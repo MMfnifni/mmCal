@@ -1,0 +1,38 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.2.11415.280 d18.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cal", "cal.vcxproj", "{375BB1CB-CC49-4E94-B11C-A651E1724736}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ca2", "ca2", "{DDB4EF12-CC4E-5E88-E6FC-71A802F4DE97}"
+	ProjectSection(SolutionItems) = preProject
+		cal2.cpp = cal2.cpp
+		ver3.cpp = ver3.cpp
+		ver4.cpp = ver4.cpp
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x64.ActiveCfg = Debug|x64
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x64.Build.0 = Debug|x64
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x86.ActiveCfg = Debug|Win32
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x86.Build.0 = Debug|Win32
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x64.ActiveCfg = Release|x64
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x64.Build.0 = Release|x64
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x86.ActiveCfg = Release|Win32
+		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {EF796038-5A5C-40F7-8309-4652C032854E}
+	EndGlobalSection
+EndGlobal

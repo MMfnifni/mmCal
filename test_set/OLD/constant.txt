@@ -1,0 +1,9 @@
+Pi
+E
+2*Pi
+Pi*2
+(Pi)
+2(Pi)
+Phi
+NA
+Teu

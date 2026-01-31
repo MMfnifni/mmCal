@@ -1,0 +1,43 @@
+sin(0)
+cos(0)
+tan(0)
+asin(0)
+acos(1)
+atan(1)
+sqrt(4)
+log(e)
+abs(-3)
+sinh(1)
+cosh(1)
+tanh(1)
+pow(2,8)
+mod(7,3)
+mod(8,3)
+sin(30)
+cos(45)
+tan(90)
+log(10)
+sqrt(25)
+abs(-10)
+log(2.718281828459045)
+gamma(5)
+erf(1)
+5!
+perm(5, 2)
+comb(5, 2)
+perm(20, 0)
+pow(0, 1)
+pow(5, 0)
+(sqrt(16) + pow(2, 3)) * 3
+pow(2, 3) + 5 * 4 - (3 + 2) * 2
+log(abs(-1)) * sqrt(9)
+comb(10, 3) * gcd(8, 4)
+Out(1)
+In[2]
+sin(Out[1])
+sqrt(Out[3])
+log(Out[4])
+Out[1] + Out[2]
+%%%
+%
+%%%%%%

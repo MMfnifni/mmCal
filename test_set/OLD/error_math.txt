@@ -1,0 +1,11 @@
+1/0
+sqrt(-1)
+log(0)
+log(-3)
+asin(2)
+acos(-2)
+sin(4000)
+tan(90)
+pow(0,0)
+Pi2
+2(Pi+1)

@@ -1,0 +1,67 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="ソース ファイル">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="ヘッダー ファイル">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="リソース ファイル">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="test_set">
+      <UniqueIdentifier>{f2ade5fc-e5c6-4be9-9398-063179bb2e58}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="cal.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="cal.rc">
+      <Filter>リソース ファイル</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="test_set\angle.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\basic.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\constant.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\error_identifier.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\error_math.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\error_syntax.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\function.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\implicit.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="test_set\regression.txt">
+      <Filter>test_set</Filter>
+    </Text>
+    <Text Include="cmplx.txt">
+      <Filter>test_set</Filter>
+    </Text>
+  </ItemGroup>
+</Project>
