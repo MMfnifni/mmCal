@@ -99,21 +99,34 @@ Functions must always be enclosed in `()` or `[]`.
 
 #### Basic Mathematical Functions
 
-```text
-abs, sign, sqrt, cbrt, exp, log
-```
-
-- `log(x)` : Natural logarithm
-- `log(base, x)` : Logarithm with arbitrary base
-
----
+| Function       | Description                                           | Input / Output Examples                      |
+| -------------- | ----------------------------------------------------- | -------------------------------------------- |
+| `abs(x)`       | Absolute value (supports complex numbers)             | `abs(-5) = 5`<br>`abs(3+4I) = 5`             |
+| `sign(x)`      | Sign of a real number                                 | `sign(10)=1`<br>`sign(-3)=-1`<br>`sign(0)=0` |
+| `sqrt(x)`      | Square root (returns complex for negative real input) | `sqrt(4)=2`<br>`sqrt(-9)=3I`                 |
+| `cbrt(x)`      | Cube root                                             | `cbrt(-8)=-2`                                |
+| `exp(x)`       | Exponential function                                  | `exp(1)=E`<br>`exp(I)=cos(1)+sin(1)I`        |
+| `log(x)`       | Natural logarithm                                     | `log(E)=1`                                   |
+| `log(base, x)` | Logarithm with arbitrary base                         | `log(2,8)=3`                                 |
+| `log10(x)`     | Base-10 logarithm                                     | `log10(100)=2`                               |
+| `log2(x)`      | Base-2 logarithm                                      | `log2(8)=3`                                  |
+| `floor(x)`     | Floor function                                        | `floor(3.7)=3`                               |
+| `ceil(x)`      | Ceiling function                                      | `ceil(3.2)=4`                                |
+| `round(x)`     | Round to nearest integer                              | `round(1.5)=2`                               |
+| `round(x, n)`  | Round with decimal precision                          | `round(1.234,2)=1.23`                        |
+| `fract(x)`     | Fractional part                                       | `fract(1.25)=0.25`                           |
+| `pow(x, y)`    | Power function                                        | `pow(2,3)=8`                                 |
 
 #### Angle Conversion
 
-```text
-DtoR, DtoG, RtoD, RtoG
-GtoD, GtoR
-```
+| Function  | Description     | Example         |
+| --------- | --------------- | --------------- |
+| `DtoR(x)` | Degree → Radian | `DtoR(180)=Pi`  |
+| `DtoG(x)` | Degree → Grad   | `DtoG(90)=100`  |
+| `RtoD(x)` | Radian → Degree | `RtoD(Pi)=180`  |
+| `RtoG(x)` | Radian → Grad   | `RtoG(Pi)=200`  |
+| `GtoD(x)` | Grad → Degree   | `GtoD(200)=180` |
+| `GtoR(x)` | Grad → Radian   | `GtoR(200)=Pi`  |
 
 - D: Degree, R: Radian, G: Grad
 - Converts the input value into the target angle unit
@@ -124,10 +137,18 @@ GtoD, GtoR
 
 #### Trigonometric Functions (Degree-based)
 
-```text
-sin, cos, tan, cot, sec, csc
-asin, acos, atan
-```
+| Function      | Description                      | Example         |
+| ------------- | -------------------------------- | --------------- |
+| `sin(x)`      | Sine (degree)                    | `sin(30)=0.5`   |
+| `cos(x)`      | Cosine (degree)                  | `cos(60)=0.5`   |
+| `tan(x)`      | Tangent (degree)                 | `tan(45)=1`     |
+| `cot(x)`      | Cotangent                        | `cot(45)=1`     |
+| `sec(x)`      | Secant                           | `sec(60)=2`     |
+| `csc(x)`      | Cosecant                         | `csc(30)=2`     |
+| `asin(x)`     | Inverse sine (returns degree)    | `asin(0.5)=30`  |
+| `acos(x)`     | Inverse cosine (returns degree)  | `acos(0.5)=60`  |
+| `atan(x)`     | Inverse tangent (returns degree) | `atan(1)=45`    |
+| `atan2(y, x)` | Quadrant-aware inverse tangent   | `atan2(1,1)=45` |
 
 - Both input and output are in **degrees**
 - Other angle units can be used explicitly via `RtoD`, etc.
@@ -138,27 +159,65 @@ asin, acos, atan
 
 #### Hyperbolic Functions
 
-```text
-sinh, cosh, tanh
-asinh, acosh, atanh
-```
+| Function   | Description                | Example             |
+| ---------- | -------------------------- | ------------------- |
+| `sinh(x)`  | Hyperbolic sine            | `sinh(1)=1.1752`    |
+| `cosh(x)`  | Hyperbolic cosine          | `cosh(1)=1.5431`    |
+| `tanh(x)`  | Hyperbolic tangent         | `tanh(1)=0.7616`    |
+| `asinh(x)` | Inverse hyperbolic sine    | `asinh(1)=0.8814`   |
+| `acosh(x)` | Inverse hyperbolic cosine  | `acosh(2)=1.3170`   |
+| `atanh(x)` | Inverse hyperbolic tangent | `atanh(0.5)=0.5493` |
 
 ---
 
 #### Number Theory & Combinatorics
 
-```text
-gcd, lcm
-perm, comb
-```
+| Function    | Description             | Example        |
+| ----------- | ----------------------- | -------------- |
+| `gcd(a,b)`  | Greatest common divisor | `gcd(8,4)=4`   |
+| `lcm(a,b)`  | Least common multiple   | `lcm(6,8)=24`  |
+| `perm(n,r)` | Permutations            | `perm(5,2)=20` |
+| `comb(n,r)` | Combinations            | `comb(5,2)=10` |
 
 ---
 
 #### Aggregation & Control
 
-```text
-sum, mean, min, max
-```
+| Function             | Description                         | Example                        |
+| -------------------- | ----------------------------------- | ------------------------------ |
+| `sum(...)`           | Sum of values                       | `sum(1,2,3)=6`                 |
+| `mean(...)`          | Arithmetic mean                     | `mean(2,4)=3`                  |
+| `min(...)`           | Minimum                             | `min(3,1,5)=1`                 |
+| `max(...)`           | Maximum                             | `max(3,1,5)=5`                 |
+| `var(x...)`          | Population deviation (divided by n) | `var(1,2,3)=0.666666666667`    |
+| `vars(x...)`         | Unbiased variance (divided by n-1)  | `vars(1,2,3)=1`                |
+| `stddev(x...)`       | standard deviation                  | `stddev(1,2,3)=0.816496580928` |
+| `stddevs(x...)`      | Unbiased standard deviation         | `stddevs(1,2,3)=1`             |
+| `median(...)`        | Median                              | `median(1,2,3,4)=2.5`          |
+| `percentile(p, ...)` | Percentile (0–100)                  | `percentile(25,1,2,3,4)=1.75`  |
+| `cov(x..., y...)`    | Covariance                          | `cov(1,2,3, 3,2,1)=-2/3`       |
+| `corr(x..., y...)`   | Correlation coefficient             | `corr(1,2,3, 1,2,3)=1`         |
+
+---
+
+#### Geometry / Vector Operations
+
+| Function                | Description               | Example               |
+| ----------------------- | ------------------------- | --------------------- |
+| `norm(x,y)`             | 2D vector length          | `norm(3,4)=5`         |
+| `dot(x1,y1,x2,y2)`      | Dot product               | `dot(1,2,3,4)=11`     |
+| `cross(x1,y1,x2,y2)`    | 2D cross product (scalar) | `cross(1,0,0,1)=1`    |
+| `lerp(a,b,t)`           | Linear interpolation      | `lerp(0,10,0.5)=5`    |
+| `distance(x1,y1,x2,y2)` | Distance between points   | `distance(0,0,3,4)=5` |
+
+---
+
+#### Control & Utility
+
+| Function           | Description          | Example           |
+| ------------------ | -------------------- | ----------------- |
+| `clamp(x, lo, hi)` | Clamp value to range | `clamp(5,0,10)=5` |
+| `rand()`           | Random number [0,1)  | `rand()`          |
 
 ---
 
@@ -250,6 +309,15 @@ The following conditions are explicitly treated as **Errors**:
 - Errors do not propagate as values
 - IEEE754 results (`inf`, `-inf`) are distinguished from errors
 - Distinction between returning `inf` and `result is infinite` is currently ambiguous (needs improvement)
+
+---
+
+#### Singularities and Exceptions
+
+- エラー発生時，それ以降の評価は行われません
+- エラーは値として伝播せず，直ちに表示されます
+- IEEE754 に基づく結果（`inf`, `-inf`）はエラーと区別されます
+- `inf`, `-inf`を返すか`result is infinite`は曖昧です(要改修です)
 
 ---
 

@@ -1,4 +1,6 @@
 .vs
 .git
-./Win32
-./x64
+Win32
+x64
+res
+build

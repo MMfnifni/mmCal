@@ -64,4 +64,12 @@
       <Filter>test_set</Filter>
     </Text>
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="res\icon\mmcal.ico">
+      <Filter>リソース ファイル</Filter>
+    </Image>
+    <Image Include="res\icon\icon3.ico">
+      <Filter>リソース ファイル</Filter>
+    </Image>
+  </ItemGroup>
 </Project>

@@ -1,5 +1,7 @@
-﻿#include <cassert>
+﻿#include <algorithm>
+#include <cassert>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <complex>
 #include <functional>
@@ -13,6 +15,11 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+#ifdef _WIN32
+# define DLL_EXPORT __declspec(dllexport)
+#else
+# define DLL_EXPORT
+#endif
 
 /*
 Expr        ::= Add
@@ -32,6 +39,7 @@ Primary     ::= Number
    ============================ */
 
 enum class CalcErrorType {
+ NotImplemented,
  Syntax,
  UnknownIdentifier,
  InvalidCharacter,
@@ -49,10 +57,14 @@ enum class CalcErrorType {
  InvalidNumber,
  InvalidOperation,
  TypeError,
+ InvalidArgument,
+ NaNDetected,
+ InfinityDetected,
 };
 
 std::string errorMessage(CalcErrorType t) {
  switch (t) {
+  case CalcErrorType::NotImplemented: return "this feature is not yet implemented";
   case CalcErrorType::Syntax: return "syntax error";
   case CalcErrorType::UnknownIdentifier: return "unknown identifier";
   case CalcErrorType::InvalidCharacter: return "invalid character";
@@ -70,8 +82,11 @@ std::string errorMessage(CalcErrorType t) {
   case CalcErrorType::InvalidNumber: return "invalid number";
   case CalcErrorType::InvalidOperation: return "invalid operation";
   case CalcErrorType::TypeError: return "double or complex type error";
+  case CalcErrorType::InvalidArgument: return "invalid argument count";
+  case CalcErrorType::NaNDetected: return "NaN detected";
+  case CalcErrorType::InfinityDetected: return "Infinity detected";
  }
- return "error";
+ return "unknown calculation error";
 }
 
 struct CalcError : std::runtime_error {
@@ -231,12 +246,31 @@ double factorial(double x, size_t pos) {
   r *= i;
  return r;
 }
+inline long long checkedMul(long long a, long long b, size_t pos) {
+ if (a == 0 || b == 0) return 0;
+
+ if (a > 0) {
+  if (b > 0) {
+   if (a > LLONG_MAX / b) throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos);
+  } else {
+   if (b < LLONG_MIN / a) throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos);
+  }
+ } else {
+  if (b > 0) {
+   if (a < LLONG_MIN / b) throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos);
+  } else {
+   if (a != 0 && b < LLONG_MAX / a) throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos);
+  }
+ }
+
+ return a * b;
+}
 
 Value roundValue(const Value &v, const SystemConfig &cfg) {
  if (isInvalid(v)) return v;
 
  auto roundDouble = [&](double d) {
-  double scale = std::pow(10.0, cfg.precision);
+  double scale = std::pow(10.0, (cfg.precision));
   return std::round(d * scale) / scale;
  };
 
@@ -258,9 +292,12 @@ struct Token {
   TokenType type = TokenType::End;
   std::string text;
   size_t pos = 0;
+  double number = 0.0;
   Token() = default;
 
-  Token(TokenType t, std::string s, size_t p) : type(t), text(std::move(s)), pos(p) {}
+  Token(TokenType t, std::string txt, size_t p) : type(t), text(std::move(txt)), number(0.0), pos(p) {}
+
+  Token(TokenType t, std::string txt, double num, size_t p) : type(t), text(std::move(txt)), number(num), pos(p) {}
 };
 
 class Lexer {
@@ -308,12 +345,21 @@ class Lexer {
    // number
    if (std::isdigit(c) || c == '.') {
     --p;
-    char *end;
-    double v = std::strtod(src.data() + p, &end);
-    if (end == src.data() + p) { throw CalcError(CalcErrorType::InvalidNumber, "invalid number", p); }
-    p = end - src.data();
-    std::string s(src.data() + start, p - start);
-    return {TokenType::Number, s, start};
+
+    const char *begin = src.data() + p;
+    const char *end = src.data() + src.size();
+
+    double value;
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+
+    if (ec == std::errc::invalid_argument) { throw CalcError(CalcErrorType::InvalidNumber, "invalid number", p); }
+    if (ec == std::errc::result_out_of_range) { throw CalcError(CalcErrorType::Overflow, "number out of range", p); }
+
+    size_t len = static_cast<size_t>(ptr - begin);
+    std::string s(src.substr(p, len));
+
+    p += len;
+    return {TokenType::Number, s, value, start};
    }
 
    // identifier
@@ -448,20 +494,30 @@ inline long long requireInt(const Value &v, size_t pos) {
  return static_cast<int64_t>(d);
 }
 
-long long permLL(long long n, long long r) {
- if (r < 0 || r > n) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), 0);
+long long permLL(long long n, long long r, size_t pos) {
+ if (r < 0 || r > n) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos);
+
  long long res = 1;
- for (long long i = 0; i < r; ++i)
-  res *= (n - i);
+ for (long long i = 0; i < r; ++i) {
+  res = checkedMul(res, n - i, pos);
+ }
  return res;
 }
 
-long long combLL(long long n, long long r) {
- if (r < 0 || r > n) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), 0);
+long long combLL(long long n, long long r, size_t pos) {
+ if (r < 0 || r > n) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos);
+
  r = std::min(r, n - r);
+
  long long res = 1;
- for (long long i = 1; i <= r; ++i)
-  res = res * (n - r + i) / i;
+ for (long long i = 1; i <= r; ++i) {
+  long long num = n - r + i;
+
+  // res * num / i を安全に
+  res = checkedMul(res, num, pos);
+  res /= i;
+ }
+
  return res;
 }
 
@@ -478,9 +534,7 @@ long long gcdLL(long long a, long long b) {
 
 Value evalCompare(const Value &lhs, const Value &rhs, CmpOp op, FunctionContext &ctx) {
  // 複素数は大小比較不可
- if (isComplex(lhs) || isComplex(rhs)) {
-  if (op != CmpOp::Equal && op != CmpOp::NotEqual) throw CalcError(CalcErrorType::TypeError, "complex comparison", ctx.pos);
- }
+ if (isComplex(lhs) || isComplex(rhs)) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
 
  double a = asDouble(lhs, ctx.pos);
  double b = asDouble(rhs, ctx.pos);
@@ -514,7 +568,34 @@ Value evaluate(const std::string &src, SystemConfig &cfg, const std::vector<Inpu
 struct ASTNode {
   size_t pos = 0;
   virtual ~ASTNode() = default;
-  virtual Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const = 0;
+
+  // 外から呼ばれる唯一の eval
+  virtual Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const final {
+   Value v = evalImpl(cfg, hist, base);
+   checkFinite(v, pos); // nan / inf は必ずここで捕まる
+   return v;
+  }
+
+ protected:
+  // 派生クラスはこれだけ実装する
+  virtual Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const = 0;
+
+  // 派生クラスからも使える
+  static void checkFinite(const Value &v, size_t pos) {
+   std::visit(
+       [&](auto &&x) {
+        using T = std::decay_t<decltype(x)>;
+
+        if constexpr (std::is_same_v<T, double>) {
+         if (std::isnan(x)) throw CalcError(CalcErrorType::NaNDetected, errorMessage(CalcErrorType::NaNDetected), pos);
+         if (!std::isfinite(x)) throw CalcError(CalcErrorType::InfinityDetected, errorMessage(CalcErrorType::InfinityDetected), pos);
+        } else if constexpr (std::is_same_v<T, std::complex<double>>) {
+         if (std::isnan(x.real()) || std::isnan(x.imag())) throw CalcError(CalcErrorType::NaNDetected, errorMessage(CalcErrorType::NaNDetected), pos);
+         if (!std::isfinite(x.real()) || !std::isfinite(x.imag())) throw CalcError(CalcErrorType::InfinityDetected, errorMessage(CalcErrorType::InfinityDetected), pos);
+        }
+       },
+       v);
+  }
 };
 
 /* ---------- Number ---------- */
@@ -523,7 +604,7 @@ struct NumberNode : ASTNode {
   Value value;
 
   NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
-  Value eval(SystemConfig &, const std::vector<InputEntry> &, int) const override { return value; }
+  Value evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const override { return value; }
 };
 
 /* ---------- Unary ---------- */
@@ -536,7 +617,7 @@ struct UnaryNode : ASTNode {
 
   UnaryNode(UnaryOp o, std::unique_ptr<ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
    auto v = rhs->eval(cfg, hist, base);
    if (op == UnaryOp::Minus) {
     if (isComplex(v)) return -toComplex(v);
@@ -552,7 +633,7 @@ struct PostfixUnaryNode : ASTNode {
 
   PostfixUnaryNode(char op, std::unique_ptr<ASTNode> e, size_t p) : op(op), expr(std::move(e)) { pos = p; }
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
 
    Value v = expr->eval(cfg, hist, base);
 
@@ -567,9 +648,7 @@ struct PostfixUnaryNode : ASTNode {
     default: throw CalcError(CalcErrorType::Syntax, "unknown postfix operator", pos);
    }
 
-   Value out = r;
-   checkFinite(out, pos);
-   return out;
+   return r;
   }
 };
 
@@ -580,7 +659,7 @@ struct CompareNode : ASTNode {
 
   CompareNode(CmpOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
    Value a = lhs->eval(cfg, hist, base);
    Value b = rhs->eval(cfg, hist, base);
 
@@ -608,25 +687,35 @@ struct BinaryNode : ASTNode {
 
   BinaryNode(BinOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
-
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
    auto a = lhs->eval(cfg, hist, base);
    auto b = rhs->eval(cfg, hist, base);
 
+   // ===== complex が含まれる場合 =====
    if (isComplex(a) || isComplex(b)) {
     Complex x = toComplex(a);
     Complex y = toComplex(b);
+
+    // nan注意
+    if (!std::isfinite(x.real()) || !std::isfinite(x.imag()) || !std::isfinite(y.real()) || !std::isfinite(y.imag())) { throw CalcError(CalcErrorType::DomainError, "nan or inf", pos); }
+
     switch (op) {
      case BinOp::Add: return x + y;
      case BinOp::Sub: return x - y;
      case BinOp::Mul: return x * y;
-     case BinOp::Div: return x / y;
+     case BinOp::Div:
+      if (std::abs(y) == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
+      return x / y;
      case BinOp::Pow: return std::pow(x, y);
     }
    }
 
+   // ===== real 同士 =====
    double x = asDouble(a, pos);
    double y = asDouble(b, pos);
+
+   // nan注意（real）
+   if (!std::isfinite(x) || !std::isfinite(y)) throw CalcError(CalcErrorType::DomainError, "nan or inf", pos);
 
    switch (op) {
     case BinOp::Add: return x + y;
@@ -635,7 +724,10 @@ struct BinaryNode : ASTNode {
     case BinOp::Div:
      if (y == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
      return x / y;
-    case BinOp::Pow: return std::pow(x, y);
+    case BinOp::Pow:
+     // ★ real→complex 昇格判定はここだけ
+     if (x < 0.0 && std::floor(y) != y) { return std::pow(Complex(x, 0.0), Complex(y, 0.0)); }
+     return std::pow(x, y);
    }
 
    throw CalcError(CalcErrorType::InvalidOperation, "invalid op", pos);
@@ -648,7 +740,7 @@ struct FunctionCallNode : ASTNode {
   std::string name;
   std::vector<std::unique_ptr<ASTNode>> args;
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
 
    auto it = cfg.functions.find(name);
    if (it == cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
@@ -667,8 +759,8 @@ struct FunctionCallNode : ASTNode {
 
    Value r = f.f(v, ctx);
 
-   // double のときだけ有限チェック
-   if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);
+   // double のときだけ有限チェック -> 一括捕捉に変更
+   /* if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);*/
 
    return r;
   }
@@ -695,7 +787,7 @@ struct OutNode : ASTNode {
   int index; // 正: Out[n], 負: % / %%
   OutNode(int idx, size_t p) : index(idx) { pos = p; }
 
-  Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
+  Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override {
    if (index == 0) { throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos); }
 
    int i;
@@ -719,7 +811,7 @@ class Parser {
  public:
   Lexer lex;
   Token cur;
-  Token prev;
+  Token prev{TokenType::End, "", 0};
   SystemConfig &cfg;
 
   Parser(SystemConfig &cfg, const std::string &s) : cfg(cfg), lex(s) { cur = lex.get(); }
@@ -879,6 +971,7 @@ std::unique_ptr<ASTNode> Parser::parsePower() {
   size_t p = cur.pos;
   advance();
   auto r = parseUnary();
+  // auto r = parsePower(); // 厳格な右辺結合ならpsersePowerがいいが[2^-2]の-が読めなくなる
   n = std::make_unique<BinaryNode>(BinOp::Pow, std::move(n), std::move(r), p);
  }
  return n;
@@ -899,10 +992,7 @@ std::unique_ptr<ASTNode> Parser::parsePrimary() {
 
  // ---- number ----
  if (cur.type == TokenType::Number) {
-  double v;
-  try {
-   v = std::stod(cur.text);
-  } catch (...) { throw CalcError(CalcErrorType::InvalidNumber, "invalid number", p); }
+  double v = cur.number;
   advance();
   return std::make_unique<NumberNode>(v, p);
  }
@@ -1050,7 +1140,7 @@ std::string formatComplex(const std::complex<double> &c, const SystemConfig &cfg
  double im = c.imag();
 
  // 純実数
- if (std::abs(im) < std::pow(10.0, -cnst_precision)) return formatReal(re, cfg);
+ if (std::abs(im) < std::pow(10.0, -(cnst_precision))) return formatReal(re, cfg);
 
  std::ostringstream oss;
 
@@ -1143,6 +1233,23 @@ Value grad2rad_v(const Value &v, size_t pos) {
  constexpr double k = PI / 200.0;
  return mulReal(v, k, pos);
 }
+
+Value evaluateFunction(const std::string &name, const std::vector<Value> &args, FunctionContext &ctx) {
+ auto it = ctx.cfg.functions.find(name);
+ if (it == ctx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), ctx.pos);
+
+ const FunctionDef &f = it->second;
+
+ if (!f.validArgc((int)args.size())) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), ctx.pos);
+
+ Value r = f.f(args, ctx);
+
+ // double のみ有限性チェック
+ if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), ctx.pos);
+
+ return r;
+}
+
 void initFunctions(SystemConfig &cfg) {
 
  const double deg2rad = PI / 180.0;
@@ -1163,39 +1270,53 @@ void initFunctions(SystemConfig &cfg) {
 
  cfg.functions["floor"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::floor(asReal(v[0], ctx.pos)); }};
  cfg.functions["ceil"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::ceil(asReal(v[0], ctx.pos)); }};
- cfg.functions["round"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::round(asReal(v[0], ctx.pos)); }};
+ // cfg.functions["round"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::round(asReal(v[0], ctx.pos)); }};
 
  cfg.functions["pow"] = {2, 2, [](auto &v, auto &ctx) -> Value { return std::pow(asComplex(v[0]), asComplex(v[1])); }};
 
  // ---- exp / log ----
  cfg.functions["exp"] = {1, 1, [](auto &v, auto &) -> Value { return std::exp(asComplex(v[0])); }};
 
- cfg.functions["log"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                          if (isComplex(v[0])) return std::log(asComplex(v[0]));
-                          double x = asReal(v[0], ctx.pos);
-                          if (x <= 0) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), ctx.pos);
-                          return std::log(x);
-                         }};
- cfg.functions["log"] = {1, 2, [](auto &v, auto &ctx) -> Value {
-                          if (isComplex(v[0]) || (v.size() == 2 && isComplex(v[1]))) {
-                           if (v.size() == 1) {
-                            return std::log(asComplex(v[0]));
-                           } else {
-                            auto base = asComplex(v[0]);
-                            auto x = asComplex(v[1]);
-                            return std::log(x) / std::log(base);
-                           }
-                          }
-                          if (v.size() == 1) {
+ // cfg.functions["log"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+ //                          if (isComplex(v[0])) return std::log(asComplex(v[0]));
+ //                          double x = asReal(v[0], ctx.pos);
+ //                          if (x <= 0) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), ctx.pos);
+ //                          return std::log(x);
+ //                         }};
+ cfg.functions["log10"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            double x = asReal(v[0], ctx.pos);
+                            if (x <= 0) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), ctx.pos);
+                            return std::log10(x);
+                           }};
+
+ cfg.functions["log2"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            double x = asReal(v[0], ctx.pos);
                            if (x <= 0) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), ctx.pos);
+                           return std::log2(x);
+                          }};
+
+ cfg.functions["log"] = {1, 2, [](auto &v, auto &ctx) -> Value {
+                          // ---- complex case ----
+                          if (isComplex(v[0]) || (v.size() == 2 && isComplex(v[1]))) {
+                           if (v.size() == 1) return std::log(asComplex(v[0]));
+
+                           auto base = asComplex(v[0]);
+                           auto x = asComplex(v[1]);
+                           return std::log(x) / std::log(base);
+                          }
+
+                          // ---- real case ----
+                          if (v.size() == 1) {
+                           double x = asReal(v[0], ctx.pos);
+                           if (x <= 0) throw CalcError(CalcErrorType::DomainError, "log: x <= 0", ctx.pos);
                            return std::log(x);
                           }
+
                           // v.size() == 2
                           double base = asReal(v[0], ctx.pos);
                           double x = asReal(v[1], ctx.pos);
 
-                          if (base <= 0 || base == 1 || x <= 0) throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), ctx.pos);
+                          if (base <= 0 || base == 1 || x <= 0) throw CalcError(CalcErrorType::DomainError, "log: invalid base or x", ctx.pos);
 
                           return std::log(x) / std::log(base);
                          }};
@@ -1250,6 +1371,12 @@ void initFunctions(SystemConfig &cfg) {
  cfg.functions["asin"] = {1, 1, [=](auto &v, auto &) -> Value { return std::asin(asComplex(v[0])) * rad2deg; }};
  cfg.functions["acos"] = {1, 1, [=](auto &v, auto &) -> Value { return std::acos(asComplex(v[0])) * rad2deg; }};
  cfg.functions["atan"] = {1, 1, [=](auto &v, auto &) -> Value { return std::atan(asComplex(v[0])) * rad2deg; }};
+ cfg.functions["atan2"] = {2, 2, [=](auto &v, auto &ctx) -> Value {
+                            double y = asReal(v[0], ctx.pos);
+                            double x = asReal(v[1], ctx.pos);
+                            if (x == 0.0 && y == 0.0) throw CalcError(CalcErrorType::DomainError, "atan2(0,0)", ctx.pos);
+                            return std::atan2(y, x) * rad2deg;
+                           }};
 
  // ---- hyperbolic ----
  cfg.functions["sinh"] = {1, 1, [](auto &v, auto &) -> Value { return std::sinh(asComplex(v[0])); }};
@@ -1302,12 +1429,12 @@ void initFunctions(SystemConfig &cfg) {
  cfg.functions["comb"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                            long long n = requireInt(v[0], ctx.pos);
                            long long r = requireInt(v[1], ctx.pos);
-                           return (double)combLL(n, r);
+                           return (double)combLL(n, r, ctx.pos);
                           }};
  cfg.functions["perm"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                            long long n = requireInt(v[0], ctx.pos);
                            long long r = requireInt(v[1], ctx.pos);
-                           return (double)permLL(n, r);
+                           return (double)permLL(n, r, ctx.pos);
                           }};
  cfg.functions["lcm"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                           long long a = requireInt(v[0], ctx.pos);
@@ -1348,6 +1475,17 @@ void initFunctions(SystemConfig &cfg) {
                            m = std::max(m, asReal(x, ctx.pos));
                           return m;
                          }};
+ cfg.functions["clamp"] = {3, 3, [](auto &v, auto &ctx) -> Value {
+                            double x = asReal(v[0], ctx.pos);
+                            double lo = asReal(v[1], ctx.pos);
+                            double hi = asReal(v[2], ctx.pos);
+                            if (lo > hi) throw CalcError(CalcErrorType::DomainError, "clamp: lo > hi", ctx.pos);
+                            return std::min(std::max(x, lo), hi);
+                           }};
+ cfg.functions["fract"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            double x = asReal(v[0], ctx.pos);
+                            return x - std::floor(x);
+                           }};
  cfg.functions["gamma"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             double x = asReal(v[0], ctx.pos);
                             return std::tgamma(x);
@@ -1356,6 +1494,168 @@ void initFunctions(SystemConfig &cfg) {
                           double x = asReal(v[0], ctx.pos);
                           return std::erf(x);
                          }};
+ cfg.functions["round"] = {1, 2, [](auto &v, auto &ctx) -> Value {
+                            double x = asReal(v[0], ctx.pos);
+
+                            if (v.size() == 1) return std::round(x);
+
+                            int n = (int)requireInt(v[1], ctx.pos);
+                            double s = std::pow(10.0, n);
+                            return std::round(x * s) / s;
+                           }};
+
+ cfg.functions["var"] = {1, -1, [](auto &v, auto &ctx) -> Value {
+                          int n = (int)v.size();
+                          if (n == 0) throw CalcError(CalcErrorType::DomainError, "var: no elements", ctx.pos);
+                          if (n == 1) return 0.0;
+
+                          double mean = 0;
+                          for (auto &x : v)
+                           mean += asReal(x, ctx.pos);
+                          mean /= n;
+
+                          double acc = 0;
+                          for (auto &x : v) {
+                           double d = asReal(x, ctx.pos) - mean;
+                           acc += d * d;
+                          }
+                          return acc / n;
+                         }};
+ cfg.functions["vars"] = {1, -1, [](auto &v, auto &ctx) -> Value {
+                           int n = (int)v.size();
+                           if (n < 2) throw CalcError(CalcErrorType::DomainError, "vars: too few elements", ctx.pos);
+
+                           double mean = 0;
+                           for (auto &x : v)
+                            mean += asReal(x, ctx.pos);
+                           mean /= n;
+
+                           double acc = 0;
+                           for (auto &x : v) {
+                            double d = asReal(x, ctx.pos) - mean;
+                            acc += d * d;
+                           }
+                           return acc / (n - 1);
+                          }};
+ cfg.functions["stddev"] = {1, -1, [](auto &v, auto &ctx) -> Value { return std::sqrt(asReal(evaluateFunction("var", v, ctx), ctx.pos)); }};
+
+ cfg.functions["stddevs"] = {1, -1, [](auto &v, auto &ctx) -> Value { return std::sqrt(asReal(evaluateFunction("vars", v, ctx), ctx.pos)); }};
+
+ cfg.functions["median"] = {1, -1, [](auto &v, auto &ctx) -> Value {
+                             std::vector<double> a;
+                             for (auto &x : v)
+                              a.push_back(asReal(x, ctx.pos));
+                             std::sort(a.begin(), a.end());
+                             int n = (int)a.size();
+                             if (n % 2 == 1) return a[n / 2];
+                             return 0.5 * (a[n / 2 - 1] + a[n / 2]);
+                            }};
+ cfg.functions["percentile"] = {2, -1, [](auto &v, auto &ctx) -> Value {
+                                 double p = asReal(v[0], ctx.pos);
+                                 if (p < 0 || p > 100) throw CalcError(CalcErrorType::DomainError, "percentile: p out of range", ctx.pos);
+
+                                 std::vector<double> a;
+                                 for (size_t i = 1; i < v.size(); ++i)
+                                  a.push_back(asReal(v[i], ctx.pos));
+
+                                 std::sort(a.begin(), a.end());
+                                 double idx = (p / 100.0) * (a.size() - 1);
+                                 size_t i0 = (size_t)std::floor(idx);
+                                 size_t i1 = (size_t)std::ceil(idx);
+                                 if (i0 == i1) return a[i0];
+                                 return a[i0] * (i1 - idx) + a[i1] * (idx - i0);
+                                }};
+ cfg.functions["cov"] = {2, -1, [](auto &v, auto &ctx) -> Value {
+                          if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "cov: invalid argument count", ctx.pos);
+
+                          int n = (int)v.size() / 2;
+                          if (n < 2) throw CalcError(CalcErrorType::DomainError, "cov: too few samples", ctx.pos);
+
+                          double mx = 0, my = 0;
+                          for (int i = 0; i < n; ++i) {
+                           mx += asReal(v[i], ctx.pos);
+                           my += asReal(v[i + n], ctx.pos);
+                          }
+                          mx /= n;
+                          my /= n;
+
+                          double acc = 0;
+                          for (int i = 0; i < n; ++i)
+                           acc += (asReal(v[i], ctx.pos) - mx) * (asReal(v[i + n], ctx.pos) - my);
+
+                          return acc / n;
+                         }};
+ cfg.functions["corr"] = {2, -1, [](auto &v, auto &ctx) -> Value {
+                           int total = (int)v.size();
+                           if (total % 2 != 0) throw CalcError(CalcErrorType::InvalidArgument, "corr: argument count must be even", ctx.pos);
+
+                           int n = total / 2;
+                           std::vector<Value> vx(v.begin(), v.begin() + n);
+                           std::vector<Value> vy(v.begin() + n, v.end());
+                           double c = asReal(evaluateFunction("cov", v, ctx), ctx.pos);
+                           double sx = asReal(evaluateFunction("var", vx, ctx), ctx.pos);
+                           double sy = asReal(evaluateFunction("var", vy, ctx), ctx.pos);
+                           if (sx == 0.0 || sy == 0.0) throw CalcError(CalcErrorType::DomainError, "corr: zero variance", ctx.pos);
+                           return c / std::sqrt(sx * sy);
+                          }};
+
+ // ---- geometric vector ----
+ cfg.functions["norm"] = {1, -1, [](auto &v, auto &ctx) -> Value {
+                           if (v.empty()) throw CalcError(CalcErrorType::DomainError, "norm: no elements", ctx.pos);
+
+                           double acc = 0.0;
+                           for (auto &x : v) {
+                            double r = asReal(x, ctx.pos);
+                            acc += r * r;
+                           }
+                           return std::sqrt(acc);
+                          }};
+ cfg.functions["dot"] = {2, -1, [](auto &v, auto &ctx) -> Value {
+                          if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dot: dimension mismatch", ctx.pos);
+
+                          int n = (int)v.size() / 2;
+                          if (n == 0) throw CalcError(CalcErrorType::DomainError, "dot: no elements", ctx.pos);
+
+                          double acc = 0.0;
+                          for (int i = 0; i < n; ++i) {
+                           acc += asReal(v[i], ctx.pos) * asReal(v[i + n], ctx.pos);
+                          }
+                          return acc;
+                         }};
+
+ // cfg.functions["cross"] = {6, 6, [](auto &v, auto &ctx) -> Value {
+ //                            double x1 = asReal(v[0], ctx.pos);
+ //                            double y1 = asReal(v[1], ctx.pos);
+ //                            double z1 = asReal(v[2], ctx.pos);
+ //                            double x2 = asReal(v[3], ctx.pos);
+ //                            double y2 = asReal(v[4], ctx.pos);
+ //                            double z2 = asReal(v[5], ctx.pos);
+ //
+ //                            // (x1,y1,z1) × (x2,y2,z2)
+ //                            // → ベクトルとして返したいが、現状 Value が scalar 前提なので
+ //                            // テストに合わせて "(x,y,z)" 形式の文字列 Value を返す想定
+ //                            return VectorValue{y1 * z2 - z1 * y2, z1 * x2 - x1 * z2, x1 * y2 - y1 * x2};
+ //                           }};
+
+ cfg.functions["lerp"] = {3, 3, [](auto &v, auto &ctx) -> Value {
+                           double a = asReal(v[0], ctx.pos);
+                           double b = asReal(v[1], ctx.pos);
+                           double t = asReal(v[2], ctx.pos);
+                           return a * (1 - t) + b * t;
+                          }};
+ cfg.functions["distance"] = {2, -1, [](auto &v, auto &ctx) -> Value {
+                               if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "distance: dimension mismatch", ctx.pos);
+
+                               int n = (int)v.size() / 2;
+                               if (n == 0) throw CalcError(CalcErrorType::DomainError, "distance: no elements", ctx.pos);
+
+                               double acc = 0.0;
+                               for (int i = 0; i < n; ++i) {
+                                double d = asReal(v[i + n], ctx.pos) - asReal(v[i], ctx.pos);
+                                acc += d * d;
+                               }
+                               return std::sqrt(acc);
+                              }};
 
  // ---- control ----
  cfg.functions["if"] = {3, 3, [](auto &v, auto &ctx) -> Value { return asReal(v[0], ctx.pos) != 0.0 ? v[1] : v[2]; }};
@@ -1400,14 +1700,77 @@ EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt
   return res;
  } catch (const ExitRequest &) {
   rt.shouldExit = true;
+  std::cout << "bye...nara\n";
   res.kind = EvalKind::Exit;
   return res;
  }
 }
 
 /* ============================
+  DLL
+  ============================ */
+struct CalcResult {
+  bool ok;
+  std::string output;  // 成功時: 計算結果 / 失敗時: エラーメッセージ
+  size_t errorPos = 0; // エラー時のみ
+};
+
+CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
+
+CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base) {
+ try {
+  Value v = evaluate(expr, cfg, history, base);
+
+  // 表示用に丸め
+  Value vr = roundValue(v, cfg);
+  std::string out = formatResult(vr, cfg);
+
+  history.push_back({expr, vr});
+
+  return {true, out, 0};
+
+ } catch (const CalcError &e) { return {false, e.what(), e.pos}; } catch (const std::exception &e) {
+  return {false, e.what(), 0};
+
+ } catch (...) { return {false, "unknown error", 0}; }
+}
+
+extern "C" __declspec(dllexport) const char *CalcEvalDLL(const char *expr, SystemConfig *cfg, std::vector<InputEntry> *history, int base) {
+ static thread_local std::string result; // DLL境界安全
+
+ try {
+  Value v = evaluate(expr, *cfg, *history, base);
+
+  Value vr = roundValue(v, *cfg);
+  result = formatResult(vr, *cfg);
+
+  history->push_back({expr, vr});
+  return result.c_str();
+
+ } catch (const ExitRequest &) {
+  result = "ERROR: Exit requested";
+  return result.c_str();
+
+ } catch (const CalcError &e) {
+  result = "ERROR: ";
+  result += e.what();
+  return result.c_str();
+
+ } catch (const std::exception &e) {
+  result = "ERROR: ";
+  result += e.what();
+  return result.c_str();
+
+ } catch (...) {
+  result = "ERROR: unknown error";
+  return result.c_str();
+ }
+}
+
+/* ============================
   main
   ============================ */
+
 int main(int argc, char *argv[]) {
  SystemConfig syscfg;
  RuntimeState rtmstt;

@@ -1,11 +1,35 @@
 import subprocess
 import sys
 import re
+import math
 
 EPS = 1e-9
 
+def normalize_float(x, eps=EPS):
+    if math.isinf(x):
+        return x
+    if abs(x) < eps:
+        return 0.0
+    return x
+
 def almost_equal(a, b, eps=EPS):
+    a = normalize_float(a, eps)
+    b = normalize_float(b, eps)
+
+    if math.isinf(a) or math.isinf(b):
+        return a == b
+
     return abs(a - b) < eps
+
+
+def parse_float(s):
+    s = s.strip().lower()
+    if s in ("inf", "+inf"):
+        return float("inf")
+    if s == "-inf":
+        return float("-inf")
+    return float(s)
+
 
 def parse_complex(s):
     s = s.strip()
@@ -33,17 +57,26 @@ def parse_complex(s):
 def complex_equal(a, b):
     ar, ai = parse_complex(a)
     br, bi = parse_complex(b)
+
+    ar = normalize_float(ar)
+    ai = normalize_float(ai)
+    br = normalize_float(br)
+    bi = normalize_float(bi)
+
     return almost_equal(ar, br) and almost_equal(ai, bi)
 
-EXE = r"..\x64\Release\cal.exe"
-TESTS = "test.txt"
+
+EXE = r"..\x64\Release\mmCal.exe"
+
+import glob; TESTS = sys.argv[1:] or glob.glob("test*.txt")
 
 PASS = FAIL = TOTAL = 0
 
 print("Running tests...\n")
 
-with open(TESTS, encoding="utf-8") as f:
-    for line in f:
+for testfile in TESTS:
+    with open(testfile, encoding="utf-8") as f:
+      for line in f:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -94,7 +127,7 @@ with open(TESTS, encoding="utf-8") as f:
                         else:
                             raise ValueError
                     else:
-                        if almost_equal(float(out), float(expect)):
+                        if almost_equal(parse_float(out), parse_float(expect)):
                             print(f"[PASS] {expr} = {out}")
                             PASS += 1
                         else:
