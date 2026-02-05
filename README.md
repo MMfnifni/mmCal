@@ -79,6 +79,13 @@ Pi(2)
 (2+3)(4+5)
 ```
 
+But, please be mindful of the following types of input.
+
+| Imput   | Calculator's Thinking | Output                          | Expected result (or input error) |
+| ------- | --------------------- | ------------------------------- | -------------------------------- |
+| `1..1`  | `1. .<-???`           | `Error: multiple '.' in number` | `1. * .1 = 0.1`                  |
+| `1.2.1` | `1.2 .<-???`          | `Error: multiple '.' in number` | `1.2 * .1 = 0.12`                |
+
 **Implicit binding between function names and numbers is prohibited.**
 
 ```text
@@ -97,127 +104,258 @@ Functions must always be enclosed in `()` or `[]`.
 
 ### Functions
 
-#### Basic Mathematical Functions
+Below is a complete list of all currently implemented functions. For each function, the function name, a brief description, and representative input/output examples are provided.
 
-| Function       | Description                                           | Input / Output Examples                      |
-| -------------- | ----------------------------------------------------- | -------------------------------------------- |
-| `abs(x)`       | Absolute value (supports complex numbers)             | `abs(-5) = 5`<br>`abs(3+4I) = 5`             |
-| `sign(x)`      | Sign of a real number                                 | `sign(10)=1`<br>`sign(-3)=-1`<br>`sign(0)=0` |
-| `sqrt(x)`      | Square root (returns complex for negative real input) | `sqrt(4)=2`<br>`sqrt(-9)=3I`                 |
-| `cbrt(x)`      | Cube root                                             | `cbrt(-8)=-2`                                |
-| `exp(x)`       | Exponential function                                  | `exp(1)=E`<br>`exp(I)=cos(1)+sin(1)I`        |
-| `log(x)`       | Natural logarithm                                     | `log(E)=1`                                   |
-| `log(base, x)` | Logarithm with arbitrary base                         | `log(2,8)=3`                                 |
-| `log10(x)`     | Base-10 logarithm                                     | `log10(100)=2`                               |
-| `log2(x)`      | Base-2 logarithm                                      | `log2(8)=3`                                  |
-| `floor(x)`     | Floor function                                        | `floor(3.7)=3`                               |
-| `ceil(x)`      | Ceiling function                                      | `ceil(3.2)=4`                                |
-| `round(x)`     | Round to nearest integer                              | `round(1.5)=2`                               |
-| `round(x, n)`  | Round with decimal precision                          | `round(1.234,2)=1.23`                        |
-| `fract(x)`     | Fractional part                                       | `fract(1.25)=0.25`                           |
-| `pow(x, y)`    | Power function                                        | `pow(2,3)=8`                                 |
+---
+
+### Basic Math (Algebra, Exponentials, Logarithms, Rounding)
+
+| Function Name    | Description                               | Example Inputs/Outputs           |
+| ---------------- | ----------------------------------------- | -------------------------------- |
+| `abs(x)`         | Absolute value (supports complex numbers) | `abs(-3) = 3`<br>`abs(3+4I) = 5` |
+| `sign(x)`        | Sign function                             | `sign(-5) = -1`<br>`sign(0) = 0` |
+| `sqrt(x)`        | Square root (negative → complex)          | `sqrt(4) = 2`<br>`sqrt(-4) = 2I` |
+| `cbrt(x)`        | Cube root                                 | `cbrt(8) = 2`                    |
+| `exp(x)`         | Exponential function                      | `exp(1) = 2.71828...`            |
+| `expm1(x)`       | `exp(x) - 1`                              | `expm1(1)=1.718281828459`        |
+| `log(x)`,`ln(x)` | Natural logarithm                         | `log(E) = 1`                     |
+| `log(b, x)`      | Logarithm with arbitrary base             | `log(10, 1000) = 3`              |
+| `log10(x)`       | Base-10 logarithm                         | `log10(100) = 2`                 |
+| `log2(x)`        | Base-2 logarithm                          | `log2(8) = 3`                    |
+| `log1p(x)`       | `log(1 + x)`                              | `log1p(E-1)=1`                   |
+| `floor(x)`       | Floor                                     | `floor(3.7) = 3`                 |
+| `ceil(x)`        | Ceiling                                   | `ceil(3.1) = 4`                  |
+| `trunc(x)`       | Truncation toward zero                    | `trunc(-1.9)=-1`                 |
+| `round(x)`       | Rounding (nearest integer)                | `round(2.6) = 3`                 |
+| `round(x,n)`     | Rounding to _n_ digits                    | `round(1.2345,2)=1.23`           |
+| `fract(x)`       | Fractional part                           | `fract(3.14)=0.14`               |
+| `fact(x)`        | Factorial                                 | `fact(10)=3628800`               |
+
+---
+
+### Special Functions
+
+| Function Name | Description            | Example Inputs/Outputs        |
+| ------------- | ---------------------- | ----------------------------- |
+| `gamma(x)`    | Gamma function         | `gamma(5)=24`                 |
+| `lgamma(x)`   | Log-gamma function     | `lgamma(5)=3.178053830348...` |
+| `erf(x)`      | Error function         | `erf(1)=0.842700792949...`    |
+| `erfc(x)`     | Complementary error fn | `erfc(1)=0.157299207050...`   |
+
+---
 
 #### Angle Conversion
 
-| Function  | Description     | Example         |
-| --------- | --------------- | --------------- |
-| `DtoR(x)` | Degree → Radian | `DtoR(180)=Pi`  |
-| `DtoG(x)` | Degree → Grad   | `DtoG(90)=100`  |
-| `RtoD(x)` | Radian → Degree | `RtoD(Pi)=180`  |
-| `RtoG(x)` | Radian → Grad   | `RtoG(Pi)=200`  |
-| `GtoD(x)` | Grad → Degree   | `GtoD(200)=180` |
-| `GtoR(x)` | Grad → Radian   | `GtoR(200)=Pi`  |
-
-- D: Degree, R: Radian, G: Grad
-- Converts the input value into the target angle unit
-- `RtoD(Pi) = 180`
-- `RtoG(4+10I) = 254.647908947033+636.619772367581I`
+| Function Name | Description     | Example Inputs/Outputs |
+| ------------- | --------------- | ---------------------- |
+| `DtoR(x)`     | Degree → Radian | `DtoR(180)=Pi`         |
+| `DtoG(x)`     | Degree → Grad   | `DtoG(90)=100`         |
+| `RtoD(x)`     | Radian → Degree | `RtoD(Pi)=180`         |
+| `RtoG(x)`     | Radian → Grad   | `RtoG(Pi)=200`         |
+| `GtoD(x)`     | Grad → Degree   | `GtoD(200)=180`        |
+| `GtoR(x)`     | Grad → Radian   | `GtoR(200)=Pi`         |
 
 ---
 
-#### Trigonometric Functions (Degree-based)
+### Trigonometric Functions (Degree Mode / degree)
 
-| Function      | Description                      | Example         |
-| ------------- | -------------------------------- | --------------- |
-| `sin(x)`      | Sine (degree)                    | `sin(30)=0.5`   |
-| `cos(x)`      | Cosine (degree)                  | `cos(60)=0.5`   |
-| `tan(x)`      | Tangent (degree)                 | `tan(45)=1`     |
-| `cot(x)`      | Cotangent                        | `cot(45)=1`     |
-| `sec(x)`      | Secant                           | `sec(60)=2`     |
-| `csc(x)`      | Cosecant                         | `csc(30)=2`     |
-| `asin(x)`     | Inverse sine (returns degree)    | `asin(0.5)=30`  |
-| `acos(x)`     | Inverse cosine (returns degree)  | `acos(0.5)=60`  |
-| `atan(x)`     | Inverse tangent (returns degree) | `atan(1)=45`    |
-| `atan2(y, x)` | Quadrant-aware inverse tangent   | `atan2(1,1)=45` |
-
-- Both input and output are in **degrees**
-- Other angle units can be used explicitly via `RtoD`, etc.
-- Out-of-domain inputs result in an Error  
-  (e.g. `tan(90)` → `Error: result is infinite`)
+| Function Name | Description               | Example Inputs/Outputs |
+| ------------- | ------------------------- | ---------------------- |
+| `sin(x)`      | Sine                      | `sin(30)=0.5`          |
+| `cos(x)`      | Cosine                    | `cos(60)=0.5`          |
+| `tan(x)`      | Tangent                   | `tan(45)=1`            |
+| `cot(x)`      | Cotangent                 | `cot(45)=1`            |
+| `sec(x)`      | Secant                    | `sec(60)=2`            |
+| `csc(x)`      | Cosecant                  | `csc(30)=2`            |
+| `asin(x)`     | Inverse sine              | `asin(0.5)=30`         |
+| `acos(x)`     | Inverse cosine            | `acos(0.5)=60`         |
+| `atan(x)`     | Inverse tangent           | `atan(1)=45`           |
+| `atan2(y,x)`  | Quadrant-aware arctangent | `atan2(1,1)=45`        |
 
 ---
 
-#### Hyperbolic Functions
+### Hyperbolic Functions
 
-| Function   | Description                | Example             |
-| ---------- | -------------------------- | ------------------- |
-| `sinh(x)`  | Hyperbolic sine            | `sinh(1)=1.1752`    |
-| `cosh(x)`  | Hyperbolic cosine          | `cosh(1)=1.5431`    |
-| `tanh(x)`  | Hyperbolic tangent         | `tanh(1)=0.7616`    |
-| `asinh(x)` | Inverse hyperbolic sine    | `asinh(1)=0.8814`   |
-| `acosh(x)` | Inverse hyperbolic cosine  | `acosh(2)=1.3170`   |
-| `atanh(x)` | Inverse hyperbolic tangent | `atanh(0.5)=0.5493` |
-
----
-
-#### Number Theory & Combinatorics
-
-| Function    | Description             | Example        |
-| ----------- | ----------------------- | -------------- |
-| `gcd(a,b)`  | Greatest common divisor | `gcd(8,4)=4`   |
-| `lcm(a,b)`  | Least common multiple   | `lcm(6,8)=24`  |
-| `perm(n,r)` | Permutations            | `perm(5,2)=20` |
-| `comb(n,r)` | Combinations            | `comb(5,2)=10` |
+| Function Name | Description             | Example Inputs/Outputs |
+| ------------- | ----------------------- | ---------------------- |
+| `sinh(x)`     | Hyperbolic sine         | `sinh(1)=1.175...`     |
+| `cosh(x)`     | Hyperbolic cosine       | `cosh(0)=1`            |
+| `tanh(x)`     | Hyperbolic tangent      | `tanh(0)=0`            |
+| `asinh(x)`    | Inverse hyperbolic sine | `asinh(1)=0.881...`    |
+| `acosh(x)`    | Inverse hyperbolic cos  | `acosh(1)=0`           |
+| `atanh(x)`    | Inverse hyperbolic tan  | `atanh(0.5)=0.549...`  |
 
 ---
 
-#### Aggregation & Control
+### Special Ratio Functions (c-series / degree)
 
-| Function             | Description                         | Example                        |
-| -------------------- | ----------------------------------- | ------------------------------ |
-| `sum(...)`           | Sum of values                       | `sum(1,2,3)=6`                 |
-| `mean(...)`          | Arithmetic mean                     | `mean(2,4)=3`                  |
-| `min(...)`           | Minimum                             | `min(3,1,5)=1`                 |
-| `max(...)`           | Maximum                             | `max(3,1,5)=5`                 |
-| `var(x...)`          | Population deviation (divided by n) | `var(1,2,3)=0.666666666667`    |
-| `vars(x...)`         | Unbiased variance (divided by n-1)  | `vars(1,2,3)=1`                |
-| `stddev(x...)`       | standard deviation                  | `stddev(1,2,3)=0.816496580928` |
-| `stddevs(x...)`      | Unbiased standard deviation         | `stddevs(1,2,3)=1`             |
-| `median(...)`        | Median                              | `median(1,2,3,4)=2.5`          |
-| `percentile(p, ...)` | Percentile (0–100)                  | `percentile(25,1,2,3,4)=1.75`  |
-| `cov(x..., y...)`    | Covariance                          | `cov(1,2,3, 3,2,1)=-2/3`       |
-| `corr(x..., y...)`   | Correlation coefficient             | `corr(1,2,3, 1,2,3)=1`         |
+| Function Name | Description    | Example Inputs/Outputs   |
+| ------------- | -------------- | ------------------------ |
+| `sinc(x)`     | `sin(x)/x`     | `sinc(90)=0.111...`      |
+| `cosc(x)`     | `(1-cos(x))/x` | `cosc(60)=0.008333...`   |
+| `tanc(x)`     | `tan(x)/x`     | `tanc(0)=1`              |
+| `sinhc(x)`    | `sinh(x)/x`    | `sinhc(3)=3.339...`      |
+| `tanhc(x)`    | `tanh(x)/x`    | `tanhc(30)=0.03333...`   |
+| `expc(x)`     | `(exp(x)-1)/x` | `expc(1)=1.718281828...` |
 
----
+- Since sin/cos/tan assume degree input, these also take degree input.
+- When `x` is extremely small, loss-of-significance countermeasures are applied.
 
-#### Geometry / Vector Operations
+| Function Name | Description    | Example Inputs/Outputs |
+| ------------- | -------------- | ---------------------- |
+| `sincR(x)`    | `sin(x)/x`     | `sincR(1e-8)≈1`        |
+| `coscR(x)`    | `(1-cos(x))/x` | `coscR(1e-8)≈5e-9`     |
+| `tancR(x)`    | `tan(x)/x`     | `tancR(1e-8)≈1`        |
 
-| Function                | Description               | Example               |
-| ----------------------- | ------------------------- | --------------------- |
-| `norm(x,y)`             | 2D vector length          | `norm(3,4)=5`         |
-| `dot(x1,y1,x2,y2)`      | Dot product               | `dot(1,2,3,4)=11`     |
-| `cross(x1,y1,x2,y2)`    | 2D cross product (scalar) | `cross(1,0,0,1)=1`    |
-| `lerp(a,b,t)`           | Linear interpolation      | `lerp(0,10,0.5)=5`    |
-| `distance(x1,y1,x2,y2)` | Distance between points   | `distance(0,0,3,4)=5` |
+- These interpret `x` as radians.
+- For the signal-processing-style “sinc”, this is generally the one you want.
 
 ---
 
-#### Control & Utility
+### Number Theory / Combinatorics
 
-| Function           | Description          | Example           |
-| ------------------ | -------------------- | ----------------- |
-| `clamp(x, lo, hi)` | Clamp value to range | `clamp(5,0,10)=5` |
-| `rand()`           | Random number [0,1)  | `rand()`          |
+| Function Name | Description             | Example Inputs/Outputs |
+| ------------- | ----------------------- | ---------------------- |
+| `gcd(a,b)`    | Greatest common divisor | `gcd(12,18)=6`         |
+| `lcm(a,b)`    | Least common multiple   | `lcm(6,8)=24`          |
+| `perm(n,r)`   | Permutations            | `perm(5,2)=20`         |
+| `comb(n,r)`   | Combinations            | `comb(5,2)=10`         |
+
+---
+
+### Statistics (Descriptive Statistics / Aggregation)
+
+| Function Name          | Description                                            | Example Inputs/Outputs                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sum(...)`             | Sum                                                    | `sum(1,2,3)=6`                                                                                                                                                          |
+| `mean(...)`, `ave()`   | Mean                                                   | `mean(1,2,3)=2`                                                                                                                                                         |
+| `min(...)`             | Minimum                                                | `min(3,1,2)=1`                                                                                                                                                          |
+| `max(...)`             | Maximum                                                | `max(3,1,2)=3`                                                                                                                                                          |
+| `prod(...)`            | Product                                                | `prod(2,3,4)=24`                                                                                                                                                        |
+| `median(...)`          | Median                                                 | `median(1,3,5)=3`                                                                                                                                                       |
+| `mode(...)`            | Mode                                                   | `mode(1,2,2,3)=2`                                                                                                                                                       |
+| `percentile(p,...)`    | Percentile                                             | `percentile(50,1,3,5)=3`                                                                                                                                                |
+| `quantile(p,...)`      | Quantile (`p` in [0,1])                                | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                       |
+| `var(x...)`            | Population variance (divide by _n_)                    | `var(1,2,3)=0.666666666667`                                                                                                                                             |
+| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)            | `vars(1,2,3)=1`                                                                                                                                                         |
+| `stddev(x...)`         | Standard deviation                                     | `stddev(1,2,3)=0.816496580928`                                                                                                                                          |
+| `stddevs(x...)`        | Sample standard deviation (unbiased)                   | `stddevs(1,2,3)=1`                                                                                                                                                      |
+| `geomean(...)`         | Geometric mean                                         | `geomean(1,4,1/32)=0.5`                                                                                                                                                 |
+| `harmmean(...)`        | Harmonic mean                                          | `harmmean(1,2,6)=1.8`                                                                                                                                                   |
+| `mad(...)`             | Median Absolute Deviation (MAD)                        | `mad(1,1,2,2,4)=1`                                                                                                                                                      |
+| `skew(...)`            | Skewness (symmetry measure)                            | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                              |
+| `kurt(...)`            | Excess kurtosis (normal distribution -> 0)             | `kurt(-1,-0.5,0,0.5,1) < 0` (light tails)<br>`kurt(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurt(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurt(0,0,0,0,0,-2,2) > 0` (outliers) |
+| `isprime(x)`           | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(67280421310721)=1`                                                                                                                                             |
+| `cv(...)`              | Coefficient of variation = stddev/mean                 | `cv(10,10,10)=0`                                                                                                                                                        |
+| `stderr(...)`          | Standard error = stddev/sqrt(n)                        | `stderr(1,2,3)=0.471...`                                                                                                                                                |
+| `zscore(x, mu, sigma)` | (x - mu) / sigma                                       | `zscore(5,3,1)=2`                                                                                                                                                       |
+| `iqr(...)`             | Interquartile range (Q3 - Q1)                          | `iqr(1,2,3,4)=2`                                                                                                                                                        |
+| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)     | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                         |
+| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)       | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                             |
+
+---
+
+### Correlation / Covariance
+
+| Function Name             | Description                             | Example Inputs/Outputs            |
+| ------------------------- | --------------------------------------- | --------------------------------- |
+| `cov(x...,y...)`          | Covariance                              | `cov(1,2,3,2,4,6)=0.666...`       |
+| `corr(x...,y...)`         | Correlation coefficient                 | `corr(1,2,3,2,4,6)=1`             |
+| `corrspearman(x...,y...)` | Spearman correlation (rank correlation) | `corrspearman(1,2,3, 10,20,30)=1` |
+
+---
+
+### Numerical Computation (Floating-Point Utilities)
+
+| Function Name | Description                                  | Example Inputs/Outputs |
+| ------------- | -------------------------------------------- | ---------------------- |
+| `hypot(x,y)`  | √(x² + y²) (robust against cancellation)     | `hypot(3,4)=5`         |
+| `fma(a,b,c)`  | Compute a\*b + c with a single rounding step | `fma(10,10,2)=102`     |
+| `rms(...)`    | Root mean square                             | `rms(1,-1,1,-1)=1`     |
+
+---
+
+### Complex Numbers
+
+| Function Name    | Description                | Example                |
+| ---------------- | -------------------------- | ---------------------- |
+| `re(z)`          | Real part                  | `re(3+4I)=3`           |
+| `im(z)`          | Imaginary part             | `im(3+4I)=4`           |
+| `arg(z)`         | Argument (degree)          | `arg(1+I)=45`          |
+| `conj(z)`        | Complex conjugate          | `conj(3+4I)=3-4I`      |
+| `polar(r,theta)` | Polar form r∠θ (degree)    | `polar(2,60)=1+1.732I` |
+| `cis(x)`         | cos(x) + i sin(x) (degree) | `cis(60)=0.5+0.866I`   |
+
+---
+
+#### Geometry / Vectors (2D)
+
+| Function Name           | Description                 | Example Inputs/Outputs |
+| ----------------------- | --------------------------- | ---------------------- |
+| `norm(x,y)`             | Vector magnitude            | `norm(3,4)=5`          |
+| `dot(x1,y1,x2,y2)`      | Dot product                 | `dot(1,0,0,1)=0`       |
+| `cross(x1,y1,x2,y2)`    | Cross product (Z component) | `cross(1,0,0,1)=1`     |
+| `lerp(a,b,t)`           | Linear interpolation        | `lerp(0,10,0.5)=5`     |
+| `distance(x1,y1,x2,y2)` | Distance                    | `distance(0,0,3,4)=5`  |
+
+---
+
+### Random Numbers
+
+| Function Name      | Description                                           | Example Inputs/Outputs                   |
+| ------------------ | ----------------------------------------------------- | ---------------------------------------- |
+| `rand()`           | Uniform random in \[0,1)                              | `rand()=0.37...`                         |
+| `randn()`          | Normal random N(0,1)                                  | `randn()=-0.23...`                       |
+| `randn(mu)`        | Normal random N(mu,1)                                 | `randn(10)=9.61...`                      |
+| `randn(mu,sigma)`  | Normal random N(mu,sigma)                             | `randn(0,2)=1.74...`                     |
+| `rand(hi)`         | Uniform random in \[0,hi)                             | `rand(5)=3.37...` (returns 0 if hi=0)    |
+| `rand(lo,hi)`      | Uniform random in \[lo,hi)                            | `rand(-2,2)=-0.71...`                    |
+| `randint()`        | Random integer 0 or 1                                 | `randint()=0`                            |
+| `randint(a)`       | Random integer in \[0,a] if `a>0`, or \[a,0] if `a<0` | `randint(5)=2`                           |
+| `randint(a,b)`     | Random integer in \[a,b]                              | `randint(1,6)=3` (dice)                  |
+| `choice(a, b,...)` | Randomly select one element                           | `choice(2,3,5,7,9,11,13,17,19,23,29)=17` |
+
+---
+
+### Strength of Materials (Stress, Strain, Elasticity)
+
+| Function Name      | Description            | Example                   |
+| ------------------ | ---------------------- | ------------------------- |
+| `stress(F,A)`      | Stress: σ = F/A        | `stress(1000,10)=100`     |
+| `strain(dL,L)`     | Strain: ε = dL/L       | `strain(0.1,100)=0.001`   |
+| `young(sigma,eps)` | Young’s modulus: E=σ/ε | `young(200,0.001)=200000` |
+
+---
+
+### Section Properties (I, Z, J)
+
+| Function Name          | Description                            | Example                        |
+| ---------------------- | -------------------------------------- | ------------------------------ |
+| `moment_rect(b,h)`     | Rectangular area moment: I=b\*h³/12    | `moment_rect(10,20)=6666.6`    |
+| `moment_circle(d)`     | Circular area moment: I=π\*d⁴/64       | `moment_circle(10)=490.87`     |
+| `sectionmod_rect(b,h)` | Rectangular section modulus: Z=b\*h²/6 | `sectionmod_rect(10,20)=666.6` |
+| `sectionmod_circle(d)` | Circular section modulus: Z=π\*d³/32   | `sectionmod_circle(10)=98.17`  |
+| `torsion_J_circle(d)`  | Polar moment of inertia: J=π\*d⁴/32    | `torsion_J_circle(10)=981.74`  |
+| `polarZ_circle(d)`     | Polar section modulus: Zp=π\*d³/16     | `polarZ_circle(10)=196.35`     |
+
+---
+
+### Fasteners / Friction (Bolts, Torque)
+
+| Function Name                | Description                     | Example                                  |
+| ---------------------------- | ------------------------------- | ---------------------------------------- |
+| `bolt_stress(F,d)`           | Bolt stress: σ = F/(πd²/4)      | `bolt_stress(10000,10)=127.3`            |
+| `torque_from_preload(F,d,K)` | Tightening torque: T = K F d    | `torque_from_preload(10000,0.01,0.2)=20` |
+| `preload_from_torque(T,d,K)` | Inverse conversion: F = T/(K d) | `preload_from_torque(20,0.01,0.2)=10000` |
+| `friction(mu,N)`             | Friction force: F = μ N         | `friction(0.2,100)=20`                   |
+
+---
+
+### Utilities
+
+| Function Name      | Description | Example Inputs/Outputs |
+| ------------------ | ----------- | ---------------------- |
+| `clamp(x, lo, hi)` | Clamp       | `clamp(5,0,10)=5`      |
 
 ---
 
@@ -314,10 +452,8 @@ The following conditions are explicitly treated as **Errors**:
 
 #### Singularities and Exceptions
 
-- エラー発生時，それ以降の評価は行われません
-- エラーは値として伝播せず，直ちに表示されます
-- IEEE754 に基づく結果（`inf`, `-inf`）はエラーと区別されます
-- `inf`, `-inf`を返すか`result is infinite`は曖昧です(要改修です)
+- When an error occurs, subsequent evaluations are not performed
+- Errors are not propagated as values but are displayed immediately
 
 ---
 
@@ -373,6 +509,20 @@ Displayed values and history are rounded to 12 decimal places.
 
 ---
 
+### Specification behavior
+
+- Spaces are generally ignored, but between numbers they are treated as implicit multiplication. `3 2` -> `3*2`
+- In principle, complex solutions are returned as complex numbers, but `cbrt` returns real solutions. (`(-8)^(1/3)=1+1.732050807569I`, `cbrt(-8)=-2`)
+
+---
+
+### Future Plans
+
+- [N]Base Support (0x, 0b, add(), shift())
+- AngleMode Support (sin(30deg), setAngle=RADIAN)
+
+---
+
 ## Grammar Definition (EBNF)
 
 ```ebnf
@@ -425,14 +575,15 @@ BSD 3-Clause License
 
 Copyright (c) 2021–2026 mmKreutzef
 
-If you use this software in academic papers or commercial products, please clearly state that fact in your documentation or publications.  
-A short notice would be appreciated.
+If you use this software in academic papers or commercial products, please clearly state that fact in your documentation or publications.
+
+A short notice would be appreciated.(and feel delight)
 
 ---
 
 ## Tests
 
-This project includes **300 automated tests**, covering:
+This project includes **600 automated tests**, covering:
 
 - Operator precedence and associativity
 - Error handling
@@ -447,4 +598,4 @@ This project aims to balance **strict operator semantics** with **practical expr
 
 ## Requests / Contributions
 
-Please submit them via Git.
+Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.

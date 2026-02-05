@@ -31,27 +31,50 @@ def parse_float(s):
     return float(s)
 
 
-def parse_complex(s):
-    s = s.strip()
+_complex_re = re.compile(r"""
+^\s*
+(?:
+  (?P<real>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
+  (?:
+    (?P<imag_sign>[+-])?
+    (?P<imag>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
+    [iI]
+  )?
+|
+  (?P<pure_sign>[+-])?
+  (?P<pure_imag>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
+  [iI]
+)
+\s*$
+""", re.VERBOSE)
 
-    if s.endswith("I"):
-        body = s[:-1]
+def parse_complex(s: str):
+    s = re.sub(r"\s+", "", s)
 
-        if body == "" or body == "+":
-            return 0.0, 1.0
-        if body == "-":
-            return 0.0, -1.0
-
-        if "+" in body[1:]:
-            r, i = body.rsplit("+", 1)
-            return float(r), float(i)
-        elif "-" in body[1:]:
-            r, i = body.rsplit("-", 1)
-            return float(r), -float(i)
-        else:
-            return 0.0, float(body)
-    else:
+    m = _complex_re.match(s)
+    if not m:
+        # fallback: treat as real
         return float(s), 0.0
+
+    # pure imaginary like "I", "-I", "2I"
+    if m.group("pure_imag") is not None or m.group("pure_sign") is not None:
+        sign = -1.0 if m.group("pure_sign") == "-" else 1.0
+        mag = m.group("pure_imag")
+        imag = 1.0 if (mag is None or mag == "") else float(mag)
+        return 0.0, sign * imag
+
+    real_s = m.group("real")
+    real = float(real_s) if (real_s is not None and real_s != "") else 0.0
+
+    if m.group("imag") is None and m.group("imag_sign") is None:
+        return real, 0.0
+
+    sign = -1.0 if m.group("imag_sign") == "-" else 1.0
+    mag = m.group("imag")
+    imag = 1.0 if (mag is None or mag == "") else float(mag)
+
+    return real, sign * imag
+
 
 
 def complex_equal(a, b):
@@ -65,8 +88,11 @@ def complex_equal(a, b):
 
     return almost_equal(ar, br) and almost_equal(ai, bi)
 
+def looks_complex(s):
+    return bool(re.search(r"[iI]", s))
 
-EXE = r"..\x64\Release\mmCal.exe"
+
+EXE = r"..\build\x64\Release\mmCal.exe"
 
 import glob; TESTS = sys.argv[1:] or glob.glob("test*.txt")
 
@@ -89,6 +115,10 @@ for testfile in TESTS:
 
         expr, expect = line.split(":=", 1)
         expect = expect.strip()
+        
+        if expect.lower() == "skip":
+            print(f"[SKIP] {expr.strip()}")
+            continue
 
         try:
             p = subprocess.run(
@@ -120,7 +150,7 @@ for testfile in TESTS:
         else:
             if ret == 0:
                 try:
-                    if "I" in out or "I" in expect:
+                    if looks_complex(out) or looks_complex(expect):
                         if complex_equal(out, expect):
                             print(f"[PASS] {expr} = {out}")
                             PASS += 1
