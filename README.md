@@ -596,6 +596,18 @@ This project includes **600 automated tests**, covering:
 
 This project aims to balance **strict operator semantics** with **practical expression evaluation**, ensuring it works reliably in design and manufacturing environments of any scale.
 
+---
+
+### **Disclaimer**
+
+This software is provided “as is” without any warranty, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement.  
+The author or copyright holder shall not be liable for any claims, damages, or other liabilities arising out of or in connection with the software, whether based on contract, tort, or otherwise.
+
+By using this software, you acknowledge and automatically agree that all risks associated with its use are your responsibility.
+The author assumes no responsibility for any damage resulting from data loss, system malfunction, or other consequences arising from the use of this software.
+
+---
+
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
