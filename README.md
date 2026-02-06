@@ -1,11 +1,9 @@
-# mm Calculator – Manufacturing-Oriented Mathematical Calculator
+# mmCalculator – Mechanical & Manufacturing Calculator
 
 © 2021–2026 mmKreuzef (aka Daiki.NIIMI) Project mme
 Licensed under the BSD 3-Clause License
 
 [English](README.md) | [日本語](README.ja.md)
-
-## Language Specification
 
 ### Overview
 
@@ -77,6 +75,7 @@ The following patterns are **automatically interpreted as multiplication**:
 2(Pi)
 Pi(2)
 (2+3)(4+5)
+2 4
 ```
 
 But, please be mindful of the following types of input.
@@ -86,7 +85,7 @@ But, please be mindful of the following types of input.
 | `1..1`  | `1. .<-???`           | `Error: multiple '.' in number` | `1. * .1 = 0.1`                  |
 | `1.2.1` | `1.2 .<-???`          | `Error: multiple '.' in number` | `1.2 * .1 = 0.12`                |
 
-**Implicit binding between function names and numbers is prohibited.**
+**Function names and numeric values do not implicitly combine.**
 
 ```text
 [NG]
@@ -214,44 +213,45 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Number Theory / Combinatorics
 
-| Function Name | Description             | Example Inputs/Outputs |
-| ------------- | ----------------------- | ---------------------- |
-| `gcd(a,b)`    | Greatest common divisor | `gcd(12,18)=6`         |
-| `lcm(a,b)`    | Least common multiple   | `lcm(6,8)=24`          |
-| `perm(n,r)`   | Permutations            | `perm(5,2)=20`         |
-| `comb(n,r)`   | Combinations            | `comb(5,2)=10`         |
+| Function Name | Description                                            | Example Inputs/Outputs      |
+| ------------- | ------------------------------------------------------ | --------------------------- |
+| `gcd(a,b)`    | Greatest common divisor                                | `gcd(12,18)=6`              |
+| `lcm(a,b)`    | Least common multiple                                  | `lcm(6,8)=24`               |
+| `perm(n,r)`   | Permutations                                           | `perm(5,2)=20`              |
+| `comb(n,r)`   | Combinations                                           | `comb(5,2)=10`              |
+| `isprime(x)`  | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(67280421310721)=1` |
+| `fib(x)`      | Fibonacci sequence                                     | `fib(25)=75025`             |
 
 ---
 
 ### Statistics (Descriptive Statistics / Aggregation)
 
-| Function Name          | Description                                            | Example Inputs/Outputs                                                                                                                                                  |
-| ---------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sum(...)`             | Sum                                                    | `sum(1,2,3)=6`                                                                                                                                                          |
-| `mean(...)`, `ave()`   | Mean                                                   | `mean(1,2,3)=2`                                                                                                                                                         |
-| `min(...)`             | Minimum                                                | `min(3,1,2)=1`                                                                                                                                                          |
-| `max(...)`             | Maximum                                                | `max(3,1,2)=3`                                                                                                                                                          |
-| `prod(...)`            | Product                                                | `prod(2,3,4)=24`                                                                                                                                                        |
-| `median(...)`          | Median                                                 | `median(1,3,5)=3`                                                                                                                                                       |
-| `mode(...)`            | Mode                                                   | `mode(1,2,2,3)=2`                                                                                                                                                       |
-| `percentile(p,...)`    | Percentile                                             | `percentile(50,1,3,5)=3`                                                                                                                                                |
-| `quantile(p,...)`      | Quantile (`p` in [0,1])                                | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                       |
-| `var(x...)`            | Population variance (divide by _n_)                    | `var(1,2,3)=0.666666666667`                                                                                                                                             |
-| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)            | `vars(1,2,3)=1`                                                                                                                                                         |
-| `stddev(x...)`         | Standard deviation                                     | `stddev(1,2,3)=0.816496580928`                                                                                                                                          |
-| `stddevs(x...)`        | Sample standard deviation (unbiased)                   | `stddevs(1,2,3)=1`                                                                                                                                                      |
-| `geomean(...)`         | Geometric mean                                         | `geomean(1,4,1/32)=0.5`                                                                                                                                                 |
-| `harmmean(...)`        | Harmonic mean                                          | `harmmean(1,2,6)=1.8`                                                                                                                                                   |
-| `mad(...)`             | Median Absolute Deviation (MAD)                        | `mad(1,1,2,2,4)=1`                                                                                                                                                      |
-| `skew(...)`            | Skewness (symmetry measure)                            | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                              |
-| `kurt(...)`            | Excess kurtosis (normal distribution -> 0)             | `kurt(-1,-0.5,0,0.5,1) < 0` (light tails)<br>`kurt(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurt(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurt(0,0,0,0,0,-2,2) > 0` (outliers) |
-| `isprime(x)`           | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(67280421310721)=1`                                                                                                                                             |
-| `cv(...)`              | Coefficient of variation = stddev/mean                 | `cv(10,10,10)=0`                                                                                                                                                        |
-| `stderr(...)`          | Standard error = stddev/sqrt(n)                        | `stderr(1,2,3)=0.471...`                                                                                                                                                |
-| `zscore(x, mu, sigma)` | (x - mu) / sigma                                       | `zscore(5,3,1)=2`                                                                                                                                                       |
-| `iqr(...)`             | Interquartile range (Q3 - Q1)                          | `iqr(1,2,3,4)=2`                                                                                                                                                        |
-| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)     | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                         |
-| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)       | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                             |
+| Function Name          | Description                                        | Example Inputs/Outputs                                                                                                                                                  |
+| ---------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sum(...)`             | Sum                                                | `sum(1,2,3)=6`                                                                                                                                                          |
+| `mean(...)`, `ave()`   | Mean                                               | `mean(1,2,3)=2`                                                                                                                                                         |
+| `min(...)`             | Minimum                                            | `min(3,1,2)=1`                                                                                                                                                          |
+| `max(...)`             | Maximum                                            | `max(3,1,2)=3`                                                                                                                                                          |
+| `prod(...)`            | Product                                            | `prod(2,3,4)=24`                                                                                                                                                        |
+| `median(...)`          | Median                                             | `median(1,3,5)=3`                                                                                                                                                       |
+| `mode(...)`            | Mode                                               | `mode(1,2,2,3)=2`                                                                                                                                                       |
+| `percentile(p,...)`    | Percentile                                         | `percentile(50,1,3,5)=3`                                                                                                                                                |
+| `quantile(p,...)`      | Quantile (`p` in \[0,1\])                          | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                       |
+| `var(x...)`            | Population variance (divide by _n_)                | `var(1,2,3)=0.666666666667`                                                                                                                                             |
+| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)        | `vars(1,2,3)=1`                                                                                                                                                         |
+| `stddev(x...)`         | Standard deviation                                 | `stddev(1,2,3)=0.816496580928`                                                                                                                                          |
+| `stddevs(x...)`        | Sample standard deviation (unbiased)               | `stddevs(1,2,3)=1`                                                                                                                                                      |
+| `geomean(...)`         | Geometric mean                                     | `geomean(1,4,1/32)=0.5`                                                                                                                                                 |
+| `harmmean(...)`        | Harmonic mean                                      | `harmmean(1,2,6)=1.8`                                                                                                                                                   |
+| `mad(...)`             | Median Absolute Deviation (MAD)                    | `mad(1,1,2,2,4)=1`                                                                                                                                                      |
+| `skew(...)`            | Skewness (symmetry measure)                        | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                              |
+| `kurt(...)`            | Excess kurtosis (normal distribution -> 0)         | `kurt(-1,-0.5,0,0.5,1) < 0` (light tails)<br>`kurt(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurt(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurt(0,0,0,0,0,-2,2) > 0` (outliers) |
+| `cv(...)`              | Coefficient of variation = stddev/mean             | `cv(10,10,10)=0`                                                                                                                                                        |
+| `stderr(...)`          | Standard error = stddev/sqrt(n)                    | `stderr(1,2,3)=0.471...`                                                                                                                                                |
+| `zscore(x, mu, sigma)` | (x - mu) / sigma                                   | `zscore(5,3,1)=2`                                                                                                                                                       |
+| `iqr(...)`             | Interquartile range (Q3 - Q1)                      | `iqr(1,2,3,4)=2`                                                                                                                                                        |
+| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends) | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                         |
+| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)   | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                             |
 
 ---
 
@@ -302,18 +302,18 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Random Numbers
 
-| Function Name      | Description                                           | Example Inputs/Outputs                   |
-| ------------------ | ----------------------------------------------------- | ---------------------------------------- |
-| `rand()`           | Uniform random in \[0,1)                              | `rand()=0.37...`                         |
-| `randn()`          | Normal random N(0,1)                                  | `randn()=-0.23...`                       |
-| `randn(mu)`        | Normal random N(mu,1)                                 | `randn(10)=9.61...`                      |
-| `randn(mu,sigma)`  | Normal random N(mu,sigma)                             | `randn(0,2)=1.74...`                     |
-| `rand(hi)`         | Uniform random in \[0,hi)                             | `rand(5)=3.37...` (returns 0 if hi=0)    |
-| `rand(lo,hi)`      | Uniform random in \[lo,hi)                            | `rand(-2,2)=-0.71...`                    |
-| `randint()`        | Random integer 0 or 1                                 | `randint()=0`                            |
-| `randint(a)`       | Random integer in \[0,a] if `a>0`, or \[a,0] if `a<0` | `randint(5)=2`                           |
-| `randint(a,b)`     | Random integer in \[a,b]                              | `randint(1,6)=3` (dice)                  |
-| `choice(a, b,...)` | Randomly select one element                           | `choice(2,3,5,7,9,11,13,17,19,23,29)=17` |
+| Function Name      | Description                                           | Example Inputs/Outputs                |
+| ------------------ | ----------------------------------------------------- | ------------------------------------- |
+| `rand()`           | Uniform random in \[0,1)                              | `rand()=0.37...`                      |
+| `rand(hi)`         | Uniform random in \[0,hi)                             | `rand(5)=3.37...` (returns 0 if hi=0) |
+| `rand(lo,hi)`      | Uniform random in \[lo,hi)                            | `rand(-2,2)=-0.71...`                 |
+| `randint()`        | Random integer 0 or 1                                 | `randint()=0`                         |
+| `randint(a)`       | Random integer in \[0,a] if `a>0`, or \[a,0] if `a<0` | `randint(5)=2`                        |
+| `randint(a,b)`     | Random integer in \[a,b]                              | `randint(1,6)=3` (dice)               |
+| `choice(a, b,...)` | Randomly select one element                           | `choice(2,3,5,7,9,11,13,17,19)=17`    |
+| `randn()`          | Normal random N(0,1)                                  | `randn()=-0.23...`                    |
+| `randn(mu)`        | Normal random N(mu,1)                                 | `randn(10)=9.61...`                   |
+| `randn(mu,sigma)`  | Normal random N(mu,sigma)                             | `randn(0,2)=1.74...`                  |
 
 ---
 
@@ -369,12 +369,10 @@ In[n], Out[n], %, %%, %%%...
 
 #### System Functions
 
-```text
-Clear[], Exit[]
-```
-
-- `Clear[]` clears history and resets `In[n] / Out[n]` to 1
-- `Exit[]` terminates the program
+| Function Name | Description                                   |
+| ------------- | --------------------------------------------- |
+| `Clear[]`     | clears history and resets`In[n] / Out[n]`to 1 |
+| `Exit`        | terminates the program                        |
 
 ---
 
@@ -465,9 +463,42 @@ Out[1] := 1
 
 In [2] := sqrt(-4)
 Out[2] := 2I
-```
 
----
+In [3] :=
+
+In [3] := (2+3)(4+5)
+Out[3] := 45
+
+In [4] := 10/2+3
+Out[4] := 8
+
+In [5] := --3!-(-(3!))
+Out[5] := 12
+
+In [6] := gcd(8,4)
+Out[6] := 4
+
+In [7] := pow(4,0.5)
+Out[7] := 2
+
+In [8] := sin(90)
+Out[8] := 1
+
+In [9] := Out[3]+2
+Out[9] := 47
+
+In [10] := In[2+3]*5
+Out[10] := 60
+
+
+In [11] := %%
+Out[11] := 47
+
+In [12] := Clear[]
+
+In [1] :=
+
+```
 
 ## Design Notes
 
@@ -483,6 +514,9 @@ Out[2] := 2I
 ### Numerical Precision
 
 - Internally uses `double`
+- Since the internal representation is double precision, it can only handle values within the range of 1.7E±308.
+  Values exceeding ±1.7E+308 will result in an overflow or infinity error.
+
 - Subject to IEEE754 rounding errors
 
 ```text
