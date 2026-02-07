@@ -21,7 +21,7 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 
   <div style="flex:1; min-width:340px;">
 
-````txt
+```txt
 In [1] := (2+3)(4+5) + 2Pi
 Out[1] := 51.28318530718
 
@@ -51,7 +51,11 @@ Out[9] := 30
 
 In [10] := %% / %
 Out[10] := 12
+```
+
 </div> <div style="flex:1; min-width:340px;">
+
+```
 In [11] := 3!^2/%
 Out[11] := 1
 
@@ -81,7 +85,9 @@ Out[19] := 876
 
 In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
-</div> </div> ```
+```
+
+</div> </div>
 
 ---
 
@@ -720,4 +726,7 @@ The author assumes no responsibility for any damage resulting from data loss, sy
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
-````
+
+```
+
+```
