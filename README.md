@@ -9,7 +9,7 @@ Licensed under the BSD 3-Clause License
 
 This project is a **mathematical expression evaluation engine** featuring **numerical computation, complex number arithmetic, and high-precision mathematical functions**.
 
-While it can be used as a calculator, it is primarily designed for **CAD, mathematical processing, and practical use at manufacturing and design sites**, where both numerical accuracy and usability are required.
+While it can be used as a calculator, it is primarily designed for **CAD, Mechanical processing, and practical use at manufacturing and design sites**, where both numerical accuracy and usability are required.
 
 The design is inspired by _Mathematica_ in spirit, but **variable assignment and symbolic computation are intentionally not implemented**.
 
@@ -24,17 +24,17 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 
 ### Constants
 
-All constants start with an uppercase letter.
+All constants start with an capital letter.
 
-| Name  | Description                              |
-| ----- | ---------------------------------------- |
-| `Pi`  | π (pi)                                   |
-| `Tue` | 2π (τ, tau)                              |
-| `E`   | Base of natural logarithm                |
-| `Phi` | Golden ratio                             |
-| `NA`  | Avogadro constant                        |
-| `I`   | Imaginary unit                           |
-| `ESP` | Internal convergence tolerance (`1e-12`) |
+| Name  | Description                    | Expansion value                         |
+| ----- | ------------------------------ | --------------------------------------- |
+| `Pi`  | π (pi)                         | `3.14159265358979323846264338327950288` |
+| `Tue` | 2π (τ, tau)                    | `6.283185307179586476925286766559006`   |
+| `E`   | Base of natural logarithm      | `2.7182818284590452353602874713526625`  |
+| `Phi` | Golden ratio                   | `1.618033988749894848204586834365638`   |
+| `NA`  | Avogadro constant              | ` 6.02214076e23`                        |
+| `I`   | Imaginary unit                 | `0+I`                                   |
+| `ESP` | Internal convergence tolerance | `1e-12`                                 |
 
 ---
 
