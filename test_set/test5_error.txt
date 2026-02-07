@@ -4,7 +4,7 @@
 (-1)^(1/2):=I
 sqrt(-1):=I
 log(0):=Error
-log(-1):=Error
+log(-1):=3.14159265359I
 log(0,10):=Error
 log(1,0):=Error
 asin(2):=90+75.456129290217I
@@ -18,10 +18,9 @@ csc(0):=Error
 factorial(-1):=Error
 (-1)!:=Error
 1.5!:=Error
-perm(5,6):=Error
 perm(-1,2):=Error
-comb(5,6):=Error
-comb(-1,2):=Error
+comb(5,6):=0
+comb(-1,2):=0
 Out[0]:=Error
 Out[-100]:=Error
 Out[100]:=Error
@@ -45,7 +44,6 @@ abs-5:=Error
 I/0:=Error
 0^I:=Error
 (-0)^I:=Error
-log(0+0I):=Error
 I^I^I:=0.947158998072378+0.320764449979309I
 mean(1,I):=0.5+0.5I
 var(1,I):=Error
@@ -65,12 +63,22 @@ foo(1):=Error
 !=2:=Error
 1<2<3:=Skip
 log(0):=Error
-log(-1):=Error
-log10(0):=Error
-log2(-2):=Error
+log(-1):=3.141592653589793I
+log(0+0I) := Error
+log(-1) := 3.141592653589793I
+log(-1+0I) := 3.141592653589793I
+log(-1-0I) := 3.141592653589793I
+
+log10(1) := 0
+log10(0) := Error
+log2(1) := 0
+log2(0) := Error
+log1p(0) := 0
+log1p(-1) := Error
 log(1,10):=Error
-log(-2,8):=Error
-log(2,-8):=Error
+expm1(0) := 0
+log(-2,8):=0.1392609706362244-0.6311808726237906I
+log(2,-8):=3+4.532360141827194I
 
 tan(90):=Error
 cot(0):=Error
@@ -85,3 +93,24 @@ atanh(-1):=Error
 mod(1,0):=Error
 
 arg(0):=Error
+
+
+fib(-1) := Error
+fact(-1) := Error
+perm(5,6) := 0
+perm(5,-1) := Error
+gcd(0,0) := 0
+trimmean(0.5,1,2,3,4) := Error
+
+stddevs(1) := Error
+
+skew(1,2) := 0
+kurts(1,2,3) := Error
+preload_from_torque(1,0,0.2):=Error
+preload_from_torque(1,10,0):=Error
+bolt_stress(1,0):=Error
+
+corr(1,1,1, 2,3,4) := Error
+corr(1,2,3, 1,1,1) := Error
+corrspearman(1,1,1,1, 1,2,3,4) := Error
+stderr(1) := Error

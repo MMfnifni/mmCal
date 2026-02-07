@@ -217,8 +217,8 @@ Below is a complete list of all currently implemented functions. For each functi
 | ------------- | ------------------------------------------------------ | --------------------------- |
 | `gcd(a,b)`    | Greatest common divisor                                | `gcd(12,18)=6`              |
 | `lcm(a,b)`    | Least common multiple                                  | `lcm(6,8)=24`               |
-| `perm(n,r)`   | Permutations                                           | `perm(5,2)=20`              |
-| `comb(n,r)`   | Combinations                                           | `comb(5,2)=10`              |
+| `perm(n,r)`   | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`              |
+| `comb(n,r)`   | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`              |
 | `isprime(x)`  | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(67280421310721)=1` |
 | `fib(x)`      | Fibonacci sequence                                     | `fib(25)=75025`             |
 
@@ -226,32 +226,33 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Statistics (Descriptive Statistics / Aggregation)
 
-| Function Name          | Description                                        | Example Inputs/Outputs                                                                                                                                                  |
-| ---------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sum(...)`             | Sum                                                | `sum(1,2,3)=6`                                                                                                                                                          |
-| `mean(...)`, `ave()`   | Mean                                               | `mean(1,2,3)=2`                                                                                                                                                         |
-| `min(...)`             | Minimum                                            | `min(3,1,2)=1`                                                                                                                                                          |
-| `max(...)`             | Maximum                                            | `max(3,1,2)=3`                                                                                                                                                          |
-| `prod(...)`            | Product                                            | `prod(2,3,4)=24`                                                                                                                                                        |
-| `median(...)`          | Median                                             | `median(1,3,5)=3`                                                                                                                                                       |
-| `mode(...)`            | Mode                                               | `mode(1,2,2,3)=2`                                                                                                                                                       |
-| `percentile(p,...)`    | Percentile                                         | `percentile(50,1,3,5)=3`                                                                                                                                                |
-| `quantile(p,...)`      | Quantile (`p` in \[0,1\])                          | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                       |
-| `var(x...)`            | Population variance (divide by _n_)                | `var(1,2,3)=0.666666666667`                                                                                                                                             |
-| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)        | `vars(1,2,3)=1`                                                                                                                                                         |
-| `stddev(x...)`         | Standard deviation                                 | `stddev(1,2,3)=0.816496580928`                                                                                                                                          |
-| `stddevs(x...)`        | Sample standard deviation (unbiased)               | `stddevs(1,2,3)=1`                                                                                                                                                      |
-| `geomean(...)`         | Geometric mean                                     | `geomean(1,4,1/32)=0.5`                                                                                                                                                 |
-| `harmmean(...)`        | Harmonic mean                                      | `harmmean(1,2,6)=1.8`                                                                                                                                                   |
-| `mad(...)`             | Median Absolute Deviation (MAD)                    | `mad(1,1,2,2,4)=1`                                                                                                                                                      |
-| `skew(...)`            | Skewness (symmetry measure)                        | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                              |
-| `kurt(...)`            | Excess kurtosis (normal distribution -> 0)         | `kurt(-1,-0.5,0,0.5,1) < 0` (light tails)<br>`kurt(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurt(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurt(0,0,0,0,0,-2,2) > 0` (outliers) |
-| `cv(...)`              | Coefficient of variation = stddev/mean             | `cv(10,10,10)=0`                                                                                                                                                        |
-| `stderr(...)`          | Standard error = stddev/sqrt(n)                    | `stderr(1,2,3)=0.471...`                                                                                                                                                |
-| `zscore(x, mu, sigma)` | (x - mu) / sigma                                   | `zscore(5,3,1)=2`                                                                                                                                                       |
-| `iqr(...)`             | Interquartile range (Q3 - Q1)                      | `iqr(1,2,3,4)=2`                                                                                                                                                        |
-| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends) | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                         |
-| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)   | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                             |
+| Function Name          | Description                                           | Example Inputs/Outputs                                                                                                                                                             |
+| ---------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sum(...)`             | Sum                                                   | `sum(1,2,3)=6`                                                                                                                                                                     |
+| `mean(...)`, `ave()`   | Mean                                                  | `mean(1,2,3)=2`                                                                                                                                                                    |
+| `min(...)`             | Minimum                                               | `min(3,1,2)=1`                                                                                                                                                                     |
+| `max(...)`             | Maximum                                               | `max(3,1,2)=3`                                                                                                                                                                     |
+| `prod(...)`            | Product                                               | `prod(2,3,4)=24`                                                                                                                                                                   |
+| `median(...)`          | Median                                                | `median(1,3,5)=3`                                                                                                                                                                  |
+| `mode(...)`            | Mode                                                  | `mode(1,2,2,3)=2`                                                                                                                                                                  |
+| `percentile(p,...)`    | Percentile                                            | `percentile(50,1,3,5)=3`                                                                                                                                                           |
+| `quantile(p,...)`      | Quantile (`p` in \[0,1\])                             | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                                  |
+| `var(x...)`            | Population variance (divide by _n_)                   | `var(1,2,3)=0.666666666667`                                                                                                                                                        |
+| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)           | `vars(1,2,3)=1`                                                                                                                                                                    |
+| `stddev(x...)`         | Standard deviation                                    | `stddev(1,2,3)=0.816496580928`                                                                                                                                                     |
+| `stddevs(x...)`        | Sample standard deviation (unbiased)                  | `stddevs(1,2,3)=1`                                                                                                                                                                 |
+| `geomean(...)`         | Geometric mean                                        | `geomean(1,4,1/32)=0.5`                                                                                                                                                            |
+| `harmmean(...)`        | Harmonic mean                                         | `harmmean(1,2,6)=1.8`                                                                                                                                                              |
+| `mad(...)`             | Median Absolute Deviation (MAD)                       | `mad(1,1,2,2,4)=1`                                                                                                                                                                 |
+| `skew(...)`            | Skewness (symmetry measure)                           | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                                         |
+| `kurtp(...)`           | Population Excess kurtosis (normal distribution -> 0) | `kurtp(-1,-0.5,0,0.5,1) < 0 (-1.3)` (light tails)<br>`kurtp(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurtp(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurtp(0,0,0,0,0,-2,2) > 0` (outliers) |
+| `kurts(...)`           | Sample Excess kurtosis, `n\geq 5`                     | `kurts(-1,-0.5,0,0.5,1)= -7.09`                                                                                                                                                    |
+| `cv(...)`              | Coefficient of variation = stddev/mean                | `cv(10,10,10)=0`                                                                                                                                                                   |
+| `stderr(...)`          | Standard error = stddev/sqrt(n), `n\geq 2`            | `stderr(1,2,3)=0.471...`                                                                                                                                                           |
+| `zscore(x, mu, sigma)` | (x - mu) / sigma                                      | `zscore(5,3,1)=2`                                                                                                                                                                  |
+| `iqr(...)`             | Interquartile range (Q3 - Q1)                         | `iqr(1,2,3,4)=2`                                                                                                                                                                   |
+| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                    |
+| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                                        |
 
 ---
 
@@ -277,14 +278,17 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Complex Numbers
 
-| Function Name    | Description                | Example                |
-| ---------------- | -------------------------- | ---------------------- |
-| `re(z)`          | Real part                  | `re(3+4I)=3`           |
-| `im(z)`          | Imaginary part             | `im(3+4I)=4`           |
-| `arg(z)`         | Argument (degree)          | `arg(1+I)=45`          |
-| `conj(z)`        | Complex conjugate          | `conj(3+4I)=3-4I`      |
-| `polar(r,theta)` | Polar form r∠θ (degree)    | `polar(2,60)=1+1.732I` |
-| `cis(x)`         | cos(x) + i sin(x) (degree) | `cis(60)=0.5+0.866I`   |
+| Function Name                       | Description                    | Example                |
+| ----------------------------------- | ------------------------------ | ---------------------- |
+| `re(z)`, `real(z)`                  | Real part                      | `re(3+4I)=3`           |
+| `im(z)`, `imag(z)`                  | Imaginary part                 | `im(3+4I)=4`           |
+| `arg(z)`                            | Argument (degree)              | `arg(1+I)=45`          |
+| `conj(z)`                           | Complex conjugate              | `conj(3+4I)=3-4I`      |
+| `polar(r,theta)`<br>`rect(r,theta)` | Polar form r∠θ (degree)        | `polar(2,60)=1+1.732I` |
+| `cis(x)`                            | cos(x) + i sin(x) (degree)     | `cis(60)=0.5+0.866I`   |
+| `mag(z)`                            | Alias of `abs(z)`              | `mag(3+4I)=5`          |
+| `proj(z)`                           | Riemann sphere projection      | `proj(3+4I)=3+4I`      |
+| `unit(z)`, `csgn(z)`                | Unit complex number `z/abs(z)` | `unit(3+4I)=0.6+0.8I`  |
 
 ---
 
@@ -415,6 +419,7 @@ The following table shows **operator precedence (high → low)** in this engine:
 - `sqrt(-1) = I`
 - `exp(I)` follows Euler’s formula
 - Real numbers are automatically promoted to complex numbers when required
+- `+0I` and `-0I` both evaluate to zero. Therefore, `arg(-1+0I) = 180` and `arg(-1-0I) = 180` are obtained respectively.
 
 ---
 

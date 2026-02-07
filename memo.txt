@@ -1,0 +1,17 @@
+ctags -R --languages=C++ --extras=+q --fields=+n+S+K .
+
+Get-Content tags |
+  Where-Object { $_ -notmatch '^!' } |
+  ForEach-Object {
+    $cols = $_ -split "`t"
+    $name = $cols[0]
+    $file = $cols[1]
+
+    # signatureは tags の末尾に "signature:(...)" みたいに入ってることが多い
+    $sig = ""
+    if ($_ -match 'signature:\((.*?)\)') { $sig = "($($matches[1]))" }
+
+    "$name$sig  [$file]"
+  } |
+  Sort-Object -Unique |
+  Out-File functions_full.txt -Encoding utf8

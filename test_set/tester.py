@@ -3,7 +3,7 @@ import sys
 import re
 import math
 
-EPS = 1e-9
+EPS = 1e-12
 
 def normalize_float(x, eps=EPS):
     if math.isinf(x):
@@ -92,7 +92,7 @@ def looks_complex(s):
     return bool(re.search(r"[iI]", s))
 
 
-EXE = r"..\build\x64\Release\mmCal.exe"
+EXE = r"..\build\x64\Release\mmCal_x64.exe"
 
 import glob; TESTS = sys.argv[1:] or glob.glob("test*.txt")
 
