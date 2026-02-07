@@ -15,6 +15,76 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 
 ---
 
+### Forget the details, let's get straight to the real-world examples!
+
+<div style="display:flex; gap:24px; align-items:flex-start;">
+
+  <div style="flex:1; min-width:340px;">
+
+````txt
+In [1] := (2+3)(4+5) + 2Pi
+Out[1] := 51.28318530718
+
+In [2] := hypot(3,4) + norm(3,4) + distance(0,0,3,4)
+Out[2] := 15
+
+In [3] := round(ln(E^5) + log10(1000) + log2(8), 10)
+Out[3] := 11
+
+In [4] := fma(10^16, 3, -10^16*3) + expm1(1) - (E-1)
+Out[4] := 0
+
+In [5] := sin(30)^2 + cos(30)^2
+Out[5] := 1
+
+In [6] := tan(45) + cot(45) + sec(60) + csc(30)
+Out[6] := 6
+
+In [7] := asin(0.5) + acos(0.5) + atan(1)
+Out[7] := 135
+
+In [8] := atan2(1,1) + atan2(1,-1) + atan2(-1,-1) + atan2(-1,1)
+Out[8] := 360
+
+In [9] :=Out[3]*Out[2]-Out[7]
+Out[9] := 30
+
+In [10] := %% / %
+Out[10] := 12
+</div> <div style="flex:1; min-width:340px;">
+In [11] := 3!^2/%
+Out[11] := 1
+
+In [12] := (-8)^(1/3)
+Out[12] := 1+1.732050807569I
+
+In [13] := exp(I Pi) + 1
+Out[13] := 0
+
+In [14] := polar(2,60) + cis(60)
+Out[14] := 1.5+2.598076211353I
+
+In [15] := abs(%) + arg(%) + re(%) + im(%)
+Out[15] := 67.098076211353
+
+In [16] := conj(%%) + unit(%%) - proj(%%)
+Out[16] := 0.5-4.330127018922I
+
+In [17] := mean(3,5,7,11,13,17) + median(1,3,5) + mode(1,2,2,3)
+Out[17] := 14.3333333333333
+
+In [18] := stddevs(3,5,7,11,13,17) + vars(1,2,3) + iqr(1,2,3,4)
+Out[18] := 7.778888771954
+
+In [19] := gcd(84,120) + lcm(6,8) + perm(10,3) + comb(10,3)
+Out[19] := 876
+
+In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
+Out[20] := 3
+</div> </div> ```
+
+---
+
 ### Numeric Types
 
 - **Real numbers**: IEEE 754 `double` (displayed with up to 12 decimal digits)
@@ -32,7 +102,7 @@ All constants start with an capital letter.
 | `Tue` | 2π (τ, tau)                    | `6.283185307179586476925286766559006`   |
 | `E`   | Base of natural logarithm      | `2.7182818284590452353602874713526625`  |
 | `Phi` | Golden ratio                   | `1.618033988749894848204586834365638`   |
-| `NA`  | Avogadro constant              | ` 6.02214076e23`                        |
+| `NA`  | Avogadro constant              | `6.02214076e23`                         |
 | `I`   | Imaginary unit                 | `0+I`                                   |
 | `ESP` | Internal convergence tolerance | `1e-12`                                 |
 
@@ -639,7 +709,7 @@ This project aims to balance **strict operator semantics** with **practical expr
 
 ### **Disclaimer**
 
-This software is provided “as is” without any warranty, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement.  
+This software is provided “as is” without any warranty, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement.
 The author or copyright holder shall not be liable for any claims, damages, or other liabilities arising out of or in connection with the software, whether based on contract, tort, or otherwise.
 
 By using this software, you acknowledge and automatically agree that all risks associated with its use are your responsibility.
@@ -650,3 +720,4 @@ The author assumes no responsibility for any damage resulting from data loss, sy
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
+````
