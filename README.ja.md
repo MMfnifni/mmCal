@@ -15,27 +15,7 @@ Mathematicaに着想を得ているため，風味がしますが変数代入や
 
 ---
 
-<style>
-.column-left{
-  float: left;
-  width: 47.5%;
-  text-align: left;
-}
-.column-right{
-  float: right;
-  width: 47.5%;
-  text-align: left;
-}
-.column-one{
-  float: left;
-  width: 100%;
-  text-align: left;
-}
-</style>
-
 ## 細かいことは置いといて実例超特急
-
-<div class="column-left">
 
 ```txt
 In [1] := (2+3)(4+5) + 2Pi
@@ -67,12 +47,7 @@ Out[9] := 30
 
 In [10] := %% / %
 Out[10] := 12
-```
 
-</div>
-<div class="column-right">
-
-```txt
 In [11] := 3!^2/%
 Out[11] := 1
 
@@ -103,8 +78,6 @@ Out[19] := 876
 In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
 ```
-
-</div>
 
 ### 要点超特急
 

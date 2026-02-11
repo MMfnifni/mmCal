@@ -17,26 +17,6 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 
 ## Enough theory — let’s get straight to real-world examples!
 
-<style>
-.column-left{
-  float: left;
-  width: 47.5%;
-  text-align: left;
-}
-.column-right{
-  float: right;
-  width: 47.5%;
-  text-align: left;
-}
-.column-one{
-  float: left;
-  width: 100%;
-  text-align: left;
-}
-</style>
-
-<div class="column-left">
-
 ```txt
 In [1] := (2+3)(4+5) + 2Pi
 Out[1] := 51.28318530718
@@ -67,12 +47,7 @@ Out[9] := 30
 
 In [10] := %% / %
 Out[10] := 12
-```
 
-</div>
-<div class="column-right">
-
-```txt
 In [11] := 3!^2/%
 Out[11] := 1
 
@@ -103,8 +78,6 @@ Out[19] := 876
 In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
 ```
-
-</div>
 
 ## Key Points Express
 
