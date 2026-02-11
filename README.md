@@ -5,7 +5,7 @@ Licensed under the BSD 3-Clause License
 
 [English](README.md) | [日本語](README.ja.md)
 
-### Overview
+# Overview
 
 This project is a **mathematical expression evaluation engine** featuring **numerical computation, complex number arithmetic, and high-precision mathematical functions**.
 
@@ -15,11 +15,27 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 
 ---
 
-### Forget the details, let's get straight to the real-world examples!
+## Enough theory — let’s get straight to real-world examples!
 
-<div style="display:flex; gap:24px; align-items:flex-start;">
+<style>
+.column-left{
+  float: left;
+  width: 47.5%;
+  text-align: left;
+}
+.column-right{
+  float: right;
+  width: 47.5%;
+  text-align: left;
+}
+.column-one{
+  float: left;
+  width: 100%;
+  text-align: left;
+}
+</style>
 
-  <div style="flex:1; min-width:340px;">
+<div class="column-left">
 
 ```txt
 In [1] := (2+3)(4+5) + 2Pi
@@ -37,7 +53,7 @@ Out[4] := 0
 In [5] := sin(30)^2 + cos(30)^2
 Out[5] := 1
 
-In [6] := tan(45) + cot(45) + sec(60) + csc(30)
+In [6] := tan(45) + cot(Pi/4 rad) + sec(60deg) + csc(Pi/6 rad)
 Out[6] := 6
 
 In [7] := asin(0.5) + acos(0.5) + atan(1)
@@ -53,9 +69,10 @@ In [10] := %% / %
 Out[10] := 12
 ```
 
-</div> <div style="flex:1; min-width:340px;">
+</div>
+<div class="column-right">
 
-```
+```txt
 In [11] := 3!^2/%
 Out[11] := 1
 
@@ -87,11 +104,20 @@ In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
 ```
 
-</div> </div>
+</div>
 
----
+## Key Points Express
 
-### Numeric Types
+- Implicit multiplication works (natural input)
+- Use `%` or `Out[n]` to reuse past history in calculations
+- Supports complex numbers
+- Angles default to degrees but can be specified with `rad`, etc.
+- Extensive set of functions and constants!
+- Operable in any environment!
+
+# Detailed implementation
+
+## Numeric Types
 
 - **Real numbers**: IEEE 754 `double` (displayed with up to 12 decimal digits)
 - **Complex numbers**: `a + bI`
@@ -100,12 +126,12 @@ Out[20] := 3
 
 ### Constants
 
-All constants start with an capital letter.
+All constants start with a capital letter.
 
 | Name  | Description                    | Expansion value                         |
 | ----- | ------------------------------ | --------------------------------------- |
 | `Pi`  | π (pi)                         | `3.14159265358979323846264338327950288` |
-| `Tue` | 2π (τ, tau)                    | `6.283185307179586476925286766559006`   |
+| `Tau` | 2π (τ)                         | `6.283185307179586476925286766559006`   |
 | `E`   | Base of natural logarithm      | `2.7182818284590452353602874713526625`  |
 | `Phi` | Golden ratio                   | `1.618033988749894848204586834365638`   |
 | `NA`  | Avogadro constant              | `6.02214076e23`                         |
@@ -433,9 +459,12 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Utilities
 
-| Function Name      | Description | Example Inputs/Outputs |
-| ------------------ | ----------- | ---------------------- |
-| `clamp(x, lo, hi)` | Clamp       | `clamp(5,0,10)=5`      |
+| Function Name      | Description | Example Inputs/Outputs        |
+| ------------------ | ----------- | ----------------------------- |
+| `clamp(x, lo, hi)` | Clamp       | `clamp(5,0,10)=5`             |
+| `cnst("name")`     | Constant    | `cnst("celeritas")=299792458` |
+
+Refer to the following for the list of constants-> [【List of Constants】](constants_list.md)
 
 ---
 
@@ -452,7 +481,7 @@ In[n], Out[n], %, %%, %%%...
 | Function Name | Description                                   |
 | ------------- | --------------------------------------------- |
 | `Clear[]`     | clears history and resets`In[n] / Out[n]`to 1 |
-| `Exit`        | terminates the program                        |
+| `Exit[]`      | terminates the program                        |
 
 ---
 
@@ -536,59 +565,26 @@ The following conditions are explicitly treated as **Errors**:
 
 ---
 
-## Usage Examples
+### Key Points Express
 
-```text
-In [1] := sin(30)^2 + cos(30)^2
-Out[1] := 1
-
-In [2] := sqrt(-4)
-Out[2] := 2I
-
-In [3] :=
-
-In [3] := (2+3)(4+5)
-Out[3] := 45
-
-In [4] := 10/2+3
-Out[4] := 8
-
-In [5] := --3!-(-(3!))
-Out[5] := 12
-
-In [6] := gcd(8,4)
-Out[6] := 4
-
-In [7] := pow(4,0.5)
-Out[7] := 2
-
-In [8] := sin(90)
-Out[8] := 1
-
-In [9] := Out[3]+2
-Out[9] := 47
-
-In [10] := In[2+3]*5
-Out[10] := 60
-
-
-In [11] := %%
-Out[11] := 47
-
-In [12] := Clear[]
-
-In [1] :=
-
-```
+- Implicit multiplication works (natural input)
+- Use `%` or `Out[n]` to reuse past history in calculations
+- Supports complex numbers
+- Angles default to degrees but can be specified with `rad`, etc.
+- Loads of functions and constants!
+- Works anywhere!
 
 ## Design Notes
 
 ### Angle System
 
 - All trigonometric functions use **degrees** by default
-- Degrees were chosen for usability in practical environments
-- Use `RtoD` if needed
-- Native radian support is a future extension
+
+You can specify radians when explicitly stated as follows.
+
+```text
+sin(Pi/2 rad) = 1
+```
 
 ---
 
@@ -641,45 +637,58 @@ Displayed values and history are rounded to 12 decimal places.
 ## Grammar Definition (EBNF)
 
 ```ebnf
-expression ::= comparison ;
-
-comparison ::= additive
-| additive ( ("<" | "<=" | ">" | ">=" | "==") additive ) ;
-
-additive ::= multiplicative { ("+" | "-") multiplicative } ;
-
-multiplicative ::= power { ("*" | "/") power | implicit_mul power } ;
-
-implicit_mul ::= /* adjacency rule */ ;
-
-power ::= unary [ "^" power ] ; // right associative
-
-unary ::= { "+" | "-" } postfix ;
-
-postfix ::= primary { "!" } ;
-
-primary ::= number
-| constant
-| function_call
-| "(" expression ")" ;
-
-function_call ::= identifier "(" [ arguments ] ")" ;
-
-arguments ::= expression { "," expression } ;
-
+(* Token Definition (Abstraction) *)
+digit       ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+letter      ::= "A" | ... | "Z" | "a" | ... | "z" ;
+underscore  ::= "_" ;
+identifier  ::= (letter | underscore) , { letter | digit | underscore } ;
 number ::= integer | float ;
-
-constant ::= "Pi" | "E" | "Phi" | "I" ;
-
-identifier ::= letter { letter | digit } ;
-
+string      ::= '"' , { any_character_except_quote } , '"' ;
+constant    ::= "Pi" | "E" | "Phi" | "I" ;
+arguments ::= expression { "," expression } ;
 integer ::= digit { digit } ;
-
 float ::= digit { digit } "." digit { digit } ;
 
-letter ::= "A"…"Z" | "a"…"z" ;
+plus        ::= "+" ;  minus       ::= "-" ;
+mul         ::= "*" ;  div         ::= "/" ;
+pow         ::= "^" ;
+lparen      ::= "(" ;  rparen      ::= ")" ;
+lbracket    ::= "[" ;  rbracket    ::= "]" ;
+comma       ::= "," ;  bang        ::= "!" ;
+lt          ::= "<" ;  le          ::= "<=" ;
+gt          ::= ">" ;  ge          ::= ">=" ;
+eq          ::= "==";  percent     ::= "%";
 
-digit ::= "0"…"9" ;
+(* Basic formula *)
+Expression      ::= Term , { ( plus | minus ) , Term } ;
+Term            ::= Factor , { ( mul | div | ImplicitMul ) , Factor } ;
+Factor          ::= Unary ;
+Unary           ::= [ plus | minus ] , Power ;
+Power           ::= Postfix , [ pow , Unary ] ;
+Postfix         ::= Primary , { bang } ;
+
+Primary         ::=
+    | number
+    | string
+    | constant
+    | percent { percent }       (* history reference *)
+    | identifier [ FunctionCallOrUnit ]
+    | "(" , Expression , ")"
+    | "[" , Expression , "]" ;
+
+FunctionCallOrUnit ::=
+    | "(" , [ Expression , { comma , Expression } ] , ")"
+    | "[" , [ Expression , { comma , Expression } ] , "]"
+    | UnitIdentifier ;
+
+UnitIdentifier  ::= identifier ; (* 30deg, 45rad など *)
+
+(* Abstracting the concept of implicit multiplication using EBNF ※ In[n], Out[n], %, %% etc. are processed as special tokens at lexer level *)
+ImplicitMul     ::= /* 記号なしで値When values appear without symbols同士が並ぶ場合 */ ;
+
+
+(* Comparative *)
+Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
 ```
 
 ---
@@ -709,7 +718,8 @@ This project includes **600 automated tests**, covering:
 
 ## Notes
 
-This project aims to balance **strict operator semantics** with **practical expression evaluation**, ensuring it works reliably in design and manufacturing environments of any scale.
+This project aims to reconcile rigorous operator semantics with practical formula evaluation.
+It also seeks to operate with ease in any environment, whether for designers or on the production floor.
 
 ---
 
@@ -726,7 +736,3 @@ The author assumes no responsibility for any damage resulting from data loss, sy
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
-
-```
-
-```

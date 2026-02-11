@@ -135,6 +135,10 @@ namespace mm::cal {
 
         return formatComplex(x, cfg);
 
+       } else if constexpr (std::is_same_v<T, std::string>) {
+        // 将来: "rad" "deg" "mm" などが結果として出る可能性もあるので一旦そのまま返す
+        return x;
+
        } else if constexpr (std::is_same_v<T, InvalidValue>) {
         return "Invalid";
 

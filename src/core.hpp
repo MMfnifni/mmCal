@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <complex>
@@ -16,7 +17,7 @@
 #include <vector>
 
 namespace mm::cal {
- inline constexpr double PI = 3.14159265358979323846264338327950288;
+ inline constexpr double PI = 3.14159265358979323846264338327950288419716939937510;
  inline constexpr int cnst_precision = 12;
  inline constexpr double cnst_precision_inv = 1e-12;
 
@@ -27,7 +28,7 @@ namespace mm::cal {
  struct FunctionContext;
  struct FunctionDef;
  struct InputEntry;
- using Value = std::variant<double, std::complex<double>, InvalidValue>;
+ using Value = std::variant<double, std::complex<double>, std::string, InvalidValue>;
  // 以下のほうが高速になる。可読性とのトレードオフ
  // struct Value {
  //  enum { Real, Complex } type;
@@ -84,9 +85,9 @@ namespace mm::cal {
 
  inline const std::unordered_map<std::string, Value> constants = {
      {"Pi", PI},
-     {"E", 2.7182818284590452353602874713526625},
-     {"Teu", 6.283185307179586476925286766559006},
-     {"Phi", 1.618033988749894848204586834365638},
+     {"E", 2.71828182845904523536028747135266249775724709369995},
+     {"Tau", 2 * PI},
+     {"Phi", 1.61803398874989484820458683436563811772030917980576},
      {"NA", 6.02214076e23},
      {"I", Complex(0.0, 1.0)},
      {"EPS", cnst_precision_inv},
@@ -124,6 +125,7 @@ namespace mm::cal {
   NaNDetected,
   InfinityDetected,
   InternalError,
+  SyntaxError,
  };
 
  constexpr const char *errorMessage(CalcErrorType t) {
@@ -150,6 +152,7 @@ namespace mm::cal {
    case CalcErrorType::NaNDetected: return "NaN detected";
    case CalcErrorType::InfinityDetected: return "Infinity detected";
    case CalcErrorType::InternalError: return "InternalError";
+   case CalcErrorType::SyntaxError: return "InternalError";
   }
   return "unknown calculation error";
  }
@@ -171,6 +174,11 @@ namespace mm::cal {
  inline bool isComplex(const Value &v) { return std::holds_alternative<std::complex<double>>(v); }
  inline bool isDouble(const Value &v) { return std::holds_alternative<double>(v); }
  inline bool isInvalid(const Value &v) { return std::holds_alternative<InvalidValue>(v); }
+ inline bool isString(const Value &v) { return std::holds_alternative<std::string>(v); }
+ inline const std::string &asString(const Value &v, size_t pos) {
+  if (!std::holds_alternative<std::string>(v)) { throw CalcError(CalcErrorType::TypeError, "expected string", pos); }
+  return std::get<std::string>(v);
+ }
 
  inline std::complex<double> toComplex(const Value &v) {
   if (std::holds_alternative<double>(v)) return std::complex<double>(std::get<double>(v), 0.0);
@@ -243,6 +251,8 @@ namespace mm::cal {
         checkFinite(x, pos);
        } else if constexpr (std::is_same_v<T, std::complex<double>>) {
         checkFinite(x, pos);
+       } else if constexpr (std::is_same_v<T, std::string>) {
+        // string は有限チェック不要（タグ/オプション用途）
        } else if constexpr (std::is_same_v<T, InvalidValue>) {
         // Invalidは別ルートで処理される前提
        } else {

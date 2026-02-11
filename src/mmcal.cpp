@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
 
     case EvalKind::Value:
      history.push_back({line, res.value});
-     std::cout << "\nOut[" << history.size() << "] := " << formatResult(res.value, syscfg) << "\n\n";
+     std::cout << "Out[" << history.size() << "] := " << formatResult(res.value, syscfg) << "\n\n";
      break;
 
     case EvalKind::None: break;

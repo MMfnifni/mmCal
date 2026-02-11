@@ -30,6 +30,13 @@ Out[100]:=Error
 1+*2:=Error
 1/:=Error
 ():=Error
+(():=Error
+(:=Error
+):=Error
+cnst(""):=Error
+cnst("):=Error
+cnst("GFN"):=Error
+cnst("GFN):=Error
 []:=Error
 (1+2:=Error
 1+2):=Error
@@ -61,7 +68,7 @@ foo(1):=Error
 <=2:=Error
 1==:=Error
 !=2:=Error
-1<2<3:=Skip
+1<2<3:=1
 log(0):=Error
 log(-1):=3.141592653589793I
 log(0+0I) := Error
@@ -114,3 +121,4 @@ corr(1,1,1, 2,3,4) := Error
 corr(1,2,3, 1,1,1) := Error
 corrspearman(1,1,1,1, 1,2,3,4) := Error
 stderr(1) := Error
+

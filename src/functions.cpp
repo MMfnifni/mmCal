@@ -1,4 +1,5 @@
 ﻿#include "functions.hpp"
+#include "constants.hpp"
 #include "core.hpp"
 #include "evaluate.hpp"
 #include "math_util.hpp"
@@ -1171,6 +1172,13 @@ namespace mm::cal {
                                }};
  }
  void registerOthers(SystemConfig &cfg) {
+  cfg.functions["cnst"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            // v[0] が string であることを要求
+                            const std::string &name = asString(v[0], ctx.pos);
+                            auto it = constants_dic.find(name);
+                            if (it == constants_dic.end()) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown constant: " + name, ctx.pos); }
+                            return it->second;
+                           }};
   cfg.functions["fib"] = {1, 1, [](auto &v, auto &ctx) -> Value { return (double)fibULL(requireInt(v[0], ctx.pos), ctx.pos); }};
   cfg.functions["isprime"] = {1, 1, [](auto &v, auto &ctx) -> Value { return isPrimeLL(requireInt(v[0], ctx.pos)) ? 1.0 : 0.0; }};
   cfg.functions["if"] = {3, 3, [](auto &v, auto &ctx) -> Value { return asReal(v[0], ctx.pos) != 0.0 ? v[1] : v[2]; }};

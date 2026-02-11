@@ -97,6 +97,20 @@ namespace mm::cal {
    throw CalcError(CalcErrorType::InvalidCharacter, "single '=' not allowed", start);
   }
 
+  if (c == '"') {
+   std::string s;
+   while (p < src.size() && src[p] != '"') {
+    // エスケープ無しでOK
+    s.push_back(src[p]);
+    ++p;
+   }
+
+   if (p >= src.size()) { throw CalcError(CalcErrorType::Syntax, "unterminated string", start); }
+
+   ++p; // closing "
+   return {TokenType::String, s, 0.0, start};
+  }
+
   switch (c) {
    case '+': return {TokenType::Plus, "+", start};
    case '-': return {TokenType::Minus, "-", start};
@@ -109,7 +123,9 @@ namespace mm::cal {
    case ']': return {TokenType::RBracket, "]", start};
    case ',': return {TokenType::Comma, ",", start};
    case '!': return {TokenType::Bang, "!", start};
-   case '%': return {TokenType::Percent, "%", start};
+   case '%':
+    return {TokenType::Percent, "%", start};
+    // case '"': return {TokenType::String, '"', start};
   }
 
   throw CalcError(CalcErrorType::InvalidCharacter, std::string("unexpected character: ") + c, start);
@@ -138,9 +154,10 @@ namespace mm::cal {
   if (!accept(t)) throw CalcError(CalcErrorType::Syntax, errorMessage(CalcErrorType::Syntax), cur.pos);
  }
 
- bool Parser::startsPrimary() const { return cur.type == TokenType::Number || cur.type == TokenType::Identifier || cur.type == TokenType::LParen || cur.type == TokenType::Percent; }
+ bool Parser::startsPrimary() const { return cur.type == TokenType::Number || cur.type == TokenType::String || cur.type == TokenType::Identifier || cur.type == TokenType::LParen || cur.type == TokenType::Percent; }
  bool Parser::isFunctionName(const std::string &name) const { return cfg.functions.find(name) != cfg.functions.end(); }
  bool Parser::isConstantName(const std::string &name) const { return constants.find(name) != constants.end(); }
+ bool Parser::isUnitName(const std::string &s) const { return symbols.count(s) != 0; }
 
  bool isValueEnd(TokenType t) {
   switch (t) {
@@ -206,6 +223,30 @@ namespace mm::cal {
    // 暗黙乗算
    else if (isImplicitMul(prev, cur)) {
     size_t p = cur.pos;
+
+    // ★ unit の場合は UnitApplyNode
+    if (cur.type == TokenType::Identifier && symbols.count(cur.text)) {
+
+     // unitを付けていい左辺を制限する
+     // OK: 30deg, 30 rad, PI rad
+     // NG: (30)rad, sin(30)rad, xrad
+     bool okLhs = false;
+
+     // 直前トークンが Number ならOK
+     if (prev.type == TokenType::Number) okLhs = true;
+
+     // 直前トークンが Identifier の場合は「定数だけOK」
+     if (prev.type == TokenType::Identifier) { okLhs = isConstantName(prev.text); }
+
+     if (!okLhs) { throw CalcError(CalcErrorType::Syntax, "unit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
+
+     std::string u = cur.text;
+     advance(); // unit消費
+     n = std::make_unique<UnitApplyNode>(std::move(n), std::move(u), p);
+     continue;
+    }
+
+    // 通常の暗黙乗算
     auto r = parseUnary();
     n = std::make_unique<BinaryNode>(BinOp::Mul, std::move(n), std::move(r), p);
    } else {
@@ -257,6 +298,13 @@ namespace mm::cal {
    return std::make_unique<NumberNode>(v, p);
   }
 
+  // ---- string ----
+  if (cur.type == TokenType::String) {
+   std::string s = cur.text;
+   advance();
+   return std::make_unique<NumberNode>(Value(std::move(s)), p);
+  }
+
   // ---- history % ----
   if (cur.type == TokenType::Percent) {
    int c = 0;
@@ -289,7 +337,9 @@ namespace mm::cal {
 
      while (true) {
       f->args.push_back(parseExpression());
+
       if (accept(TokenType::Comma)) continue;
+
       if (open == TokenType::LParen) expect(TokenType::RParen);
       else expect(TokenType::RBracket);
       break;
@@ -297,7 +347,7 @@ namespace mm::cal {
      return f;
     }
 
-    // ★ 定数なら「定数 * (expr)」
+    // 定数なら「定数 * (expr)」
     if (constants.count(name)) {
      auto lhs = std::make_unique<NumberNode>(constants.at(name), p);
      auto rhs = parseExpression();
@@ -310,21 +360,18 @@ namespace mm::cal {
    }
 
    // ----- identifier only -----
-   if (constants.count(name)) return std::make_unique<NumberNode>(constants.at(name), p);
-
-   throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), p);
+   if (constants.count(name)) { return std::make_unique<NumberNode>(constants.at(name), p); }
+   if (symbols.count(name)) { throw CalcError(CalcErrorType::Syntax, "unit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
+   return std::make_unique<SymbolNode>(std::move(name), p);                                                         // それ以外は「オプション指定子」としてASTに残す
   }
 
   // ---- grouped expression ----
   if (cur.type == TokenType::LParen || cur.type == TokenType::LBracket) {
    TokenType open = cur.type;
    advance();
-
    auto n = parseExpression();
-
    if (open == TokenType::LParen) expect(TokenType::RParen);
    else expect(TokenType::RBracket);
-
    return n;
   }
 
@@ -397,10 +444,20 @@ namespace mm::cal {
  Parser::NumberNode::NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
  Value Parser::NumberNode::evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const { return value; }
  Parser::BinaryNode::BinaryNode(BinOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
-
  Value Parser::BinaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   auto a = lhs->eval(cfg, hist, base);
   auto b = rhs->eval(cfg, hist, base);
+  // ==========================================
+  // 拡張ポイント：Mulだけ特別扱いできるようにする
+  // 例： (double * unit) や (unit * double)
+  // 現状は unit を Value に入れてないので何もしないが、
+  // 将来 Value に Unit/Quantity を足すならここが入口になる。
+  // ==========================================
+  if (op == BinOp::Mul) {
+   // いまは何もしない（将来用）
+   // if (isUnit(a) && std::holds_alternative<double>(b)) ...
+   // if (std::holds_alternative<double>(a) && isUnit(b)) ...
+  }
 
   // ===== complex が含まれる場合 =====
   if (isComplex(a) || isComplex(b)) {
@@ -499,6 +556,42 @@ namespace mm::cal {
   // double のときだけ有限チェック -> 一括捕捉に変更
   /* if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);*/
   return r;
+ }
+
+ Parser::SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }
+
+ Value Parser::SymbolNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &, int) const {
+  if (constants.count(name)) return constants.at(name); // 定数はここで解決できる（parse段階で解決しなくてよくなる）
+  if (symbols.count(name)) return name;                 // ★ symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
+
+  // 変数（将来用）
+  // if (cfg.variables.count(name)) return cfg.variables.at(name);
+
+  // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
+  // return name;
+
+  throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
+ }
+
+ Parser::UnitApplyNode::UnitApplyNode(std::unique_ptr<ASTNode> e, std::string u, size_t p) : expr(std::move(e)), unit(std::move(u)) { pos = p; }
+
+ Value Parser::UnitApplyNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
+  Value v = expr->eval(cfg, hist, base);
+
+  // 今は unit適用は実数だけ
+  if (!std::holds_alternative<double>(v)) { throw CalcError(CalcErrorType::TypeError, "unit can be applied to real only", pos); }
+
+  double x = std::get<double>(v);
+
+  // angle
+  if (unit == "deg") return x;
+  if (unit == "rad") { return x * 180.0 / PI; }
+  if (unit == "grad") { return x * 0.9; }
+
+  // length (将来)
+  if (unit == "mm" || unit == "cm" || unit == "m" || unit == "inch") { throw CalcError(CalcErrorType::NotImplemented, "length units are not implemented yet", pos); }
+
+  throw CalcError(CalcErrorType::UnknownIdentifier, "unknown unit: " + unit, pos);
  }
 
  Parser::OutNode::OutNode(int idx, size_t p) : index(idx) { pos = p; }

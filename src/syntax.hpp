@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,8 @@ namespace mm::cal {
  /* ============================
 Token / Lexer
 ============================ */
+
+ inline const std::unordered_set<std::string> symbols = {"deg", "rad", "grad", "mm", "cm", "m", "inch"};
 
  enum class TokenType {
   End,
@@ -41,6 +44,7 @@ Token / Lexer
   GreaterEq, // >=
   Equal,     // ==
   NotEqual,  // !=
+  String,    // ""
  };
 
  struct Token {
@@ -94,6 +98,7 @@ Token / Lexer
 
    bool isFunctionName(const std::string &name) const;
    bool isConstantName(const std::string &name) const;
+   bool isUnitName(const std::string &s) const;
    bool isImplicitMul(const Token &prev, const Token &cur) const;
 
    std::unique_ptr<ASTNode> parseCompare();
@@ -201,7 +206,27 @@ Token / Lexer
    struct FunctionCallNode : ASTNode {
      std::string name;
      std::vector<std::unique_ptr<ASTNode>> args;
+     std::unordered_map<std::string, std::unique_ptr<ASTNode>> options;
 
+     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+   };
+
+   /* ---------- SymbolNode ---------- */
+
+   struct SymbolNode : ASTNode {
+     std::string name;
+     SymbolNode(std::string n, size_t p);
+
+     Value evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const override;
+   };
+
+   /* ---------- Unit ---------- */
+
+   struct UnitApplyNode : ASTNode {
+     std::unique_ptr<ASTNode> expr;
+     std::string unit;
+
+     UnitApplyNode(std::unique_ptr<ASTNode> e, std::string u, size_t p);
      Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
    };
 

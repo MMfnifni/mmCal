@@ -259,6 +259,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <ClInclude Include="src\constants.hpp" />
     <ClInclude Include="src\core.hpp" />
     <ClInclude Include="src\evaluate.hpp" />
     <ClInclude Include="src\functions.hpp" />
