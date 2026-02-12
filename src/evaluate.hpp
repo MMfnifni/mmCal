@@ -90,9 +90,9 @@ namespace mm::cal {
   MMCAL_API void mmcal_set_base(mmcal_context *ctx, int base);
   MMCAL_API void mmcal_set_precision(mmcal_context *ctx, int precision);
 
-  MMCAL_API int mmcal_eval(mmcal_context *ctx, const char *expr, char *out, int out_cap);
+  MMCAL_API int mmcal_eval_ex(mmcal_context *ctx, const char *expr, char *out, int out_cap, int *out_need, char *err, int err_cap, int *err_need, int *err_pos);
 
-  MMCAL_API int mmcal_last_error(mmcal_context *ctx, char *out, int out_cap);
+  MMCAL_API int mmcal_last_error(mmcal_context *ctx, char *out, int out_cap, int *out_need);
 
 #ifdef __cplusplus
  }

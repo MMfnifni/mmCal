@@ -706,6 +706,12 @@ The author assumes no responsibility for any damage resulting from data loss, sy
 
 ---
 
+### Acknowledgments
+
+I express my gratitude to my past self who inspired the development of this tool, to my university and professors who served as my place of learning, and to my current workplace as the environment where it is actually used.
+
+---
+
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.

@@ -15,3 +15,125 @@ Get-Content tags |
   } |
   Sort-Object -Unique |
   Out-File functions_full.txt -Encoding utf8
+
+
+
+
+// =============C#受け取り側==============
+
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+internal static class MmCalNative
+{
+    private const string DLL = "mmcal.dll";
+
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr mmcal_create();
+
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void mmcal_destroy(IntPtr ctx);
+
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void mmcal_set_base(IntPtr ctx, int @base);
+
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void mmcal_set_precision(IntPtr ctx, int precision);
+
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int mmcal_last_error_pos(IntPtr ctx);
+
+    // int mmcal_last_error(mmcal_context *ctx, char *out, int out_cap, int *out_need)
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    public static extern int mmcal_last_error(
+        IntPtr ctx,
+        StringBuilder outBuf,
+        int outCap,
+        out int outNeed
+    );
+
+    // int mmcal_eval_ex(
+    //   mmcal_context *ctx,
+    //   const char *expr,
+    //   char *out, int out_cap, int *out_need,
+    //   char *err, int err_cap, int *err_need,
+    //   int *err_pos
+    // )
+    [DllImport(DLL, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    public static extern int mmcal_eval_ex(
+        IntPtr ctx,
+        string expr,
+
+        StringBuilder outBuf,
+        int outCap,
+        out int outNeed,
+
+        StringBuilder errBuf,
+        int errCap,
+        out int errNeed,
+
+        out int errPos
+    );
+}
+
+
+
+
+// ==============C#呼び出し例=================
+public static string Eval(IntPtr ctx, string expr)
+{
+    int outCap = 256;
+    int errCap = 256;
+
+    var outSb = new StringBuilder(outCap);
+    var errSb = new StringBuilder(errCap);
+
+    int status = MmCalNative.mmcal_eval_ex(
+        ctx,
+        expr,
+        outSb, outCap, out int outNeed,
+        errSb, errCap, out int errNeed,
+        out int errPos
+    );
+
+    // 出力バッファ不足なら拡張してリトライ
+    if (status == -3 && outNeed > outCap)
+    {
+        outCap = outNeed;
+        outSb = new StringBuilder(outCap);
+
+        status = MmCalNative.mmcal_eval_ex(
+            ctx,
+            expr,
+            outSb, outCap, out outNeed,
+            errSb, errCap, out errNeed,
+            out errPos
+        );
+    }
+
+    // エラーバッファ不足なら拡張してリトライ
+    if (status == -3 && errNeed > errCap)
+    {
+        errCap = errNeed;
+        errSb = new StringBuilder(errCap);
+
+        status = MmCalNative.mmcal_eval_ex(
+            ctx,
+            expr,
+            outSb, outCap, out outNeed,
+            errSb, errCap, out errNeed,
+            out errPos
+        );
+    }
+
+    if (status == 0)
+    {
+        return outSb.ToString();
+    }
+    else
+    {
+        // errPos は -1 の場合もある
+        throw new Exception($"mmcal error: {errSb} (pos={errPos}, status={status})");
+    }
+}

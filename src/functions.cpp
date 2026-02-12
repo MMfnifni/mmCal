@@ -12,7 +12,7 @@ namespace mm::cal {
 
  static const double deg2rad = PI / 180.0;
  static const double rad2deg = 180.0 / PI;
- static const double eps = asDouble(constants.at("EPS"));
+ inline const double eps = cnst_precision_inv;
 
  ///!!!!
  static void registerBasicMath(SystemConfig &cfg);   // 基本関数
@@ -37,7 +37,6 @@ namespace mm::cal {
  static inline Value invOrSignedInf(double denom, double signSource) { return (std::abs(denom) < eps) ? signedInfBy(signSource) : (1.0 / denom); }
 
  static Value fn_log(const std::vector<Value> &v, FunctionContext &ctx) {
-  const double eps = asDouble(constants.at("EPS"));
   auto warnPrincipal = [&] { calcWarn(ctx.cfg, ctx.pos, "log: complex principal value only; other branches may exist"); };
   auto safeLogBase = [&](Complex base) -> Complex {
    const auto lb = std::log(base);

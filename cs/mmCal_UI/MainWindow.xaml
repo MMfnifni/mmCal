@@ -1,0 +1,61 @@
+﻿<Window x:Class="MmCalculatorWpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="mmCalculator" Height="600" Width="800"
+        Background="#1E1E1E" Foreground="White">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition />
+            <!-- 入力履歴 -->
+            <RowDefinition />
+            <!-- 出力履歴 -->
+            <RowDefinition Height="100"/>
+            <!-- 直近出力 -->
+            <RowDefinition Height="50"/>
+            <!-- 入力欄 + ボタン -->
+        </Grid.RowDefinitions>
+
+        <!-- 入力履歴 -->
+        <ListBox x:Name="InputHistoryListBox" Grid.Row="0"
+                 Margin="0,10,0,10"
+                 Background="#1E1E1E" Foreground="White"
+                 FontSize="14"/>
+
+        <!-- 出力履歴 -->
+        <ListBox x:Name="OutputHistoryListBox" Grid.Row="1"
+                 Background="#2D2D30" Foreground="White"
+                 FontSize="14"/>
+
+        <!-- 直近出力 -->
+        <TextBox x:Name="RecentOutputTextBox" Grid.Row="2"
+                 FontSize="14"
+                 Background="#2D2D30" Foreground="White"
+                 IsReadOnly="True" TextWrapping="Wrap"/>
+
+        <!-- 入力欄 + Evaluateボタン -->
+        <DockPanel Grid.Row="3" LastChildFill="True">
+            <Button Content="Evaluate" Width="100" Margin="5"
+                    Click="EvaluateButton_Click"/>
+            <Grid>
+                <TextBox x:Name="InputTextBox"
+                         FontSize="14"
+                         VerticalAlignment="Center"
+                          VerticalContentAlignment="Center" 
+                         Background="#252526" Foreground="White"
+                         AcceptsReturn="False" TextWrapping="Wrap"
+                         KeyDown="InputTextBox_KeyDown"
+                         TextChanged="InputTextBox_TextChanged"
+                         GotFocus="InputTextBox_GotFocus"
+                         LostFocus="InputTextBox_LostFocus"
+                         Height="50"/>
+                <TextBlock x:Name="PlaceholderTextBlock"
+                           Text="Enter expression..."
+                           FontSize="14" Foreground="Gray"
+                           Margin="4,12,0,0"
+                           IsHitTestVisible="False"
+                           VerticalAlignment="Top"/>
+            </Grid>
+        </DockPanel>
+    </Grid>
+
+</Window>
