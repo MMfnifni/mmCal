@@ -11,10 +11,12 @@ asin(2):=90+75.456129290217I
 acos(2):=-75.456129290217I
 atanh(2):=0.549306144334+1.570796326795I
 acosh(0.5):=1.047197551197I
+
 tan(90):=Error
 cot(0):=Error
 sec(90):=Error
 csc(0):=Error
+
 factorial(-1):=Error
 (-1)!:=Error
 1.5!:=Error
@@ -50,7 +52,6 @@ abs-5:=Error
 (2+3)4:=20
 I/0:=Error
 0^I:=Error
-(-0)^I:=Error
 I^I^I:=0.947158998072378+0.320764449979309I
 mean(1,I):=0.5+0.5I
 var(1,I):=Error
@@ -71,7 +72,6 @@ foo(1):=Error
 1<2<3:=1
 log(0):=Error
 log(-1):=3.141592653589793I
-log(0+0I) := Error
 log(-1) := 3.141592653589793I
 log(-1+0I) := 3.141592653589793I
 log(-1-0I) := 3.141592653589793I
@@ -82,15 +82,16 @@ log2(1) := 0
 log2(0) := Error
 log1p(0) := 0
 log1p(-1) := Error
+log1p(-2):=Error
+
 log(1,10):=Error
 expm1(0) := 0
 log(-2,8):=0.1392609706362244-0.6311808726237906I
 log(2,-8):=3+4.532360141827194I
 
-tan(90):=Error
-cot(0):=Error
-sec(90):=Error
-csc(0):=Error
+
+(-0)^I := Error
+log(0+0I) := Error
 
 atan2(0,0):=Error
 
@@ -122,3 +123,20 @@ corr(1,2,3, 1,1,1) := Error
 corrspearman(1,1,1,1, 1,2,3,4) := Error
 stderr(1) := Error
 
+
+unit(0) := Error
+unit(0+0I) := Error
+
+
+sum():=Error
+mean():=Error
+median():=Error
+var():=Error
+prod():=Error
+clamp(0,10,0):=Error
+
+stress(1,0):=Error
+strain(1,0):=Error
+young(10,0):=Error
+vars(1) := Error
+cv(0,0,0) := Error

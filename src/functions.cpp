@@ -72,7 +72,7 @@ namespace mm::cal {
   warnPrincipal();
   return logBase(Complex(base, 0.0), cx(x));
  }
- // sum, prod用
+ // sum, prod用obj
  static inline Value complexToValue(Complex z) { return (std::abs(z.imag()) < cnst_precision_inv) ? Value(z.real()) : Value(z); }
  // 実数チェックの御老体
  static inline double requireRealNoComplex(const Value &x, size_t pos, const char *msg) {

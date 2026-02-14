@@ -14,6 +14,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ca2", "ca2", "{DDB4EF12-CC4
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "mmCal_UI", "cs\mmCal_UI\mmCal_UI.csproj", "{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ソリューション項目", "ソリューション項目", "{C7983E80-1DFC-4CBD-BAAB-C840C0F7EA02}"
+	ProjectSection(SolutionItems) = preProject
+		version.h = version.h
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -59,10 +64,10 @@ Global
 		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|x86.Build.0 = Release|Any CPU
 		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.Build.0 = Release|Any CPU
+		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.ActiveCfg = Release|x64
+		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.Build.0 = Release|x64
+		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.ActiveCfg = Release|x86
+		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.Build.0 = Release|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

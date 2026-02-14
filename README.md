@@ -1,7 +1,6 @@
 # mmCalculator – Mechanical & Manufacturing Calculator
 
-© 2021–2026 mmKreuzef (aka Daiki.NIIMI) Project mme
-Licensed under the BSD 3-Clause License
+© 2021–2026 mmKreutzef (aka Daiki.NIIMI) Licensed under the BSD 3-Clause License
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -9,13 +8,13 @@ Licensed under the BSD 3-Clause License
 
 This project is a **mathematical expression evaluation engine** featuring **numerical computation, complex number arithmetic, and high-precision mathematical functions**.
 
-While it can be used as a calculator, it is primarily designed for **CAD, Mechanical processing, and practical use at manufacturing and design sites**, where both numerical accuracy and usability are required.
+While it can be used as a calculator, it is primarily designed for **CAD, Mechanical machining, and practical use at manufacturing and design sites**, where both numerical accuracy and usability are required.
 
 The design is inspired by _Mathematica_ in spirit, but **variable assignment and symbolic computation are intentionally not implemented**.
 
 ---
 
-## Enough theory — let’s get straight to real-world examples!
+## Enough theory — let’s dive straight into practical examples!
 
 ```txt
 In [1] := (2+3)(4+5) + 2Pi
@@ -86,7 +85,7 @@ Out[20] := 3
 - Supports complex numbers
 - Angles default to degrees but can be specified with `rad`, etc.
 - Extensive set of functions and constants!
-- Operable in any environment!
+- UI version is available, not just the CLI!
 
 # Detailed implementation
 
@@ -512,15 +511,21 @@ The following conditions are explicitly treated as **Errors**:
 
 #### Error Categories
 
-| Category           | Description                   | Example        | Error Message               |
-| ------------------ | ----------------------------- | -------------- | --------------------------- |
-| Syntax error       | Invalid token order           | `2**3`, `1+*2` | `syntax error`              |
-| Parenthesis error  | Unbalanced parentheses        | `(1+2`         | `syntax error`              |
-| Argument error     | Invalid argument count        | `sin()`        | `function argument missing` |
-| Type error         | Complex value in real-only op | `(-3)!`        | `factorial: negative value` |
-| Domain error       | Mathematically undefined      | `log(-1)`      | `domain error`              |
-| Division by zero   | Denominator is zero           | `1/0`          | `division by zero`          |
-| Undefined behavior | Unsupported syntax            | `sin30`        | `unknown identifier`        |
+| Error Type                                 | Example Cases                                                                                                                            | Comments                                                                                             |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Division by zero**                       | `1/0`, `0/0`, `I/0`, `mod(1,0)`                                                                                                          | Occurs when dividing by zero                                                                         |
+| **Syntax error**                           | `1+*2`, `1/`, `()`, `(()`, `(`, `[)`                                                                                                     | Invalid expression syntax                                                                            |
+| **Domain error**                           | `log(0)`, `(-1)!`, `1.5!`, `preload_from_torque(1,0,0.2)`,<br> `bolt_stress(1,0)`, `trimmean(0.5,1,2,3,4)`, `stddevs(1)`, `kurts(1,2,3)` | Calculation outside the function's domain (negative factorial, square root of negative number, etc.) |
+| **Unknown identifier**                     | `foo`, `foo(1)`, `unknown(1)`, `cnst("")`, `cnst("GFN")`                                                                                 | Undefined function or constant                                                                       |
+| **Result is infinite**                     | `tan(90)`, `cot(0)`, `sec(90)`, `csc(0)`, `atanh(1)`, `atanh(-1)`, `log(0+0I)`                                                           | Result becomes infinite                                                                              |
+| **Result is NaN**                          | `0^I`, `(-0)^I`                                                                                                                          | Undefined numeric calculation                                                                        |
+| **History out of range**                   | `Out[0]`, `Out[-100]`, `Out[100]`,                                                                                                       | History access is out of range                                                                       |
+| **Multiple '.' in number**                 | `1..1`                                                                                                                                   | Syntax error in numeric notation                                                                     |
+| **Unknown constant / unterminated string** | `cnst(")`, `cnst("GFN)`                                                                                                                  | Constant undefined or string not properly terminated                                                 |
+| **Double or complex type error**           | `var(1,I)`, `median(1,I)`                                                                                                                | Calculation with unsupported type                                                                    |
+| **Error in log with base**                 | `log(0,10)`, `log(1,0)`                                                                                                                  | Invalid logarithm base                                                                               |
+| **Overflow detected**                      | `fib(-1)`                                                                                                                                | Value exceeds calculation range                                                                      |
+| **Other domain-related**                   | `acos(2)`, `asin(2)`, `acosh(0.5)`, `atan2(0,0)`, `log1p(-1)`, `log1p(-2)`                                                               | Out of domain for trigonometric or logarithmic functions                                             |
 
 #### Error Policy
 
@@ -547,7 +552,7 @@ The following conditions are explicitly treated as **Errors**:
 - Loads of functions and constants!
 - Works anywhere!
 
-## Design Notes
+# Design Notes
 
 ### Angle System
 
@@ -600,13 +605,6 @@ Displayed values and history are rounded to 12 decimal places.
 
 ---
 
-### Future Plans
-
-- [N]Base Support (0x, 0b, add(), shift())
-- AngleMode Support (sin(30deg), setAngle=RADIAN)
-
----
-
 ## Grammar Definition (EBNF)
 
 ```ebnf
@@ -615,12 +613,12 @@ digit       ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 letter      ::= "A" | ... | "Z" | "a" | ... | "z" ;
 underscore  ::= "_" ;
 identifier  ::= (letter | underscore) , { letter | digit | underscore } ;
-number ::= integer | float ;
+number      ::= integer | float ;
 string      ::= '"' , { any_character_except_quote } , '"' ;
 constant    ::= "Pi" | "E" | "Phi" | "I" ;
-arguments ::= expression { "," expression } ;
-integer ::= digit { digit } ;
-float ::= digit { digit } "." digit { digit } ;
+arguments   ::= expression { "," expression } ;
+integer     ::= digit { digit } ;
+float       ::= digit { digit } "." digit { digit } ;
 
 plus        ::= "+" ;  minus       ::= "-" ;
 mul         ::= "*" ;  div         ::= "/" ;
@@ -657,12 +655,21 @@ FunctionCallOrUnit ::=
 UnitIdentifier  ::= identifier ; (* 30deg, 45rad など *)
 
 (* Abstracting the concept of implicit multiplication using EBNF ※ In[n], Out[n], %, %% etc. are processed as special tokens at lexer level *)
-ImplicitMul     ::= /* 記号なしで値When values appear without symbols同士が並ぶ場合 */ ;
+ImplicitMul     ::= /* When values appear without symbols */ ;
 
 
 (* Comparative *)
 Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
 ```
+
+---
+
+## UI Version
+
+This is a UI wrapper around the CLI version. Usage is the same as the CLI version.  
+However, it requires the following runtime:
+
+[.NET 8 Runtime](https://dotnet.microsoft.com/ja-jp/download/dotnet/8.0)
 
 ---
 
@@ -715,3 +722,15 @@ I express my gratitude to my past self who inspired the development of this tool
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
+
+---
+
+### Future Plans
+
+- Support for different bases (_N_ notation, 0x, 0b, plus add() and shift())
+- AngleMode support (setAngle = RADIAN)
+- `eval` now supports `expect`
+- Basic calculus stuff
+- Variables aren’t really supported on purpose, but loop-like stuff (like `for`) would be nice
+- `plot` function for graphing
+- BigInt? (still depends on double, so very large numbers can get a bit messy at the lower digits)

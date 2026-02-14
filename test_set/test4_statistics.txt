@@ -7,10 +7,6 @@ median(1,2,3,4):=2.5
 var(1,2,3):=0.666666666666667
 var(2,4,6,8):=5
 
-sum():=Error
-mean():=Error
-median():=Error
-var():=Error
 
 sum(5):=5
 mean(5):=5
@@ -60,7 +56,6 @@ isprime(4):=0
 isprime(97):=1
 
 
-prod():=Error
 prod(1,2,3,4):=24
 prod(2,3,5):=30
 
@@ -91,8 +86,6 @@ max(3,2,5,1,4):=5
 clamp(5,0,10):=5
 clamp(-1,0,10):=0
 clamp(11,0,10):=10
-clamp(0,10,0):=Error
-
 fract(1.25):=0.25
 fract(-1.25):=0.75
 
@@ -183,7 +176,6 @@ arg(1):=0
 arg(I):=90
 arg(-1):=180
 arg(-I):=-90
-arg(0):=Error
 
 conj(1+2I):=1-2I
 
@@ -217,13 +209,10 @@ cis(90):=I
 cis(180):=-1
 
 stress(100,10):=10
-stress(1,0):=Error
 
 strain(1,10):=0.1
-strain(1,0):=Error
 
 young(10,0.5):=20
-young(10,0):=Error
 
 moment_rect(2,3):=4.5
 moment_circle(2):=0.7853981633974483
@@ -250,7 +239,6 @@ median(1) := 1
 median(1,2) := 1.5
 
 var(1) := 0
-vars(1) := Error
 
 stddev(1) := 0
 
@@ -258,7 +246,6 @@ kurtp(-1,-0.5,0,0.5,1) := -1.3
 kurts(-1,-0.5,0,0.5,1) := -7.09
 
 cv(10,10,10) := 0
-cv(0,0,0) := Error
 
 stderr(1,2,3) := 0.471404520791
 

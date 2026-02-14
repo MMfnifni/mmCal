@@ -6,6 +6,45 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Platforms>AnyCPU;x64;x86</Platforms>
+    <ApplicationIcon>mmcal.ico</ApplicationIcon>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+    <SignAssembly>False</SignAssembly>
+    <Authors>mmKreutzef(aka.Daiki.NIIMI)</Authors>
+    <Product>$(AssemblyName)_$(Platform)</Product>
+    <Company />
+    <Copyright>Copyright (C) 2021-2026</Copyright>
+    <PackageId>$(AssemblyName)_$(Platform)</PackageId>
+    <AssemblyTitle>$(MSBuildProjectName)_$(Platform)</AssemblyTitle>
+    <FileVersion>$(PackageVersion)</FileVersion>
+    <NeutralLanguage>ja-JP</NeutralLanguage>
+    <Version>1.2.4.0</Version>
+    <AssemblyVersion>$(PackageVersion)</AssemblyVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,9 +52,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="mmCal_x64.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    <Content Include="mmcal.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\build\x64\dll\mmCal_x64.dll" Link="mmCal_x64.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\build\Win32\dll\mmCal_x86.dll" Link="mmCal_x86.dll" />
   </ItemGroup>
 
 </Project>

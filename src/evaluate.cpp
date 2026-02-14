@@ -166,7 +166,17 @@ namespace mm::cal {
    DLL
    ============================ */
 
- enum mmcal_status { MMCAL_OK = 0, MMCAL_E_NULL_CTX = -1, MMCAL_E_NULL_EXPR = -2, MMCAL_E_BUFFER_TOO_SMALL = -3, MMCAL_E_CALC_ERROR = -10, MMCAL_E_STD_EXCEPTION = -11, MMCAL_E_UNKNOWN = -12 };
+ enum mmcal_status {
+  MMCAL_OK = 0,
+  MMCAL_E_NULL_CTX = -1,
+  MMCAL_E_NULL_EXPR = -2,
+  MMCAL_E_BUFFER_TOO_SMALL = -3,
+  MMCAL_E_CALC_ERROR = -10,
+  MMCAL_E_STD_EXCEPTION = -11,
+  MMCAL_E_UNKNOWN = -12,
+  MMCAL_S_CLEARED = -13,
+  MMCAL_S_EXIT = -14,
+ };
 
  struct mmcal_context {
    SystemConfig cfg;
@@ -277,7 +287,12 @@ namespace mm::cal {
     write_out(err, err_cap, ctx->last_error);
     return MMCAL_E_CALC_ERROR;
 
-   } catch (const std::exception &e) {
+   } catch (const ClearRequest &) {
+    ctx->history.clear();
+    ctx->last_error.clear();
+    ctx->last_error_pos = -1;
+    return MMCAL_S_CLEARED;
+   } catch (const ExitRequest &) { return MMCAL_S_EXIT; } catch (const std::exception &e) {
     ctx->last_error = e.what();
     ctx->last_error_pos = -1;
 
@@ -305,6 +320,41 @@ namespace mm::cal {
     write_out(err, err_cap, ctx->last_error);
     return MMCAL_E_UNKNOWN;
    }
+  }
+
+  // expr の構文だけ解析してエラー位置を返す
+  MMCAL_API int mmcal_syntax_check(mmcal_context *ctx, const char *expr, char *err, int err_cap, int *err_pos) {
+   if (!ctx) return MMCAL_E_NULL_CTX;
+   if (!expr) return MMCAL_E_NULL_EXPR;
+
+   ctx->last_error.clear();
+   ctx->last_error_pos = -1;
+
+   try {
+    Parser p(ctx->cfg, expr);
+    std::unique_ptr<Parser::ASTNode> ast = p.parseCompare();
+
+    // 未消化トークンがあれば構文エラー
+    if (p.cur.type != TokenType::End) {
+     ctx->last_error = "Syntax error";
+     ctx->last_error_pos = static_cast<int>(p.cur.pos);
+    }
+
+   } catch (const CalcError &e) {
+    ctx->last_error = e.what();
+    ctx->last_error_pos = (int)e.pos;
+   } catch (const std::exception &e) {
+    ctx->last_error = e.what();
+    ctx->last_error_pos = -1;
+   } catch (...) {
+    ctx->last_error = "unknown error";
+    ctx->last_error_pos = -1;
+   }
+
+   if (err_pos) *err_pos = ctx->last_error_pos;
+   if (err && err_cap > 0) write_out(err, err_cap, ctx->last_error);
+
+   return ctx->last_error_pos >= 0 ? MMCAL_E_CALC_ERROR : MMCAL_OK;
   }
 
  } // extern "C"
