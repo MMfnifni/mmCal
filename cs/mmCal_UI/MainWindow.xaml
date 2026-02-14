@@ -188,10 +188,15 @@
 
         <!-- Input -->
         <DockPanel Grid.Row="3" LastChildFill="True">
-            <Button Content="Evaluate"
+            <Button 
                     Width="100"
                     Margin="5"
-                    Click="EvaluateButton_Click"/>
+                    Click="EvaluateButton_Click">
+                <StackPanel>
+                    <TextBlock Text="Evaluate" TextAlignment="Center"/>
+                    <TextBlock Text="or Shift+Enter" FontSize="10" TextAlignment="Center"/>
+                </StackPanel>
+            </Button>
 
             <Grid>
                 <TextBox x:Name="InputTextBox"
@@ -204,6 +209,7 @@
                          AcceptsReturn="False"
                          TextWrapping="Wrap"
                          KeyDown="InputTextBox_KeyDown"
+                         KeyUp="InputTextBox_KeyDown"
                          TextChanged="InputTextBox_TextChanged"
                          GotFocus="InputTextBox_GotFocus"
                          LostFocus="InputTextBox_LostFocus"

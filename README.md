@@ -203,6 +203,7 @@ Below is a complete list of all currently implemented functions. For each functi
 | `round(x,n)`     | Rounding to _n_ digits                    | `round(1.2345,2)=1.23`           |
 | `fract(x)`       | Fractional part                           | `fract(3.14)=0.14`               |
 | `fact(x)`        | Factorial                                 | `fact(10)=3628800`               |
+| `mod(x,y)`       | Surplus                                   | `mod(11,3)=2`                    |
 
 ---
 
@@ -232,18 +233,21 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Trigonometric Functions (Degree Mode / degree)
 
-| Function Name | Description               | Example Inputs/Outputs |
-| ------------- | ------------------------- | ---------------------- |
-| `sin(x)`      | Sine                      | `sin(30)=0.5`          |
-| `cos(x)`      | Cosine                    | `cos(60)=0.5`          |
-| `tan(x)`      | Tangent                   | `tan(45)=1`            |
-| `cot(x)`      | Cotangent                 | `cot(45)=1`            |
-| `sec(x)`      | Secant                    | `sec(60)=2`            |
-| `csc(x)`      | Cosecant                  | `csc(30)=2`            |
-| `asin(x)`     | Inverse sine              | `asin(0.5)=30`         |
-| `acos(x)`     | Inverse cosine            | `acos(0.5)=60`         |
-| `atan(x)`     | Inverse tangent           | `atan(1)=45`           |
-| `atan2(y,x)`  | Quadrant-aware arctangent | `atan2(1,1)=45`        |
+| Function Name | Description                                     | Example Inputs/Outputs |
+| ------------- | ----------------------------------------------- | ---------------------- |
+| `sin(x)`      | Sine                                            | `sin(30)=0.5`          |
+| `cos(x)`      | Cosine                                          | `cos(60)=0.5`          |
+| `tan(x)`      | Tangent                                         | `tan(45)=1`            |
+| `cot(x)`      | Cotangent                                       | `cot(45)=1`            |
+| `sec(x)`      | Secant                                          | `sec(60)=2`            |
+| `csc(x)`      | Cosecant                                        | `csc(30)=2`            |
+| `asin(x)`     | Inverse sine                                    | `asin(0.5)=30`         |
+| `acos(x)`     | Inverse cosine                                  | `acos(0.5)=60`         |
+| `atan(x)`     | Inverse tangent                                 | `atan(1)=45`           |
+| `atan2(y,x)`  | Quadrant-aware arctangent                       | `atan2(1,1)=45`        |
+| `csch(x)`     | Hyperbolic secant function `1/sinh(x)`          | `csch(1)=0.8509...`    |
+| `sech(x)`     | Hyperbolic tangent function `1/cosh(x)`         | `sech(0)=1`            |
+| `coth(x)`     | Hyperbolic cotangent function `cosh(x)/sinh(x)` | `coth(1)=1.313...`     |
 
 ---
 
@@ -287,14 +291,16 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Number Theory / Combinatorics
 
-| Function Name | Description                                            | Example Inputs/Outputs      |
-| ------------- | ------------------------------------------------------ | --------------------------- |
-| `gcd(a,b)`    | Greatest common divisor                                | `gcd(12,18)=6`              |
-| `lcm(a,b)`    | Least common multiple                                  | `lcm(6,8)=24`               |
-| `perm(n,r)`   | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`              |
-| `comb(n,r)`   | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`              |
-| `isprime(x)`  | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(67280421310721)=1` |
-| `fib(x)`      | Fibonacci sequence                                     | `fib(25)=75025`             |
+| Function Name  | Description                                            | Example Inputs/Outputs |
+| -------------- | ------------------------------------------------------ | ---------------------- |
+| `gcd(a,b)`     | Greatest common divisor                                | `gcd(12,18)=6`         |
+| `lcm(a,b)`     | Least common multiple                                  | `lcm(6,8)=24`          |
+| `perm(n,r)`    | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`         |
+| `comb(n,r)`    | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`         |
+| `isprime(x)`   | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(9973)=1`      |
+| `nextprime(n)` | The smallest prime number exceeding                    | `nextprime(11) = 13`   |
+| `prevprime(n)` | The largest prime number less than _n_                 | `prevprime(11) = 7`    |
+| `fib(x)`       | Fibonacci sequence                                     | `fib(25)=75025`        |
 
 ---
 
@@ -317,7 +323,8 @@ Below is a complete list of all currently implemented functions. For each functi
 | `stddevs(x...)`        | Sample standard deviation (unbiased)                  | `stddevs(1,2,3)=1`                                                                                                                                                                 |
 | `geomean(...)`         | Geometric mean                                        | `geomean(1,4,1/32)=0.5`                                                                                                                                                            |
 | `harmmean(...)`        | Harmonic mean                                         | `harmmean(1,2,6)=1.8`                                                                                                                                                              |
-| `mad(...)`             | Median Absolute Deviation (MAD)                       | `mad(1,1,2,2,4)=1`                                                                                                                                                                 |
+| `mad(...)`             | Median Absolute Deviation                             | `mad(1,1,2,2,4)=1`                                                                                                                                                                 |
+| `madR(v)`              | Mean Absolute Deviation                               | `madR(1,2,3) = 0.666...`                                                                                                                                                           |
 | `skew(...)`            | Skewness (symmetry measure)                           | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                                         |
 | `kurtp(...)`           | Population Excess kurtosis (normal distribution -> 0) | `kurtp(-1,-0.5,0,0.5,1) < 0 (-1.3)` (light tails)<br>`kurtp(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurtp(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurtp(0,0,0,0,0,-2,2) > 0` (outliers) |
 | `kurts(...)`           | Sample Excess kurtosis, `n\geq 5`                     | `kurts(-1,-0.5,0,0.5,1)= -7.09`                                                                                                                                                    |
@@ -330,13 +337,46 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ---
 
-### Correlation / Covariance
+### Financial Functions
 
-| Function Name             | Description                             | Example Inputs/Outputs            |
-| ------------------------- | --------------------------------------- | --------------------------------- |
-| `cov(x...,y...)`          | Covariance                              | `cov(1,2,3,2,4,6)=0.666...`       |
-| `corr(x...,y...)`         | Correlation coefficient                 | `corr(1,2,3,2,4,6)=1`             |
-| `corrspearman(x...,y...)` | Spearman correlation (rank correlation) | `corrspearman(1,2,3, 10,20,30)=1` |
+| Function Name                           | Description                                           | Input and Output Example                      |
+| --------------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
+| `fin_fv(rate,n,pmt)`                    | Future Value (FV)                                     | `fin_fv(0.05,10,100)=1257.789...`             |
+| `fin_pv(rate,nper,pmt)`                 | Present Value (PV)                                    | `fin_pv(0.05,10,100)=772.173...`              |
+| `fin_pmt(rate,nper,pv)`                 | Payment Amount (PMT)                                  | `fin_pmt(0.05,10,1000)=129.504...`            |
+| `fin_total_payment(rate,nper,pv)`       | Total Payment                                         | `fin_total_payment(0.05,10,1000)=1295.045...` |
+| `fin_ppmt(rate,nper,per,pv)`            | Principal Payment Amount (PPMT, Period-specified)     | `fin_ppmt(0.05,10,3,1000)=92.455...`          |
+| `fin_ipmt(rate,nper,per,pv)`            | Interest Payment Amount (IPMT, Period Specified)      | `fin_ipmt(0.05,10,3,1000)=37.049...`          |
+| `fin_npv(rate,cf...)`                   | Net Present Value (NPV)                               | `fin_npv(0.1,100,-50,-50)=12.021... `         |
+| `fin_irr(cf...)`                        | Internal Rate of Return (IRR, Brent)                  | `fin_irr(-100,50,60)=0.063...`                |
+| `fin_rate(nper,pmt,pv)`                 | Interest Rate Calculation (RATE, Brent)               | `fin_rate(10,100,1000)=0.05`                  |
+| `fin_nper(rate,pmt,pv)`                 | Period Calculation (NPER)                             | `fin_nper(0.05,100,1000)=10`                  |
+| `fin_cumipmt(rate,nper,pmt,start,end)`  | Cumulative interest over specified period (CUMIPMT)   | `fin_cumipmt(0.05,10,100,1,5)=210.562...`     |
+| `fin_cumprinc(rate,nper,pmt,start,end)` | Cumulative principal over specified period (CUMPRINC) | `fin_cumprinc(0.05,10,100,1,5)=289.437...`    |
+| `fin_effective_rate(nominal,npery)`     | Effective interest rate (EFFECTIVE RATE)              | `fin_effective_rate(0.06,12)=0.061...`        |
+| `fin_nominal_rate(effective,npery)`     | Nominal Rate (NOMINAL RATE)                           | `fin_nominal_rate(0.0617,12)=0.060...`        |
+| `fin_cagr(start,end,n)`                 | Compound Annual Growth Rate (CAGR)                    | `fin_cagr(1000,2000,10)=0.071...`             |
+
+- `fin_irr`may fail to find roots when the negative value is strong.
+
+---
+
+### Correlation / Covariance / Uncategorized(ToDo: To be organized)
+
+| Function Name             | Description                                                                            | Example Inputs/Outputs            |
+| ------------------------- | -------------------------------------------------------------------------------------- | --------------------------------- |
+| `cov(x...,y...)`          | Covariance                                                                             | `cov(1,2,3,2,4,6)=0.666...`       |
+| `corr(x...,y...)`         | Correlation coefficient                                                                | `corr(1,2,3,2,4,6)=1`             |
+| `corrspearman(x...,y...)` | Spearman correlation (rank correlation)                                                | `corrspearman(1,2,3, 10,20,30)=1` |
+| `numdiff(v)`              | Evaluates the magnitude of the derivative using the root mean square of the difference | `numdiff(1,3,6)=2.549509756796`   |
+| `polylog(s, z)`           | Polylog calculation using a multiple series (`\|z\|<1`)                                | `polylog(2, 0.5)=0.582240526465`  |
+| `totient(n)`              | Euler's totient function φ(n)                                                          | `totient(9)=6`                    |
+| `fft(...)`                | Returns the amplitude average of an FFT                                                | `fft(1,2,3)=3.154700538379`       |
+| `ifft(...)`               | Returns the amplitude average of an IFFT                                               | `ifft(1,2,3)=2`                   |
+| `dft(...)`                | Returns the average amplitude of the DFT                                               | `dft(1,2,3)=3.732`                |
+| `hilbert(...)`            | Returns the average amplitude of the signal after Hilbert transform                    | `hilbert(1,2,3)=1`                |
+
+- This program currently does not support multiple values for what should be received as a vector, so it is a simplified version (returning the average value).
 
 ---
 
@@ -395,6 +435,22 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ---
 
+### Area and Volume
+
+| Function Name                         | Description                                  | Input and Output Example          |
+| ------------------------------------- | -------------------------------------------- | --------------------------------- |
+| `area_circle(d)`                      | Area of a circle (diameter specified)        | `area_circle(2)=3.14159...`       |
+| `area_triangle(b,h)`                  | Triangle area (base and height)              | `area_triangle(3,4)=6`            |
+| `area_triangle(a,b,c)`                | Triangle area (three side lengths)           | `area_triangle(3,4,5)=6`          |
+| `area_trapezoid(a,b,h)`               | Trapezoid area                               | `area_trapezoid(3,5,4)=16`        |
+| `area_polygon(x0,y0,x1,y1,...,xn,yn)` | Polygon area (coordinate specification)      | `area_polygon(0,0,1,0,1,1,0,1)=1` |
+| `vol_cylinder(d,h)`                   | Cylinder volume (diameter specified)         | `vol_cylinder(2,3)=9.42477...`    |
+| `vol_cone(d,h)`                       | Volume of a cone (diameter specified)        | `vol_cone(2,3)=3.14159...`        |
+| `vol_sphere(d)`                       | Volume of a sphere (diameter specified)      | `vol_sphere(2)=4.18879...`        |
+| `vol_prism(x0,y0,...,xn,yn,h)`        | Volume of prism with base polygon and height | `vol_prism(0,0,1,0,1,1,0,1,2)=2`  |
+
+---
+
 ### Strength of Materials (Stress, Strain, Elasticity)
 
 | Function Name      | Description            | Example                   |
@@ -415,6 +471,29 @@ Below is a complete list of all currently implemented functions. For each functi
 | `sectionmod_circle(d)` | Circular section modulus: Z=π\*d³/32   | `sectionmod_circle(10)=98.17`  |
 | `torsion_J_circle(d)`  | Polar moment of inertia: J=π\*d⁴/32    | `torsion_J_circle(10)=981.74`  |
 | `polarZ_circle(d)`     | Polar section modulus: Zp=π\*d³/16     | `polarZ_circle(10)=196.35`     |
+
+---
+
+### Mold & Injection Molding
+
+| Function Name                                     | Description                                          | Example                                                              | Output Unit (MKS System) |
+| ------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------- | ------------------------ |
+| `mold_clamp(P_avg, A_proj)`                       | Mold clamping force (clamp force)                    | `mold_clamp(5e6, 0.01)=50000`                                        | N (kg·m/s²)              |
+| `mold_clamp_safe(SF, P_avg, A_proj)`              | Clamping force including safety factor               | `mold_clamp_safe(1.2, 5e6, 0.01)=60000`                              | N                        |
+| `mold_Pinj(P_cav, ΔP_runner, ΔP_gate, ΔP_nozzle)` | Injection pressure                                   | `mold_Pinj(50e6, 1e6, 0.2e6, 0.1e6)=51300000`                        | Pa (kg/m·s²)             |
+| `mold_flowrate(V, t_fill)`                        | Fill Flow Rate (Volume Flow Rate)                    | `mold_flowrate(0.0001, 0.5)=0.0002`                                  | m³/s                     |
+| `mold_gate_velocity(Q, A_gate)`                   | Gate flow velocity                                   | `mold_gate_velocity(2e-4, 2e-5)=10`                                  | m/s                      |
+| `mold_shear_gate(Q, b, h)`                        | Rectangular gate shear velocity                      | `mold_shear_gate(2e-4, 0.002, 0.001)=60000`                          | 1/s                      |
+| `mold_shear_runner(Q, D)`                         | Shear velocity of runner circular pipe               | `mold_shear_runner(2e-4, 0.004)=31830.988...`                        | 1/                       |
+| `mold_pressure_loss_runner(mu, L, Q, D)`          | Runner pressure loss (Newtonian fluid approximation) | `mold_pressure_loss_runner(500, 0.2, 2e-4, 0.004)=3183098861.837...` | Pa                       |
+| `mold_eject_friction(mu, N)`                      | Mold ejection friction force                         | `mold_eject_friction(0.2, 1e4)=200`                                  | N                        |
+| `mold_eject_contact(p_contact, A_contact)`        | Contact force                                        | `mold_eject_contact(5e6, 0.002)=10000`                               | N                        |
+| `mold_eject_total(mu, p_contact, A_contact)`      | Total Ejection Force                                 | `mold_eject_total(0.2, 5e6, 0.002)=2000`                             | N                        |
+| `mold_mu_tex(k, h)`                               | Texture friction correction factor                   | `mold_mu_tex(0.5, 0.001)=0.0005`                                     | Dimensionless            |
+| `mold_pin_stress(F_eject, n, A_pin)`              | Ejector pin surface pressure                         | `mold_pin_stress(1000, 4, 1e-6)=250000000`                           | Pa                       |
+| `mold_plate_deflection(K, P, a, E, t)`            | Maximum mold plate deflection                        | `mold_plate_deflection(0.005, 5e6, 0.2, 2e11, 0.01)=0.0002`          | m                        |
+
+- This is an experimental implementation. In the future, self-evident and unnecessary functions may be removed, and the unit system may be subject to change.
 
 ---
 

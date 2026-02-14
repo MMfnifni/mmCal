@@ -1,0 +1,7 @@
+#pragma once
+
+#define MMCAL_VERSION_MAJOR 1
+#define MMCAL_VERSION_MINOR 2
+#define MMCAL_VERSION_PATCH 5
+
+#define MMCAL_VERSION_STRING "1.2.5"

@@ -19,7 +19,7 @@
     <AssemblyTitle>$(MSBuildProjectName)_$(Platform)</AssemblyTitle>
     <FileVersion>$(PackageVersion)</FileVersion>
     <NeutralLanguage>ja-JP</NeutralLanguage>
-    <Version>1.2.4.0</Version>
+    <Version>1.2.5.0</Version>
     <AssemblyVersion>$(PackageVersion)</AssemblyVersion>
   </PropertyGroup>
 

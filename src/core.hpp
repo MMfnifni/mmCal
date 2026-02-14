@@ -117,6 +117,7 @@ namespace mm::cal {
   InfiniteResult,
   OutOfRange,
   NeedInteger,
+  NonConvergence,
   Overflow,
   InvalidNumber,
   InvalidOperation,
@@ -126,6 +127,7 @@ namespace mm::cal {
   InfinityDetected,
   InternalError,
   SyntaxError,
+  RuntimeError,
  };
 
  constexpr const char *errorMessage(CalcErrorType t) {
@@ -144,6 +146,7 @@ namespace mm::cal {
    case CalcErrorType::InfiniteResult: return "result is infinite";
    case CalcErrorType::OutOfRange: return "history out of range";
    case CalcErrorType::NeedInteger: return "this func need integer";
+   case CalcErrorType::NonConvergence: return "did not converge";
    case CalcErrorType::Overflow: return "overflow detected";
    case CalcErrorType::InvalidNumber: return "invalid number";
    case CalcErrorType::InvalidOperation: return "invalid operation";
@@ -152,7 +155,8 @@ namespace mm::cal {
    case CalcErrorType::NaNDetected: return "NaN detected";
    case CalcErrorType::InfinityDetected: return "Infinity detected";
    case CalcErrorType::InternalError: return "InternalError";
-   case CalcErrorType::SyntaxError: return "InternalError";
+   case CalcErrorType::SyntaxError: return "SyntaxError";
+   case CalcErrorType::RuntimeError: return "RuntimeError";
   }
   return "unknown calculation error";
  }

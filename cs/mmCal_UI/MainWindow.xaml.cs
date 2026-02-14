@@ -14,6 +14,7 @@ using System.IO;
 
 namespace MmCalculatorWpf {
     public partial class MainWindow : Window {
+        private int historyIndex = -1;
         private const string PlaceholderText = "";
 
         private int evalCount = 0;
@@ -84,6 +85,21 @@ namespace MmCalculatorWpf {
                 ShowPlaceholder();
         }
 
+        private void RecallHistory(int direction) {
+            if (history.Count == 0) return;
+
+            // direction: -1=up, +1=down
+            if (historyIndex == -1 && direction == -1)
+                historyIndex = history.Count - 1;
+            else
+                historyIndex = Math.Clamp(historyIndex + direction, 0, history.Count - 1);
+
+            InputTextBox.Text = history[historyIndex].Input;
+            InputTextBox.CaretIndex = InputTextBox.Text.Length;
+
+            HidePlaceholder(); // プレースホルダーを隠す
+        }
+
         // -------------------------
         // Shift+Enter = Evaluate
         // -------------------------
@@ -91,8 +107,26 @@ namespace MmCalculatorWpf {
             if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Shift) {
                 e.Handled = true;
                 EvaluateInput();
+                historyIndex = -1; // 評価後は履歴ポインタをリセット
+                return;
+            }
+
+            if (e.Key == Key.Up) {
+                e.Handled = true;
+                RecallHistory(-1);
+            } else if (e.Key == Key.Down) {
+                e.Handled = true;
+                if (historyIndex == -1) return; // 最新行に戻る
+                if (historyIndex < history.Count - 1)
+                    RecallHistory(+1);
+                else {
+                    historyIndex = -1;
+                    InputTextBox.Text = "";
+                    ShowPlaceholder();
+                }
             }
         }
+
 
         private void EvaluateButton_Click(object sender, RoutedEventArgs e) => EvaluateInput();
 
@@ -129,9 +163,9 @@ namespace MmCalculatorWpf {
             if (errPos >= 0) {
                 string pointerLine = new string(' ', errPos) + "^";
                 RecentOutputTextBox.Text =
-                    $"Syntax error: {errSb}\n{InputTextBox.Text}\n{pointerLine}";
+                    $"Pre-check: {errSb}\n{InputTextBox.Text}\n{pointerLine}";
             } else {
-                RecentOutputTextBox.Text = $"Syntax error:\n{errSb}";
+                RecentOutputTextBox.Text = $"Pre-check:\n{errSb}";
             }
         }
 
