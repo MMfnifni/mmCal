@@ -68,7 +68,7 @@ namespace mm::cal {
   // identifier
   if (std::isalpha(c) || c == '_') {
    std::string s(1, c);
-   while (p < src.size() && (std::isalnum(src[p]) || src[p] == '_'))
+   while (p < src.size() && (std::isalnum((unsigned char)src[p]) || src[p] == '_'))
     s += src[p++];
    return {TokenType::Identifier, s, start};
   }
@@ -105,7 +105,7 @@ namespace mm::cal {
     ++p;
    }
 
-   if (p >= src.size()) { throw CalcError(CalcErrorType::Syntax, "unterminated string", start); }
+   if (p >= src.size()) { throw CalcError(CalcErrorType::SyntaxError, "unterminated string", start); }
 
    ++p; // closing "
    return {TokenType::String, s, 0.0, start};
@@ -151,7 +151,7 @@ namespace mm::cal {
  }
 
  void Parser::expect(TokenType t) {
-  if (!accept(t)) throw CalcError(CalcErrorType::Syntax, errorMessage(CalcErrorType::Syntax), cur.pos);
+  if (!accept(t)) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), cur.pos);
  }
 
  bool Parser::startsPrimary() const { return cur.type == TokenType::Number || cur.type == TokenType::String || cur.type == TokenType::Identifier || cur.type == TokenType::LParen || cur.type == TokenType::Percent; }
@@ -176,7 +176,7 @@ namespace mm::cal {
    case TokenType::Identifier:
    case TokenType::LParen:
    case TokenType::LBracket:
-   case TokenType::Percent: return true;
+   case TokenType::Percent: return true; // ←ここは方針次第なので要検討
    default: return false;
   }
  }
@@ -238,7 +238,7 @@ namespace mm::cal {
      // 直前トークンが Identifier の場合は「定数だけOK」
      if (prev.type == TokenType::Identifier) { okLhs = isConstantName(prev.text); }
 
-     if (!okLhs) { throw CalcError(CalcErrorType::Syntax, "unit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
+     if (!okLhs) { throw CalcError(CalcErrorType::SyntaxError, "unit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
 
      std::string u = cur.text;
      advance(); // unit消費
@@ -336,7 +336,7 @@ namespace mm::cal {
      if ((open == TokenType::LParen && accept(TokenType::RParen)) || (open == TokenType::LBracket && accept(TokenType::RBracket))) { return f; }
 
      while (true) {
-      f->args.push_back(parseExpression());
+      f->args.push_back(parseCompare());
 
       if (accept(TokenType::Comma)) continue;
 
@@ -361,8 +361,8 @@ namespace mm::cal {
 
    // ----- identifier only -----
    if (constants.count(name)) { return std::make_unique<NumberNode>(constants.at(name), p); }
-   if (symbols.count(name)) { throw CalcError(CalcErrorType::Syntax, "unit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
-   return std::make_unique<SymbolNode>(std::move(name), p);                                                         // それ以外は「オプション指定子」としてASTに残す
+   if (symbols.count(name)) { throw CalcError(CalcErrorType::SyntaxError, "unit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
+   return std::make_unique<SymbolNode>(std::move(name), p);                                                              // それ以外は「オプション指定子」としてASTに残す
   }
 
   // ---- grouped expression ----
@@ -375,7 +375,7 @@ namespace mm::cal {
    return n;
   }
 
-  throw CalcError(CalcErrorType::Syntax, errorMessage(CalcErrorType::Syntax), cur.pos);
+  throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), cur.pos);
  }
 
  // <,>,<=,>=,==,!=
@@ -448,10 +448,9 @@ namespace mm::cal {
   auto a = lhs->eval(cfg, hist, base);
   auto b = rhs->eval(cfg, hist, base);
   // ==========================================
-  // 拡張ポイント：Mulだけ特別扱いできるようにする
+  // Mulだけ特別扱いできるようにする
   // 例： (double * unit) や (unit * double)
-  // 現状は unit を Value に入れてないので何もしないが、
-  // 将来 Value に Unit/Quantity を足すならここが入口になる。
+  // 現状は unit を Value に入れてないので何もしないが、将来 Value に Unit/Quantity を足すならここが入口になる。
   // ==========================================
   if (op == BinOp::Mul) {
    // いまは何もしない（将来用）
@@ -524,7 +523,7 @@ namespace mm::cal {
   double d = std::get<double>(v), r;
   switch (op) {
    case '!': r = factorial(d, pos); break;
-   default: throw CalcError(CalcErrorType::Syntax, "unknown postfix operator", pos);
+   default: throw CalcError(CalcErrorType::SyntaxError, "unknown postfix operator", pos);
   }
   return r;
  }
@@ -562,7 +561,7 @@ namespace mm::cal {
 
  Value Parser::SymbolNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &, int) const {
   if (constants.count(name)) return constants.at(name); // 定数はここで解決できる（parse段階で解決しなくてよくなる）
-  if (symbols.count(name)) return name;                 // ★ symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
+  if (symbols.count(name)) return name;                 // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
 
   // 変数（将来用）
   // if (cfg.variables.count(name)) return cfg.variables.at(name);

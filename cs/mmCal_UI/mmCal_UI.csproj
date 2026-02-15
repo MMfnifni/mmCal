@@ -14,7 +14,7 @@
     <Authors>mmKreutzef(aka.Daiki.NIIMI)</Authors>
     <Product>$(AssemblyName)_$(Platform)</Product>
     <Company />
-    <Copyright>Copyright (C) 2021-2026</Copyright>
+    <Copyright>mmKreutzef(aka.Daiki.NIIMI) Copyright (C) 2021-2026</Copyright>
     <PackageId>$(AssemblyName)_$(Platform)</PackageId>
     <AssemblyTitle>$(MSBuildProjectName)_$(Platform)</AssemblyTitle>
     <FileVersion>$(PackageVersion)</FileVersion>

@@ -293,8 +293,8 @@ Below is a complete list of all currently implemented functions. For each functi
 
 | Function Name  | Description                                            | Example Inputs/Outputs |
 | -------------- | ------------------------------------------------------ | ---------------------- |
-| `gcd(a,b)`     | Greatest common divisor                                | `gcd(12,18)=6`         |
-| `lcm(a,b)`     | Least common multiple                                  | `lcm(6,8)=24`          |
+| `gcd(a,b,...)` | Greatest common divisor                                | `gcd(12,18,24)=6`      |
+| `lcm(a,b,...)` | Least common multiple                                  | `lcm(6,8)=24`          |
 | `perm(n,r)`    | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`         |
 | `comb(n,r)`    | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`         |
 | `isprime(x)`   | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(9973)=1`      |

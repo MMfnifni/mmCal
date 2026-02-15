@@ -76,7 +76,6 @@ namespace mm::cal {
  }
 
  unsigned long long fibULL(unsigned long long n, size_t pos) {
-  if (n < 0) throw CalcError(CalcErrorType::DomainError, "fib: n < 0", pos);
 
   auto add = [&](unsigned long long x, unsigned long long y) -> unsigned long long {
    if (ULLONG_MAX - x < y) throwOverflow(pos);

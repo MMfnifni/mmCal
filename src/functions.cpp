@@ -10,9 +10,9 @@ namespace mm::cal {
    地獄の無限関数定義編
    ============================ */
 
- static const double deg2rad = PI / 180.0;
- static const double rad2deg = 180.0 / PI;
- inline const double eps = cnst_precision_inv;
+ static constexpr double deg2rad = PI / 180.0;
+ static constexpr double rad2deg = 180.0 / PI;
+ inline constexpr double eps = cnst_precision_inv;
 
  ///!!!!
  static void registerBasicMath(SystemConfig &cfg);     // 基本関数
@@ -712,7 +712,7 @@ namespace mm::cal {
                             }};
   cfg.functions["csch"] = {1, 1, [](auto &v, auto &ctx) {
                             double x = asReal(v[0], ctx.pos);
-                            if (x == 0) throwDomain(ctx.pos);
+                            if (x == 0) throwDomain(ctx.pos, "must be nonzero");
                             return 1.0 / std::sinh(x);
                            }};
   cfg.functions["sech"] = {1, 1, [](auto &v, auto &ctx) {
@@ -721,16 +721,15 @@ namespace mm::cal {
                            }};
   cfg.functions["coth"] = {1, 1, [](auto &v, auto &ctx) {
                             double x = asReal(v[0], ctx.pos);
-                            if (x == 0) throwDomain(ctx.pos);
+                            if (x == 0) throwDomain(ctx.pos, "must be nonzero");
                             return std::cosh(x) / std::sinh(x);
                            }};
  }
 
  void registerStatistics(SystemConfig &cfg) {
-  cfg.functions["hypot"] = {2, 2, [](auto &v, auto &ctx) -> Value { return std::hypot(asReal(v[0], ctx.pos), asReal(v[1], ctx.pos)); }};
   cfg.functions["fact"] = {1, 1, [](auto &v, auto &ctx) -> Value { return (double)factLD(requireInt(v[0], ctx.pos), ctx.pos); }};
   cfg.functions["gcd"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                           if (v.size() < 2) throwDomain(ctx.pos);
+                           if (v.size() < 2) throwDomain(ctx.pos, "need at least 2 arguments");
                            long long g = requireInt(v[0], ctx.pos);
                            for (size_t i = 1; i < v.size(); ++i) {
                             g = gcdLL(g, requireInt(v[i], ctx.pos));
@@ -740,7 +739,7 @@ namespace mm::cal {
   cfg.functions["comb"] = {2, 2, [](auto &v, auto &ctx) -> Value { return (double)combLL(requireInt(v[0], ctx.pos), requireInt(v[1], ctx.pos), ctx.pos); }};
   cfg.functions["perm"] = {2, 2, [](auto &v, auto &ctx) -> Value { return (double)permLL(requireInt(v[0], ctx.pos), requireInt(v[1], ctx.pos), ctx.pos); }};
   cfg.functions["lcm"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                           if (v.size() < 2) throwDomain(ctx.pos);
+                           if (v.size() < 2) throwDomain(ctx.pos, "need at least 2 arguments");
                            long long l = requireInt(v[0], ctx.pos);
                            for (size_t i = 1; i < v.size(); ++i) {
                             long long b = requireInt(v[i], ctx.pos);
@@ -750,21 +749,21 @@ namespace mm::cal {
                            return (double)l;
                           }};
   cfg.functions["sum"] = {0, -1, [](auto &v, auto &ctx) -> Value {
-                           if (v.empty()) throwDomain(ctx.pos);
+                           if (v.empty()) throwDomain(ctx.pos, "no elements");
                            Complex acc{0, 0};
                            for (const auto &x : v)
                             acc += asComplex(x);
                            return complexToValue(acc);
                           }};
   cfg.functions["prod"] = {0, -1, [](auto &v, auto &ctx) -> Value {
-                            if (v.empty()) throwDomain(ctx.pos);
+                            if (v.empty()) throwDomain(ctx.pos, "no elements");
                             Complex acc{1, 0};
                             for (const auto &x : v)
                              acc *= asComplex(x);
                             return complexToValue(acc);
                            }};
   cfg.functions["mean"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            if (v.empty()) throwDomain(ctx.pos);
+                            if (v.empty()) throwDomain(ctx.pos, "no elements");
                             Complex acc{0, 0};
                             for (const auto &x : v)
                              acc += asComplex(x);
@@ -880,7 +879,7 @@ namespace mm::cal {
                               }};
   cfg.functions["zeta"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             double s = asReal(v[0], ctx.pos);
-                            if (s <= 1.0) throwDomain(ctx.pos);
+                            if (s <= 1.0) throwDomain(ctx.pos, "must be > 1");
                             double sum = 0.0;
                             for (int n = 1; n <= 10000; ++n)
                              sum += 1.0 / std::pow(n, s);
@@ -917,7 +916,7 @@ namespace mm::cal {
 
   cfg.functions["numdiff"] = {1, -1, [](auto &v, auto &ctx) -> Value {
                                auto x = collectReals(v, ctx);
-                               if (x.size() < 2) throwDomain(ctx.pos);
+                               if (x.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
 
                                double sumsq = 0;
                                for (size_t i = 0; i < x.size() - 1; ++i) {
@@ -926,19 +925,6 @@ namespace mm::cal {
                                }
 
                                return std::sqrt(sumsq / (x.size() - 1));
-                              }};
-
-  cfg.functions["digamma"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                               double x = asReal(v[0], ctx.pos);
-                               if (x <= 0.0) throwDomain(ctx.pos);
-                               double result = 0.0;
-                               while (x < 6) {
-                                result -= 1 / x;
-                                x += 1;
-                               }
-                               double y = 1 / (x * x);
-                               result += std::log(x) - 0.5 / x - y * (1.0 / 12 - y * (1.0 / 120 - y / 252));
-                               return result;
                               }};
 
   cfg.functions["mode"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value {
@@ -1040,7 +1026,7 @@ namespace mm::cal {
                           if (v.size() < 2) throwDomain(ctx.pos);
                           const auto s = welfordMeanM2Real(v, ctx);
                           const double mu = (double)s.mean;
-                          if (!std::isfinite(mu) || mu == 0.0) throwDomain(ctx.pos);
+                          if (!std::isfinite(mu) || mu == 0.0) throwDomain(ctx.pos, "mean must be nonzero");
 
                           // population variance
                           const long double var = s.m2 / (long double)s.n;
@@ -1053,7 +1039,7 @@ namespace mm::cal {
                          }};
 
   cfg.functions["stderr"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value {
-                              if (v.size() < 2) throwDomain(ctx.pos);
+                              if (v.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
                               const auto s = welfordMeanM2Real(v, ctx);
                               // population variance
                               const long double var = s.m2 / (long double)s.n;
@@ -1069,12 +1055,12 @@ namespace mm::cal {
                               double x = asReal(v[0], ctx.pos);
                               double mu = asReal(v[1], ctx.pos);
                               double sigma = asReal(v[2], ctx.pos);
-                              if (sigma == 0.0) throwDomain(ctx.pos);
+                              if (sigma == 0.0) throwDomain(ctx.pos, "sigma must be nonzero");
                               return (x - mu) / sigma;
                              }};
   cfg.functions["iqr"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value {
                            auto a = gatherReals(v, ctx.pos);
-                           if (a.size() < 2) throwDomain(ctx.pos);
+                           if (a.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
                            std::sort(a.begin(), a.end());
                            return quantileLinearSorted(a, 0.75, ctx.pos) - quantileLinearSorted(a, 0.25, ctx.pos); // quantileLinearでソート回数を減らすやつ
                           }};
@@ -1199,8 +1185,9 @@ namespace mm::cal {
  }
 
  void registerGeoVec(SystemConfig &cfg) {
+  cfg.functions["hypot"] = {2, 2, [](auto &v, auto &ctx) -> Value { return std::hypot(asReal(v[0], ctx.pos), asReal(v[1], ctx.pos)); }};
   cfg.functions["norm"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            if (v.empty()) throw CalcError(CalcErrorType::DomainError, "norm: no elements", ctx.pos);
+                            if (v.empty()) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
                             double acc = 0.0;
                             // for (const auto &x : v)
                             //  acc += std::pow(asReal(x, ctx.pos), 2);
@@ -1211,9 +1198,9 @@ namespace mm::cal {
                             return std::sqrt(acc);
                            }};
   cfg.functions["dot"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                           if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dot: dimension mismatch", ctx.pos);
+                           if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
                            size_t n = v.size() / 2;
-                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "dot: no elements", ctx.pos);
+                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
 
                            double acc = 0.0;
                            // for (size_t i = 0; i < n; ++i)
@@ -1231,9 +1218,9 @@ namespace mm::cal {
                             // return std::lerp(a, b, t); // leapは丸めが微妙なことがあった
                            }};
   cfg.functions["distance"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "distance: dimension mismatch", ctx.pos);
+                                if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
                                 size_t n = v.size() / 2;
-                                if (n == 0) throw CalcError(CalcErrorType::DomainError, "distance: no elements", ctx.pos);
+                                if (n == 0) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
                                 double acc = 0.0;
                                 // for (size_t i = 0; i < n; ++i) {
                                 //  acc += std::pow(asReal(v[i + n], ctx.pos) - asReal(v[i], ctx.pos), 2);
@@ -1246,7 +1233,7 @@ namespace mm::cal {
                                }};
   cfg.functions["totient"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                                int n = (int)asReal(v[0], ctx.pos);
-                               if (n < 1) throwDomain(ctx.pos);
+                               if (n < 1) throwDomain(ctx.pos, "must be >= 1");
                                int phi = n;
                                for (int p = 2; p * p <= n; ++p) {
                                 if (n % p == 0) {
@@ -1511,6 +1498,7 @@ namespace mm::cal {
  void registerAreaVol(SystemConfig &cfg) {
   cfg.functions["area_circle"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                                    double d = asReal(v[0], ctx.pos);
+                                   if (d < 0) throwDomain(ctx.pos, "diameter must be >= 0");
                                    return PI * d * d / 4.0;
                                   }};
 
@@ -1539,6 +1527,7 @@ namespace mm::cal {
   cfg.functions["vol_cylinder"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                                     double d = asReal(v[0], ctx.pos);
                                     double h = asReal(v[1], ctx.pos);
+                                    if (d < 0 || h < 0) throwDomain(ctx.pos, "must be >= 0");
                                     return PI * (d * d / 4.0) * h;
                                    }};
 

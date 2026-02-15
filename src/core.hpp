@@ -58,6 +58,7 @@ namespace mm::cal {
  };
 
  using FuncImpl = std::function<Value(const std::vector<Value> &, FunctionContext &)>;
+ // using Fn = std::function<Value(std::span<const Value>, FunctionContext &)>;  // vectorは重いのでそのうち固定長バッファに切り替える
  struct FunctionDef {
    int minArgc = 0;
    int maxArgc = -1; // -1 = unlimited
@@ -104,7 +105,6 @@ namespace mm::cal {
 
  enum class CalcErrorType {
   NotImplemented,
-  Syntax,
   UnknownIdentifier,
   InvalidCharacter,
   MismatchedParen,
@@ -133,7 +133,6 @@ namespace mm::cal {
  constexpr const char *errorMessage(CalcErrorType t) {
   switch (t) {
    case CalcErrorType::NotImplemented: return "this feature is not yet implemented";
-   case CalcErrorType::Syntax: return "syntax error";
    case CalcErrorType::UnknownIdentifier: return "unknown identifier";
    case CalcErrorType::InvalidCharacter: return "invalid character";
    case CalcErrorType::MismatchedParen: return "mismatched parentheses";
@@ -169,6 +168,8 @@ namespace mm::cal {
 
  [[noreturn]] inline void throwOverflow(size_t pos) { throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos); }
  [[noreturn]] inline void throwDomain(size_t pos) { throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos); }
+ [[noreturn]] inline void throwDomain(size_t pos, const char *msg) { throw CalcError(CalcErrorType::DomainError, msg, pos); }
+ [[noreturn]] inline void throwInvalid(size_t pos, const char *msg) { throw CalcError(CalcErrorType::InvalidArgument, msg, pos); }
 
  /* ============================
     補助関数(ヘルパーマン)

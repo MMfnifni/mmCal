@@ -9,7 +9,7 @@ namespace mm::cal {
  Value evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) {
   Parser p(cfg, src);
   std::unique_ptr<Parser::ASTNode> ast = p.parseCompare();
-  if (p.cur.type != TokenType::End) throw CalcError(CalcErrorType::Syntax, errorMessage(CalcErrorType::Syntax), p.cur.pos);
+  if (p.cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), p.cur.pos);
   return ast->eval(cfg, hist, base);
  }
 
