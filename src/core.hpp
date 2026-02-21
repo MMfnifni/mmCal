@@ -28,13 +28,212 @@ namespace mm::cal {
  struct FunctionContext;
  struct FunctionDef;
  struct InputEntry;
- using Value = std::variant<double, std::complex<double>, std::string, InvalidValue>;
+ struct MultiValue;
+
+ /* ============================
+    エラー
+    ============================ */
+
+ enum class CalcErrorType {
+  NotImplemented,
+  UnknownIdentifier,
+  InvalidCharacter,
+  MismatchedParen,
+  OperandMissing,
+  FunctionMissing,
+  DivisionByZero,
+  AngleWithoutdouble,
+  DomainError,
+  NaNResult,
+  InfiniteResult,
+  OutOfRange,
+  NeedInteger,
+  NonConvergence,
+  Overflow,
+  InvalidNumber,
+  InvalidOperation,
+  TypeError,
+  InvalidArgument,
+  NaNDetected,
+  InfinityDetected,
+  DimensionMismatch,
+  InternalError,
+  SyntaxError,
+  RuntimeError,
+ };
+
+ constexpr const char *errorMessage(CalcErrorType t) {
+  switch (t) {
+   case CalcErrorType::NotImplemented: return "this feature is not yet implemented";
+   case CalcErrorType::UnknownIdentifier: return "unknown identifier";
+   case CalcErrorType::InvalidCharacter: return "invalid character";
+   case CalcErrorType::MismatchedParen: return "mismatched parentheses";
+   case CalcErrorType::OperandMissing: return "operand missing";
+   case CalcErrorType::FunctionMissing: return "function argument missing(many or few args)";
+   case CalcErrorType::DivisionByZero: return "division by zero";
+   case CalcErrorType::AngleWithoutdouble: return "angle without value";
+   case CalcErrorType::DomainError: return "domain error";
+   case CalcErrorType::NaNResult: return "result is NaN";
+   case CalcErrorType::InfiniteResult: return "result is infinite";
+   case CalcErrorType::OutOfRange: return "history out of range";
+   case CalcErrorType::NeedInteger: return "this func need integer";
+   case CalcErrorType::NonConvergence: return "did not converge";
+   case CalcErrorType::Overflow: return "overflow detected";
+   case CalcErrorType::InvalidNumber: return "invalid number";
+   case CalcErrorType::InvalidOperation: return "invalid operation";
+   case CalcErrorType::TypeError: return "double or complex type error";
+   case CalcErrorType::InvalidArgument: return "invalid argument count";
+   case CalcErrorType::NaNDetected: return "NaN detected";
+   case CalcErrorType::InfinityDetected: return "Infinity detected";
+   case CalcErrorType::DimensionMismatch: return "Dimension mismatch";
+   case CalcErrorType::InternalError: return "InternalError";
+   case CalcErrorType::SyntaxError: return "SyntaxError";
+   case CalcErrorType::RuntimeError: return "RuntimeError";
+  }
+  return "unknown calculation error";
+ }
+
+ struct CalcError : std::runtime_error {
+   CalcErrorType type;
+   size_t pos;
+   CalcError(CalcErrorType t, const std::string &m, size_t p) : std::runtime_error(m), type(t), pos(p) {}
+ };
+
+ [[noreturn]] inline void throwOverflow(size_t pos) { throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos); }
+ [[noreturn]] inline void throwDomain(size_t pos) { throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos); }
+ [[noreturn]] inline void throwDomain(size_t pos, const char *msg) { throw CalcError(CalcErrorType::DomainError, msg, pos); }
+ [[noreturn]] inline void throwInvalid(size_t pos, const char *msg) { throw CalcError(CalcErrorType::InvalidArgument, msg, pos); }
+ //[[noreturn]] inline void throwRuntime(const char *msg) { throw CalcError(CalcErrorType::RuntimeError, msg, 0); }
+
+ /* ============================
+   値だぞっ
+   ============================ */
+ class Value {
+  public:
+   using MultiPtr = std::shared_ptr<MultiValue>;
+
+  private:
+   using Storage = std::variant<std::monostate, double, std::complex<double>, std::string, MultiPtr>;
+
+   Storage data_;
+
+  public:
+   // constructors
+   Value() noexcept : data_(std::monostate{}) {}
+   Value(double v) : data_(v) {}
+   Value(std::complex<double> v) : data_(v) {}
+   Value(const std::string &s) : data_(s) {}
+   Value(std::string &&s) : data_(std::move(s)) {}
+   Value(MultiPtr mv) : data_(std::move(mv)) {}
+
+   // type checks
+   bool isInvalid() const noexcept { return std::holds_alternative<std::monostate>(data_); }
+   bool isScalar() const noexcept { return std::holds_alternative<double>(data_); }
+   bool isComplex() const noexcept { return std::holds_alternative<std::complex<double>>(data_); }
+   bool isString() const noexcept { return std::holds_alternative<std::string>(data_); }
+   bool isMulti() const noexcept { return std::holds_alternative<MultiPtr>(data_); }
+   bool isNumeric() const noexcept { return isScalar() || isComplex(); }
+
+   // getters
+   double asScalar(size_t pos) const {
+    if (!isScalar()) throw CalcError(CalcErrorType::TypeError, "asScalar: expected scalar", pos);
+    return std::get<double>(data_);
+   }
+
+   std::complex<double> asComplex(size_t pos) const {
+    if (auto p = std::get_if<std::complex<double>>(&data_)) return *p;
+    if (auto p = std::get_if<double>(&data_)) return std::complex<double>(*p, 0.0);
+    throw CalcError(CalcErrorType::TypeError, "asComplex: expected complex", pos);
+   }
+
+   const std::string &asString(size_t pos) const {
+    if (!isString()) throw CalcError(CalcErrorType::TypeError, "asString: expected string", pos);
+    return std::get<std::string>(data_);
+   }
+
+   MultiPtr asMulti(size_t pos) const {
+    if (!isMulti()) throw CalcError(CalcErrorType::TypeError, "asMulti: expected multivalue", pos);
+    return std::get<MultiPtr>(data_);
+   }
+
+   // conversions
+   std::complex<double> toComplex(size_t pos) const {
+    if (isScalar()) return {std::get<double>(data_), 0.0};
+    if (isComplex()) return std::get<std::complex<double>>(data_);
+
+    throw CalcError(CalcErrorType::TypeError, "toComplex: numeric required", pos);
+   }
+
+   int64_t toInt64(size_t pos) const {
+    double x = asScalar(pos);
+
+    if (!std::isfinite(x)) throw CalcError(CalcErrorType::DomainError, "nan/inf", pos);
+    if (std::floor(x) != x) throw CalcError(CalcErrorType::TypeError, "integer required", pos);
+    if (x < (double)LLONG_MIN || x > (double)LLONG_MAX) throw CalcError(CalcErrorType::OutOfRange, "int64 overflow", pos);
+
+    return static_cast<int64_t>(x);
+   }
+
+  private:
+   static inline void checkFiniteImpl(const std::monostate &, size_t) {
+    // ignore
+   }
+   static inline void checkFiniteImpl(double x, size_t pos) {
+    if (!std::isfinite(x)) throwDomain(pos);
+   }
+   static void checkFiniteImpl(const std::complex<double> &z, size_t pos) {
+    if (!std::isfinite(z.real()) || !std::isfinite(z.imag())) throwDomain(pos);
+   }
+   static void checkFiniteImpl(const std::string &, size_t) {
+    // string has no numeric domain将来
+   }
+   static void checkFiniteImpl(const MultiPtr &mv, size_t pos);
+
+  public:
+   // Finite guarantee layer
+
+   static void checkFinite(const Value &v, size_t pos) {
+    std::visit([&](auto &&x) { checkFiniteImpl(x, pos); }, v.data_);
+   }
+   static Value requireFinite(Value v, size_t pos) {
+    checkFinite(v, pos);
+    return v;
+   }
+   // finite
+   void validateFinite(size_t pos) const;
+
+  public:
+   // visitor access
+   const Storage &storage() const noexcept { return data_; }
+   Storage &storage() noexcept { return data_; }
+
+   template <class Visitor> decltype(auto) visit(Visitor &&v) { return std::visit(std::forward<Visitor>(v), data_); }
+   template <class Visitor> decltype(auto) visit(Visitor &&v) const { return std::visit(std::forward<Visitor>(v), data_); }
+ };
+
+ struct MultiValue {
+   std::vector<Value> elems_;
+   MultiValue() = default;
+
+   explicit MultiValue(std::vector<Value> elems) : elems_(std::move(elems)) {}
+
+   const std::vector<Value> &elems() const noexcept { return elems_; }
+
+   std::size_t size() const noexcept { return elems_.size(); }
+
+   const Value &operator[](std::size_t i) const { return elems_[i]; }
+
+   auto begin() const noexcept { return elems_.begin(); }
+   auto end() const noexcept { return elems_.end(); }
+ };
  // 以下のほうが高速になる。可読性とのトレードオフ
  // struct Value {
  //  enum { Real, Complex } type;
  //  double r;
  //  std::complex<double> c;
  //};
+ //
+
  using Complex = std::complex<double>;
 
  struct FunctionContext;
@@ -100,183 +299,141 @@ namespace mm::cal {
  CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
 
  /* ============================
-    エラー
-    ============================ */
-
- enum class CalcErrorType {
-  NotImplemented,
-  UnknownIdentifier,
-  InvalidCharacter,
-  MismatchedParen,
-  OperandMissing,
-  FunctionMissing,
-  DivisionByZero,
-  AngleWithoutdouble,
-  DomainError,
-  NaNResult,
-  InfiniteResult,
-  OutOfRange,
-  NeedInteger,
-  NonConvergence,
-  Overflow,
-  InvalidNumber,
-  InvalidOperation,
-  TypeError,
-  InvalidArgument,
-  NaNDetected,
-  InfinityDetected,
-  InternalError,
-  SyntaxError,
-  RuntimeError,
- };
-
- constexpr const char *errorMessage(CalcErrorType t) {
-  switch (t) {
-   case CalcErrorType::NotImplemented: return "this feature is not yet implemented";
-   case CalcErrorType::UnknownIdentifier: return "unknown identifier";
-   case CalcErrorType::InvalidCharacter: return "invalid character";
-   case CalcErrorType::MismatchedParen: return "mismatched parentheses";
-   case CalcErrorType::OperandMissing: return "operand missing";
-   case CalcErrorType::FunctionMissing: return "function argument missing";
-   case CalcErrorType::DivisionByZero: return "division by zero";
-   case CalcErrorType::AngleWithoutdouble: return "angle without value";
-   case CalcErrorType::DomainError: return "domain error";
-   case CalcErrorType::NaNResult: return "result is NaN";
-   case CalcErrorType::InfiniteResult: return "result is infinite";
-   case CalcErrorType::OutOfRange: return "history out of range";
-   case CalcErrorType::NeedInteger: return "this func need integer";
-   case CalcErrorType::NonConvergence: return "did not converge";
-   case CalcErrorType::Overflow: return "overflow detected";
-   case CalcErrorType::InvalidNumber: return "invalid number";
-   case CalcErrorType::InvalidOperation: return "invalid operation";
-   case CalcErrorType::TypeError: return "double or complex type error";
-   case CalcErrorType::InvalidArgument: return "invalid argument count";
-   case CalcErrorType::NaNDetected: return "NaN detected";
-   case CalcErrorType::InfinityDetected: return "Infinity detected";
-   case CalcErrorType::InternalError: return "InternalError";
-   case CalcErrorType::SyntaxError: return "SyntaxError";
-   case CalcErrorType::RuntimeError: return "RuntimeError";
-  }
-  return "unknown calculation error";
- }
-
- struct CalcError : std::runtime_error {
-   CalcErrorType type;
-   size_t pos;
-   CalcError(CalcErrorType t, const std::string &m, size_t p) : std::runtime_error(m), type(t), pos(p) {}
- };
-
- [[noreturn]] inline void throwOverflow(size_t pos) { throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos); }
- [[noreturn]] inline void throwDomain(size_t pos) { throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos); }
- [[noreturn]] inline void throwDomain(size_t pos, const char *msg) { throw CalcError(CalcErrorType::DomainError, msg, pos); }
- [[noreturn]] inline void throwInvalid(size_t pos, const char *msg) { throw CalcError(CalcErrorType::InvalidArgument, msg, pos); }
-
- /* ============================
     補助関数(ヘルパーマン)
     ============================ */
 
- inline bool isReal(const Value &v) { return std::holds_alternative<double>(v); }
- inline bool isComplex(const Value &v) { return std::holds_alternative<std::complex<double>>(v); }
- inline bool isDouble(const Value &v) { return std::holds_alternative<double>(v); }
- inline bool isInvalid(const Value &v) { return std::holds_alternative<InvalidValue>(v); }
- inline bool isString(const Value &v) { return std::holds_alternative<std::string>(v); }
- inline const std::string &asString(const Value &v, size_t pos) {
-  if (!std::holds_alternative<std::string>(v)) { throw CalcError(CalcErrorType::TypeError, "expected string", pos); }
-  return std::get<std::string>(v);
+ template <class... Ts> struct Overloaded : Ts... {
+   using Ts::operator()...;
+ };
+
+ template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+
+ template <typename RealFn, typename ComplexFn> inline Value applyUnaryNumeric(const Value &v, RealFn rf, ComplexFn cf, size_t pos) {
+  return std::visit(Overloaded{
+
+                        [&](double d) -> Value { return rf(d); },
+
+                        [&](std::complex<double> c) -> Value { return cf(c); },
+
+                        [&](std::shared_ptr<MultiValue> m) -> Value {
+                         auto result = std::make_shared<MultiValue>();
+                         result->elems_.reserve(m->elems_.size());
+
+                         for (const auto &e : m->elems_)
+                          result->elems_.push_back(applyUnaryNumeric(e, rf, cf, pos));
+
+                         return result;
+                        },
+
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "numeric argument required", pos); }
+
+                    },
+                    v.storage());
  }
 
- inline std::complex<double> toComplex(const Value &v) {
-  if (std::holds_alternative<double>(v)) return std::complex<double>(std::get<double>(v), 0.0);
-  return std::get<std::complex<double>>(v);
- }
-
- inline double asDouble(const Value &v, size_t pos = 0) {
-  if (!isDouble(v)) throw CalcError(CalcErrorType::TypeError, errorMessage(CalcErrorType::TypeError), pos);
-  return std::get<double>(v);
- }
- inline double asReal(const Value &v, size_t pos) {
-  if (!std::holds_alternative<double>(v)) throw CalcError(CalcErrorType::TypeError, errorMessage(CalcErrorType::TypeError), pos);
-  return std::get<double>(v);
- }
- inline Complex asComplex(const Value &v) {
-  if (std::holds_alternative<Complex>(v)) return std::get<Complex>(v);
-  return Complex(std::get<double>(v), 0.0);
- }
- inline int64_t asInt64(const Value &v, size_t pos) {
-  if (isComplex(v)) throw CalcError(CalcErrorType::TypeError, "int required", pos);
-  double x = std::get<double>(v);
-  if (!std::isfinite(x)) throw CalcError(CalcErrorType::DomainError, "nan/inf", pos);
-  if (std::floor(x) != x) throw CalcError(CalcErrorType::TypeError, "integer required", pos);
-  if (x < (double)LLONG_MIN || x > (double)LLONG_MAX) throw CalcError(CalcErrorType::OutOfRange, "int64 overflow", pos);
-
-  return (int64_t)x;
- }
+ inline bool isScaler(const Value &v) { return v.isScalar(); }
+ inline bool isComplex(const Value &v) { return v.isComplex(); }
+ inline bool isDouble(const Value &v) { return v.isScalar(); }
+ inline bool isInvalid(const Value &v) { return v.isInvalid(); }
+ inline bool isString(const Value &v) { return v.isString(); }
+ inline bool isMulti(const Value &v) { return v.isMulti(); }
 
  inline Value makeValue(double v) { return Value{v}; }
  inline Value makeValue(std::complex<double> v) { return Value{v}; }
 
  inline Value mulReal(const Value &v, double k, size_t pos) {
-  if (isComplex(v)) return asComplex(v) * k;
-  return asDouble(v, pos) * k;
+  return std::visit(Overloaded{
+
+                        [&](double d) -> Value { return d * k; },
+
+                        [&](std::complex<double> c) -> Value { return c * k; },
+
+                        [&](std::shared_ptr<MultiValue> m) -> Value {
+                         auto result = std::make_shared<MultiValue>();
+                         result->elems_.reserve(m->elems_.size());
+
+                         for (const auto &e : m->elems_)
+                          result->elems_.push_back(mulReal(e, k, pos));
+
+                         return result;
+                        },
+
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for real multiplication", pos); }
+
+                    },
+                    v.storage());
  }
 
  inline Value divReal(const Value &v, double k, size_t pos) {
-  if (k == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
-  if (isComplex(v)) return asComplex(v) / k;
-  return asDouble(v, pos) / k;
+  if (k == 0.0) throw CalcError(CalcErrorType::DivisionByZero, "division by zero", pos);
+
+  return std::visit(Overloaded{
+
+                        [&](double d) -> Value { return d / k; },
+
+                        [&](std::complex<double> c) -> Value { return c / k; },
+
+                        [&](std::shared_ptr<MultiValue> m) -> Value {
+                         auto result = std::make_shared<MultiValue>();
+                         result->elems_.reserve(m->elems_.size());
+
+                         for (const auto &e : m->elems_)
+                          result->elems_.push_back(divReal(e, k, pos));
+
+                         return result;
+                        },
+
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for real division", pos); }
+
+                    },
+                    v.storage());
  }
 
- // 有限性チェックたち
- inline void checkFinite(double v, size_t pos) {
-  if (std::isnan(v)) throw CalcError(CalcErrorType::NaNResult, errorMessage(CalcErrorType::NaNResult), pos);
-  if (std::isinf(v)) throw CalcError(CalcErrorType::InfiniteResult, errorMessage(CalcErrorType::InfiniteResult), pos);
- }
-
- inline void checkFinite(const Value &v, size_t pos) {
-  if (std::holds_alternative<double>(v)) {
-   double x = std::get<double>(v);
-   if (std::isnan(x)) throw CalcError(CalcErrorType::NaNResult, errorMessage(CalcErrorType::NaNResult), pos);
-   if (std::isinf(x)) throw CalcError(CalcErrorType::InfiniteResult, errorMessage(CalcErrorType::InfiniteResult), pos);
-   return;
-  }
-  // complex
-  const auto &z = std::get<std::complex<double>>(v);
-  if (std::isnan(z.real()) || std::isnan(z.imag())) throw CalcError(CalcErrorType::NaNResult, errorMessage(CalcErrorType::NaNResult), pos);
-  if (std::isinf(z.real()) || std::isinf(z.imag())) throw CalcError(CalcErrorType::InfiniteResult, errorMessage(CalcErrorType::InfiniteResult), pos);
- }
- inline void checkFinite(const std::complex<double> &z, size_t pos) {
-  checkFinite(z.real(), pos);
-  checkFinite(z.imag(), pos);
- }
- inline void checkFiniteValue(const Value &v, size_t pos) {
+ // Finite
+ inline void Value::validateFinite(size_t pos) const {
   std::visit(
       [&](auto &&x) {
        using T = std::decay_t<decltype(x)>;
-       if constexpr (std::is_same_v<T, double>) {
+
+       if constexpr (std::is_same_v<T, std::monostate>) {
+        return;
+       } else if constexpr (std::is_same_v<T, double>) {
         checkFinite(x, pos);
        } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-        checkFinite(x, pos);
+        checkFinite(x.real(), pos);
+        checkFinite(x.imag(), pos);
        } else if constexpr (std::is_same_v<T, std::string>) {
-        // string は有限チェック不要（タグ/オプション用途）
-       } else if constexpr (std::is_same_v<T, InvalidValue>) {
-        // Invalidは別ルートで処理される前提
-       } else {
-        static_assert(always_false<T>);
+        return;
+       } else if constexpr (std::is_same_v<T, MultiPtr>) {
+        if (!x) return;
+        for (const auto &v : x->elems())
+         v.validateFinite(pos);
        }
       },
-      v);
+      data_);
+
+  // MultiValue 拡張時もここに追加すること(絶対未来の私は忘れてる)
  }
+
+ // 有限性チェックたち
+ inline void checkFinite(const std::complex<double> &z, size_t pos) { Value::checkFinite(Value(z), pos); }
 
  inline double requireFinite(double x, size_t pos) {
   if (!std::isfinite(x)) throwDomain(pos);
   return x;
  }
 
+ inline void checkFinite(double x, size_t pos) {
+  if (!std::isfinite(x)) throwDomain(pos);
+ }
+
+ inline void checkFinite(const Value &v, size_t pos) { Value::checkFinite(v, pos); }
+
  // 警告ウマーマン
  inline void calcWarn(const FunctionContext &ctx, const std::string &msg) { std::cerr << "[WARN] pos=" << ctx.pos << " " << msg << "\n"; }
  inline void calcWarn(SystemConfig &cfg, size_t pos, const std::string &msg) { std::cerr << "[WARN] pos=" << pos << " " << msg << "\n"; }
+ inline void calcWarn(size_t pos, const std::string &msg) { std::cerr << "[WARN] pos=" << pos << " " << msg << "\n"; }
 
  Value roundValue(const Value &v, const SystemConfig &cfg);
 
- inline double round12(double v) { return std::round(v / cnst_precision_inv) * cnst_precision_inv; }
 } // namespace mm::cal

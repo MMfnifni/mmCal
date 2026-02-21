@@ -381,13 +381,18 @@ namespace mm::cal {
  // <,>,<=,>=,==,!=
  std::unique_ptr<Parser::ASTNode> Parser::parseCompare() {
   auto n = parseExpression();
+
   while (cur.type == TokenType::Less || cur.type == TokenType::LessEq || cur.type == TokenType::Greater || cur.type == TokenType::GreaterEq || cur.type == TokenType::Equal || cur.type == TokenType::NotEqual) {
    CmpOp op = tokenToCmpOp(cur.type);
    size_t p = cur.pos;
+
    advance();
+
    auto r = parseExpression();
+
    n = std::make_unique<CompareNode>(op, std::move(n), std::move(r), p);
   }
+
   return n;
  }
 
@@ -419,8 +424,8 @@ namespace mm::cal {
 
  Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx) {
   // 複素数は大小比較不可
-  if (isComplex(lhs) || isComplex(rhs)) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
-  double a = asDouble(lhs, ctx.pos), b = asDouble(rhs, ctx.pos);
+  if (lhs.isComplex() || rhs.isComplex()) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
+  double a = lhs.asScalar(ctx.pos), b = rhs.asScalar(ctx.pos);
   bool r = false;
   int prec = ctx.cfg.precision;
 
@@ -447,58 +452,12 @@ namespace mm::cal {
  Value Parser::BinaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   auto a = lhs->eval(cfg, hist, base);
   auto b = rhs->eval(cfg, hist, base);
-  // ==========================================
-  // Mulだけ特別扱いできるようにする
-  // 例： (double * unit) や (unit * double)
-  // 現状は unit を Value に入れてないので何もしないが、将来 Value に Unit/Quantity を足すならここが入口になる。
-  // ==========================================
-  if (op == BinOp::Mul) {
-   // いまは何もしない（将来用）
-   // if (isUnit(a) && std::holds_alternative<double>(b)) ...
-   // if (std::holds_alternative<double>(a) && isUnit(b)) ...
-  }
-
-  // ===== complex が含まれる場合 =====
-  if (isComplex(a) || isComplex(b)) {
-   Complex x = toComplex(a);
-   Complex y = toComplex(b);
-
-   // nan注意
-   if (!std::isfinite(x.real()) || !std::isfinite(x.imag()) || !std::isfinite(y.real()) || !std::isfinite(y.imag())) { throw CalcError(CalcErrorType::DomainError, "nan or inf", pos); }
-
-   switch (op) {
-    case BinOp::Add: return x + y;
-    case BinOp::Sub: return x - y;
-    case BinOp::Mul: return x * y;
-    case BinOp::Div:
-     if (std::abs(y) == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
-     return x / y;
-    case BinOp::Pow: return std::pow(x, y);
-   }
-  }
-
-  // ===== real 同士 =====
-  double x = asDouble(a, pos);
-  double y = asDouble(b, pos);
-
-  // nan注意（real）
-  if (!std::isfinite(x) || !std::isfinite(y)) throw CalcError(CalcErrorType::DomainError, "nan or inf", pos);
-
   switch (op) {
-   case BinOp::Add: return x + y;
-   case BinOp::Sub: return x - y;
-   case BinOp::Mul: return x * y;
-   case BinOp::Div:
-    if (y == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
-    return x / y;
-   case BinOp::Pow:
-    // real→complex 昇格判定はここだけ
-    if (x < 0.0 && std::floor(y) != y) {
-     // 警告（stderr）
-     calcWarn(cfg, pos, "(-a)^(p/q) : principal value only; other branches may exist");
-     return std::pow(Complex(x, 0.0), Complex(y, 0.0));
-    }
-    return std::pow(x, y);
+   case BinOp::Add: return add(a, b, pos);
+   case BinOp::Sub: return sub(a, b, pos);
+   case BinOp::Mul: return mul(a, b, pos);
+   case BinOp::Div: return div(a, b, pos);
+   case BinOp::Pow: return power(a, b, pos);
   }
 
   throw CalcError(CalcErrorType::InvalidOperation, "invalid op", pos);
@@ -507,10 +466,7 @@ namespace mm::cal {
  Parser::UnaryNode::UnaryNode(UnaryOp o, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
  Value Parser::UnaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   auto v = rhs->eval(cfg, hist, base);
-  if (op == UnaryOp::Minus) {
-   if (isComplex(v)) return -toComplex(v);
-   return -asDouble(v, pos);
-  }
+  if (op == UnaryOp::Minus) return negate(v, pos);
   return v;
  }
 
@@ -518,23 +474,30 @@ namespace mm::cal {
 
  Value Parser::PostfixUnaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   Value v = expr->eval(cfg, hist, base);
-  // 後置演算子は実数のみ対応
-  if (!std::holds_alternative<double>(v)) { throw CalcError(CalcErrorType::TypeError, errorMessage(CalcErrorType::TypeError), pos); }
-  double d = std::get<double>(v), r;
-  switch (op) {
-   case '!': r = factorial(d, pos); break;
-   default: throw CalcError(CalcErrorType::SyntaxError, "unknown postfix operator", pos);
-  }
-  return r;
+
+  if (op == '!') return mm::cal::factorial(v, pos);
+
+  throw CalcError(CalcErrorType::InvalidOperation, "invalid postfix", pos);
  }
 
  Parser::CompareNode::CompareNode(CmpOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
  Value Parser::CompareNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
+
   Value a = lhs->eval(cfg, hist, base);
   Value b = rhs->eval(cfg, hist, base);
 
-  FunctionContext ctx{cfg, hist, base, pos};
-  return evalCompare(a, b, op, ctx);
+  mm::cal::CompareOp cop;
+
+  switch (op) {
+   case CmpOp::Equal: cop = CompareOp::Eq; break;
+   case CmpOp::NotEqual: cop = CompareOp::Ne; break;
+   case CmpOp::Less: cop = CompareOp::Lt; break;
+   case CmpOp::LessEq: cop = CompareOp::Le; break;
+   case CmpOp::Greater: cop = CompareOp::Gt; break;
+   case CmpOp::GreaterEq: cop = CompareOp::Ge; break;
+  }
+
+  return mm::cal::compare(a, b, cop, pos);
  }
 
  Value Parser::FunctionCallNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
@@ -576,11 +539,7 @@ namespace mm::cal {
 
  Value Parser::UnitApplyNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   Value v = expr->eval(cfg, hist, base);
-
-  // 今は unit適用は実数だけ
-  if (!std::holds_alternative<double>(v)) { throw CalcError(CalcErrorType::TypeError, "unit can be applied to real only", pos); }
-
-  double x = std::get<double>(v);
+  double x = v.asScalar(pos);
 
   // angle
   if (unit == "deg") return x;

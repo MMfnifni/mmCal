@@ -1,6 +1,7 @@
 1/0:=Error
 1..1:=Error
 0/0:=Error
+0^0:=Error
 (-1)^(1/2):=I
 sqrt(-1):=I
 log(0):=Error

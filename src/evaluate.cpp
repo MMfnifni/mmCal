@@ -110,6 +110,7 @@ namespace mm::cal {
  // }
 
  std::string formatResult(const Value &v, const SystemConfig &cfg) {
+
   return std::visit(
       [&](auto &&x) -> std::string {
        using T = std::decay_t<decltype(x)>;
@@ -125,6 +126,7 @@ namespace mm::cal {
         if (std::isinf(re) || std::isinf(im)) {
          std::string s;
          if (std::isinf(re)) s += (re > 0 ? "inf" : "-inf");
+
          if (std::isinf(im)) {
           if (!s.empty() && im > 0) s += "+";
           s += (im > 0 ? "inf" : "-inf");
@@ -136,31 +138,36 @@ namespace mm::cal {
         return formatComplex(x, cfg);
 
        } else if constexpr (std::is_same_v<T, std::string>) {
-        // 将来: "rad" "deg" "mm" などが結果として出る可能性もあるので一旦そのまま返す
         return x;
 
        } else if constexpr (std::is_same_v<T, InvalidValue>) {
         return "Invalid";
 
+       } else if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
+
+        std::ostringstream oss;
+        oss << "[";
+
+        for (size_t i = 0; i < x->elems_.size(); ++i) {
+         if (i > 0) oss << ", ";
+         oss << formatResult(x->elems_[i], cfg);
+        }
+        oss << "]";
+        return oss.str();
+
+       } else if constexpr (std::is_same_v<T, std::monostate>) {
+        return "Invalid";
        } else {
         static_assert(always_false<T>, "Unhandled Value type");
        }
       },
-      v);
+      v.storage());
  }
 
  /* ============================
     ユーティリティの兄貴
     ============================ */
  Value Parser::ASTNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const { return Value(); }
- Value div(const Value &a, const Value &b, size_t pos) {
-  if (isDouble(a) && isDouble(b)) {
-   double r = asDouble(b, pos);
-   if (r == 0.0) throw CalcError(CalcErrorType::DivisionByZero, errorMessage(CalcErrorType::DivisionByZero), pos);
-   return asDouble(a) / r;
-  }
-  return asComplex(a) / asComplex(b);
- }
 
  /* ============================
    DLL

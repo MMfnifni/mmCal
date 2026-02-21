@@ -1,0 +1,26 @@
+統計系強化
+
+t分布
+F分布
+chi-square
+inverse系
+
+数値解析
+
+root(f,x0)
+integrate(f,a,b)
+solve_linear
+
+工学
+
+Bessel J/Y/I/K
+elliptic integrals
+error function 拡張
+
+金融
+
+IRR
+XIRR
+RATE
+DURATION
+YIELD

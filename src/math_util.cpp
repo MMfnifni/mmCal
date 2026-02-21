@@ -6,8 +6,6 @@ namespace mm::cal {
    数学補助系
    ============================ */
 
- bool eq(double a, double b) { return std::abs(a - b) < cnst_precision_inv; }
-
  /* ============================
    整数系
    ============================ */
@@ -50,11 +48,8 @@ namespace mm::cal {
 
  double factorial(double x, size_t pos) {
   if (!std::isfinite(x)) throwDomain(pos);
-
   if (x < 0) throwDomain(pos);
-
   if (std::floor(x) != x) throwDomain(pos);
-
   if (x > 170) // 171! は double overflow
    throwOverflow(pos);
 
@@ -124,17 +119,24 @@ namespace mm::cal {
  // return a;
  //}
 
- bool isPrimeLL(long long n) {
-  if (n <= 1) return false;                   // 1以下は素数ではない
-  if (n <= 3) return true;                    // 2と3は素数
-  if (n % 2 == 0 || n % 3 == 0) return false; // 2または3で割り切れる数は素数ではない
+ Value area_polygon_impl(const std::vector<Value> &v, FunctionContext &ctx) {
+  size_t n = v.size() / 2;
 
-  // 5から始めて、iを6ずつ増やしていく
-  for (long long i = 5; i * i <= n; i += 6) {
-   if (n % i == 0 || n % (i + 2) == 0) return false; // iかi+2で割り切れる場合は素数ではない
+  if (n < 3) throw CalcError(CalcErrorType::DomainError, "area_polygon: need at least 3 points", ctx.pos);
+
+  double area = 0.0;
+
+  for (size_t i = 0; i < n; ++i) {
+   double x0 = v[2 * i].asScalar(ctx.pos);
+   double y0 = v[2 * i + 1].asScalar(ctx.pos);
+
+   double x1 = v[2 * ((i + 1) % n)].asScalar(ctx.pos);
+   double y1 = v[2 * ((i + 1) % n) + 1].asScalar(ctx.pos);
+
+   area += x0 * y1 - x1 * y0;
   }
 
-  return true; // それ以外は素数
+  return std::abs(area) / 2.0;
  }
 
  /* ============================
@@ -145,11 +147,11 @@ namespace mm::cal {
   a.reserve(v.size());
   for (const auto &x : v) {
    if (isComplex(x)) {
-    const auto z = asComplex(x);
+    const auto z = x.asComplex(pos);
     if (std::abs(std::imag(z)) > cnst_precision_inv) throwDomain(pos);
     a.push_back(std::real(z));
    } else {
-    a.push_back(asReal(x, pos));
+    a.push_back(x.asScalar(pos));
    }
   }
   return a;
@@ -159,7 +161,14 @@ namespace mm::cal {
   std::vector<double> a;
   a.reserve(v.size());
   for (const auto &x : v)
-   a.push_back(asReal(x, ctx.pos));
+   a.push_back(x.asScalar(ctx.pos));
+  return a;
+ }
+ std::vector<Complex> collectComplex(const std::vector<Value> &v, FunctionContext &ctx) {
+  std::vector<Complex> a;
+  a.reserve(v.size());
+  for (const auto &x : v)
+   a.push_back(x.asComplex(ctx.pos));
   return a;
  }
 
@@ -253,4 +262,112 @@ namespace mm::cal {
   return (double)(ss / (long double)a.size());
  }
 
+ double zetaEulerMaclaurin(double s) {
+  const int N = 12; // 打ち切り位置
+  const int M = 4;  // Bernoulli 項数
+
+  // Bernoulli numbers B2, B4, B6, B8
+  static const double B[] = {1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0};
+
+  double sum = 0.0;
+  for (int n = 1; n < N; ++n)
+   sum += 1.0 / std::pow(n, s);
+
+  double Ns = std::pow(N, -s);
+  sum += std::pow(N, 1.0 - s) / (s - 1.0);
+  sum += 0.5 * Ns;
+
+  for (int k = 1; k <= M; ++k) {
+   double term = B[k - 1] * std::tgamma(s + 2 * k - 1) / std::tgamma(s) * std::pow(N, -s - 2 * k + 1);
+   sum += term;
+  }
+
+  return sum;
+ }
+
+ double brent(std::function<double(double)> f, double a, double b, FunctionContext &ctx, double tol, int maxIter) {
+  double fa = f(a), fb = f(b);
+  if (fa * fb > 0) throw CalcError(CalcErrorType::NonConvergence, "Brent method did not converge (root not bracketed)", ctx.pos);
+  if (std::abs(fa) < std::abs(fb)) {
+   std::swap(a, b);
+   std::swap(fa, fb);
+  }
+
+  double c = a, fc = fa, d = 0;
+  bool mflag = true;
+  for (int iter = 0; iter < maxIter; ++iter) {
+   double s;
+   if (fa != fc && fb != fc) { // インターポレーション（逆二次）
+    s = a * fb * fc / ((fa - fb) * (fa - fc)) + b * fa * fc / ((fb - fa) * (fb - fc)) + c * fa * fb / ((fc - fa) * (fc - fb));
+   } else { // 線形補間
+    s = b - fb * (b - a) / (fb - fa);
+   }
+
+   double midpoint = (3 * a + b) / 4;
+   bool bisect = !((s > midpoint && s < b) || (s < midpoint && s > b)) || (mflag ? std::abs(s - b) >= std::abs(b - c) / 2 : std::abs(s - b) >= std::abs(c - d) / 2) || (mflag ? std::abs(b - c) < tol : std::abs(c - d) < tol);
+
+   if (bisect) s = (a + b) / 2, mflag = true;
+   else mflag = false;
+
+   double fs = f(s);
+   d = c;
+   c = b;
+   fc = fb;
+
+   if (fa * fs < 0) b = s, fb = fs;
+   else a = s, fa = fs;
+
+   if (std::abs(fa) < std::abs(fb)) {
+    std::swap(a, b);
+    std::swap(fa, fb);
+   }
+
+   if (std::abs(b - a) < tol) return b;
+  }
+
+  throw CalcError(CalcErrorType::NonConvergence, "Brent method did not converge", ctx.pos);
+ }
+
+ std::pair<double, double> fullScanBracket(std::function<double(double)> f, double start, double end, double step, FunctionContext &ctx) {
+  double prev = f(start);
+  for (double x = start + step; x <= end; x += step) {
+   double curr = f(x);
+   if (prev * curr <= 0) return {x - step, x};
+   prev = curr;
+  }
+  throw CalcError(CalcErrorType::NonConvergence, "IRR root not bracketed in full scan", ctx.pos);
+ }
+
+ Value safeInv(double denom, double sign) {
+  if (std::abs(denom) < cnst_precision_inv) return std::numeric_limits<double>::infinity() * (sign >= 0 ? 1.0 : -1.0);
+  return 1.0 / denom;
+ }
+
+ bool eq(double a, double b) { return std::abs(a - b) < cnst_precision_inv; }
+
+ inline Value areaPolygon(const std::vector<Value> &v, FunctionContext &ctx) {
+  size_t n = v.size() / 2;
+
+  if (n < 3) throw CalcError(CalcErrorType::DomainError, "area_polygon: need at least 3 points", ctx.pos);
+
+  double area = 0.0;
+
+  for (size_t i = 0; i < n; ++i) {
+
+   double x0 = requireReal(v[2 * i], ctx.pos);
+   double y0 = requireReal(v[2 * i + 1], ctx.pos);
+
+   double x1 = requireReal(v[2 * ((i + 1) % n)], ctx.pos);
+
+   double y1 = requireReal(v[2 * ((i + 1) % n) + 1], ctx.pos);
+
+   area += x0 * y1 - x1 * y0;
+  }
+
+  return std::abs(area) / 2.0;
+ }
+ inline std::vector<double> collectNumericVector(const std::vector<Value> &v, FunctionContext &ctx) {
+  std::vector<Value> tmp = v;
+  return collectReals(tmp, ctx);
+ }
 } // namespace mm::cal

@@ -65,7 +65,6 @@ namespace mm::cal {
  /* ============================
     ユーティリティの兄貴
     ============================ */
- Value div(const Value &a, const Value &b, size_t pos);
 
  // Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx);//syntaxにあるよ
 

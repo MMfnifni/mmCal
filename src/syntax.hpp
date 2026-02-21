@@ -3,6 +3,8 @@
 #include "core.hpp"
 #include "functions.hpp"
 #include "math_util.hpp"
+#include "value_arithmetic.hpp"
+#include "value_compare.hpp"
 #include <cctype>
 #include <charconv>
 #include <memory>
@@ -127,30 +129,13 @@ Token / Lexer
      // 外から呼ばれる唯一の eval
      virtual Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const final {
       Value v = evalImpl(cfg, hist, base);
-      checkFiniteValue(v, pos); // nan / inf は必ずここで捕まる
+      checkFinite(v, pos);
       return v;
      }
 
     protected:
      // 派生クラスはこれだけ実装する
      virtual Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const = 0;
-
-     // 派生クラスからも使える
-     static void checkFinite(const Value &v, size_t pos) {
-      std::visit(
-          [&](auto &&x) {
-           using T = std::decay_t<decltype(x)>;
-
-           if constexpr (std::is_same_v<T, double>) {
-            if (std::isnan(x)) throw CalcError(CalcErrorType::NaNDetected, errorMessage(CalcErrorType::NaNDetected), pos);
-            if (!std::isfinite(x)) throw CalcError(CalcErrorType::InfinityDetected, errorMessage(CalcErrorType::InfinityDetected), pos);
-           } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-            if (std::isnan(x.real()) || std::isnan(x.imag())) throw CalcError(CalcErrorType::NaNDetected, errorMessage(CalcErrorType::NaNDetected), pos);
-            if (!std::isfinite(x.real()) || !std::isfinite(x.imag())) throw CalcError(CalcErrorType::InfinityDetected, errorMessage(CalcErrorType::InfinityDetected), pos);
-           }
-          },
-          v);
-     }
    };
 
    /* ---------- Number ---------- */
