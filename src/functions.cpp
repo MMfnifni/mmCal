@@ -263,26 +263,54 @@ namespace mm::cal {
                            return (double)l;
                           }};
   cfg.functions["sum"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                           auto x = collectComplex(v, ctx);
-                           Complex acc = 0;
-                           for (auto d : x)
-                            acc += d;
-                           return acc;
+                           double sum = 0.0;
+                           if (v.size() == 1 && v[0].isMulti()) {
+                            // multivalue
+                            const auto &mv = v[0].asMultiRef(ctx.pos);
+                            for (const auto &elem : mv.elems())
+                             sum += elem.asScalar(ctx.pos);
+                            return Value(sum);
+                           } else if (v.size() == 1) { // single value
+                            return v[0];
+                           } else {
+                            // value
+                            for (const auto &elem : v)
+                             sum += elem.asScalar(ctx.pos);
+                            return Value(sum);
+                           }
                           }};
   cfg.functions["prod"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            auto x = collectComplex(v, ctx);
-                            Complex acc = 1;
-                            for (auto d : x)
-                             acc *= d;
-                            return acc;
+                            if (v.size() == 1 && v[0].isMulti()) {
+                             const auto &mv = v[0].asMultiRef(ctx.pos);
+                             Complex acc = 1;
+                             for (const auto &elem : mv.elems()) {
+                              acc *= elem.toComplex(ctx.pos);
+                             }
+                             return acc;
+                            } else {
+                             auto x = collectComplex(v, ctx);
+                             Complex acc = 1;
+                             for (auto d : x)
+                              acc *= d;
+                             return acc;
+                            }
                            }};
   cfg.functions["mean"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            auto x = collectComplex(v, ctx);
-                            if (x.empty()) throwDomain(ctx.pos);
-                            Complex acc = 0.0;
-                            for (auto d : x)
-                             acc += d;
-                            return (acc / static_cast<double>(x.size()));
+                            if (v.size() == 1 && v[0].isMulti()) {
+                             const auto &mv = v[0].asMultiRef(ctx.pos);
+                             Complex acc = 0;
+                             for (const auto &elem : mv.elems()) {
+                              acc += elem.toComplex(ctx.pos);
+                             }
+                             return (acc / static_cast<double>(mv.size()));
+                            } else {
+                             auto x = collectComplex(v, ctx);
+                             if (x.empty()) throwDomain(ctx.pos);
+                             Complex acc = 0.0;
+                             for (auto d : x)
+                              acc += d;
+                             return (acc / static_cast<double>(x.size()));
+                            }
                            }};
   cfg.functions["mod"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                            const double x = v[0].asScalar(ctx.pos);
@@ -744,19 +772,161 @@ namespace mm::cal {
                             }
                             return std::sqrt(acc);
                            }};
-  cfg.functions["dot"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                           if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
-                           size_t n = v.size() / 2;
-                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
 
+  // ベクトル和
+  cfg.functions["vadd"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                            if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vadd requires two multivalue arguments", ctx.pos);
+                            const auto &a = v[0].asMultiRef(ctx.pos);
+                            const auto &b = v[1].asMultiRef(ctx.pos);
+
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                            auto result = std::make_shared<MultiValue>();
+                            result->elems_.reserve(a.size());
+                            for (size_t i = 0; i < a.size(); ++i) {
+                             result->elems_.push_back(Value(a[i].asScalar(ctx.pos) + b[i].asScalar(ctx.pos)));
+                            }
+                            return Value(result);
+                           }};
+
+  // ベクトル差
+  cfg.functions["vsub"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                            if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vsub requires two multivalue arguments", ctx.pos);
+                            const auto &a = v[0].asMultiRef(ctx.pos);
+                            const auto &b = v[1].asMultiRef(ctx.pos);
+
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                            auto result = std::make_shared<MultiValue>();
+                            result->elems_.reserve(a.size());
+                            for (size_t i = 0; i < a.size(); ++i) {
+                             result->elems_.push_back(Value(a[i].asScalar(ctx.pos) - b[i].asScalar(ctx.pos)));
+                            }
+                            return Value(result);
+                           }};
+
+  // スカラ倍
+  cfg.functions["vscalar"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                               if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vscalar requires multivalue argument", ctx.pos);
+                               double scalar = v[1].asScalar(ctx.pos);
+                               const auto &vec = v[0].asMultiRef(ctx.pos);
+
+                               auto result = std::make_shared<MultiValue>();
+                               result->elems_.reserve(vec.size());
+                               for (const auto &elem : vec.elems()) {
+                                result->elems_.push_back(Value(elem.asScalar(ctx.pos) * scalar));
+                               }
+                               return Value(result);
+                              }};
+  // 内積
+  cfg.functions["vdot"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                            if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vdot requires two multivalue arguments", ctx.pos);
+                            const auto &a = v[0].asMultiRef(ctx.pos);
+                            const auto &b = v[1].asMultiRef(ctx.pos);
+
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                            double acc = 0.0;
+                            for (size_t i = 0; i < a.size(); ++i) {
+                             acc += a[i].asScalar(ctx.pos) * b[i].asScalar(ctx.pos);
+                            }
+                            return Value(acc);
+                           }};
+
+  // 外積 (3次元限定)
+  cfg.functions["vcross"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                              if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vcross requires two multivalue arguments", ctx.pos);
+                              const auto &a = v[0].asMultiRef(ctx.pos);
+                              const auto &b = v[1].asMultiRef(ctx.pos);
+
+                              if (a.size() != 3 || b.size() != 3) throw CalcError(CalcErrorType::DomainError, "vcross requires 3-dimensional vectors", ctx.pos);
+
+                              double x = a[1].asScalar(ctx.pos) * b[2].asScalar(ctx.pos) - a[2].asScalar(ctx.pos) * b[1].asScalar(ctx.pos);
+                              double y = a[2].asScalar(ctx.pos) * b[0].asScalar(ctx.pos) - a[0].asScalar(ctx.pos) * b[2].asScalar(ctx.pos);
+                              double z = a[0].asScalar(ctx.pos) * b[1].asScalar(ctx.pos) - a[1].asScalar(ctx.pos) * b[0].asScalar(ctx.pos);
+
+                              auto result = std::make_shared<MultiValue>(std::vector<Value>{Value(x), Value(y), Value(z)});
+                              return Value(result);
+                             }};
+  cfg.functions["vnorm"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vnorm requires multivalue argument", ctx.pos);
+                             const auto &vec = v[0].asMultiRef(ctx.pos);
+
+                             double sum = 0.0;
+                             for (const auto &elem : vec.elems()) {
+                              double val = elem.asScalar(ctx.pos);
+                              sum += val * val;
+                             }
+                             return Value(std::sqrt(sum));
+                            }};
+
+  // マンハッタン距離
+  cfg.functions["vmanhattan"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                  if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vmanhattan requires two multivalue arguments", ctx.pos);
+                                  const auto &a = v[0].asMultiRef(ctx.pos);
+                                  const auto &b = v[1].asMultiRef(ctx.pos);
+
+                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                                  double sum = 0.0;
+                                  for (size_t i = 0; i < a.size(); ++i) {
+                                   sum += std::abs(a[i].asScalar(ctx.pos) - b[i].asScalar(ctx.pos));
+                                  }
+                                  return Value(sum);
+                                 }};
+
+  // ユークリッド距離
+  cfg.functions["veuclidean"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                  if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "veuclidean requires two multivalue arguments", ctx.pos);
+                                  const auto &a = v[0].asMultiRef(ctx.pos);
+                                  const auto &b = v[1].asMultiRef(ctx.pos);
+
+                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                                  double sum = 0.0;
+                                  for (size_t i = 0; i < a.size(); ++i) {
+                                   double diff = a[i].asScalar(ctx.pos) - b[i].asScalar(ctx.pos);
+                                   sum += diff * diff;
+                                  }
+                                  return Value(std::sqrt(sum));
+                                 }};
+
+  cfg.functions["dot"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                           if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "dot requires two multivalue arguments", ctx.pos);
+
+                           const auto &a = v[0].asMultiRef(ctx.pos);
+                           const auto &b = v[1].asMultiRef(ctx.pos);
+                           if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                           if (a.empty()) throw CalcError(CalcErrorType::DomainError, "dot of empty multivalue", ctx.pos);
                            double acc = 0.0;
-                           // for (size_t i = 0; i < n; ++i)
-                           //  acc += v[i].asScalar(ctx.pos) * asReal(v[i + n], ctx.pos);
-                           for (size_t i = 0; i < n; ++i)
-                            acc += v[i].asScalar(ctx.pos) * v[i + n].asScalar(ctx.pos);
-
-                           return acc;
+                           for (size_t i = 0; i < a.size(); ++i) { // nested Multi は禁止するよん
+                            if (a[i].isMulti() || b[i].isMulti()) throw CalcError(CalcErrorType::TypeError, "nested multivalue not allowed", ctx.pos);
+                            acc += a[i].asScalar(ctx.pos) * b[i].asScalar(ctx.pos);
+                           }
+                           return Value(acc);
                           }};
+  cfg.functions["vsum"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vsum requires multivalue argument", ctx.pos);
+                            const auto &a = v[0].asMultiRef(ctx.pos);
+                            double sum = 0.0;
+                            for (const auto &elem : a.elems()) {
+                             sum += elem.asScalar(ctx.pos);
+                            }
+                            return Value(sum);
+                           }};
+  cfg.functions["scalar"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                              if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "scalar requires multivalue argument", ctx.pos);
+                              double scalar = v[1].asScalar(ctx.pos);
+                              const auto &a = v[0].asMultiRef(ctx.pos);
+
+                              auto result = std::make_shared<MultiValue>();
+                              result->elems_.reserve(a.size());
+                              for (const auto &elem : a.elems()) {
+                               result->elems_.push_back(Value(elem.asScalar(ctx.pos) * scalar));
+                              }
+                              return Value(result);
+                             }};
+
   cfg.functions["lerp"] = {3, 3, [](auto &v, auto &ctx) -> Value {
                             double a = v[0].asScalar(ctx.pos);
                             double b = v[1].asScalar(ctx.pos);

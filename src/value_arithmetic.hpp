@@ -127,7 +127,7 @@ namespace mm::cal {
    double exp = b.asScalar(pos);
 
    // 0^0
-   if (base == 0.0 && exp == 0.0) throwDomain(pos);
+   if (base == 0.0 && exp == 0.0) throw CalcError(CalcErrorType::DomainError, "0^0 is indeterminate", pos);
 
    // 0^negative
    if (base == 0.0) {

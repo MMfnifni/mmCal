@@ -121,6 +121,8 @@ namespace mm::cal {
    case ')': return {TokenType::RParen, ")", start};
    case '[': return {TokenType::LBracket, "[", start};
    case ']': return {TokenType::RBracket, "]", start};
+   case '{': return {TokenType::LBrace, "{", start};
+   case '}': return {TokenType::RBrace, "}", start};
    case ',': return {TokenType::Comma, ",", start};
    case '!': return {TokenType::Bang, "!", start};
    case '%':
@@ -154,7 +156,9 @@ namespace mm::cal {
   if (!accept(t)) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), cur.pos);
  }
 
- bool Parser::startsPrimary() const { return cur.type == TokenType::Number || cur.type == TokenType::String || cur.type == TokenType::Identifier || cur.type == TokenType::LParen || cur.type == TokenType::Percent; }
+ bool Parser::startsPrimary() const {
+  return cur.type == TokenType::Number || cur.type == TokenType::String || cur.type == TokenType::Identifier || cur.type == TokenType::LParen || cur.type == TokenType::LBracket || cur.type == TokenType::LBrace || cur.type == TokenType::Percent;
+ }
  bool Parser::isFunctionName(const std::string &name) const { return cfg.functions.find(name) != cfg.functions.end(); }
  bool Parser::isConstantName(const std::string &name) const { return constants.find(name) != constants.end(); }
  bool Parser::isUnitName(const std::string &s) const { return symbols.count(s) != 0; }
@@ -165,6 +169,7 @@ namespace mm::cal {
    case TokenType::Identifier:
    case TokenType::RParen:
    case TokenType::RBracket:
+   case TokenType::RBrace:
    case TokenType::Bang: return true;
    default: return false;
   }
@@ -181,10 +186,10 @@ namespace mm::cal {
   }
  }
 
- bool Parser::isImplicitMul(const Token &prev, const Token &cur) const {
+ bool Parser::isImplicitMul(const Token &prev, const Token &cur) const { // ちなみにMultiValueは暗黙乗算の対象外
   // 右が「値の開始」でなければダメ
   auto isValueStart = [&](TokenType t) { return t == TokenType::Number || t == TokenType::Identifier || t == TokenType::LParen; };
-  // 左が「値の終了」でなければダメ
+  // 左が「値の終了」でなければダメダメよ
   auto isValueEnd = [&](TokenType t) { return t == TokenType::Number || t == TokenType::Identifier || t == TokenType::RParen || t == TokenType::Bang; };
   if (!isValueEnd(prev.type) || !isValueStart(cur.type)) return false;
   // Identifier + Number → 定数のみ許可（sin30 みたいなのはルカルカ★ナイトフィーバー）
@@ -289,10 +294,10 @@ namespace mm::cal {
  }
 
  std::unique_ptr<Parser::ASTNode> Parser::parsePrimary() {
-  size_t p = cur.pos;
 
   // ---- number ----
   if (cur.type == TokenType::Number) {
+   size_t p = cur.pos;
    double v = cur.number;
    advance();
    return std::make_unique<NumberNode>(v, p);
@@ -300,6 +305,7 @@ namespace mm::cal {
 
   // ---- string ----
   if (cur.type == TokenType::String) {
+   size_t p = cur.pos;
    std::string s = cur.text;
    advance();
    return std::make_unique<NumberNode>(Value(std::move(s)), p);
@@ -307,6 +313,7 @@ namespace mm::cal {
 
   // ---- history % ----
   if (cur.type == TokenType::Percent) {
+   size_t p = cur.pos;
    int c = 0;
    while (cur.type == TokenType::Percent) {
     advance();
@@ -315,9 +322,28 @@ namespace mm::cal {
    return std::make_unique<OutNode>(-c, p);
   }
 
+  // ----------- {multivalue} -----------
+  if (cur.type == TokenType::LBrace) {
+   size_t startPos = cur.pos;
+   advance();
+   std::vector<std::unique_ptr<ASTNode>> elems;
+   if (cur.type != TokenType::RBrace) {
+    while (true) {
+     elems.push_back(parseCompare());
+     if (accept(TokenType::Comma)) continue;
+     expect(TokenType::RBrace);
+     break;
+    }
+   } else {
+    advance();
+   }
+   return std::make_unique<MultiLiteralNode>(std::move(elems), startPos);
+  }
+
   // ---- identifier ----
   if (cur.type == TokenType::Identifier) {
    std::string name = cur.text;
+   size_t p = cur.pos;
    advance();
 
    // ----- followed by ( or [ -----
@@ -452,6 +478,7 @@ namespace mm::cal {
  Value Parser::BinaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   auto a = lhs->eval(cfg, hist, base);
   auto b = rhs->eval(cfg, hist, base);
+  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "operator not defined for multivalue", pos);
   switch (op) {
    case BinOp::Add: return add(a, b, pos);
    case BinOp::Sub: return sub(a, b, pos);
@@ -466,6 +493,7 @@ namespace mm::cal {
  Parser::UnaryNode::UnaryNode(UnaryOp o, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
  Value Parser::UnaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
   auto v = rhs->eval(cfg, hist, base);
+  if (v.isMulti()) throw CalcError(CalcErrorType::TypeError, "unary operator not defined for multivalue", pos);
   if (op == UnaryOp::Minus) return negate(v, pos);
   return v;
  }
@@ -482,10 +510,10 @@ namespace mm::cal {
 
  Parser::CompareNode::CompareNode(CmpOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
  Value Parser::CompareNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-
   Value a = lhs->eval(cfg, hist, base);
   Value b = rhs->eval(cfg, hist, base);
 
+  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "comparison not defined for multivalue", pos);
   mm::cal::CompareOp cop;
 
   switch (op) {
@@ -550,6 +578,23 @@ namespace mm::cal {
   if (unit == "mm" || unit == "cm" || unit == "m" || unit == "inch") { throw CalcError(CalcErrorType::NotImplemented, "length units are not implemented yet", pos); }
 
   throw CalcError(CalcErrorType::UnknownIdentifier, "unknown unit: " + unit, pos);
+ }
+
+ Parser::MultiLiteralNode::MultiLiteralNode(std::vector<std::unique_ptr<ASTNode>> e, size_t p) {
+  pos = p;
+  elems = std::move(e);
+ }
+
+ Value Parser::MultiLiteralNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
+  std::vector<Value> values;
+  values.reserve(elems.size());
+
+  for (const auto &n : elems) {
+   Value v = n->eval(cfg, hist, base);
+   values.push_back(std::move(v));
+  }
+
+  return Value(std::make_shared<MultiValue>(std::move(values)));
  }
 
  Parser::OutNode::OutNode(int idx, size_t p) : index(idx) { pos = p; }

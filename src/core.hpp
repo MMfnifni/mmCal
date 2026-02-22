@@ -155,6 +155,7 @@ namespace mm::cal {
     if (!isMulti()) throw CalcError(CalcErrorType::TypeError, "asMulti: expected multivalue", pos);
     return std::get<MultiPtr>(data_);
    }
+   const MultiValue &asMultiRef(size_t pos) const;
 
    // conversions
    std::complex<double> toComplex(size_t pos) const {
@@ -174,6 +175,14 @@ namespace mm::cal {
     return static_cast<int64_t>(x);
    }
 
+   // multi util
+   std::size_t multiSize(size_t pos) const;
+   bool multiEmpty(size_t pos) const;
+   const Value &multiAt(std::size_t i, size_t pos) const;
+   bool isEmptyMulti() const noexcept;
+
+   template <class F> void forEachMulti(size_t pos, F &&f) const;
+
   private:
    static inline void checkFiniteImpl(const std::monostate &, size_t) {
     // ignore
@@ -188,6 +197,8 @@ namespace mm::cal {
     // string has no numeric domain将来
    }
    static void checkFiniteImpl(const MultiPtr &mv, size_t pos);
+
+   bool hasNestedMulti(size_t pos) const;
 
   public:
    // Finite guarantee layer
@@ -223,8 +234,24 @@ namespace mm::cal {
 
    const Value &operator[](std::size_t i) const { return elems_[i]; }
 
+   bool empty() const noexcept { return elems_.empty(); }
+
+   template <class F> void forEach(F &&f) const {
+    for (const auto &v : elems_)
+     f(v);
+   }
+
+   template <class F> Value map(F &&f) const;
+
+   template <class F> Value mapMulti(size_t pos, F &&f) const {
+    if (!Value::isMulti()) throw CalcError(CalcErrorType::TypeError, "multivalue required", pos);
+    return Value::asMultiRef(pos).map(std::forward<F>(f));
+   }
+
    auto begin() const noexcept { return elems_.begin(); }
    auto end() const noexcept { return elems_.end(); }
+
+   bool hasNested() const;
  };
  // 以下のほうが高速になる。可読性とのトレードオフ
  // struct Value {
@@ -435,5 +462,12 @@ namespace mm::cal {
  inline void calcWarn(size_t pos, const std::string &msg) { std::cerr << "[WARN] pos=" << pos << " " << msg << "\n"; }
 
  Value roundValue(const Value &v, const SystemConfig &cfg);
+
+ template <class F> inline void Value::forEachMulti(size_t pos, F &&f) const {
+  if (!isMulti()) return;
+  const auto &mv = asMultiRef(pos);
+  for (const auto &v : mv.elems())
+   f(v);
+ }
 
 } // namespace mm::cal

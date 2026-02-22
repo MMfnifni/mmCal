@@ -35,10 +35,46 @@ namespace mm::cal {
                     v.storage());
  }
 
+ bool Value::hasNestedMulti(size_t pos) const {
+  const auto &mv = asMultiRef(pos);
+  for (const auto &v : mv.elems()) {
+   if (v.isMulti()) return true;
+  }
+  return false;
+ }
+
+ // multi util
+ inline const MultiValue &Value::asMultiRef(size_t pos) const { return *asMulti(pos); }
+
+ std::size_t Value::multiSize(size_t pos) const { return asMultiRef(pos).size(); }
+
+ bool Value::multiEmpty(size_t pos) const { return asMultiRef(pos).size() == 0; }
+
+ const Value &Value::multiAt(std::size_t i, size_t pos) const {
+  const auto &mv = asMultiRef(pos);
+  if (i >= mv.size()) throw CalcError(CalcErrorType::OutOfRange, "multivalue index out of range", pos);
+  return mv[i];
+ }
+
+ bool Value::isEmptyMulti() const noexcept {
+  if (!isMulti()) return false;
+  return std::get<MultiPtr>(data_)->size() == 0;
+ }
+
  void Value::checkFiniteImpl(const MultiPtr &mv, size_t pos) {
   if (!mv) return;
   for (const auto &e : mv->elems_)
    Value::checkFinite(e, pos);
+ }
+
+ template <class F> Value MultiValue::map(F &&f) const {
+  std::vector<Value> res;
+  res.reserve(elems_.size());
+
+  for (const auto &v : elems_)
+   res.push_back(f(v));
+
+  return Value(std::make_shared<MultiValue>(std::move(res)));
  }
 
 } // namespace mm::cal

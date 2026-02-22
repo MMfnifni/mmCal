@@ -146,13 +146,13 @@ namespace mm::cal {
        } else if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
 
         std::ostringstream oss;
-        oss << "[";
+        oss << "{";
 
         for (size_t i = 0; i < x->elems_.size(); ++i) {
          if (i > 0) oss << ", ";
          oss << formatResult(x->elems_[i], cfg);
         }
-        oss << "]";
+        oss << "}";
         return oss.str();
 
        } else if constexpr (std::is_same_v<T, std::monostate>) {

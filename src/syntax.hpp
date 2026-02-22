@@ -37,6 +37,8 @@ Token / Lexer
   RParen,    // )
   LBracket,  // [
   RBracket,  // ]
+  LBrace,    // {
+  RBrace,    // }
   Comma,     // ,
   Bang,      // !
   Percent,   // %
@@ -215,6 +217,16 @@ Token / Lexer
      Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
    };
 
+   /* ---------- MultiLiteral ---------- */
+   struct MultiLiteralNode : ASTNode {
+     std::vector<std::unique_ptr<ASTNode>> elems;
+
+     MultiLiteralNode(std::vector<std::unique_ptr<ASTNode>> e, size_t p);
+
+    protected:
+     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+   };
+
    /* ---------- History % ---------- */
    //
    // struct OutRelativeNode : ASTNode {
@@ -238,7 +250,6 @@ Token / Lexer
 
      Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
    };
-
    /* ============================
       ユーティリティ先輩
       ============================ */

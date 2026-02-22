@@ -724,7 +724,8 @@ Primary         ::=
     | percent { percent }       (* history reference *)
     | identifier [ FunctionCallOrUnit ]
     | "(" , Expression , ")"
-    | "[" , Expression , "]" ;
+    | "[" , Expression , "]"
+    | "{" , [ Expression , { "," , Expression } ] , "}" ;
 
 FunctionCallOrUnit ::=
     | "(" , [ Expression , { comma , Expression } ] , ")"
