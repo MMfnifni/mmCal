@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 #include "core.hpp"
 #include "value_arithmetic.hpp"
@@ -8,7 +8,7 @@ namespace mm::cal {
  enum class CompareOp { Eq, Ne, Lt, Le, Gt, Ge };
 
  // ---------------------------------------------
- // “à•”“I‚ÉƒCƒR[ƒ‹‚Æ‚·‚é
+ // å†…éƒ¨çš„ã«ã‚¤ã‚³ãƒ¼ãƒ«ã¨ã™ã‚‹
  // ---------------------------------------------
 
  inline bool tolerantEqual(double a, double b) { return std::abs(a - b) <= cnst_precision_inv; }
@@ -16,7 +16,7 @@ namespace mm::cal {
  inline bool tolerantEqual(std::complex<double> a, std::complex<double> b) { return tolerantEqual(a.real(), b.real()) && tolerantEqual(a.imag(), b.imag()); }
 
  // ---------------------------------------------
- // ”’l”äŠr‚Ìdispatcher
+ // æ•°å€¤æ¯”è¼ƒã®dispatcher
  // ---------------------------------------------
 
  inline bool compareNumeric(double x, double y, CompareOp op) {

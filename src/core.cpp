@@ -77,4 +77,23 @@ namespace mm::cal {
   return Value(std::make_shared<MultiValue>(std::move(res)));
  }
 
+ bool MultiValue::hasNested() const noexcept {
+  for (const auto &v : elems_)
+   if (v.isMulti()) return true;
+  return false;
+ }
+ std::vector<std::vector<double>> MultiValue::toMatrix() const {
+  std::vector<std::vector<double>> matrix;
+  for (const auto &row : elems_) {
+   if (!row.isMulti()) { throw CalcError(CalcErrorType::TypeError, "Invalid matrix row", 0); }
+   std::vector<double> row_vals;
+   const auto &multi_row = row.asMultiRef(0);
+   for (size_t i = 0; i < multi_row.size(); ++i) {
+    row_vals.push_back(multi_row[i].asScalar(0));
+   }
+   matrix.push_back(std::move(row_vals));
+  }
+  return matrix;
+ }
+
 } // namespace mm::cal

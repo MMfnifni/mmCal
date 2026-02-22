@@ -46,9 +46,8 @@ def parse_complex(s: str):
     s = re.sub(r"\s+", "", s)
     m = _complex_re.match(s)
     if not m:
-        return float(s), 0.0  # fallback: real only
+        return float(s), 0.0
 
-    # pure imaginary like "I", "-I", "2I"
     if m.group("pure_imag") or m.group("pure_sign"):
         sign = -1.0 if m.group("pure_sign") == "-" else 1.0
         mag = m.group("pure_imag")
@@ -70,6 +69,57 @@ def complex_equal(a, b):
 def looks_complex(s):
     return "i" in s.lower()
 
+# ---------------- Structure Parser ({ } support) ----------------
+def parse_structure(s: str):
+    s = s.strip()
+
+    # scalar
+    if not s.startswith("{"):
+        return parse_float(s)
+
+    # empty vector
+    if s == "{}":
+        return []
+
+    inner = s[1:-1].strip()
+    if not inner:
+        return []
+
+    elems = []
+    depth = 0
+    token = ""
+
+    for ch in inner:
+        if ch == "," and depth == 0:
+            elems.append(parse_structure(token))
+            token = ""
+        else:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            token += ch
+
+    if token:
+        elems.append(parse_structure(token))
+
+    return elems
+
+def structure_equal(a, b):
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        return all(structure_equal(x, y) for x, y in zip(a, b))
+
+    if isinstance(a, float) and isinstance(b, float):
+        return almost_equal(a, b)
+
+    return False
+
+# ---------------- Normalize structure formatting ----------------
+def normalize_structure(s):
+    return re.sub(r'\s*([{},])\s*', r'\1', s.strip())
+
 # ---------------- Test Runner ----------------
 def run_test(expr, expect):
     try:
@@ -86,10 +136,22 @@ def run_test(expr, expect):
         return "fail", "Error"
 
     try:
-        if looks_complex(out) or looks_complex(expect):
-            return ("pass", out) if complex_equal(out, expect) else ("fail", out)
-        else:
-            return ("pass", out) if almost_equal(parse_float(out), parse_float(expect)) else ("fail", out)
+        norm_out = normalize_structure(out)
+        norm_expect = normalize_structure(expect)
+
+        # vector / structure
+        if norm_out.startswith("{") or norm_expect.startswith("{"):
+            parsed_out = parse_structure(norm_out)
+            parsed_expect = parse_structure(norm_expect)
+            return ("pass", out) if structure_equal(parsed_out, parsed_expect) else ("fail", out)
+
+        # complex
+        if looks_complex(norm_out) or looks_complex(norm_expect):
+            return ("pass", out) if complex_equal(norm_out, norm_expect) else ("fail", out)
+
+        # scalar
+        return ("pass", out) if almost_equal(parse_float(norm_out), parse_float(norm_expect)) else ("fail", out)
+
     except Exception:
         return "fail", out or "(empty)"
 
@@ -111,6 +173,7 @@ for testfile in TESTS:
                 continue
 
             expr, expect = map(str.strip, line.split(":=", 1))
+
             if expect.lower() == "skip":
                 print(f"[SKIP] {expr}")
                 continue

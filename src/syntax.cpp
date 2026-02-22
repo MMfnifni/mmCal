@@ -523,6 +523,7 @@ namespace mm::cal {
    case CmpOp::LessEq: cop = CompareOp::Le; break;
    case CmpOp::Greater: cop = CompareOp::Gt; break;
    case CmpOp::GreaterEq: cop = CompareOp::Ge; break;
+   default: throw CalcError(CalcErrorType::InvalidOperation, "invalid operator", pos);
   }
 
   return mm::cal::compare(a, b, cop, pos);

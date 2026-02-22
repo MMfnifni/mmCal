@@ -653,4 +653,6 @@ namespace mm::cal {
  double variancePopulation(const std::vector<double> &a, double mu);
  Value area_polygon_impl(const std::vector<Value> &v, FunctionContext &ctx);
  inline std::vector<double> collectNumericVector(const std::vector<Value> &v, const FunctionContext &ctx);
+ std::vector<double> compute_eigenvalues(std::vector<std::vector<double>> &matrix, const FunctionContext &ctx);
+ std::vector<double> meigenvals(const std::vector<std::vector<double>> &matrix);
 } // namespace mm::cal

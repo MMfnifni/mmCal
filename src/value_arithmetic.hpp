@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 #include "core.hpp"
 namespace mm::cal {
@@ -121,7 +121,7 @@ namespace mm::cal {
  inline Value power(const Value &a, const Value &b, size_t pos) {
   if (!a.isNumeric() || !b.isNumeric()) throw CalcError(CalcErrorType::TypeError, "numeric required", pos);
 
-  // ===== real ~ real fast path =====
+  // ===== real Ã— real fast path =====
   if (a.isScalar() && b.isScalar()) {
    double base = a.asScalar(pos);
    double exp = b.asScalar(pos);
@@ -135,7 +135,7 @@ namespace mm::cal {
     throwDomain(pos);
    }
 
-   // •‰”‚Ì”ñ®”æ ¨ complex principal branch
+   // è² æ•°ã®éæ•´æ•°ä¹— â†’ complex principal branch
    if (base < 0.0 && !isInteger(exp)) {
     calcWarn(pos, "(-a)^(p/q) : principal value only; other branches may exist");
 
@@ -148,7 +148,7 @@ namespace mm::cal {
     return r;
    }
 
-   // ’Êí real pow
+   // é€šå¸¸ real pow
    return std::pow(base, exp);
   }
 

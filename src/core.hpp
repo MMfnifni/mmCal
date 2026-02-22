@@ -220,6 +220,7 @@ namespace mm::cal {
 
    template <class Visitor> decltype(auto) visit(Visitor &&v) { return std::visit(std::forward<Visitor>(v), data_); }
    template <class Visitor> decltype(auto) visit(Visitor &&v) const { return std::visit(std::forward<Visitor>(v), data_); }
+   std::size_t size() const;
  };
 
  struct MultiValue {
@@ -251,7 +252,9 @@ namespace mm::cal {
    auto begin() const noexcept { return elems_.begin(); }
    auto end() const noexcept { return elems_.end(); }
 
-   bool hasNested() const;
+   bool hasNested() const noexcept;
+
+   std::vector<std::vector<double>> toMatrix() const;
  };
  // 以下のほうが高速になる。可読性とのトレードオフ
  // struct Value {
@@ -440,6 +443,15 @@ namespace mm::cal {
       data_);
 
   // MultiValue 拡張時もここに追加すること(絶対未来の私は忘れてる)
+ }
+
+ inline std::size_t Value::size() const {
+  if (isMulti()) { return std::get<MultiPtr>(data_)->size(); }
+  if (isString()) { return std::get<std::string>(data_).size(); }
+  if (isInvalid()) { return 0; }
+  // scalar / complex → 要素1とみなす
+  if (isNumeric()) { return 1; }
+  throw CalcError(CalcErrorType::RuntimeError, "RuntimeError: Value->size()???", 0);
  }
 
  // 有限性チェックたち

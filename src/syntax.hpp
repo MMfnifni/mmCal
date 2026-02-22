@@ -93,7 +93,7 @@ Token / Lexer
 
    Parser(SystemConfig &cfg, const std::string &s);
    void advance();
-   const Token &peek();
+   // const Token &peek();
 
    bool accept(TokenType t);
    void expect(TokenType t);

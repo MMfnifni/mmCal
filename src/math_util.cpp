@@ -370,4 +370,261 @@ namespace mm::cal {
   std::vector<Value> tmp = v;
   return collectReals(tmp, ctx);
  }
+
+ // 固有値を求める関数（QR反復法）
+ std::vector<double> compute_eigenvalues(std::vector<std::vector<double>> &matrix, const FunctionContext &ctx) {
+  size_t n = matrix.size();
+  std::vector<double> eigenvals(n);
+
+  // 対角成分を初期化
+  for (size_t i = 0; i < n; ++i) {
+   eigenvals[i] = matrix[i][i];
+  }
+
+  // QR反復法の実装
+  const int max_iterations = 1000;
+  const double epsilon = 1e-12;
+
+  for (int iter = 0; iter < max_iterations; ++iter) {
+   bool converged = true;
+
+   // QR分解を計算
+   std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
+   std::vector<std::vector<double>> R = matrix;
+
+   // 単位行列で初期化
+   for (size_t i = 0; i < n; ++i) {
+    Q[i][i] = 1.0;
+   }
+
+   // ハウスホルダー変換でQR分解
+   for (size_t k = 0; k < n - 1; ++k) {
+    // ベクトルv = R[k:n][k] を取得
+    std::vector<double> v(n - k);
+    for (size_t i = 0; i < n - k; ++i) {
+     v[i] = R[k + i][k];
+    }
+
+    // ノルムを計算
+    double norm = 0.0;
+    for (double val : v) {
+     norm += val * val;
+    }
+    norm = std::sqrt(norm);
+
+    if (norm < epsilon) continue;
+
+    // 通常の符号を持つ値を選択
+    double sign = (v[0] >= 0) ? 1.0 : -1.0;
+    double alpha = -sign * norm;
+
+    // w = v + alpha * e_1
+    std::vector<double> w(v);
+    w[0] += alpha;
+
+    // ノルムを正規化
+    double w_norm = 0.0;
+    for (double val : w) {
+     w_norm += val * val;
+    }
+    w_norm = std::sqrt(w_norm);
+
+    if (w_norm < epsilon) continue;
+
+    // ハウスホルダー変換の計算
+    std::vector<double> u(w);
+    for (double &val : u) {
+     val /= w_norm;
+    }
+
+    // H = I - 2 * u * u^T を計算
+    std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
+    for (size_t i = 0; i < n; ++i) {
+     H[i][i] = 1.0;
+    }
+    for (size_t i = 0; i < n - k; ++i) {
+     for (size_t j = 0; j < n - k; ++j) {
+      H[k + i][k + j] -= 2.0 * u[i] * u[j];
+     }
+    }
+
+    // 行列の積を計算
+    std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+     for (size_t j = 0; j < n; ++j) {
+      double sum = 0.0;
+      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
+       sum += H[i][k_idx] * R[k_idx][j];
+      }
+      temp_R[i][j] = sum;
+     }
+    }
+    R = temp_R;
+
+    // Q = Q * H^T
+    std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+     for (size_t j = 0; j < n; ++j) {
+      double sum = 0.0;
+      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
+       sum += Q[i][k_idx] * H[j][k_idx];
+      }
+      temp_Q[i][j] = sum;
+     }
+    }
+    Q = temp_Q;
+   }
+
+   // 収束判定
+   for (size_t i = 0; i < n - 1; ++i) {
+    if (std::abs(R[i][i + 1]) > epsilon) {
+     converged = false;
+     break;
+    }
+   }
+
+   if (converged) {
+    // 固有値を対角成分から取得
+    for (size_t i = 0; i < n; ++i) {
+     eigenvals[i] = R[i][i];
+    }
+    break;
+   }
+  }
+
+  return eigenvals;
+ };
+
+ // 固有値計算関数
+ std::vector<double> meigenvals(const std::vector<std::vector<double>> &matrix) {
+  size_t n = matrix.size();
+
+  // 行列の次元確認
+  if (n == 0) { return {}; }
+
+  // 正方行列でない場合はエラー
+  for (size_t i = 0; i < n; ++i) {
+   if (matrix[i].size() != n) { throw std::runtime_error("Matrix must be square"); }
+  }
+
+  // 行列のコピーを作成（元の行列を変更しない）
+  std::vector<std::vector<double>> A = matrix;
+
+  // 固有値を求める（QR反復法）
+  std::vector<double> eigenvals(n);
+
+  // QR反復法の実装
+  const int max_iterations = 1000;
+  const double epsilon = 1e-12;
+
+  for (int iter = 0; iter < max_iterations; ++iter) {
+   bool converged = true;
+
+   // QR分解を計算
+   std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
+   std::vector<std::vector<double>> R = A;
+
+   // 単位行列で初期化
+   for (size_t i = 0; i < n; ++i) {
+    Q[i][i] = 1.0;
+   }
+
+   // ガウス・ホルツ変換でQR分解
+   for (size_t k = 0; k < n - 1; ++k) {
+    // ベクトルv = R[k:n][k] を取得
+    std::vector<double> v(n - k);
+    for (size_t i = 0; i < n - k; ++i) {
+     v[i] = R[k + i][k];
+    }
+
+    // ノルムを計算
+    double norm = 0.0;
+    for (double val : v) {
+     norm += val * val;
+    }
+    norm = std::sqrt(norm);
+
+    if (norm < epsilon) continue;
+
+    // 通常の符号を持つ値を選択
+    double sign = (v[0] >= 0) ? 1.0 : -1.0;
+    double alpha = -sign * norm;
+
+    // w = v + alpha * e_1
+    std::vector<double> w(v);
+    w[0] += alpha;
+
+    // ノルムを正規化
+    double w_norm = 0.0;
+    for (double val : w) {
+     w_norm += val * val;
+    }
+    w_norm = std::sqrt(w_norm);
+
+    if (w_norm < epsilon) continue;
+
+    // ハウスホルダー変換の計算
+    std::vector<double> u(w);
+    for (double &val : u) {
+     val /= w_norm;
+    }
+
+    // H = I - 2 * u * u^T を計算
+    std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
+    for (size_t i = 0; i < n; ++i) {
+     H[i][i] = 1.0;
+    }
+    for (size_t i = 0; i < n - k; ++i) {
+     for (size_t j = 0; j < n - k; ++j) {
+      H[k + i][k + j] -= 2.0 * u[i] * u[j];
+     }
+    }
+
+    // 行列の積を計算
+    std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+     for (size_t j = 0; j < n; ++j) {
+      double sum = 0.0;
+      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
+       sum += H[i][k_idx] * R[k_idx][j];
+      }
+      temp_R[i][j] = sum;
+     }
+    }
+    R = temp_R;
+
+    // Q = Q * H^T
+    std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+     for (size_t j = 0; j < n; ++j) {
+      double sum = 0.0;
+      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
+       sum += Q[i][k_idx] * H[j][k_idx];
+      }
+      temp_Q[i][j] = sum;
+     }
+    }
+    Q = temp_Q;
+   }
+
+   // 収束判定
+   for (size_t i = 0; i < n - 1; ++i) {
+    if (std::abs(R[i][i + 1]) > epsilon) {
+     converged = false;
+     break;
+    }
+   }
+
+   if (converged) {
+    // 固有値を対角成分から取得
+    for (size_t i = 0; i < n; ++i) {
+     eigenvals[i] = R[i][i];
+    }
+    break;
+   }
+  }
+
+  return eigenvals;
+ }
+
 } // namespace mm::cal
