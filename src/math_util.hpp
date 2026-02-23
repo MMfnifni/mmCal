@@ -652,7 +652,31 @@ namespace mm::cal {
  double medianOfSorted(const std::vector<double> &a);
  double variancePopulation(const std::vector<double> &a, double mu);
  Value area_polygon_impl(const std::vector<Value> &v, FunctionContext &ctx);
+
+ /* ============================
+   ベクトル系
+   ============================ */
  inline std::vector<double> collectNumericVector(const std::vector<Value> &v, const FunctionContext &ctx);
  std::vector<double> compute_eigenvalues(std::vector<std::vector<double>> &matrix, const FunctionContext &ctx);
  std::vector<double> meigenvals(const std::vector<std::vector<double>> &matrix);
+ size_t nrows(const std::vector<std::vector<double>> &A);
+ size_t ncols(const std::vector<std::vector<double>> &A);
+ std::vector<std::vector<double>> identity(size_t n);
+ std::vector<double> mat_vec(const std::vector<std::vector<double>> &A, const std::vector<double> &x);
+ std::vector<std::vector<double>> mat_mul(const std::vector<std::vector<double>> &A, const std::vector<std::vector<double>> &B);
+ std::vector<std::vector<double>> transpose(const std::vector<std::vector<double>> &A);
+ double norm(const std::vector<double> &x);
+ double dot(const std::vector<double> &a, const std::vector<double> &b);
+ double power_method(const std::vector<std::vector<double>> &A, std::vector<double> &eigenvec, int max_iter = 1000);
+ void hessenberg(std::vector<std::vector<double>> &A);
+ void qr_decompose(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &Q, std::vector<std::vector<double>> &R);
+ std::vector<double> eigenvalues(std::vector<std::vector<double>> A, int max_iter = 1000);
+ void lu_decompose(std::vector<std::vector<double>> A, std::vector<std::vector<double>> &L, std::vector<std::vector<double>> &U, std::vector<size_t> &P);
+ std::vector<double> inverse_iteration(const std::vector<std::vector<double>> &A, double lambda);
+ std::vector<double> singular_values(const std::vector<std::vector<double>> &A);
+ double condition_number(const std::vector<std::vector<double>> &A);
+ void bidiagonalize(std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
+ void bidiagonal_qr(std::vector<std::vector<double>> &B, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
+ void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
+ void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
 } // namespace mm::cal

@@ -96,4 +96,26 @@ namespace mm::cal {
   return matrix;
  }
 
+ std::vector<std::vector<double>> toMatrix(const Value &val, const FunctionContext &ctx) {
+  const auto &M = val.asMultiRef(ctx.pos);
+
+  size_t rows = M.size();
+  if (rows == 0) throw CalcError(CalcErrorType::DomainError, "empty matrix", ctx.pos);
+
+  size_t cols = M[0].asMultiRef(ctx.pos).size();
+
+  std::vector<std::vector<double>> A(rows, std::vector<double>(cols));
+
+  for (size_t i = 0; i < rows; ++i) {
+   const auto &row = M[i].asMultiRef(ctx.pos);
+
+   if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "irregular matrix", ctx.pos);
+
+   for (size_t j = 0; j < cols; ++j)
+    A[i][j] = row[j].asScalar(ctx.pos);
+  }
+
+  return A;
+ }
+
 } // namespace mm::cal

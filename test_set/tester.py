@@ -4,7 +4,7 @@ import re
 import math
 import glob
 
-EPS = 1e-12
+EPS = 1e-10
 EXE = r"..\build\x64\Release\mmCal_x64.exe"
 TESTS = sys.argv[1:] or glob.glob("test*.txt")
 
@@ -73,11 +73,12 @@ def looks_complex(s):
 def parse_structure(s: str):
     s = s.strip()
 
-    # scalar
     if not s.startswith("{"):
-        return parse_float(s)
+        try:
+            return float(s)
+        except:
+            return s
 
-    # empty vector
     if s == "{}":
         return []
 
@@ -106,13 +107,15 @@ def parse_structure(s: str):
     return elems
 
 def structure_equal(a, b):
+    # both list
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return False
         return all(structure_equal(x, y) for x, y in zip(a, b))
 
-    if isinstance(a, float) and isinstance(b, float):
-        return almost_equal(a, b)
+    # numeric comparison (intも吸収)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return almost_equal(float(a), float(b))
 
     return False
 

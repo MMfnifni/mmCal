@@ -4,12 +4,20 @@ t分布
 F分布
 chi-square
 inverse系
+Kernel density estimation
+Bootstrap statistics
+Confidence interval estimation
 
 数値解析
 
 root(f,x0)
 integrate(f,a,b)
 solve_linear
+FFT
+IFFT
+DCT
+Wavelet transform
+Short-time Fourier transform
 
 工学
 
@@ -24,3 +32,41 @@ XIRR
 RATE
 DURATION
 YIELD
+
+
+積分
+adaptive Simpson integration
+Romberg integration
+Gauss-Legendre quadrature
+Trapezoidal rule
+Composite Simpson rule
+Gauss-Kronrod adaptive integration
+Monte Carlo integration
+Double exponential integration
+Clenshaw–Curtis quadrature
+
+微分
+Numerical differentiation (central difference)
+Forward difference
+Complex step differentiation
+Automatic differentiation (forward mode)
+Automatic differentiation (reverse mode)
+
+方程式解法
+Newton method
+Bisection method
+Secant method
+
+
+線形代数
+Cholesky decomposition
+QR with column pivoting 
+Eigenvalue iterative solver
+Lanczos eigen solver
+Arnoldi iteration
+Conjugate gradient solver
+
+Complex-step differentiation
+
+𝑓′(𝑥)=ℑ(𝑓(𝑥+𝑖𝜖))/𝜖
+	​

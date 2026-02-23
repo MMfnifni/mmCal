@@ -475,6 +475,8 @@ namespace mm::cal {
 
  Value roundValue(const Value &v, const SystemConfig &cfg);
 
+ std::vector<std::vector<double>> toMatrix(const Value &val, const FunctionContext &ctx);
+
  template <class F> inline void Value::forEachMulti(size_t pos, F &&f) const {
   if (!isMulti()) return;
   const auto &mv = asMultiRef(pos);

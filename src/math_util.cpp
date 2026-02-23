@@ -627,4 +627,505 @@ namespace mm::cal {
   return eigenvals;
  }
 
+ size_t nrows(const std::vector<std::vector<double>> &A) { return A.size(); }
+ size_t ncols(const std::vector<std::vector<double>> &A) { return A.empty() ? 0 : A[0].size(); }
+
+ std::vector<std::vector<double>> identity(size_t n) {
+  std::vector<std::vector<double>> I(n, std::vector<double>(n, 0.0));
+  for (size_t i = 0; i < n; ++i)
+   I[i][i] = 1.0;
+  return I;
+ }
+
+ std::vector<double> mat_vec(const std::vector<std::vector<double>> &A, const std::vector<double> &x) {
+  size_t n = nrows(A);
+  std::vector<double> r(n, 0.0);
+  for (size_t i = 0; i < n; ++i)
+   for (size_t j = 0; j < x.size(); ++j)
+    r[i] += A[i][j] * x[j];
+  return r;
+ }
+
+ std::vector<std::vector<double>> mat_mul(const std::vector<std::vector<double>> &A, const std::vector<std::vector<double>> &B) {
+  size_t n = nrows(A), m = ncols(B), k = ncols(A);
+  std::vector<std::vector<double>> C(n, std::vector<double>(m, 0.0));
+  for (size_t i = 0; i < n; ++i)
+   for (size_t j = 0; j < m; ++j)
+    for (size_t t = 0; t < k; ++t)
+     C[i][j] += A[i][t] * B[t][j];
+  return C;
+ }
+
+ std::vector<std::vector<double>> transpose(const std::vector<std::vector<double>> &A) {
+  std::vector<std::vector<double>> T(ncols(A), std::vector<double>(nrows(A)));
+  for (size_t i = 0; i < nrows(A); ++i)
+   for (size_t j = 0; j < ncols(A); ++j)
+    T[j][i] = A[i][j];
+  return T;
+ }
+
+ double norm(const std::vector<double> &x) {
+  double s = 0;
+  for (double v : x)
+   s += v * v;
+  return std::sqrt(s);
+ }
+
+ double dot(const std::vector<double> &a, const std::vector<double> &b) {
+  double s = 0;
+  for (size_t i = 0; i < a.size(); ++i)
+   s += a[i] * b[i];
+  return s;
+ }
+
+ double power_method(const std::vector<std::vector<double>> &A, std::vector<double> &eigenvec, int max_iter) {
+  size_t n = nrows(A);
+  eigenvec.assign(n, 1.0);
+
+  double lambda = 0;
+
+  for (int k = 0; k < max_iter; ++k) {
+   std::vector<double> y = mat_vec(A, eigenvec);
+   double new_lambda = dot(y, eigenvec) / dot(eigenvec, eigenvec);
+
+   double nrm = norm(y);
+   for (size_t i = 0; i < n; ++i)
+    eigenvec[i] = y[i] / nrm;
+
+   if (std::fabs(new_lambda - lambda) < cnst_precision_inv) break;
+
+   lambda = new_lambda;
+  }
+
+  return lambda;
+ }
+
+ void hessenberg(std::vector<std::vector<double>> &A) {
+  size_t n = nrows(A);
+
+  for (size_t k = 0; k < n - 2; ++k) {
+   std::vector<double> x(n - k - 1);
+   for (size_t i = k + 1; i < n; ++i)
+    x[i - k - 1] = A[i][k];
+
+   double alpha = norm(x);
+   if (alpha < cnst_precision_inv) continue;
+
+   if (x[0] >= 0) alpha = -alpha;
+   x[0] -= alpha;
+
+   double beta = dot(x, x);
+
+   for (size_t j = k; j < n; ++j) {
+    double s = 0;
+    for (size_t i = 0; i < x.size(); ++i)
+     s += x[i] * A[k + 1 + i][j];
+    s /= beta;
+
+    for (size_t i = 0; i < x.size(); ++i)
+     A[k + 1 + i][j] -= 2 * s * x[i];
+   }
+
+   for (size_t i = 0; i < n; ++i) {
+    double s = 0;
+    for (size_t j = 0; j < x.size(); ++j)
+     s += x[j] * A[i][k + 1 + j];
+    s /= beta;
+
+    for (size_t j = 0; j < x.size(); ++j)
+     A[i][k + 1 + j] -= 2 * s * x[j];
+   }
+  }
+ }
+
+ void qr_decompose(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &Q, std::vector<std::vector<double>> &R) {
+  size_t n = nrows(A);
+  Q = identity(n);
+  R = A;
+
+  for (size_t j = 0; j < n - 1; ++j) {
+   for (size_t i = n - 1; i > j; --i) {
+    double a = R[i - 1][j];
+    double b = R[i][j];
+    if (std::fabs(b) < cnst_precision_inv) continue;
+
+    double r = std::hypot(a, b);
+    double c = a / r;
+    double s = -b / r;
+
+    for (size_t k = j; k < n; ++k) {
+     double t1 = R[i - 1][k];
+     double t2 = R[i][k];
+     R[i - 1][k] = c * t1 - s * t2;
+     R[i][k] = s * t1 + c * t2;
+    }
+
+    for (size_t k = 0; k < n; ++k) {
+     double t1 = Q[k][i - 1];
+     double t2 = Q[k][i];
+     Q[k][i - 1] = c * t1 - s * t2;
+     Q[k][i] = s * t1 + c * t2;
+    }
+   }
+  }
+ }
+ std::vector<double> eigenvalues(std::vector<std::vector<double>> A, int max_iter) {
+  size_t n = nrows(A);
+  hessenberg(A);
+
+  for (int iter = 0; iter < max_iter; ++iter) {
+   bool done = true;
+   for (size_t i = 1; i < n; ++i)
+    if (std::fabs(A[i][i - 1]) > cnst_precision_inv) done = false;
+   if (done) break;
+
+   double d = (A[n - 2][n - 2] - A[n - 1][n - 1]) / 2.0;
+   double mu = A[n - 1][n - 1] - std::copysign(1.0, d) * A[n - 1][n - 2] * A[n - 1][n - 2] / (std::fabs(d) + std::sqrt(d * d + A[n - 1][n - 2] * A[n - 1][n - 2]));
+
+   for (size_t i = 0; i < n; ++i)
+    A[i][i] -= mu;
+
+   std::vector<std::vector<double>> Q, R;
+   qr_decompose(A, Q, R);
+   A = mat_mul(R, Q);
+
+   for (size_t i = 0; i < n; ++i)
+    A[i][i] += mu;
+  }
+
+  std::vector<double> eig(n);
+  for (size_t i = 0; i < n; ++i)
+   eig[i] = A[i][i];
+
+  return eig;
+ }
+ void lu_decompose(std::vector<std::vector<double>> A, std::vector<std::vector<double>> &L, std::vector<std::vector<double>> &U, std::vector<size_t> &P) {
+  size_t n = nrows(A);
+  L = identity(n);
+  U = A;
+  P.resize(n);
+  for (size_t i = 0; i < n; ++i)
+   P[i] = i;
+
+  for (size_t k = 0; k < n; ++k) {
+   size_t pivot = k;
+   double maxv = std::fabs(U[k][k]);
+   for (size_t i = k + 1; i < n; ++i)
+    if (std::fabs(U[i][k]) > maxv) {
+     maxv = std::fabs(U[i][k]);
+     pivot = i;
+    }
+
+   if (maxv < cnst_precision_inv) throw std::runtime_error("Singular std::vector<std::vector<double>>");
+
+   if (pivot != k) {
+    std::swap(U[k], U[pivot]);
+    std::swap(P[k], P[pivot]);
+    for (size_t j = 0; j < k; ++j)
+     std::swap(L[k][j], L[pivot][j]);
+   }
+
+   for (size_t i = k + 1; i < n; ++i) {
+    L[i][k] = U[i][k] / U[k][k];
+    for (size_t j = k; j < n; ++j)
+     U[i][j] -= L[i][k] * U[k][j];
+   }
+  }
+ }
+ std::vector<double> inverse_iteration(const std::vector<std::vector<double>> &A, double lambda) {
+  size_t n = nrows(A);
+  std::vector<std::vector<double>> B = A;
+  for (size_t i = 0; i < n; ++i)
+   B[i][i] -= lambda;
+
+  std::vector<std::vector<double>> L, U;
+  std::vector<size_t> P;
+  lu_decompose(B, L, U, P);
+
+  std::vector<double> x(n, 1.0);
+
+  for (int iter = 0; iter < 100; ++iter) {
+   std::vector<double> y(n);
+   for (size_t i = 0; i < n; ++i)
+    y[i] = x[P[i]];
+
+   for (size_t i = 0; i < n; ++i)
+    for (size_t j = 0; j < i; ++j)
+     y[i] -= L[i][j] * y[j];
+
+   for (int i = n - 1; i >= 0; --i) {
+    for (size_t j = i + 1; j < n; ++j)
+     y[i] -= U[i][j] * x[j];
+    y[i] /= U[i][i];
+   }
+
+   double nrm = norm(y);
+   for (size_t i = 0; i < n; ++i)
+    x[i] = y[i] / nrm;
+  }
+
+  return x;
+ }
+
+ std::vector<double> singular_values(const std::vector<std::vector<double>> &A) {
+  size_t m = A.size();
+  if (m == 0) return {};
+
+  size_t n = A[0].size();
+  if (n == 0) return {};
+
+  // 🔹 1x1 special case
+  if (m == 1 && n == 1) return {std::fabs(A[0][0])};
+
+  // 🔹 一般ケース
+  std::vector<std::vector<double>> U, V;
+  std::vector<double> S;
+
+  svd_jacobi(A, U, S, V);
+
+  return S;
+ }
+ double condition_number(const std::vector<std::vector<double>> &A) {
+  auto sv = singular_values(A);
+  double maxv = *std::max_element(sv.begin(), sv.end());
+  double minv = *std::min_element(sv.begin(), sv.end());
+  return maxv / minv;
+ }
+
+ void bidiagonalize(std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V) {
+  size_t m = nrows(A);
+  size_t n = ncols(A);
+
+  U = identity(m);
+  V = identity(n);
+
+  for (size_t k = 0; k < std::min(m, n); ++k) {
+   // --- 左Householder ---
+   std::vector<double> x(m - k);
+   for (size_t i = k; i < m; ++i)
+    x[i - k] = A[i][k];
+
+   double alpha = norm(x);
+   if (alpha > cnst_precision_inv) {
+    if (x[0] >= 0) alpha = -alpha;
+    x[0] -= alpha;
+
+    double beta = dot(x, x);
+
+    for (size_t j = k; j < n; ++j) {
+     double s = 0;
+     for (size_t i = 0; i < x.size(); ++i)
+      s += x[i] * A[k + i][j];
+     s /= beta;
+     for (size_t i = 0; i < x.size(); ++i)
+      A[k + i][j] -= 2 * s * x[i];
+    }
+
+    for (size_t j = 0; j < m; ++j) {
+     double s = 0;
+     for (size_t i = 0; i < x.size(); ++i)
+      s += x[i] * U[j][k + i];
+     s /= beta;
+     for (size_t i = 0; i < x.size(); ++i)
+      U[j][k + i] -= 2 * s * x[i];
+    }
+   }
+
+   if (k + 1 >= n) continue;
+
+   // --- 右Householder ---
+   std::vector<double> y(n - k - 1);
+   for (size_t j = k + 1; j < n; ++j)
+    y[j - k - 1] = A[k][j];
+
+   alpha = norm(y);
+   if (alpha > cnst_precision_inv) {
+    if (y[0] >= 0) alpha = -alpha;
+    y[0] -= alpha;
+
+    double beta = dot(y, y);
+
+    for (size_t i = k; i < m; ++i) {
+     double s = 0;
+     for (size_t j = 0; j < y.size(); ++j)
+      s += y[j] * A[i][k + 1 + j];
+     s /= beta;
+     for (size_t j = 0; j < y.size(); ++j)
+      A[i][k + 1 + j] -= 2 * s * y[j];
+    }
+
+    for (size_t j = 0; j < n; ++j) {
+     double s = 0;
+     for (size_t i = 0; i < y.size(); ++i)
+      s += y[i] * V[j][k + 1 + i];
+     s /= beta;
+     for (size_t i = 0; i < y.size(); ++i)
+      V[j][k + 1 + i] -= 2 * s * y[i];
+    }
+   }
+  }
+ }
+ void bidiagonal_qr(std::vector<std::vector<double>> &B, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V) {
+  size_t n = ncols(B);
+
+  for (int iter = 0; iter < 1000; ++iter) {
+   bool converged = true;
+   for (size_t i = 1; i < n; ++i)
+    if (std::fabs(B[i][i - 1]) > cnst_precision_inv) converged = false;
+   if (converged) break;
+
+   for (size_t k = 0; k < n - 1; ++k) {
+    double a = B[k][k];
+    double b = B[k][k + 1];
+    double r = std::hypot(a, b);
+    if (r < cnst_precision_inv) continue;
+    double c = a / r, s = -b / r;
+
+    for (size_t j = k; j < n; ++j) {
+     double t1 = B[k][j], t2 = B[k + 1][j];
+     B[k][j] = c * t1 - s * t2;
+     B[k + 1][j] = s * t1 + c * t2;
+    }
+
+    for (size_t j = 0; j < n; ++j) {
+     double t1 = V[j][k], t2 = V[j][k + 1];
+     V[j][k] = c * t1 - s * t2;
+     V[j][k + 1] = s * t1 + c * t2;
+    }
+   }
+  }
+ }
+
+ void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V) {
+  size_t m = A.size();
+  if (m == 0) throw std::runtime_error("empty matrix");
+
+  size_t n = A[0].size();
+  if (n == 0) throw std::runtime_error("empty matrix");
+
+  // ---- 1x1 special case ----
+  if (m == 1 && n == 1) {
+   U = {{1.0}};
+   V = {{1.0}};
+   S = {std::fabs(A[0][0])};
+   return;
+  }
+
+  // ---- m < n の場合は転置 ----
+  bool transposed = false;
+  std::vector<std::vector<double>> B = A;
+
+  if (m < n) {
+   transposed = true;
+   B.assign(n, std::vector<double>(m));
+   for (size_t i = 0; i < m; ++i)
+    for (size_t j = 0; j < n; ++j)
+     B[j][i] = A[i][j];
+   std::swap(m, n);
+  }
+
+  // ---- AtA 計算 ----
+  std::vector<std::vector<double>> AtA(n, std::vector<double>(n, 0.0));
+  for (size_t i = 0; i < n; ++i)
+   for (size_t j = 0; j < n; ++j)
+    for (size_t k = 0; k < m; ++k)
+     AtA[i][j] += B[k][i] * B[k][j];
+
+  // ---- Jacobi 固有値分解 ----
+  V.assign(n, std::vector<double>(n, 0.0));
+  for (size_t i = 0; i < n; ++i)
+   V[i][i] = 1.0;
+
+  const int max_iter = 100;
+  const double eps = 1e-12;
+
+  for (int iter = 0; iter < max_iter; ++iter) {
+   bool converged = true;
+
+   for (size_t p = 0; p < n - 1; ++p) {
+    for (size_t q = p + 1; q < n; ++q) {
+
+     if (std::abs(AtA[p][q]) < eps) continue;
+     converged = false;
+
+     double theta = 0.5 * std::atan2(2.0 * AtA[p][q], AtA[q][q] - AtA[p][p]);
+
+     double c = std::cos(theta);
+     double s = std::sin(theta);
+
+     for (size_t i = 0; i < n; ++i) {
+      double ip = AtA[i][p];
+      double iq = AtA[i][q];
+      AtA[i][p] = c * ip - s * iq;
+      AtA[i][q] = s * ip + c * iq;
+     }
+
+     for (size_t i = 0; i < n; ++i) {
+      double pi = AtA[p][i];
+      double qi = AtA[q][i];
+      AtA[p][i] = c * pi - s * qi;
+      AtA[q][i] = s * pi + c * qi;
+     }
+
+     for (size_t i = 0; i < n; ++i) {
+      double vip = V[i][p];
+      double viq = V[i][q];
+      V[i][p] = c * vip - s * viq;
+      V[i][q] = s * vip + c * viq;
+     }
+    }
+   }
+
+   if (converged) break;
+  }
+
+  // ---- 特異値 ----
+  S.resize(n);
+  for (size_t i = 0; i < n; ++i)
+   S[i] = std::sqrt(std::max(0.0, AtA[i][i]));
+
+  // ---- 降順ソート ----
+  for (size_t i = 0; i < n - 1; ++i) {
+   for (size_t j = i + 1; j < n; ++j) {
+    if (S[i] < S[j]) {
+     std::swap(S[i], S[j]);
+     for (size_t k = 0; k < n; ++k)
+      std::swap(V[k][i], V[k][j]);
+    }
+   }
+  }
+
+  // ---- U = B V Σ^-1 ----
+  U.assign(m, std::vector<double>(n, 0.0));
+
+  for (size_t i = 0; i < n; ++i) {
+   if (S[i] < eps) continue;
+
+   for (size_t r = 0; r < m; ++r)
+    for (size_t c = 0; c < n; ++c)
+     U[r][i] += B[r][c] * V[c][i];
+
+   for (size_t r = 0; r < m; ++r)
+    U[r][i] /= S[i];
+  }
+
+  // ---- 転置して戻す ----
+  if (transposed) {
+   // A = U Σ V^T だったが，元は A^T を分解しているので，U と V を入れ替える
+   std::swap(U, V);
+  }
+ }
+
+ //// svdだけど現状ゴミ
+ // void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V) {
+ //  std::vector<std::vector<double>> B = A;
+ //  bidiagonalize(B, U, V);
+ //  bidiagonal_qr(B, U, V);
+
+ // size_t n = std::min(nrows(B), ncols(B));
+ // S.resize(n);
+
+ // for (size_t i = 0; i < n; ++i)
+ //  S[i] = std::fabs(B[i][i]);
+ //}
 } // namespace mm::cal

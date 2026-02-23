@@ -16,7 +16,7 @@ namespace mm::cal {
  static void registerTrig(SystemConfig &cfg);          // 三角関数
  static void registerHyperbolic(SystemConfig &cfg);    // hyper三角関数
  static void registerGeoVec(SystemConfig &cfg);        // 図形, ベクトル
- static void registerMatrix(SystemConfig &cfg);        // 行列・線形代数
+ static void registerVector(SystemConfig &cfg);        // 行列・線形代数
  static void registerSpecialTrig(SystemConfig &cfg);   // hyper三角関数
  static void registerStatistics(SystemConfig &cfg);    // 統計系
  static void registerComplex(SystemConfig &cfg);       // 複素
@@ -264,21 +264,25 @@ namespace mm::cal {
                            return (double)l;
                           }};
   cfg.functions["sum"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                           double sum = 0.0;
-                           if (v.size() == 1 && v[0].isMulti()) {
-                            // multivalue
-                            const auto &mv = v[0].asMultiRef(ctx.pos);
-                            for (const auto &elem : mv.elems())
-                             sum += elem.asScalar(ctx.pos);
-                            return Value(sum);
-                           } else if (v.size() == 1) { // single value
-                            return v[0];
-                           } else {
-                            // value
-                            for (const auto &elem : v)
-                             sum += elem.asScalar(ctx.pos);
-                            return Value(sum);
+                           double sum_real = 0.0;
+                           double sum_imag = 0.0;
+
+                           for (const auto &arg : v) { // MultiValue 展開
+                            if (arg.isMulti()) {
+                             const auto &mv = arg.asMultiRef(ctx.pos);
+                             for (const auto &elem : mv.elems()) {
+                              auto s = elem.asComplex(ctx.pos);
+                              sum_real += s.real();
+                              sum_imag += s.imag();
+                             }
+                            } else {
+                             auto s = arg.asComplex(ctx.pos);
+                             sum_real += s.real();
+                             sum_imag += s.imag();
+                            }
                            }
+                           if (std::abs(sum_imag) < 1e-12) return Value(sum_real);
+                           return Value(std::complex<double>(sum_real, sum_imag));
                           }};
   cfg.functions["prod"] = {1, -1, [](auto &v, auto &ctx) -> Value {
                             if (v.size() == 1 && v[0].isMulti()) {
@@ -707,14 +711,13 @@ namespace mm::cal {
                                double s = v[0].asScalar(ctx.pos);
                                double z = v[1].asScalar(ctx.pos);
                                if (std::abs(z) >= 1.0) throwDomain(ctx.pos, "polylog: |z| must be < 1");
-                               const double EPS = 1e-14;
                                const int MAXIT = 100000;
                                double sum = 0.0;
                                double term = z;
                                for (int n = 1; n < MAXIT; ++n) {
                                 double add = term / std::pow((double)n, s);
                                 sum += add;
-                                if (std::abs(add) < EPS) break;
+                                if (std::abs(add) < cnst_precision_inv) break;
                                 term *= z;
                                }
                                if (!std::isfinite(sum)) throwOverflow(ctx.pos);
@@ -958,7 +961,7 @@ namespace mm::cal {
                                  b_norm_sq += val * val;
                                 }
 
-                                if (b_norm_sq == 0.0) throw CalcError(CalcErrorType::DomainError, "cannot project onto zero vector", ctx.pos);
+                                if (std::abs(b_norm_sq) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot project onto zero vector", ctx.pos);
 
                                 double scalar = dot_product / b_norm_sq;
 
@@ -1009,42 +1012,71 @@ namespace mm::cal {
   // ベクトルの反射
   cfg.functions["vreflect"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                                 if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vreflect requires two multivalue arguments", ctx.pos);
+
                                 const auto &a = v[0].asMultiRef(ctx.pos);
                                 const auto &n = v[1].asMultiRef(ctx.pos);
 
                                 if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
 
-                                // 法線ベクトルを正規化
-                                double norm_n = 0.0;
-                                for (size_t i = 0; i < n.size(); ++i) {
-                                 double val = n[i].asScalar(ctx.pos);
-                                 norm_n += val * val;
-                                }
-                                norm_n = std::sqrt(norm_n);
+                                double dot = 0.0;
+                                double nn = 0.0;
 
-                                if (norm_n == 0.0) throw CalcError(CalcErrorType::DomainError, "cannot reflect with zero normal vector", ctx.pos);
-
-                                auto normalized_n = std::make_shared<MultiValue>();
-                                normalized_n->elems_.reserve(n.size());
-                                for (size_t i = 0; i < n.size(); ++i) {
-                                 normalized_n->elems_.push_back(Value(n[i].asScalar(ctx.pos) / norm_n));
-                                }
-
-                                // 内積計算
-                                double dot_product = 0.0;
                                 for (size_t i = 0; i < a.size(); ++i) {
-                                 dot_product += a[i].asScalar(ctx.pos) * normalized_n->elems_[i].asScalar(ctx.pos);
+                                 double ai = a[i].asScalar(ctx.pos);
+                                 double ni = n[i].asScalar(ctx.pos);
+                                 dot += ai * ni;
+                                 nn += ni * ni;
                                 }
 
-                                // 反射ベクトル計算: R = I - 2 * (I·N) * N
+                                if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot reflect with zero normal vector", ctx.pos);
+
+                                double factor = 2.0 * dot / nn;
+
                                 auto result = std::make_shared<MultiValue>();
                                 result->elems_.reserve(a.size());
+
                                 for (size_t i = 0; i < a.size(); ++i) {
-                                 double reflection = a[i].asScalar(ctx.pos) - 2.0 * dot_product * normalized_n->elems_[i].asScalar(ctx.pos);
-                                 result->elems_.push_back(Value(reflection));
+                                 double ai = a[i].asScalar(ctx.pos);
+                                 double ni = n[i].asScalar(ctx.pos);
+                                 result->elems_.push_back(Value(ai - factor * ni));
                                 }
+
                                 return Value(result);
                                }};
+  // 軸対称反射
+  cfg.functions["vreflect_axis"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                     if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "vreflect_axis requires two multivalue arguments", ctx.pos);
+
+                                     const auto &a = v[0].asMultiRef(ctx.pos);
+                                     const auto &n = v[1].asMultiRef(ctx.pos);
+
+                                     if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+
+                                     double dot = 0.0;
+                                     double nn = 0.0;
+
+                                     for (size_t i = 0; i < a.size(); ++i) {
+                                      double ai = a[i].asScalar(ctx.pos);
+                                      double ni = n[i].asScalar(ctx.pos);
+                                      dot += ai * ni;
+                                      nn += ni * ni;
+                                     }
+
+                                     if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot reflect with zero axis vector", ctx.pos);
+
+                                     double factor = 2.0 * dot / nn;
+
+                                     auto result = std::make_shared<MultiValue>();
+                                     result->elems_.reserve(a.size());
+
+                                     for (size_t i = 0; i < a.size(); ++i) {
+                                      double ai = a[i].asScalar(ctx.pos);
+                                      double ni = n[i].asScalar(ctx.pos);
+                                      result->elems_.push_back(Value(factor * ni - ai));
+                                     }
+
+                                     return Value(result);
+                                    }};
 
   cfg.functions["vlength"] = cfg.functions["vnorm"];
   cfg.functions["vdistance"] = cfg.functions["veuclidean"];
@@ -1317,10 +1349,20 @@ namespace mm::cal {
                                }};
  }
 
- void registerMatrix(SystemConfig &cfg) {
+ void registerVector(SystemConfig &cfg) {
   // 任意サイズ行列の作成
   cfg.functions["matrix"] = {0, -1, [](auto &v, auto &ctx) -> Value {
                               if (v.empty()) throw CalcError(CalcErrorType::TypeError, "matrix requires at least one row", ctx.pos);
+
+                              // 1引数で既に2Dならそのまま返す
+                              if (v.size() == 1 && v[0].isMulti()) {
+
+                               const auto &first = v[0].asMultiRef(ctx.pos);
+
+                               if (!first.empty() && first[0].isMulti()) {
+                                return v[0]; // すでに2D
+                               }
+                              }
 
                               size_t rows = v.size();
                               size_t cols = v[0].asMultiRef(ctx.pos).size();
@@ -1329,11 +1371,14 @@ namespace mm::cal {
                               result->elems_.reserve(rows);
 
                               for (size_t i = 0; i < rows; ++i) {
+
                                const auto &row = v[i].asMultiRef(ctx.pos);
-                               if (row.size() != cols) { throw CalcError(CalcErrorType::DomainError, "all rows must have the same number of columns", ctx.pos); }
-                               auto row_copy = std::make_shared<MultiValue>(row);
-                               result->elems_.push_back(Value(row_copy));
+
+                               if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "all rows must have the same number of columns", ctx.pos);
+
+                               result->elems_.push_back(v[i]);
                               }
+
                               return Value(result);
                              }};
 
@@ -1610,204 +1655,94 @@ namespace mm::cal {
   // 行列のLU分解
   cfg.functions["mlu"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mlu requires matrix argument", ctx.pos);
-                           const auto &matrix = v[0].asMultiRef(ctx.pos);
 
-                           size_t rows = matrix.size();
-                           size_t cols = matrix[0].asMultiRef(ctx.pos).size();
+                           const auto &M = v[0].asMultiRef(ctx.pos);
 
-                           if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "LU decomposition requires square matrix", ctx.pos); }
+                           size_t n = M.size();
+                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "empty matrix", ctx.pos);
 
-                           // LU分解の実装
-                           std::vector<std::vector<double>> temp(rows, std::vector<double>(cols));
-                           for (size_t i = 0; i < rows; ++i) {
-                            for (size_t j = 0; j < cols; ++j) {
-                             temp[i][j] = matrix[i].asMultiRef(ctx.pos)[j].asScalar(ctx.pos);
+                           size_t m = M[0].asMultiRef(ctx.pos).size();
+
+                           if (n != m) throw CalcError(CalcErrorType::DomainError, "LU requires square matrix", ctx.pos);
+
+                           std::vector<std::vector<double>> A(n, std::vector<double>(n));
+                           for (size_t i = 0; i < n; ++i) {
+                            const auto &row = M[i].asMultiRef(ctx.pos);
+                            if (row.size() != n) throw CalcError(CalcErrorType::DomainError, "irregular matrix", ctx.pos);
+
+                            for (size_t j = 0; j < n; ++j)
+                             A[i][j] = row[j].asScalar(ctx.pos);
+                           }
+
+                           // L と U
+                           std::vector<std::vector<double>> L(n, std::vector<double>(n, 0.0));
+                           std::vector<std::vector<double>> U(n, std::vector<double>(n, 0.0));
+
+                           for (size_t i = 0; i < n; ++i) {
+                            // --- U 計算 ---
+                            for (size_t j = i; j < n; ++j) {
+                             double sum = 0.0;
+                             for (size_t k = 0; k < i; ++k)
+                              sum += L[i][k] * U[k][j];
+
+                             U[i][j] = A[i][j] - sum;
+                            }
+
+                            if (std::fabs(U[i][i]) < 1e-14) throw CalcError(CalcErrorType::DomainError, "singular matrix in LU", ctx.pos);
+
+                            // --- L 計算 ---
+                            L[i][i] = 1.0;
+
+                            for (size_t j = i + 1; j < n; ++j) {
+                             double sum = 0.0;
+                             for (size_t k = 0; k < i; ++k)
+                              sum += L[j][k] * U[k][i];
+
+                             L[j][i] = (A[j][i] - sum) / U[i][i];
                             }
                            }
 
-                           auto l = std::make_shared<MultiValue>();
-                           auto u = std::make_shared<MultiValue>();
-                           l->elems_.reserve(rows);
-                           u->elems_.reserve(rows);
+                           // MultiValue化
+                           auto l_mv = std::make_shared<MultiValue>();
+                           auto u_mv = std::make_shared<MultiValue>();
 
-                           // L行列とU行列の初期化
-                           for (size_t i = 0; i < rows; ++i) {
+                           for (size_t i = 0; i < n; ++i) {
                             auto l_row = std::make_shared<MultiValue>();
                             auto u_row = std::make_shared<MultiValue>();
-                            l_row->elems_.reserve(cols);
-                            u_row->elems_.reserve(cols);
 
-                            for (size_t j = 0; j < cols; ++j) {
-                             if (i == j) {
-                              l_row->elems_.push_back(Value(1.0));
-                              u_row->elems_.push_back(Value(temp[i][j]));
-                             } else if (i < j) {
-                              l_row->elems_.push_back(Value(0.0));
-                              u_row->elems_.push_back(Value(temp[i][j]));
-                             } else {
-                              l_row->elems_.push_back(Value(temp[i][j]));
-                              u_row->elems_.push_back(Value(0.0));
-                             }
+                            for (size_t j = 0; j < n; ++j) {
+                             l_row->elems_.emplace_back(L[i][j]);
+                             u_row->elems_.emplace_back(U[i][j]);
                             }
-                            l->elems_.push_back(Value(l_row));
-                            u->elems_.push_back(Value(u_row));
+
+                            l_mv->elems_.emplace_back(Value(l_row));
+                            u_mv->elems_.emplace_back(Value(u_row));
                            }
 
                            auto result = std::make_shared<MultiValue>();
-                           result->elems_.reserve(2);
-                           result->elems_.push_back(Value(l));
-                           result->elems_.push_back(Value(u));
+                           result->elems_.emplace_back(Value(l_mv));
+                           result->elems_.emplace_back(Value(u_mv));
+
                            return Value(result);
                           }};
 
   // 行列の固有値
   cfg.functions["meigenvals"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                                  if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "meigenvals requires matrix argument", ctx.pos);
-
-                                  const auto &matrix = v[0].asMultiRef(ctx.pos);
-
-                                  // 行列の次元確認
-                                  if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
-
-                                  size_t n = matrix.size(); // 行列の次元
-
-                                  // 正方行列でない場合はエラー
-                                  for (size_t i = 0; i < n; ++i) {
-                                   if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix must be square", ctx.pos);
+                                  std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
+                                  if (A.size() == 1) {
+                                   auto result = std::make_shared<MultiValue>();
+                                   result->elems_.emplace_back(A[0][0]);
+                                   return Value(result);
                                   }
 
-                                  // 行列のコピーを作成（元の行列を変更しない）
-                                  std::vector<std::vector<double>> A(n, std::vector<double>(n));
-                                  for (size_t i = 0; i < n; ++i) {
-                                   const auto &row = matrix[i].asMultiRef(ctx.pos);
-                                   for (size_t j = 0; j < n; ++j) {
-                                    A[i][j] = row[j].asScalar(ctx.pos);
-                                   }
-                                  }
+                                  auto eig = eigenvalues(A);
 
-                                  // 固有値を求める（QR反復法）
-                                  std::vector<double> eigenvals(n);
-
-                                  // QR反復法の実装
-                                  const int max_iterations = 1000;
-                                  const double epsilon = 1e-12;
-
-                                  for (int iter = 0; iter < max_iterations; ++iter) {
-                                   bool converged = true;
-
-                                   // QR分解を計算
-                                   std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
-                                   std::vector<std::vector<double>> R = A;
-
-                                   // 単位行列で初期化
-                                   for (size_t i = 0; i < n; ++i) {
-                                    Q[i][i] = 1.0;
-                                   }
-
-                                   // ガウス・ホルツ変換でQR分解
-                                   for (size_t k = 0; k < n - 1; ++k) {
-                                    // ベクトルv = R[k:n][k] を取得
-                                    std::vector<double> v(n - k);
-                                    for (size_t i = 0; i < n - k; ++i) {
-                                     v[i] = R[k + i][k];
-                                    }
-
-                                    // ノルムを計算
-                                    double norm = 0.0;
-                                    for (double val : v) {
-                                     norm += val * val;
-                                    }
-                                    norm = std::sqrt(norm);
-
-                                    if (norm < epsilon) continue;
-
-                                    // 通常の符号を持つ値を選択
-                                    double sign = (v[0] >= 0) ? 1.0 : -1.0;
-                                    double alpha = -sign * norm;
-
-                                    // w = v + alpha * e_1
-                                    std::vector<double> w(v);
-                                    w[0] += alpha;
-
-                                    // ノルムを正規化
-                                    double w_norm = 0.0;
-                                    for (double val : w) {
-                                     w_norm += val * val;
-                                    }
-                                    w_norm = std::sqrt(w_norm);
-
-                                    if (w_norm < epsilon) continue;
-
-                                    // ハウスホルダー変換の計算
-                                    std::vector<double> u(w);
-                                    for (double &val : u) {
-                                     val /= w_norm;
-                                    }
-
-                                    // H = I - 2 * u * u^T を計算
-                                    std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
-                                    for (size_t i = 0; i < n; ++i) {
-                                     H[i][i] = 1.0;
-                                    }
-                                    for (size_t i = 0; i < n - k; ++i) {
-                                     for (size_t j = 0; j < n - k; ++j) {
-                                      H[k + i][k + j] -= 2.0 * u[i] * u[j];
-                                     }
-                                    }
-
-                                    // 行列の積を計算
-                                    std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
-                                    for (size_t i = 0; i < n; ++i) {
-                                     for (size_t j = 0; j < n; ++j) {
-                                      double sum = 0.0;
-                                      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-                                       sum += H[i][k_idx] * R[k_idx][j];
-                                      }
-                                      temp_R[i][j] = sum;
-                                     }
-                                    }
-                                    R = temp_R;
-
-                                    // Q = Q * H^T
-                                    std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
-                                    for (size_t i = 0; i < n; ++i) {
-                                     for (size_t j = 0; j < n; ++j) {
-                                      double sum = 0.0;
-                                      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-                                       sum += Q[i][k_idx] * H[j][k_idx];
-                                      }
-                                      temp_Q[i][j] = sum;
-                                     }
-                                    }
-                                    Q = temp_Q;
-                                   }
-
-                                   // 収束判定
-                                   for (size_t i = 0; i < n - 1; ++i) {
-                                    if (std::abs(R[i][i + 1]) > epsilon) {
-                                     converged = false;
-                                     break;
-                                    }
-                                   }
-
-                                   if (converged) {
-                                    // 固有値を対角成分から取得
-                                    for (size_t i = 0; i < n; ++i) {
-                                     eigenvals[i] = R[i][i];
-                                    }
-                                    break;
-                                   }
-                                  }
-
-                                  // 結果の構築
                                   auto result = std::make_shared<MultiValue>();
-                                  result->elems_.reserve(n);
+                                  result->elems_.reserve(eig.size());
 
-                                  // 実数固有値のみを返す（複素数は実数部のみ）
-                                  for (double val : eigenvals) {
-                                   result->elems_.push_back(Value(val));
-                                  }
-
+                                  for (double lamba : eig)
+                                   result->elems_.emplace_back(lamba);
+                                  std::sort(eig.begin(), eig.end(), std::greater<double>());
                                   return Value(result);
                                  }};
 
@@ -1818,13 +1753,13 @@ namespace mm::cal {
                                   const auto &matrix = v[0].asMultiRef(ctx.pos);
 
                                   // 行列の次元確認
-                                  if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                                  if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> is empty", ctx.pos);
 
                                   size_t n = matrix.size(); // 行列の次元
 
                                   // 正方行列でない場合はエラー
                                   for (size_t i = 0; i < n; ++i) {
-                                   if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix must be square", ctx.pos);
+                                   if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> must be square", ctx.pos);
                                   }
 
                                   // 行列のコピーを作成（元の行列を変更しない）
@@ -2096,7 +2031,7 @@ namespace mm::cal {
                            const auto &matrix = v[0].asMultiRef(ctx.pos);
 
                            // 行列の次元確認
-                           if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                           if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> is empty", ctx.pos);
 
                            size_t m = matrix.size();    // 行数
                            size_t n = matrix[0].size(); // 列数
@@ -2104,7 +2039,7 @@ namespace mm::cal {
                            // 行列のコピーを作成（元の行列を変更しない）
                            std::vector<std::vector<double>> A(m, std::vector<double>(n));
                            for (size_t i = 0; i < m; ++i) {
-                            if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix has inconsistent row lengths", ctx.pos);
+                            if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> has inconsistent row lengths", ctx.pos);
                             const auto &row = matrix[i].asMultiRef(ctx.pos);
                             for (size_t j = 0; j < n; ++j) {
                              A[i][j] = row[j].asScalar(ctx.pos);
@@ -2137,7 +2072,8 @@ namespace mm::cal {
 
                             // 通常の符号を持つ値を選択
                             double sign = (v[0] >= 0) ? 1.0 : -1.0;
-                            double alpha = -sign * norm;
+                            /*double alpha = -sign * norm;*/
+                            double alpha = (v[0] >= 0) ? -norm : norm;
 
                             // w = v + alpha * e_1
                             std::vector<double> w(v);
@@ -2234,252 +2170,152 @@ namespace mm::cal {
                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "msvd requires matrix argument", ctx.pos);
 
                             const auto &matrix = v[0].asMultiRef(ctx.pos);
+                            if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "matrix is empty", ctx.pos);
 
-                            // 行列の次元確認
-                            if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                            size_t m = matrix.size();
+                            size_t n = matrix[0].asMultiRef(ctx.pos).size();
 
-                            size_t m = matrix.size();    // 行数
-                            size_t n = matrix[0].size(); // 列数
+                            if (m < n) throw CalcError(CalcErrorType::InvalidOperation, "msvd currently requires m >= n", ctx.pos);
 
-                            // 行列のコピーを作成（元の行列を変更しない）
+                            // --- A を double に変換 ---
                             std::vector<std::vector<double>> A(m, std::vector<double>(n));
                             for (size_t i = 0; i < m; ++i) {
-                             if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix has inconsistent row lengths", ctx.pos);
                              const auto &row = matrix[i].asMultiRef(ctx.pos);
-                             for (size_t j = 0; j < n; ++j) {
+                             if (row.size() != n) throw CalcError(CalcErrorType::InvalidOperation, "inconsistent row size", ctx.pos);
+                             for (size_t j = 0; j < n; ++j)
                               A[i][j] = row[j].asScalar(ctx.pos);
-                             }
                             }
 
-                            // SVDの実装（Jacobi法）
-                            std::vector<std::vector<double>> U(m, std::vector<double>(m, 0.0));
+                            // --- AtA 計算 ---
+                            std::vector<std::vector<double>> AtA(n, std::vector<double>(n, 0.0));
+                            for (size_t i = 0; i < n; ++i)
+                             for (size_t j = 0; j < n; ++j)
+                              for (size_t k = 0; k < m; ++k)
+                               AtA[i][j] += A[k][i] * A[k][j];
+
+                            // --- Jacobi 固有値分解（対称行列）---
                             std::vector<std::vector<double>> V(n, std::vector<double>(n, 0.0));
-                            std::vector<double> singular_values(std::min(m, n), 0.0);
-
-                            // 単位行列で初期化
-                            for (size_t i = 0; i < m; ++i) {
-                             U[i][i] = 1.0;
-                            }
-                            for (size_t i = 0; i < n; ++i) {
+                            for (size_t i = 0; i < n; ++i)
                              V[i][i] = 1.0;
-                            }
 
-                            // Jacobi法によるSVD計算
-                            const int max_iterations = 1000;
-                            const double epsilon = 1e-12;
+                            const int max_iter = 100;
+                            const double eps = 1e-12;
 
-                            // A^T * A を計算（または A * A^T）
-                            std::vector<std::vector<double>> AtA;
-                            if (m >= n) {
-                             AtA = std::vector<std::vector<double>>(n, std::vector<double>(n, 0.0));
-                             for (size_t i = 0; i < n; ++i) {
-                              for (size_t j = 0; j < n; ++j) {
-                               double sum = 0.0;
-                               for (size_t k = 0; k < m; ++k) {
-                                sum += A[k][i] * A[k][j];
-                               }
-                               AtA[i][j] = sum;
-                              }
-                             }
-                            } else {
-                             std::vector<std::vector<double>> AA = std::vector<std::vector<double>>(m, std::vector<double>(m, 0.0));
-                             for (size_t i = 0; i < m; ++i) {
-                              for (size_t j = 0; j < m; ++j) {
-                               double sum = 0.0;
-                               for (size_t k = 0; k < n; ++k) {
-                                sum += A[i][k] * A[j][k];
-                               }
-                               AA[i][j] = sum;
-                              }
-                             }
-                             AtA = AA;
-                            }
-
-                            // Jacobi法による固有値/固有ベクトル計算
-                            std::vector<std::vector<double>> B = AtA;
-                            std::vector<std::vector<double>> Vt = V; // V^Tの保存
-
-                            for (int iter = 0; iter < max_iterations; ++iter) {
+                            for (int iter = 0; iter < max_iter; ++iter) {
                              bool converged = true;
-                             for (size_t p = 0; p < std::min(m, n) - 1; ++p) {
-                              for (size_t q = p + 1; q < std::min(m, n); ++q) {
-                               if (std::abs(B[p][q]) > epsilon) {
-                                converged = false;
+                             for (size_t p = 0; p < n - 1; ++p) {
+                              for (size_t q = p + 1; q < n; ++q) {
 
-                                // Jacobi回転の計算
-                                double theta = 0.5 * std::atan2(2.0 * B[p][q], B[q][q] - B[p][p]);
-                                double c = std::cos(theta);
-                                double s = std::sin(theta);
+                               if (std::abs(AtA[p][q]) < eps) continue;
 
-                                // 回転行列の適用
-                                for (size_t i = 0; i < std::min(m, n); ++i) {
-                                 if (i != p && i != q) {
-                                  double temp1 = B[i][p];
-                                  double temp2 = B[i][q];
-                                  B[i][p] = c * temp1 - s * temp2;
-                                  B[i][q] = s * temp1 + c * temp2;
-                                 }
-                                }
+                               converged = false;
 
-                                for (size_t i = 0; i < std::min(m, n); ++i) {
-                                 double temp1 = B[p][i];
-                                 double temp2 = B[q][i];
-                                 B[p][i] = c * temp1 - s * temp2;
-                                 B[q][i] = s * temp1 + c * temp2;
-                                }
+                               double theta = 0.5 * std::atan2(2.0 * AtA[p][q], AtA[q][q] - AtA[p][p]);
 
-                                // V^Tの更新
-                                for (size_t i = 0; i < n; ++i) {
-                                 double temp1 = Vt[i][p];
-                                 double temp2 = Vt[i][q];
-                                 Vt[i][p] = c * temp1 - s * temp2;
-                                 Vt[i][q] = s * temp1 + c * temp2;
-                                }
+                               double c = std::cos(theta);
+                               double s = std::sin(theta);
+
+                               for (size_t i = 0; i < n; ++i) {
+                                double ip = AtA[i][p];
+                                double iq = AtA[i][q];
+                                AtA[i][p] = c * ip - s * iq;
+                                AtA[i][q] = s * ip + c * iq;
+                               }
+
+                               for (size_t i = 0; i < n; ++i) {
+                                double pi = AtA[p][i];
+                                double qi = AtA[q][i];
+                                AtA[p][i] = c * pi - s * qi;
+                                AtA[q][i] = s * pi + c * qi;
+                               }
+
+                               for (size_t i = 0; i < n; ++i) {
+                                double vip = V[i][p];
+                                double viq = V[i][q];
+                                V[i][p] = c * vip - s * viq;
+                                V[i][q] = s * vip + c * viq;
                                }
                               }
                              }
-
                              if (converged) break;
                             }
 
-                            // 特異値の計算
-                            for (size_t i = 0; i < std::min(m, n); ++i) {
-                             singular_values[i] = std::sqrt(std::abs(B[i][i]));
+                            // --- 特異値 ---
+                            std::vector<double> sigma(n);
+                            for (size_t i = 0; i < n; ++i)
+                             sigma[i] = std::sqrt(std::max(0.0, AtA[i][i]));
+
+                            // --- 降順ソート ---
+                            for (size_t i = 0; i < n - 1; ++i) {
+                             for (size_t j = i + 1; j < n; ++j) {
+                              if (sigma[i] < sigma[j]) {
+                               std::swap(sigma[i], sigma[j]);
+                               for (size_t k = 0; k < n; ++k)
+                                std::swap(V[k][i], V[k][j]);
+                              }
+                             }
                             }
 
-                            // Uの計算（A * V * S^(-1)）
-                            std::vector<std::vector<double>> U_final(m, std::vector<double>(m, 0.0));
-                            for (size_t i = 0; i < m; ++i) {
-                             U_final[i][i] = 1.0;
+                            // --- U = A V Σ^-1 ---
+                            std::vector<std::vector<double>> U(m, std::vector<double>(n, 0.0));
+
+                            for (size_t i = 0; i < n; ++i) {
+                             if (sigma[i] < eps) continue;
+
+                             for (size_t r = 0; r < m; ++r)
+                              for (size_t c = 0; c < n; ++c)
+                               U[r][i] += A[r][c] * V[c][i];
+
+                             for (size_t r = 0; r < m; ++r)
+                              U[r][i] /= sigma[i];
                             }
 
-                            // 特異値がゼロの場合の処理
-                            std::vector<double> inv_s(std::min(m, n), 0.0);
-                            for (size_t i = 0; i < std::min(m, n); ++i) {
-                             if (singular_values[i] > epsilon) { inv_s[i] = 1.0 / singular_values[i]; }
-                            }
-
-                            // 最終的なSVD結果の構築
+                            // --- MultiValue構築 ---
                             auto result = std::make_shared<MultiValue>();
 
-                            // U行列の構築
-                            auto u_matrix = std::make_shared<MultiValue>();
-                            u_matrix->elems_.reserve(m);
+                            // U
+                            auto u_mat = std::make_shared<MultiValue>();
                             for (size_t i = 0; i < m; ++i) {
                              auto row = std::make_shared<MultiValue>();
-                             row->elems_.reserve(m);
-                             for (size_t j = 0; j < m; ++j) {
-                              row->elems_.push_back(Value(U_final[i][j]));
-                             }
-                             u_matrix->elems_.push_back(Value(row));
+                             for (size_t j = 0; j < n; ++j)
+                              row->elems_.push_back(Value(U[i][j]));
+                             u_mat->elems_.push_back(Value(row));
                             }
-                            result->elems_.push_back(Value(u_matrix));
+                            result->elems_.push_back(Value(u_mat));
 
-                            // 特異値ベクトルの構築
-                            auto s_vector = std::make_shared<MultiValue>();
-                            s_vector->elems_.reserve(std::min(m, n));
-                            for (size_t i = 0; i < std::min(m, n); ++i) {
-                             s_vector->elems_.push_back(Value(singular_values[i]));
-                            }
-                            result->elems_.push_back(Value(s_vector));
+                            // Σ
+                            auto s_vec = std::make_shared<MultiValue>();
+                            for (double s : sigma)
+                             s_vec->elems_.push_back(Value(s));
+                            result->elems_.push_back(Value(s_vec));
 
-                            // V^T行列の構築
-                            auto vt_matrix = std::make_shared<MultiValue>();
-                            vt_matrix->elems_.reserve(n);
+                            // V^T
+                            auto vt_mat = std::make_shared<MultiValue>();
                             for (size_t i = 0; i < n; ++i) {
                              auto row = std::make_shared<MultiValue>();
-                             row->elems_.reserve(n);
-                             for (size_t j = 0; j < n; ++j) {
-                              row->elems_.push_back(Value(Vt[i][j]));
-                             }
-                             vt_matrix->elems_.push_back(Value(row));
+                             for (size_t j = 0; j < n; ++j)
+                              row->elems_.push_back(Value(V[j][i]));
+                             vt_mat->elems_.push_back(Value(row));
                             }
-                            result->elems_.push_back(Value(vt_matrix));
+                            result->elems_.push_back(Value(vt_mat));
 
                             return Value(result);
                            }};
 
   // 行列の軌道（行列式の絶対値）
   cfg.functions["mcond"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mcond requires matrix argument", ctx.pos);
+                             auto A = toMatrix(v[0], ctx);
 
-                             const auto &matrix = v[0].asMultiRef(ctx.pos);
+                             auto S = singular_values(A);
 
-                             // 行列の次元確認
-                             if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                             if (S.empty()) throw CalcError(CalcErrorType::DomainError, "matrix is empty", ctx.pos);
 
-                             size_t n = matrix.size(); // 行列の次元
+                             double smax = *std::max_element(S.begin(), S.end());
+                             double smin = *std::min_element(S.begin(), S.end());
 
-                             // 正方行列でない場合はエラー
-                             for (size_t i = 0; i < n; ++i) {
-                              if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix must be square", ctx.pos);
-                             }
+                             if (smin == 0.0) return Value(std::numeric_limits<double>::infinity());
 
-                             // 行列のコピーを作成（元の行列を変更しない）
-                             std::vector<std::vector<double>> A(n, std::vector<double>(n));
-                             for (size_t i = 0; i < n; ++i) {
-                              const auto &row = matrix[i].asMultiRef(ctx.pos);
-                              for (size_t j = 0; j < n; ++j) {
-                               A[i][j] = row[j].asScalar(ctx.pos);
-                              }
-                             }
-
-                             // 行列式を計算（LU分解を用いる）
-                             // 行列式 = det(L) * det(U) * (-1)^(交換回数)
-                             double det = 1.0;
-                             int sign = 1; // 行の交換回数の偶奇
-
-                             // LU分解の実装（Doolittle法）
-                             std::vector<std::vector<double>> LU = A;
-                             std::vector<int> pivot(n);
-
-                             // ピボット配列の初期化
-                             for (size_t i = 0; i < n; ++i) {
-                              pivot[i] = static_cast<int>(i);
-                             }
-
-                             for (size_t k = 0; k < n; ++k) {
-                              // ピボット選択
-                              size_t max_row = k;
-                              double max_val = std::abs(LU[k][k]);
-                              for (size_t i = k + 1; i < n; ++i) {
-                               if (std::abs(LU[i][k]) > max_val) {
-                                max_val = std::abs(LU[i][k]);
-                                max_row = i;
-                               }
-                              }
-
-                              // 偶数回の行交換なら符号を反転
-                              if (max_row != k) {
-                               std::swap(LU[k], LU[max_row]);
-                               std::swap(pivot[k], pivot[max_row]);
-                               sign = -sign;
-                              }
-
-                              // 数値誤差対応
-                              if (std::abs(LU[k][k]) < 1e-12) {
-                               return Value(0.0); // 奇跡的なゼロ行列
-                              }
-
-                              // LU分解の計算
-                              for (size_t i = k + 1; i < n; ++i) {
-                               LU[i][k] /= LU[k][k];
-                               for (size_t j = k + 1; j < n; ++j) {
-                                LU[i][j] -= LU[i][k] * LU[k][j];
-                               }
-                              }
-                             }
-
-                             // 行列式の計算
-                             for (size_t i = 0; i < n; ++i) {
-                              det *= LU[i][i];
-                             }
-
-                             // 符号の考慮
-                             det *= sign;
-
-                             // 絶対値を返す
-                             return Value(std::abs(det));
+                             return Value(smax / smin);
                             }};
 
   // 行列の条件数
@@ -2489,7 +2325,7 @@ namespace mm::cal {
                                   const auto &matrix = v[0].asMultiRef(ctx.pos);
 
                                   // 行列の次元確認
-                                  if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                                  if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> is empty", ctx.pos);
 
                                   size_t m = matrix.size();    // 行数
                                   size_t n = matrix[0].size(); // 列数
@@ -2497,7 +2333,7 @@ namespace mm::cal {
                                   // 行列のコピーを作成（元の行列を変更しない）
                                   std::vector<std::vector<double>> A(m, std::vector<double>(n));
                                   for (size_t i = 0; i < m; ++i) {
-                                   if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix has inconsistent row lengths", ctx.pos);
+                                   if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> has inconsistent row lengths", ctx.pos);
                                    const auto &row = matrix[i].asMultiRef(ctx.pos);
                                    for (size_t j = 0; j < n; ++j) {
                                     A[i][j] = row[j].asScalar(ctx.pos);
@@ -2556,179 +2392,133 @@ namespace mm::cal {
                                   return Value(max_sv / min_sv);
                                  }};
 
-  // 行列の最小二乗法解(QR分解だよ，SVDは無理ゲ)
+  // 行列の最小二乗法解(LU分解だよ，SVDやQRは無理ゲ)
+  // cfg.functions["mlsqr"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+  //                           if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "mlsqr requires matrix and vector arguments", ctx.pos);
+
+  //                           const auto &matrix_A = v[0].asMultiRef(ctx.pos);
+  //                           const auto &vector_b = v[1].asMultiRef(ctx.pos);
+
+  //                           if (matrix_A.empty()) throw CalcError(CalcErrorType::InvalidOperation, "matrix A is empty", ctx.pos);
+
+  //                           size_t m = matrix_A.size();
+  //                           size_t n = matrix_A[0].asMultiRef(ctx.pos).size();
+
+  //                           if (vector_b.size() != m) throw CalcError(CalcErrorType::InvalidOperation, "A and b dimension mismatch", ctx.pos);
+
+  //                           // --- A, b を double に変換 ---
+  //                           std::vector<std::vector<double>> A(m, std::vector<double>(n));
+  //                           for (size_t i = 0; i < m; ++i) {
+  //                            const auto &row = matrix_A[i].asMultiRef(ctx.pos);
+  //                            for (size_t j = 0; j < n; ++j)
+  //                             A[i][j] = row[j].asScalar(ctx.pos);
+  //                           }
+
+  //                           std::vector<double> b(m);
+  //                           for (size_t i = 0; i < m; ++i)
+  //                            b[i] = vector_b[i].asScalar(ctx.pos);
+
+  //                           // --- A^T A ---
+  //                           std::vector<std::vector<double>> ATA(n, std::vector<double>(n, 0.0));
+  //                           for (size_t i = 0; i < n; ++i)
+  //                            for (size_t j = 0; j < n; ++j)
+  //                             for (size_t k = 0; k < m; ++k)
+  //                              ATA[i][j] += A[k][i] * A[k][j];
+
+  //                           // --- A^T b ---
+  //                           std::vector<double> ATb(n, 0.0);
+  //                           for (size_t i = 0; i < n; ++i)
+  //                            for (size_t k = 0; k < m; ++k)
+  //                             ATb[i] += A[k][i] * b[k];
+
+  //                           // --- LU分解 ---
+  //                           std::vector<std::vector<double>> L, U;
+  //                           std::vector<size_t> P;
+  //                           lu_decompose(ATA, L, U, P);
+
+  //                           // --- 前進代入 Ly = ATb ---
+  //                           std::vector<double> y(n);
+  //                           for (size_t i = 0; i < n; ++i) {
+  //                            y[i] = ATb[P[i]];
+  //                            for (size_t j = 0; j < i; ++j)
+  //                             y[i] -= L[i][j] * y[j];
+  //                           }
+
+  //                           // --- 後退代入 Ux = y ---
+  //                           std::vector<double> x(n);
+  //                           for (int i = (int)n - 1; i >= 0; --i) {
+  //                            x[i] = y[i];
+  //                            for (size_t j = i + 1; j < n; ++j)
+  //                             x[i] -= U[i][j] * x[j];
+
+  //                            if (std::abs(U[i][i]) < 1e-12) throw CalcError(CalcErrorType::InvalidOperation, "matrix is singular", ctx.pos);
+
+  //                            x[i] /= U[i][i];
+  //                           }
+
+  //                           auto result = std::make_shared<MultiValue>();
+  //                           result->elems_.reserve(n);
+  //                           for (double val : x)
+  //                            result->elems_.push_back(Value(val));
+
+  //                           return Value(result);
+  //                          }};
+
   cfg.functions["mlsqr"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                              if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "mlsqr requires matrix and vector arguments", ctx.pos);
 
                              const auto &matrix_A = v[0].asMultiRef(ctx.pos);
                              const auto &vector_b = v[1].asMultiRef(ctx.pos);
 
-                             // 次元の確認
-                             if (matrix_A.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix A is empty", ctx.pos);
-                             size_t m = matrix_A.size();    // 行数
-                             size_t n = matrix_A[0].size(); // 列数
+                             if (matrix_A.empty()) throw CalcError(CalcErrorType::InvalidOperation, "matrix A is empty", ctx.pos);
 
-                             if (vector_b.size() != m) throw CalcError(CalcErrorType::InvalidOperation, "Matrix A and vector b have incompatible dimensions", ctx.pos);
+                             size_t m = matrix_A.size();
+                             size_t n = matrix_A[0].asMultiRef(ctx.pos).size();
 
-                             // 行列Aとベクトルbをdouble型に変換
+                             if (vector_b.size() != m) throw CalcError(CalcErrorType::InvalidOperation, "A and b dimension mismatch", ctx.pos);
+
+                             // --- A, b を double に変換 ---
                              std::vector<std::vector<double>> A(m, std::vector<double>(n));
                              for (size_t i = 0; i < m; ++i) {
                               const auto &row = matrix_A[i].asMultiRef(ctx.pos);
-                              for (size_t j = 0; j < n; ++j) {
+                              for (size_t j = 0; j < n; ++j)
                                A[i][j] = row[j].asScalar(ctx.pos);
-                              }
                              }
 
                              std::vector<double> b(m);
-                             for (size_t i = 0; i < m; ++i) {
+                             for (size_t i = 0; i < m; ++i)
                               b[i] = vector_b[i].asScalar(ctx.pos);
-                             }
 
-                             // A^T * A (n x n) と A^T * b (n x 1) を計算
-                             std::vector<std::vector<double>> ATA(n, std::vector<double>(n, 0.0));
-                             std::vector<double> ATb(n, 0.0);
+                             // --- QR分解 ---
+                             if (m < n) throw CalcError(CalcErrorType::InvalidOperation, "mlsqr requires m >= n (overdetermined system)", ctx.pos);
+                             std::vector<std::vector<double>> Q, R;
+                             qr_decompose(A, Q, R);
 
-                             for (size_t i = 0; i < n; ++i) {
-                              for (size_t j = 0; j < n; ++j) {
-                               double sum = 0.0;
-                               for (size_t k = 0; k < m; ++k) {
-                                sum += A[k][i] * A[k][j]; // A[k][i] は double なので asScalar は不要
-                               }
-                               ATA[i][j] = sum;
-                              }
-                             }
+                             // --- y = Q^T b ---
+                             std::vector<double> y(n, 0.0);
+                             for (size_t i = 0; i < n; ++i)
+                              for (size_t k = 0; k < m; ++k)
+                               y[i] += Q[k][i] * b[k];
 
-                             for (size_t i = 0; i < n; ++i) {
-                              double sum = 0.0;
-                              for (size_t k = 0; k < m; ++k) {
-                               sum += A[k][i] * b[k]; // A[k][i] は double なので asScalar は不要
-                              }
-                              ATb[i] = sum;
-                             }
-
-                             // QR分解（ハウスホルダー変換）を実装
-                             std::vector<std::vector<double>> R = ATA;
-                             std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
-
-                             // 単位行列で初期化
-                             for (size_t i = 0; i < n; ++i) {
-                              Q[i][i] = 1.0;
-                             }
-
-                             // ハウスホルダー変換を適用
-                             for (size_t k = 0; k < n; ++k) {
-                              // ベクトルv = R[k:n][k] を取得
-                              std::vector<double> v(n - k);
-                              for (size_t i = 0; i < n - k; ++i) {
-                               v[i] = R[k + i][k];
-                              }
-
-                              // ノルムを計算
-                              double norm = 0.0;
-                              for (double val : v) {
-                               norm += val * val;
-                              }
-                              norm = std::sqrt(norm);
-
-                              // 通常の符号を持つ値を選択
-                              double sign = (v[0] >= 0) ? 1.0 : -1.0;
-                              double alpha = -sign * norm;
-
-                              // w = v + alpha * e_1
-                              std::vector<double> w(v);
-                              w[0] += alpha;
-
-                              // ノルムを正規化
-                              double w_norm = 0.0;
-                              for (double val : w) {
-                               w_norm += val * val;
-                              }
-                              w_norm = std::sqrt(w_norm);
-
-                              if (w_norm < 1e-12) continue; // 0ベクトルならスキップ
-
-                              // ハウスホルダー変換の計算
-                              std::vector<double> u(w);
-                              for (double &val : u) {
-                               val /= w_norm;
-                              }
-
-                              // H = I - 2 * u * u^T を計算
-                              std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
-                              for (size_t i = 0; i < n; ++i) {
-                               H[i][i] = 1.0;
-                              }
-                              for (size_t i = 0; i < n - k; ++i) {
-                               for (size_t j = 0; j < n - k; ++j) {
-                                H[k + i][k + j] -= 2.0 * u[i] * u[j];
-                               }
-                              }
-
-                              // 行列の積を計算
-                              // R = H * R
-                              std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
-                              for (size_t i = 0; i < n; ++i) {
-                               for (size_t j = 0; j < n; ++j) {
-                                double sum = 0.0;
-                                for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-                                 sum += H[i][k_idx] * R[k_idx][j];
-                                }
-                                temp_R[i][j] = sum;
-                               }
-                              }
-                              R = temp_R;
-
-                              // Q = Q * H^T
-                              std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
-                              for (size_t i = 0; i < n; ++i) {
-                               for (size_t j = 0; j < n; ++j) {
-                                double sum = 0.0;
-                                for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-                                 sum += Q[i][k_idx] * H[j][k_idx];
-                                }
-                                temp_Q[i][j] = sum;
-                               }
-                              }
-                              Q = temp_Q;
-                             }
-
-                             // Rの上三角行列の要素を取得（対角線以上のみ）
-                             std::vector<double> r_diag(n);
-                             for (size_t i = 0; i < n; ++i) {
-                              r_diag[i] = R[i][i];
-                             }
-
-                             // 結果を確認（Rがほぼ上三角行列であることを確認）
-                             bool is_upper_triangular = true;
-                             for (size_t i = 0; i < n; ++i) {
-                              for (size_t j = 0; j < i; ++j) {
-                               if (std::abs(R[i][j]) > 1e-10) {
-                                is_upper_triangular = false;
-                                break;
-                               }
-                              }
-                              if (!is_upper_triangular) break;
-                             }
-
-                             if (!is_upper_triangular) { throw CalcError(CalcErrorType::InvalidOperation, "QR decomposition failed to produce upper triangular matrix", ctx.pos); }
-
-                             // 後退代入で解を求める
+                             // --- 後退代入 R x = y ---
                              std::vector<double> x(n);
-                             for (size_t i = n - 1; i >= 0; --i) {
-                              if (std::abs(R[i][i]) < 1e-12) { throw CalcError(CalcErrorType::InvalidOperation, "Matrix is singular or nearly singular", ctx.pos); }
-                              double sum = 0.0;
-                              for (size_t j = i + 1; j < n; ++j) {
-                               sum += R[i][j] * x[j];
-                              }
-                              x[i] = (ATb[i] - sum) / R[i][i];
+                             for (int i = (int)n - 1; i >= 0; --i) {
+
+                              if (std::abs(R[i][i]) < 1e-12) throw CalcError(CalcErrorType::InvalidOperation, "matrix is rank deficient", ctx.pos);
+
+                              x[i] = y[i];
+                              for (size_t j = i + 1; j < n; ++j)
+                               x[i] -= R[i][j] * x[j];
+
+                              x[i] /= R[i][i];
                              }
 
-                             // 結果を返す
+                             // --- 結果をMultiValueへ ---
                              auto result = std::make_shared<MultiValue>();
                              result->elems_.reserve(n);
-                             for (double val : x) {
+
+                             for (double val : x)
                               result->elems_.push_back(Value(val));
-                             }
 
                              return Value(result);
                             }};
@@ -2751,107 +2541,53 @@ namespace mm::cal {
   // 行列のフロベニウスノルム（別名）
   cfg.functions["mnorm"] = cfg.functions["mnormf"];
 
-  // 行列の最大固有値
-  cfg.functions["mmaxeigen"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                                 if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mmaxeigen requires matrix argument", ctx.pos);
-                                 const auto &matrix_multi = v[0].asMultiRef(ctx.pos);
-                                 std::vector<std::vector<double>> matrix = matrix_multi.toMatrix();
-                                 auto eigenvals = meigenvals(matrix);
-                                 double max_eigen = std::numeric_limits<double>::lowest();
-
-                                 // 固有値の最大値を求める
-                                 for (size_t i = 0; i < eigenvals.size(); ++i) {
-                                  max_eigen = std::max(max_eigen, eigenvals[i]);
-                                 }
-
-                                 return Value(max_eigen);
-                                }};
-
   // 行列の最小固有値
-  cfg.functions["mmaxeigen"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                                 if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mmaxeigen requires matrix argument", ctx.pos);
-                                 const auto &matrix_multi = v[0].asMultiRef(ctx.pos);
-                                 std::vector<std::vector<double>> matrix = matrix_multi.toMatrix();
-                                 auto eigenvals = meigenvals(matrix);
-                                 double max_eigen = std::numeric_limits<double>::lowest();
+  cfg.functions["mmaxeigen_power"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                                       std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
 
-                                 // 固有値の最大値を求める
-                                 for (size_t i = 0; i < eigenvals.size(); ++i) {
-                                  max_eigen = std::max(max_eigen, eigenvals[i]);
+                                       size_t m = A.size();
+                                       if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "matrix must be square", ctx.pos);
+
+                                       // 1×1 特殊ケース
+                                       if (m == 1) {
+                                        if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "invalid number", ctx.pos);
+
+                                        return Value(A[0][0]);
+                                       }
+
+                                       std::vector<double> eigenvec;
+                                       double lambda = power_method(A, eigenvec);
+                                       return Value(lambda);
+                                      }};
+  cfg.functions["mmaxeigen"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                                 std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
+
+                                 size_t m = A.size();
+                                 if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "matrix must be square", ctx.pos);
+
+                                 // 1×1 特殊ケース
+                                 if (m == 1) {
+                                  if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "invalid number", ctx.pos);
+
+                                  return Value(A[0][0]);
                                  }
 
-                                 return Value(max_eigen);
+                                 auto eig = eigenvalues(A);
+                                 if (eig.empty()) throw CalcError(CalcErrorType::DomainError, "eigenvalues empty", ctx.pos);
+                                 return *std::max_element(eig.begin(), eig.end());
                                 }};
 
   // 行列の特異値の和
   cfg.functions["msumsv"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                              if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "msumsv requires matrix argument", ctx.pos);
+                              auto A = toMatrix(v[0], ctx);
 
-                              const auto &matrix = v[0].asMultiRef(ctx.pos);
+                              if (A.empty()) throw CalcError(CalcErrorType::DomainError, "matrix is empty", ctx.pos);
 
-                              // 行列の次元確認
-                              if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                              auto S = singular_values(A);
 
-                              size_t m = matrix.size();    // 行数
-                              size_t n = matrix[0].size(); // 列数
-
-                              // 行列のコピーを作成（元の行列を変更しない）
-                              std::vector<std::vector<double>> A(m, std::vector<double>(n));
-                              for (size_t i = 0; i < m; ++i) {
-                               if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix has inconsistent row lengths", ctx.pos);
-                               const auto &row = matrix[i].asMultiRef(ctx.pos);
-                               for (size_t j = 0; j < n; ++j) {
-                                A[i][j] = row[j].asScalar(ctx.pos);
-                               }
-                              }
-
-                              // 特異値を求める（QR反復法で実装）
-                              std::vector<double> singular_values;
-
-                              // 行列の形状に応じて処理を分ける
-                              if (m >= n) {
-                               // A^T * A を計算
-                               std::vector<std::vector<double>> ATA(n, std::vector<double>(n, 0.0));
-                               for (size_t i = 0; i < n; ++i) {
-                                for (size_t j = 0; j < n; ++j) {
-                                 double sum = 0.0;
-                                 for (size_t k = 0; k < m; ++k) {
-                                  sum += A[k][i] * A[k][j];
-                                 }
-                                 ATA[i][j] = sum;
-                                }
-                               }
-
-                               // 固有値を求める（QR反復法）
-                               singular_values = compute_eigenvalues(ATA, ctx);
-                              } else {
-                               // A * A^T を計算
-                               std::vector<std::vector<double>> AAT(m, std::vector<double>(m, 0.0));
-                               for (size_t i = 0; i < m; ++i) {
-                                for (size_t j = 0; j < m; ++j) {
-                                 double sum = 0.0;
-                                 for (size_t k = 0; k < n; ++k) {
-                                  sum += A[i][k] * A[j][k];
-                                 }
-                                 AAT[i][j] = sum;
-                                }
-                               }
-
-                               // 固有値を求める（QR反復法）
-                               singular_values = compute_eigenvalues(AAT, ctx);
-                              }
-
-                              // 特異値は固有値の平方根
-                              for (double &val : singular_values) {
-                               if (val < 0) val = 0; // 数値誤差で負になる場合がある
-                               val = std::sqrt(val);
-                              }
-
-                              // 特異値の和を計算
                               double sum = 0.0;
-                              for (double sv : singular_values) {
-                               sum += sv;
-                              }
+                              for (double s : S)
+                               sum += s;
 
                               return Value(sum);
                              }};
@@ -2883,13 +2619,13 @@ namespace mm::cal {
                              const auto &matrix = v[0].asMultiRef(ctx.pos);
 
                              // 行列の次元確認
-                             if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "Matrix is empty", ctx.pos);
+                             if (matrix.empty()) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> is empty", ctx.pos);
 
                              size_t n = matrix.size(); // 行列の次元
 
                              // 正方行列でない場合はfalseを返す
                              for (size_t i = 0; i < n; ++i) {
-                              if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "Matrix must be square", ctx.pos);
+                              if (matrix[i].size() != n) throw CalcError(CalcErrorType::InvalidOperation, "std::vector<std::vector<double>> must be square", ctx.pos);
                              }
 
                              // 行列のコピーを作成（元の行列を変更しない）
@@ -3494,63 +3230,82 @@ namespace mm::cal {
                                }};
 
   // CUMIPMT (累積利息)
-  cfg.functions["fin_cumipmt"] = {5, 5, [](auto &v, auto &ctx) -> Value {
+  // 1. その期の利息を計算
+  // 2. 支払額から元本返済を計算
+  // 3. 元本返済で残高を減らす
+  // 4. type = 1 の場合のみ期首補正
+  cfg.functions["fin_cumipmt"] = {6, 6, [](auto &v, auto &ctx) -> Value {
                                    double rate = v[0].asScalar(ctx.pos);
-                                   double nper = v[1].asScalar(ctx.pos);
+                                   int nper = (int)v[1].asScalar(ctx.pos);
                                    double pv = v[2].asScalar(ctx.pos);
-                                   double start = v[3].asScalar(ctx.pos);
-                                   double end = v[4].asScalar(ctx.pos);
-                                   double type = v[5].asScalar(ctx.pos);
-                                   if (rate <= 0 || nper <= 0) throwDomain(ctx.pos);
+                                   int start = (int)v[3].asScalar(ctx.pos);
+                                   int end = (int)v[4].asScalar(ctx.pos);
+                                   int type = (int)v[5].asScalar(ctx.pos);
+
+                                   if (rate < 0 || nper <= 0) throwDomain(ctx.pos);
                                    if (start < 1 || end < start || end > nper) throwDomain(ctx.pos);
 
-                                   // 支払額
-                                   double pmt;
-                                   if (rate == 0.0) {
-                                    pmt = -pv / nper;
-                                   } else {
-                                    double factor = std::pow(1 + rate, nper);
-                                    pmt = -pv * rate * factor / (factor - 1);
-                                   }
+                                   const double EPS = 1e-15;
+
+                                   double factor = std::pow(1.0 + rate, nper);
+                                   double pmt = (std::fabs(rate) < EPS) ? -pv / nper : -pv * rate * factor / (factor - 1.0);
+
                                    double balance = pv;
-                                   double cumInterest = 0.0;
-                                   for (int k = 1; k <= static_cast<int>(end); ++k) {
-                                    double interest = (type == 1 && k == 1) ? 0.0 : balance * rate;
-                                    double principal = pmt - interest;
-                                    if (k >= start) cumInterest += interest;
-                                    balance += principal;
+
+                                   double sum = 0.0;
+                                   double c = 0.0;
+
+                                   auto kahan_add = [&](double x) {
+                                    double y = x - c;
+                                    double t = sum + y;
+                                    c = (t - sum) - y;
+                                    sum = t;
+                                   };
+
+                                   for (int k = 1; k <= end; k++) {
+
+                                    double interest = 0.0;
+
+                                    if (!(type == 1 && k == 1)) { interest = balance * rate; }
+
+                                    if (k >= start) kahan_add(interest);
+
+                                    balance = balance * (1.0 + rate) + pmt;
                                    }
-                                   return cumInterest;
+
+                                   return sum;
                                   }};
 
   // CUMPRINC (累積元金)
-  cfg.functions["fin_cumprinc"] = {5, 5, [](auto &v, auto &ctx) -> Value {
+  cfg.functions["fin_cumprinc"] = {6, 6, [](auto &v, auto &ctx) -> Value {
                                     double rate = v[0].asScalar(ctx.pos);
-                                    double nper = v[1].asScalar(ctx.pos);
+                                    int nper = (int)v[1].asScalar(ctx.pos);
                                     double pv = v[2].asScalar(ctx.pos);
-                                    double start = v[3].asScalar(ctx.pos);
-                                    double end = v[4].asScalar(ctx.pos);
-                                    double type = v[5].asScalar(ctx.pos);
+                                    int start = (int)v[3].asScalar(ctx.pos);
+                                    int end = (int)v[4].asScalar(ctx.pos);
+                                    int type = (int)v[5].asScalar(ctx.pos);
 
-                                    if (rate <= 0 || nper <= 0) throwDomain(ctx.pos);
+                                    if (rate < 0 || nper <= 0) throwDomain(ctx.pos);
                                     if (start < 1 || end < start || end > nper) throwDomain(ctx.pos);
-                                    double pmt;
-                                    if (rate == 0.0) {
-                                     pmt = -pv / nper;
-                                    } else {
-                                     double factor = std::pow(1 + rate, nper);
-                                     pmt = -pv * rate * factor / (factor - 1);
-                                    }
-                                    double balance = pv;
-                                    double cumPrincipal = 0.0;
 
-                                    for (int k = 1; k <= static_cast<int>(end); ++k) {
-                                     double interest = (type == 1 && k == 1) ? 0.0 : balance * rate;
-                                     double principal = pmt - interest;
-                                     if (k >= start) cumPrincipal += principal;
-                                     balance += principal;
+                                    double pmt = (std::fabs(rate) < 1e-15) ? -pv / nper : -pv * rate * std::pow(1 + rate, nper) / (std::pow(1 + rate, nper) - 1);
+
+                                    double balance = pv;
+                                    double sum = 0;
+
+                                    for (int k = 1; k <= end; k++) {
+
+                                     double prev_balance = balance;
+
+                                     if (type == 1 && k == 1) balance = balance + pmt;
+                                     else balance = balance * (1 + rate) + pmt;
+
+                                     double principal = prev_balance - balance;
+
+                                     if (k >= start) sum += principal;
                                     }
-                                    return cumPrincipal;
+
+                                    return sum;
                                    }};
 
   // EFFECTIVE RATE / NOMINAL RATE / CAGR
@@ -3698,7 +3453,7 @@ namespace mm::cal {
   registerTrig(cfg);          // 三角関数
   registerHyperbolic(cfg);    // hyper三角関数
   registerGeoVec(cfg);        // 図形, ベクトル
-  registerMatrix(cfg);        // 行列・線形代数
+  registerVector(cfg);        // 行列・線形代数
   registerSpecialTrig(cfg);   // hyper三角関数
   registerStatistics(cfg);    // 統計系
   registerComplex(cfg);       // 複素
