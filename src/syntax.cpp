@@ -181,6 +181,7 @@ namespace mm::cal {
    case TokenType::Identifier:
    case TokenType::LParen:
    case TokenType::LBracket:
+   case TokenType::LBrace:
    case TokenType::Percent: return true; // ←ここは方針次第なので要検討
    default: return false;
   }

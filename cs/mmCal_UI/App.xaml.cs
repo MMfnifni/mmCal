@@ -26,6 +26,12 @@ namespace mmCal_UI {
     }
 
     internal static class NativeDllLoader {
+        private static string ComputeHash(Stream stream) {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(stream);
+            return BitConverter.ToString(hash);
+        }
+
         public static string? DllPath { get; private set; }
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LoadLibrary(string lpFileName);
@@ -57,21 +63,43 @@ namespace mmCal_UI {
             bool shouldExtract = true;
 
             if (File.Exists(dllPath)) {
-                var existingVersion = FileVersionInfo.GetVersionInfo(dllPath).FileVersion;
 
-                string tempCheck = Path.Combine(tempDir, "check_mmCal_UI.dll");
+                string tempCheck = Path.Combine(tempDir, "check.dll");
+
+                string embeddedVersion;
+                string embeddedHash;
+
                 using (Stream? s = asm.GetManifestResourceStream(resourceName)) {
-                    if (s == null) throw new Exception("Embedded DLL not found: " + resourceName);
-                    using (var fs = new FileStream(tempCheck, FileMode.Create, FileAccess.Write))
-                        s.CopyTo(fs);
+                    if (s == null)
+                        throw new Exception("Embedded DLL not found: " + resourceName);
+
+                    using var fs = new FileStream(tempCheck, FileMode.Create, FileAccess.Write);
+                    s.CopyTo(fs);
                 }
 
-                var embeddedVersion = FileVersionInfo.GetVersionInfo(tempCheck).FileVersion;
+                var embeddedInfo = FileVersionInfo.GetVersionInfo(tempCheck);
+                embeddedVersion = embeddedInfo.FileVersion ?? "";
+
+                using (var fs = File.OpenRead(tempCheck)) {
+                    embeddedHash = ComputeHash(fs);
+                }
+
                 File.Delete(tempCheck);
 
-                if (existingVersion == embeddedVersion) shouldExtract = false;
-                else {
-                    try { File.Delete(dllPath); } catch { } // 他プロセスでロック中なら無視
+                var existingInfo = FileVersionInfo.GetVersionInfo(dllPath);
+                string existingVersion = existingInfo.FileVersion ?? "";
+
+                string existingHash;
+                using (var fs = File.OpenRead(dllPath)) {
+                    existingHash = ComputeHash(fs);
+                }
+
+                // ⭐ ここが本体判定
+                if (existingVersion == embeddedVersion &&
+                    existingHash == embeddedHash) {
+                    shouldExtract = false;
+                } else {
+                    try { File.Delete(dllPath); } catch { }
                 }
             }
 

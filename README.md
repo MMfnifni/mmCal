@@ -439,7 +439,7 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ---
 
-### Geometry and Vectors
+### Matrix
 
 - Prioritizing rigor over execution speed, these operations can become extremely slow with large matrices.
 
@@ -567,10 +567,11 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Utilities
 
-| Function Name      | Description | Example Inputs/Outputs        |
-| ------------------ | ----------- | ----------------------------- |
-| `clamp(x, lo, hi)` | Clamp       | `clamp(5,0,10)=5`             |
-| `cnst("name")`     | Constant    | `cnst("celeritas")=299792458` |
+| Function Name              | Description  | Example Inputs/Outputs                                         |
+| -------------------------- | ------------ | -------------------------------------------------------------- |
+| `clamp(x, lo, hi)`         | Clamp        | `clamp(5,0,10)=5`                                              |
+| `cnst("name")`             | Constant     | `cnst("celeritas")=299792458`                                  |
+| `convert(x, "from", "to")` | Convert unit | `convert(10,"mm","cm")=1`<br>`convert(10,"mm")=0.01` (SI unit) |
 
 Refer to the following for the list of constants-> [【List of Constants】](constants_list.md)
 
