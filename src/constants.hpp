@@ -400,8 +400,8 @@ namespace mm::cal {
 
  inline constexpr size_t kConstTableSize = sizeof(kConstTable) / sizeof(kConstTable[0]);
 
- inline std::unordered_map<std::string, Value> buildConstantsDic() {
-  std::unordered_map<std::string, Value> m;
+ inline std::unordered_map<std::string_view, Value> buildConstantsDic() {
+  std::unordered_map<std::string_view, Value> m;
   m.reserve(kConstTableSize * 2);
 
   for (auto &e : kConstTable)
@@ -414,7 +414,7 @@ namespace mm::cal {
  // exported dictionary
  // ============================================================
 
- std::unordered_map<std::string, Value> constants_dic = buildConstantsDic();
+ std::unordered_map<std::string_view, Value> constants_dic = buildConstantsDic();
 
  // ============================================================
  // unit convert

@@ -18,6 +18,27 @@ int main(int argc, char *argv[]) {
 
  initFunctions(syscfg);
 
+ // --batchモード(tester用)
+ if (argc > 1 && std::string(argv[1]) == "--batch") {
+  std::cout << std::unitbuf;
+
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(nullptr);
+
+  std::string line;
+
+  while (std::getline(std::cin, line)) {
+   if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+
+   try {
+    auto res = evalLine(line, syscfg, rtmstt, history);
+    std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
+   } catch (const std::exception &e) { std::cout << "Error: " << e.what() << '\n'; }
+  }
+
+  return 0;
+ }
+
  // ================================
  // CLI モード
  // ================================
@@ -46,9 +67,9 @@ int main(int argc, char *argv[]) {
               "================================\n\n";
 
  std::string line;
-
+ std::cout << std::unitbuf;
  while (true) {
-  std::cout << "In [" << history.size() + 1 << "] := ";
+  std::cout << "In [" << history.size() + 1 << "] := " << std::flush;
   if (!std::getline(std::cin, line)) break;
 
   if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;

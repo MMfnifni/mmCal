@@ -76,6 +76,15 @@ Out[19] := 876
 
 In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
+
+In [21] := ifft(fft({1+I,2-I,3+2I,4-3I}))
+Out[21] := {1+I,2-I,3+2I,4-3I}
+
+In [22] := mlsqr({{1,2},{3,4}},{1,2})
+Out[22] := {0, 0.5}
+
+In [23] := vdot({1,2},{3,4})+vmanhattan({0,0},{3,4})+veuclidean({0,0},{3,4})
+Out[23] := 23
 ```
 
 ### 要点超特急
@@ -84,7 +93,7 @@ Out[20] := 3
 - `%`や`Out[n]`で過去履歴を計算に使えるよ
 - 複素に対応
 - 角度は度数法が既定だけど`rad`などで指定できよ
-- 関数・定数がいっぱい！
+- 関数・定数がいっぱい！(行列, ベクトルもいける)
 - CLIだけでなくUI版もあるよ！
 
 # 詳細な内部事情
@@ -266,16 +275,20 @@ cos(15+30)
 
 ---
 
-### 特殊比関数(c 系 / degree)
+### 信号系
 
-| 関数名     | 説明           | 入力と出力例           |
-| ---------- | -------------- | ---------------------- |
-| `sinc(x)`  | `sin(x)/x`     | `sinc(90)=0.111...`    |
-| `cosc(x)`  | `(1-cos(x))/x` | `cosc(60)=0.008333...` |
-| `tanc(x)`  | `tan(x)/x`     | `tanc(0)=1`            |
-| `sinhc(x)` | `sinh(x)/x`    | `sinhc(3)=3.339...`    |
-| `tanhc(x)` | `tanh(x)/x`    | `tanhc(30)=0.03333...` |
-| `expc(x)`  | `(exp(x)-1)/x` | `expc(1)=1.7182818...` |
+| 関数名         | 説明               | 入力と出力例                               |
+| -------------- | ------------------ | ------------------------------------------ |
+| `fft(...)`     | 高速フーリエ変換   | `fft({1,1,1,1,1,1,1,1})={8,0,0,0,0,0,0,0}` |
+| `ifft(...)`    | 逆高速フーリエ変換 | `ifft({4,0,0,0})={1, 1, 1, 1}`             |
+| `dft(...)`     | 離散フーリエ変換   | `dft({1,2,3,4})={10,-2+2I,-2,-2-2I}`       |
+| `hilbert(...)` | ヒルベルト変換     | `hilbert({1,0,-1,0})={1,I,-1,-I}`          |
+| `sinc(x)`      | `sin(x)/x`         | `sinc(90)=0.111...`                        |
+| `cosc(x)`      | `(1-cos(x))/x`     | `cosc(60)=0.008333...`                     |
+| `tanc(x)`      | `tan(x)/x`         | `tanc(0)=1`                                |
+| `sinhc(x)`     | `sinh(x)/x`        | `sinhc(3)=3.339...`                        |
+| `tanhc(x)`     | `tanh(x)/x`        | `tanhc(30)=0.03333...`                     |
+| `expc(x)`      | `(exp(x)-1)/x`     | `expc(1)=1.7182818...`                     |
 
 - sin/cos/tanがdegree前提なので，これらもdegree入力
 - `x`が非常に小さいときは桁落ち対策が入る
@@ -326,29 +339,29 @@ cos(15+30)
 | `zscore(x, mu, sigma)` | (x-mu)/sigma                            | `zscore(5,3,1)=2`                                                                                                                                                                    |
 | `iqr(...)`             | Q3-Q1                                   | `iqr(1,2,3,4)=2`                                                                                                                                                                     |
 | `trimmean(p,...)`      | pの割合を両側から捨てて平均             | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                      |
-| `winsor(p,...)`        | pの割合を両側から丸める(winsorize)      | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                                          |
+| `winsor(p,...)`        | pの割合を両側から丸める(winsorize)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                          |
 
 ---
 
 ### 財務関数
 
-| 関数名                                  | 説明                          | 入力と出力例                                  |
-| --------------------------------------- | ----------------------------- | --------------------------------------------- |
-| `fin_fv(rate,n,pmt)`                    | 将来価値 (FV)                 | `fin_fv(0.05,10,100)=1257.789...`             |
-| `fin_pv(rate,nper,pmt)`                 | 現在価値 (PV)                 | `fin_pv(0.05,10,100)=772.173...`              |
-| `fin_pmt(rate,nper,pv)`                 | 支払額 (PMT)                  | `fin_pmt(0.05,10,1000)=129.504...`            |
-| `fin_total_payment(rate,nper,pv)`       | 支払総額                      | `fin_total_payment(0.05,10,1000)=1295.045...` |
-| `fin_ppmt(rate,nper,per,pv)`            | 元金返済額 (PPMT, 期指定)     | `fin_ppmt(0.05,10,3,1000)=92.455...`          |
-| `fin_ipmt(rate,nper,per,pv)`            | 利息返済額 (IPMT, 期指定)     | `fin_ipmt(0.05,10,3,1000)=37.049...`          |
-| `fin_npv(rate,cf...)`                   | 正味現在価値 (NPV)            | `fin_npv(0.1,100,-50,-50)=12.021...`          |
-| `fin_irr(cf...)`                        | 内部収益率 (IRR, Brent)       | `fin_irr(-100,50,60)=0.063...`                |
-| `fin_rate(nper,pmt,pv)`                 | 利率計算 (RATE, Brent)        | `fin_rate(10,100,1000)=0.05`                  |
-| `fin_nper(rate,pmt,pv)`                 | 期間計算 (NPER)               | `fin_nper(0.05,100,1000)=10`                  |
-| `fin_cumipmt(rate,nper,pmt,start,end)`  | 指定期間の利息累計 (CUMIPMT)  | `fin_cumipmt(0.05,10,100,1,5)=210.562...`     |
-| `fin_cumprinc(rate,nper,pmt,start,end)` | 指定期間の元金累計 (CUMPRINC) | `fin_cumprinc(0.05,10,100,1,5)=289.437...`    |
-| `fin_effective_rate(nominal,npery)`     | 実効利率 (EFFECTIVE RATE)     | `fin_effective_rate(0.06,12)=0.061...`        |
-| `fin_nominal_rate(effective,npery)`     | 名目利率 (NOMINAL RATE)       | `fin_nominal_rate(0.0617,12)=0.060...`        |
-| `fin_cagr(start,end,n)`                 | 年平均成長率 (CAGR)           | `fin_cagr(1000,2000,10)=0.071...`             |
+| 関数名                                      | 説明                          | 入力と出力例                                         |
+| ------------------------------------------- | ----------------------------- | ---------------------------------------------------- |
+| `fin_fv(rate,n,pmt)`                        | 将来価値 (FV)                 | `fin_fv(0.05,10,100)=1257.789...`                    |
+| `fin_pv(rate,nper,pmt)`                     | 現在価値 (PV)                 | `fin_pv(0.05,10,100)=772.173...`                     |
+| `fin_pmt(rate,nper,pv)`                     | 支払額 (PMT)                  | `fin_pmt(0.05,10,1000)=129.504...`                   |
+| `fin_total_payment(rate,nper,pv)`           | 支払総額                      | `fin_total_payment(0.05,10,1000)=1295.045...`        |
+| `fin_ppmt(rate,nper,per,pv)`                | 元金返済額 (PPMT, 期指定)     | `fin_ppmt(0.05,10,3,1000)=92.455...`                 |
+| `fin_ipmt(rate,nper,per,pv)`                | 利息返済額 (IPMT, 期指定)     | `fin_ipmt(0.05,10,3,1000)=37.049...`                 |
+| `fin_npv(rate,cf...)`                       | 正味現在価値 (NPV)            | `fin_npv(0.1,100,-50,-50)=12.021...`                 |
+| `fin_irr(cf...)`                            | 内部収益率 (IRR, Brent)       | `fin_irr(-100,50,60)=0.063...`                       |
+| `fin_rate(nper,pmt,pv)`                     | 利率計算 (RATE, Brent)        | `fin_rate(10,100,1000)=0.05`                         |
+| `fin_nper(rate,pmt,pv)`                     | 期間計算 (NPER)               | `fin_nper(0.05,100,1000)=10`                         |
+| `fin_cumipmt(rate,nper,pv,start,end,type)`  | 指定期間の利息累計 (CUMIPMT)  | `fin_cumipmt(0.05/12,60,100000,1,12,0)=-4518.9496`   |
+| `fin_cumprinc(rate,nper,pv,start,end,type)` | 指定期間の元金累計 (CUMPRINC) | `fin_cumprinc(0.05/12,60,100000,1,12,0)=-18127.5368` |
+| `fin_effective_rate(nominal,npery)`         | 実効利率 (EFFECTIVE RATE)     | `fin_effective_rate(0.06,12)=0.061...`               |
+| `fin_nominal_rate(effective,npery)`         | 名目利率 (NOMINAL RATE)       | `fin_nominal_rate(0.0617,12)=0.060...`               |
+| `fin_cagr(start,end,n)`                     | 年平均成長率 (CAGR)           | `fin_cagr(1000,2000,10)=0.071...`                    |
 
 - `fin_irr`は負が強いと根を見つけられないことが有ります
 
@@ -364,10 +377,6 @@ cos(15+30)
 | `numdiff(v)`              | 差分の二乗平均平方根で微分の大きさを評価 | `numdiff(1,3,6)=2.549509756796`   |
 | `polylog(s, z)`           | 多重級数による polylog 計算(`\|z\|<1`)   | `polylog(2, 0.5)=0.582240526465`  |
 | `totient(n)`              | Euler のトーシェント関数 φ(n)            | `totient(9)=6`                    |
-| `fft(...)`                | FFT の振幅平均を返す                     | `fft(1,2,3)=3.154700538379`       |
-| `ifft(...)`               | IFFTの振幅平均を返す                     | `ifft(1,2,3)=2`                   |
-| `dft(...)`                | DFTの振幅平均を返す                      | `dft(1,2,3)=3.732`                |
-| `hilbert(...)`            | Hilbert変換後の信号振幅平均を返す        | `hilbert(1,2,3)=1`                |
 
 - 本来ベクトルで受け取るべきものについて，本プログラムが多価にまだ対応していないため簡易版(平均値を返す)である
 
@@ -399,15 +408,75 @@ cos(15+30)
 
 ---
 
-#### 幾何・ベクトル(2D)
+#### 幾何・ベクトル
 
-| 関数名                  | 説明        | 入力と出力例          |
-| ----------------------- | ----------- | --------------------- |
-| `norm(x,y)`             | ベクトル長  | `norm(3,4)=5`         |
-| `dot(x1,y1,x2,y2)`      | 内積        | `dot(1,0,0,1)=0`      |
-| `cross(x1,y1,x2,y2)`    | 外積(Z成分) | `cross(1,0,0,1)=1`    |
-| `lerp(a,b,t) `          | 線形補間    | `lerp(0,10,0.5)=5`    |
-| `distance(x1,y1,x2,y2)` | 距離        | `distance(0,0,3,4)=5` |
+| 関数名                              | 説明                             | 入力と出力例                        |
+| ----------------------------------- | -------------------------------- | ----------------------------------- |
+| `norm(x,y)`                         | ベクトル長(2D)                   | `norm(3,4)=5`                       |
+| `cross(x1,y1,x2,y2)`                | 外積(Z成分)                      | `cross(1,0,0,1)=1`                  |
+| `lerp(a,b,t) `                      | 線形補間                         | `lerp(0,10,0.5)=5`                  |
+| `distance(x1,y1,x2,y2)`             | 距離                             | `distance(0,0,3,4)=5`               |
+| `vadd(a,b)`                         | ベクトル和                       | `vadd({1,2},{3,4})={4,6}`           |
+| `vsub(a,b)`                         | ベクトル差                       | `vsub({5,6},{1,2})={4,4}`           |
+| `vscalar(a,s)`                      | スカラ倍                         | `vscalar({1,2},3)={3,6}`            |
+| `vdot(a,b)`                         | 内積                             | `vdot({1,2},{3,4})=11`              |
+| `vcross(a,b)`                       | 外積 (3次元限定)                 | `vcross({1,0,0},{0,1,0})={0,0,1}`   |
+| `vnorm(a)`, `vlength(a)`            | ベクトル長                       | `vnorm({3,4})=5`                    |
+| `vmanhattan(a,b)`                   | マンハッタン距離                 | `vmanhattan({0,0},{3,4})=7`         |
+| `veuclidean(a,b)`, `vdistance(a,b)` | ユークリッド距離                 | `veuclidean({0,0},{3,4})=5`         |
+| `vnormalize(a)`                     | ベクトルの正規化 (単位ベクトル)  | `vnormalize({3,4})={0.6,0.8}`       |
+| `vproject(a,b)`                     | ベクトルaをベクトルbに射影       | `vproject({1,2},{0,1})={0,2}`       |
+| `vangle(a,b)`                       | 2つのベクトル間の角度 (度数法)   | `vangle({1,0},{0,1})=90`            |
+| `vreflect(a,n)`                     | ベクトルaを法線ベクトルnで反射   | `vreflect({1,1},{0,1})={1,-1}`      |
+| `vreflect_axis(a,n)`                | ベクトルaをベクトルnで軸対称反射 | `vreflect_axis({1,1},{0,1})={-1,1}` |
+| `vunit(a)`                          | 単位ベクトル                     | `vunit({3,4})={0.6,0.8}`            |
+
+---
+
+#### 幾何・ベクトル
+
+実行速度よりも厳格さを優先しているため，大規模行列では非常に重くなる場合がある。
+
+| 関数名                      | 説明                             | 入力と出力例                                                 |
+| --------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `matrix(a,b,c,...)`         | 任意サイズ行列の作成(デバック用) | `matrix({1,2},{3,4})={{1,2},{3,4}}`                          |
+| `identity(n)`               | n×n単位行列の作成                | `identity(3)={{1,0,0},{0,1,0},{0,0,1}}`                      |
+| `zeros(rows,cols)`          | rows x colsゼロ行列の作成        | `zeros(2,3)={{0,0,0},{0,0,0}}`                               |
+| `mget(A,row,col)`           | 行列要素のアクセス               | `mget({{1,2},{3,4}},0,1)=2`                                  |
+| `madd(A,B)`                 | 行列和                           | `madd({{1,2},{3,4}}, {{5,6},{7,8}})={{6,8}, {10,12}}`        |
+| `mmul(A,B)`                 | 行列積                           | `mmul({{1,2},{3,4}}, {{5,6},{7,8}})={{19,22},{43,50}}`       |
+| `mtranspose(A)`             | 行列の転置                       | `mtranspose({{1,2},{3,4}})={{1,3},{2,4}}`                    |
+| `mtrace(A)`                 | 行列のトレース(対角成分の和)     | `mtrace({{1,2},{3,4}})=5`                                    |
+| `mrank(A)`                  | 行列のランク                     | `mrank({{1,2},{3,4}})=2`                                     |
+| `mdet(A)`                   | 行列の決定因子(行列式)           | `mdet({{1,2},{3,4}})=-2`                                     |
+| `mrows(A)`                  | 行列の行数取得                   | `mrows({{1,2},{3,4}})=2`                                     |
+| `mcols(A)`                  | 行列の列数取得                   | `mcols({{1,2},{3,4}})=2`                                     |
+| `mdiag(A)`                  | 行列の対角成分取得               | `mdiag({{1,2},{3,4}})={1,4}`                                 |
+| `mlu(A)`                    | 行列のLU分解                     | `mlu({{2,1},{4,3}})={{{1,0},{4,1}},{{2,1},{0,3}}}`           |
+| `meigenvals(A)`             | 行列の固有値                     | `meigenvals({{1,2},{3,4}})={{0,0},{0,0}}`                    |
+| `meigenvecs(A)`             | 行列の固有ベクトル               | `meigenvecs({{1,2},{3,4}})={{1,0},{1,0}}`                    |
+| `minverse(A)`               | 行列の逆行列                     | `minverse({{1,2},{3,4}})={{-2,1},{1.5,-0.5}}`                |
+| `mqr(A)`                    | 行列のQR分解(ハウスホルダー変換) | `mqr({{1,2},{3,4}})= {{{0.316227766017, 0.948683298051},...` |
+| `msvd(A)`                   | 行列の特異値分解(Jacobi法)       | `msvd({{1,2},{3,4}})={{{1,0},{0,1}}, {0.404779426484,...`    |
+| `mcond(A)`, `mcondition(A)` | 行列の条件数                     | `mcond({{1,2},{3,4}})=2`                                     |
+| `mlsqr(A,b)`                | 最小二乗法解(QR)                 | `mlsqr({{1,2},{3,4}},{1,2})={0,0.5}`                         |
+| `mnormf(A)`, `mnorm(A)`     | 行列のフロベニウスノルム         | `mnormf({{1,2},{3,4}})=5.477225575052`                       |
+| `mmaxeigen(A)`              | 行列の最大固有値 (QR)            | `mmaxeigen({{1,2},{3,4}})=0`                                 |
+| `mmaxeigen_power(A)`        | 行列の最大固有値(冪乗法)         | `mmaxeigen_power({{1,2},{3,4}})=0`                           |
+| `mmineigen(A)`              | 行列の最小固有値                 | `mmineigen({{1,2},{3,4}})`                                   |
+| `msumsv(A)`                 | 行列の特異値の和(QR反復法SVD)    | `msumsv({{1,2},{3,4}})=7.634413615168`                       |
+| `misse_symmetric(A)`        | 行列の対称性判定                 | `misse_symmetric({{1,2},{2,1}})=1`                           |
+| `mispd(A)`                  | 行列の正定性判定(Cholesky分解)   | `mispd({{2,1},{1,2}})=1`                                     |
+
+本電卓はESP1e-12だが，極端な条件下(条件数が1e4未満)ではdouble誤差をカバーしきれない。
+
+```
+In [1] := minverse({{1, 1/2, 1/3}, {1/2, 1/3, 1/4}, {1/3, 1/4, 1/5}})
+Out[1] := {{9, -36, 30}, {-36, 192.000000000001, -180.000000000001}, {30, -180.000000000001, 180.000000000001}}
+
+In [2] := msumsv({{1e6, 0}, {0, 1e-6}})
+Out[2] := 1000000.000001000008
+```
 
 ---
 
@@ -432,14 +501,14 @@ cos(15+30)
 
 | 関数名                                | 説明                           | 入力と出力例                      |
 | ------------------------------------- | ------------------------------ | --------------------------------- |
-| `area_circle(d)`                      | 円の面積（直径指定）           | `area_circle(2)=3.14159...`       |
+| `area_circle(d)`                      | 円の面積(直径指定)             | `area_circle(2)=3.14159...`       |
 | `area_triangle(b,h)`                  | 三角形の面積(底辺と高さ)       | `area_triangle(3,4)=6`            |
 | `area_triangle(a,b,c)`                | 三角形の面積(3辺の長さ)        | `area_triangle(3,4,5)=6`          |
 | `area_trapezoid(a,b,h)`               | 台形の面積                     | `area_trapezoid(3,5,4)=16`        |
-| `area_polygon(x0,y0,x1,y1,...,xn,yn)` | 多角形の面積（座標指定）       | `area_polygon(0,0,1,0,1,1,0,1)=1` |
-| `vol_cylinder(d,h)`                   | 円柱の体積（直径指定）         | `vol_cylinder(2,3)=9.42477...`    |
-| `vol_cone(d,h)`                       | 円錐の体積（直径指定）         | `vol_cone(2,3)=3.14159...`        |
-| `vol_sphere(d)`                       | 球の体積（直径指定）           | `vol_sphere(2)=4.18879...`        |
+| `area_polygon(x0,y0,x1,y1,...,xn,yn)` | 多角形の面積(座標指定)         | `area_polygon(0,0,1,0,1,1,0,1)=1` |
+| `vol_cylinder(d,h)`                   | 円柱の体積(直径指定)           | `vol_cylinder(2,3)=9.42477...`    |
+| `vol_cone(d,h)`                       | 円錐の体積(直径指定)           | `vol_cone(2,3)=3.14159...`        |
+| `vol_sphere(d)`                       | 球の体積(直径指定)             | `vol_sphere(2)=4.18879...`        |
 | `vol_prism(x0,y0,...,xn,yn,h)`        | 底面多角形＋高さのプリズム体積 | `vol_prism(0,0,1,0,1,1,0,1,2)=2`  |
 
 ---
@@ -480,22 +549,22 @@ cos(15+30)
 
 ### 金型・射出成形
 
-| 関数名                                            | 説明                               | 入力例                                                               | 出力単位（MKS準拠） |
-| ------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------- | ------------------- |
-| `mold_clamp(P_avg, A_proj)`                       | 型締力（クランプ力）               | `mold_clamp(5e6, 0.01)=50000`                                        | N (kg·m/s²)         |
-| `mold_clamp_safe(SF, P_avg, A_proj)`              | 安全率込みの型締力                 | `mold_clamp_safe(1.2, 5e6, 0.01)=60000`                              | N                   |
-| `mold_Pinj(P_cav, ΔP_runner, ΔP_gate, ΔP_nozzle)` | 射出圧                             | `mold_Pinj(50e6, 1e6, 0.2e6, 0.1e6)=51300000`                        | Pa (kg/m·s²)        |
-| `mold_flowrate(V, t_fill)`                        | 充填流量（体積流量）               | `mold_flowrate(0.0001, 0.5)=0.0002`                                  | m³/s                |
-| `mold_gate_velocity(Q, A_gate)`                   | ゲート流速                         | `mold_gate_velocity(2e-4, 2e-5)=10`                                  | m/s                 |
-| `mold_shear_gate(Q, b, h)`                        | 矩形ゲートのせん断速度             | `mold_shear_gate(2e-4, 0.002, 0.001)=60000`                          | 1/s                 |
-| `mold_shear_runner(Q, D)`                         | ランナー円管のせん断速度           | `mold_shear_runner(2e-4, 0.004)=31830.988...`                        | 1/s                 |
-| `mold_pressure_loss_runner(mu, L, Q, D)`          | ランナー圧損（ニュートン流体近似） | `mold_pressure_loss_runner(500, 0.2, 2e-4, 0.004)=3183098861.837...` | Pa                  |
-| `mold_eject_friction(mu, N)`                      | 離型摩擦力                         | `mold_eject_friction(0.2, 1e4)=200`                                  | N                   |
-| `mold_eject_contact(p_contact, A_contact)`        | 押し付け力                         | `mold_eject_contact(5e6, 0.002)=10000`                               | N                   |
-| `mold_eject_total(mu, p_contact, A_contact)`      | 総合離型力                         | `mold_eject_total(0.2, 5e6, 0.002)=2000`                             | N                   |
-| `mold_mu_tex(k, h)`                               | シボによる摩擦補正係数             | `mold_mu_tex(0.5, 0.001)=0.0005`                                     | 無次元              |
-| `mold_pin_stress(F_eject, n, A_pin)`              | エジェクタピンの面圧               | `mold_pin_stress(1000, 4, 1e-6)=250000000`                           | Pa                  |
-| `mold_plate_deflection(K, P, a, E, t)`            | 金型プレートの最大たわみ           | `mold_plate_deflection(0.005, 5e6, 0.2, 2e11, 0.01)=0.0002`          | m                   |
+| 関数名                                            | 説明                             | 入力例                                                               | 出力単位(MKS準拠) |
+| ------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------- | ----------------- |
+| `mold_clamp(P_avg, A_proj)`                       | 型締力(クランプ力)               | `mold_clamp(5e6, 0.01)=50000`                                        | N (kg·m/s²)       |
+| `mold_clamp_safe(SF, P_avg, A_proj)`              | 安全率込みの型締力               | `mold_clamp_safe(1.2, 5e6, 0.01)=60000`                              | N                 |
+| `mold_Pinj(P_cav, ΔP_runner, ΔP_gate, ΔP_nozzle)` | 射出圧                           | `mold_Pinj(50e6, 1e6, 0.2e6, 0.1e6)=51300000`                        | Pa (kg/m·s²)      |
+| `mold_flowrate(V, t_fill)`                        | 充填流量(体積流量)               | `mold_flowrate(0.0001, 0.5)=0.0002`                                  | m³/s              |
+| `mold_gate_velocity(Q, A_gate)`                   | ゲート流速                       | `mold_gate_velocity(2e-4, 2e-5)=10`                                  | m/s               |
+| `mold_shear_gate(Q, b, h)`                        | 矩形ゲートのせん断速度           | `mold_shear_gate(2e-4, 0.002, 0.001)=60000`                          | 1/s               |
+| `mold_shear_runner(Q, D)`                         | ランナー円管のせん断速度         | `mold_shear_runner(2e-4, 0.004)=31830.988...`                        | 1/s               |
+| `mold_pressure_loss_runner(mu, L, Q, D)`          | ランナー圧損(ニュートン流体近似) | `mold_pressure_loss_runner(500, 0.2, 2e-4, 0.004)=3183098861.837...` | Pa                |
+| `mold_eject_friction(mu, N)`                      | 離型摩擦力                       | `mold_eject_friction(0.2, 1e4)=200`                                  | N                 |
+| `mold_eject_contact(p_contact, A_contact)`        | 押し付け力                       | `mold_eject_contact(5e6, 0.002)=10000`                               | N                 |
+| `mold_eject_total(mu, p_contact, A_contact)`      | 総合離型力                       | `mold_eject_total(0.2, 5e6, 0.002)=2000`                             | N                 |
+| `mold_mu_tex(k, h)`                               | シボによる摩擦補正係数           | `mold_mu_tex(0.5, 0.001)=0.0005`                                     | 無次元            |
+| `mold_pin_stress(F_eject, n, A_pin)`              | エジェクタピンの面圧             | `mold_pin_stress(1000, 4, 1e-6)=250000000`                           | Pa                |
+| `mold_plate_deflection(K, P, a, E, t)`            | 金型プレートの最大たわみ         | `mold_plate_deflection(0.005, 5e6, 0.2, 2e11, 0.01)=0.0002`          | m                 |
 
 - 実験的実装である。今後，自明で不要な関数の削除および単位系に変動の可能性がある。
 
@@ -748,7 +817,8 @@ Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
 実行時引数に数式を受け取った場合は解を出力し，終了します。
 履歴機能は使えません。
 
----
+実行時引数に`--bacth`をつけると`In[n]`, `Out[n]`が表示されないモードになる。
+外部プログラム処理向けである。
 
 ## UI版
 

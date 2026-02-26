@@ -61,9 +61,7 @@ namespace mm::cal {
   return (x == 0.0 ? 0.0 : x); // -0 → 0
  }
 
- inline static double epsilon(int precision) { return std::pow(10.0, -precision); }
-
- inline static bool nearlyZero(double x, int precision) { return std::abs(x) < epsilon(precision); }
+ inline static bool nearlyZero(double x, int precision) { return x < cnst_precision_inv && x > -cnst_precision_inv; }
 
  inline static void trimZeros(std::string &s) {
   if (auto pos = s.find('.'); pos != std::string::npos) {
@@ -133,93 +131,56 @@ namespace mm::cal {
  std::string formatMultiValue(const MultiValue &mv, const SystemConfig &cfg, int indent) {
   if (mv.elems_.empty()) return "{}";
 
-  // ----- 1D判定 -----
-  bool isVector = std::all_of(mv.elems_.begin(), mv.elems_.end(), [](const Value &v) { return !v.isMulti(); });
-  // ----- n×1 行列判定（縦ベクトル） -----
+  // ---- 1パス構造判定 ----
+  bool isVector = true;
   bool isColumnVector = true;
-
-  if (!mv.elems_.empty()) {
-   for (const auto &e : mv.elems_) {
-    if (!e.isMulti()) {
-     isColumnVector = false;
-     break;
-    }
-
-    const auto &inner = *e.asMulti(0);
-    if (inner.elems_.size() != 1) {
-     isColumnVector = false;
-     break;
-    }
-   }
-  } else {
-   isColumnVector = false;
-  }
-
-  if (isColumnVector) {
-   std::string out = "{";
-   for (size_t i = 0; i < mv.elems_.size(); ++i) {
-    if (i > 0) out += ", ";
-    out += formatResultMulti(mv.elems_[i], cfg, indent);
-   }
-   out += "}";
-   return out;
-  }
-  if (isVector) {
-   std::string out = "{";
-   for (size_t i = 0; i < mv.elems_.size(); ++i) {
-    if (i > 0) out += ", ";
-    out += formatResultMulti(mv.elems_[i], cfg, indent);
-   }
-   out += "}";
-   return out;
-  }
-
-  // ----- すべてが「1行行列」なら横圧縮 -----
   bool allSingleRowMatrix = true;
 
   for (const auto &e : mv.elems_) {
 
    if (!e.isMulti()) {
+    isColumnVector = false;
     allSingleRowMatrix = false;
-    break;
-   }
+   } else {
+    const auto &inner = *e.asMulti(0);
 
-   const auto &inner = *e.asMulti(0);
+    if (inner.elems_.size() != 1) isColumnVector = false;
 
-   // 行列であること
-   if (inner.elems_.empty()) {
-    allSingleRowMatrix = false;
-    break;
-   }
-
-   // 1行のみか？
-   bool isSingleRow = true;
-   for (const auto &row : inner.elems_) {
-    if (row.isMulti()) {
-     isSingleRow = false;
-     break;
+    bool singleRow = true;
+    for (const auto &row : inner.elems_) {
+     if (row.isMulti()) {
+      singleRow = false;
+      break;
+     }
     }
+    if (!singleRow) allSingleRowMatrix = false;
    }
 
-   if (!isSingleRow) {
-    allSingleRowMatrix = false;
-    break;
-   }
+   if (e.isMulti()) isVector = false;
   }
 
-  if (allSingleRowMatrix) {
-   std::string out = "{";
+  // ---- 横1行表示パターン ----
+  if (isVector || isColumnVector || allSingleRowMatrix) {
+   std::string out;
+   out.reserve(mv.elems_.size() * 32);
+
+   out += "{";
    for (size_t i = 0; i < mv.elems_.size(); ++i) {
     if (i > 0) out += ", ";
     out += formatResultMulti(mv.elems_[i], cfg, indent);
    }
    out += "}";
+
    return out;
   }
 
-  // ----- 2D以上 -----
+  // ---- 2D以上ブロック表示 ----
+  std::string out;
+  out.reserve(mv.elems_.size() * 64);
+
   std::string ind(indent, ' ');
-  std::string out = "{\n";
+
+  out += "{\n";
 
   for (size_t i = 0; i < mv.elems_.size(); ++i) {
 
@@ -234,6 +195,91 @@ namespace mm::cal {
   out += ind + "}";
 
   return out;
+ }
+
+ inline void appendReal(double x, const SystemConfig &cfg, std::string &out) {
+  if (std::isnan(x)) {
+   out += "Indeterminate";
+   return;
+  }
+
+  if (std::isinf(x)) {
+   out += (x > 0 ? "Infinity" : "-Infinity");
+   return;
+  }
+
+  std::array<char, 64> buffer;
+
+  auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), x, std::chars_format::general, cfg.precision);
+
+  out.append(buffer.data(), result.ptr);
+ }
+
+ inline void appendComplex(const std::complex<double> &c, const SystemConfig &cfg, std::string &out) {
+  double re = (c.real() == 0.0 ? 0.0 : c.real());
+  double im = (c.imag() == 0.0 ? 0.0 : c.imag());
+
+  const bool re0 = (re < cnst_precision_inv && re > -cnst_precision_inv);
+  const bool im0 = (im < cnst_precision_inv && im > -cnst_precision_inv);
+
+  // 虚部ゼロ → 実数扱い
+  if (im0) {
+   appendReal(re, cfg, out);
+   return;
+  }
+
+  // ---- 実部 ----
+  if (!re0) { appendReal(re, cfg, out); }
+
+  // ---- 虚部 ----
+  const bool neg = im < 0.0;
+  const double absIm = neg ? -im : im;
+
+  if (!re0) {
+   out += (neg ? "-" : "+");
+  } else if (neg) {
+   out += "-";
+  }
+
+  // ±1I のときは数値を出さない
+  if (!(absIm < 1.0 + cnst_precision_inv && absIm > 1.0 - cnst_precision_inv)) { appendReal(absIm, cfg, out); }
+
+  out += "I";
+ }
+
+ inline void appendMulti(const MultiValue &mv, const SystemConfig &cfg, std::string &out) {
+  out.push_back('{');
+
+  for (size_t i = 0; i < mv.elems_.size(); ++i) {
+   if (i > 0) {
+    out.push_back(',');
+    out.push_back(' ');
+   }
+
+   appendValue(mv.elems_[i], cfg, out);
+  }
+
+  out.push_back('}');
+ }
+
+ void appendValue(const Value &v, const SystemConfig &cfg, std::string &out) {
+  std::visit(
+      [&](auto &&x) {
+       using T = std::decay_t<decltype(x)>;
+
+       if constexpr (std::is_same_v<T, double>) {
+        appendReal(x, cfg, out);
+       } else if constexpr (std::is_same_v<T, std::complex<double>>) {
+        appendComplex(x, cfg, out);
+       } else if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
+        appendMulti(*x, cfg, out);
+       } else if constexpr (std::is_same_v<T, std::string>) {
+        out += x;
+       } else {
+        out += "Invalid";
+       }
+      },
+      v.storage());
  }
 
  // std::string formatResult(const Value &v, const SystemConfig &cfg) {
@@ -260,61 +306,6 @@ namespace mm::cal {
   return 1 + maxChild;
  }
 
- std::string formatResult(const Value &v, const SystemConfig &cfg) {
-
-  return std::visit(
-      [&](auto &&x) -> std::string {
-       using T = std::decay_t<decltype(x)>;
-
-       if constexpr (std::is_same_v<T, double>) {
-        if (std::isinf(x)) return x > 0 ? "inf" : "-inf";
-        if (std::isnan(x)) return "nan";
-        return formatReal(x, cfg);
-
-       } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-        double re = x.real(), im = x.imag();
-
-        if (std::isinf(re) || std::isinf(im)) {
-         std::string s;
-         if (std::isinf(re)) s += (re > 0 ? "inf" : "-inf");
-
-         if (std::isinf(im)) {
-          if (!s.empty() && im > 0) s += "+";
-          s += (im > 0 ? "inf" : "-inf");
-          s += "i";
-         }
-         return s;
-        }
-
-        return formatComplex(x, cfg);
-
-       } else if constexpr (std::is_same_v<T, std::string>) {
-        return x;
-
-       } else if constexpr (std::is_same_v<T, InvalidValue>) {
-        return "Invalid";
-
-       } else if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
-
-        std::ostringstream oss;
-        oss << "{";
-
-        for (size_t i = 0; i < x->elems_.size(); ++i) {
-         if (i > 0) oss << ", ";
-         oss << formatResult(x->elems_[i], cfg);
-        }
-        oss << "}";
-        return oss.str();
-
-       } else if constexpr (std::is_same_v<T, std::monostate>) {
-        return "Invalid";
-       } else {
-        static_assert(always_false<T>, "Unhandled Value type");
-       }
-      },
-      v.storage());
- }
-
  std::string formatResultMulti(const Value &v, const SystemConfig &cfg, int indent) {
   return std::visit(
       [&](auto &&x) -> std::string {
@@ -335,6 +326,15 @@ namespace mm::cal {
        }
       },
       v.storage());
+ }
+
+ std::string formatResult(const Value &v, const SystemConfig &cfg) {
+  std::string out;
+  out.reserve(256);
+
+  appendValue(v, cfg, out);
+
+  return out;
  }
 
  /* ============================

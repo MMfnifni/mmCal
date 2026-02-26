@@ -76,6 +76,15 @@ Out[19] := 876
 
 In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
 Out[20] := 3
+
+In [21] := ifft(fft({1+I,2-I,3+2I,4-3I}))
+Out[21] := {1+I,2-I,3+2I,4-3I}
+
+In [22] := mlsqr({{1,2},{3,4}},{1,2})
+Out[22] := {0, 0.5}
+
+In [23] := vdot({1,2},{3,4})+vmanhattan({0,0},{3,4})+veuclidean({0,0},{3,4})
+Out[23] := 23
 ```
 
 ## Key Points Express
@@ -84,7 +93,7 @@ Out[20] := 3
 - Use `%` or `Out[n]` to reuse past history in calculations
 - Supports complex numbers
 - Angles default to degrees but can be specified with `rad`, etc.
-- Extensive set of functions and constants!
+- Extensive set of functions and constants!(Matrices, Vectors also acceptable)
 - UI version is available, not just the CLI!
 
 # Detailed implementation
@@ -264,16 +273,20 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ---
 
-### Special Ratio Functions (c-series / degree)
+### Signal
 
-| Function Name | Description    | Example Inputs/Outputs   |
-| ------------- | -------------- | ------------------------ |
-| `sinc(x)`     | `sin(x)/x`     | `sinc(90)=0.111...`      |
-| `cosc(x)`     | `(1-cos(x))/x` | `cosc(60)=0.008333...`   |
-| `tanc(x)`     | `tan(x)/x`     | `tanc(0)=1`              |
-| `sinhc(x)`    | `sinh(x)/x`    | `sinhc(3)=3.339...`      |
-| `tanhc(x)`    | `tanh(x)/x`    | `tanhc(30)=0.03333...`   |
-| `expc(x)`     | `(exp(x)-1)/x` | `expc(1)=1.718281828...` |
+| Function Name  | Description                    | Example Inputs/Outputs                     |
+| -------------- | ------------------------------ | ------------------------------------------ |
+| `fft(...)`     | Fast Fourier Transform         | `fft({1,1,1,1,1,1,1,1})={8,0,0,0,0,0,0,0}` |
+| `ifft(...)`    | Inverse Fast Fourier Transform | `ifft({4,0,0,0})={1, 1, 1, 1}`             |
+| `dft(...)`     | Discrete Fourier Transform     | `dft({1,2,3,4})={10,-2+2I,-2,-2-2I}`       |
+| `hilbert(...)` | Hilbert transform              | `hilbert({1,0,-1,0})={1,I,-1,-I}`          |
+| `sinc(x)`      | `sin(x)/x`                     | `sinc(90)=0.111...`                        |
+| `cosc(x)`      | `(1-cos(x))/x`                 | `cosc(60)=0.008333...`                     |
+| `tanc(x)`      | `tan(x)/x`                     | `tanc(0)=1`                                |
+| `sinhc(x)`     | `sinh(x)/x`                    | `sinhc(3)=3.339...`                        |
+| `tanhc(x)`     | `tanh(x)/x`                    | `tanhc(30)=0.03333...`                     |
+| `expc(x)`      | `(exp(x)-1)/x`                 | `expc(1)=1.7182818...`                     |
 
 - Since sin/cos/tan assume degree input, these also take degree input.
 - When `x` is extremely small, loss-of-significance countermeasures are applied.
@@ -333,7 +346,7 @@ Below is a complete list of all currently implemented functions. For each functi
 | `zscore(x, mu, sigma)` | (x - mu) / sigma                                      | `zscore(5,3,1)=2`                                                                                                                                                                  |
 | `iqr(...)`             | Interquartile range (Q3 - Q1)                         | `iqr(1,2,3,4)=2`                                                                                                                                                                   |
 | `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                    |
-| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=?`                                                                                                                                                        |
+| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                        |
 
 ---
 
@@ -371,10 +384,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `numdiff(v)`              | Evaluates the magnitude of the derivative using the root mean square of the difference | `numdiff(1,3,6)=2.549509756796`   |
 | `polylog(s, z)`           | Polylog calculation using a multiple series (`\|z\|<1`)                                | `polylog(2, 0.5)=0.582240526465`  |
 | `totient(n)`              | Euler's totient function φ(n)                                                          | `totient(9)=6`                    |
-| `fft(...)`                | Returns the amplitude average of an FFT                                                | `fft(1,2,3)=3.154700538379`       |
-| `ifft(...)`               | Returns the amplitude average of an IFFT                                               | `ifft(1,2,3)=2`                   |
-| `dft(...)`                | Returns the average amplitude of the DFT                                               | `dft(1,2,3)=3.732`                |
-| `hilbert(...)`            | Returns the average amplitude of the signal after Hilbert transform                    | `hilbert(1,2,3)=1`                |
 
 - This program currently does not support multiple values for what should be received as a vector, so it is a simplified version (returning the average value).
 
@@ -406,15 +415,63 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ---
 
-#### Geometry / Vectors (2D)
+#### Geometry / Vectors
 
-| Function Name           | Description                 | Example Inputs/Outputs |
-| ----------------------- | --------------------------- | ---------------------- |
-| `norm(x,y)`             | Vector magnitude            | `norm(3,4)=5`          |
-| `dot(x1,y1,x2,y2)`      | Dot product                 | `dot(1,0,0,1)=0`       |
-| `cross(x1,y1,x2,y2)`    | Cross product (Z component) | `cross(1,0,0,1)=1`     |
-| `lerp(a,b,t)`           | Linear interpolation        | `lerp(0,10,0.5)=5`     |
-| `distance(x1,y1,x2,y2)` | Distance                    | `distance(0,0,3,4)=5`  |
+| Function Name                       | Description                           | Example                           |
+| ----------------------------------- | ------------------------------------- | --------------------------------- |
+| `norm(x,y)`                         | Vector length                         | `norm(3,4)=5`                     |
+| `cross(x1,y1,x2,y2)`                | Cross product (Z-component)           | `cross(1,0,0,1)=1`                |
+| `lerp(a,b,t) `                      | Linear interpolation                  | `lerp(0,10,0.5)=5`                |
+| `distance(x1,y1,x2,y2)`             | Distance                              | `distance(0,0,3,4)=5`             |
+| `vadd(a,b)`                         | Vector addition                       | `vadd({1,2},{3,4})={4,6}`         |
+| `vsub(a,b)`                         | Vector Subtraction                    | `vsub({5,6},{1,2})={4,4}`         |
+| `vscalar(a,s)`                      | Scalar Multiplication                 | `vscalar({1,2},3)={3,6}`          |
+| `vdot(a,b)`                         | Dot product                           | `vdot({1,2},{3,4})=11`            |
+| `vcross(a,b)`                       | Cross product (3D only)               | `vcross({1,0,0},{0,1,0})={0,0,1}` |
+| `vnorm(a)`, `vlength(a)`            | Vector length                         | `vnorm({3,4})=5`                  |
+| `vmanhattan(a,b)`                   | Manhattan distance                    | `vmanhattan({0,0},{3,4})=7`       |
+| `veuclidean(a,b)`, `vdistance(a,b)` | Euclidean distance                    | `veuclidean({0,0},{3,4})=5`       |
+| `vnormalize(a)`                     | Vector normalization (unit vector)    | `vnormalize({3,4})={0.6,0.8}`     |
+| `vproject(a,b)`                     | Project vector a onto vector b        | `vproject({1,2},{0,1})={0,2}`     |
+| `vangle(a,b)`                       | Angle between two vectors (degrees)   | `vangle({1,0},{0,1})=90`          |
+| `vreflect(a,n)`                     | Reflect vector a with normal vector n | `vreflect({1,1},{0,1})={1,-1}`    |
+| `vunit(a)`                          | Unit vector                           | `vunit({3,4})={0.6,0.8}`          |
+
+---
+
+### Geometry and Vectors
+
+- Prioritizing rigor over execution speed, these operations can become extremely slow with large matrices.
+
+| Function Name               | Description                                                      | Input and Output Examples            |
+| --------------------------- | ---------------------------------------------------------------- | ------------------------------------ |
+| `matrix(a,b,c,...)`         | Create a matrix of arbitrary size                                | `matrix({1,2},{3,4})`                |
+| `identity(n)`               | Create an n×n identity matrix                                    | `identity(3)`                        |
+| `zeros(rows,cols)`          | Create a zero matrix of size rows x cols                         | `zeros(2,3)`                         |
+| `mget(A,row,col)`           | Access matrix elements                                           | `mget({{1,2},{3,4}},0,1)=2`          |
+| `madd(A,B)`                 | Matrix addition                                                  | `madd({{1,2},{3,4}}, {{5,6},{7,8}})` |
+| `mmul(A,B)`                 | Matrix multiplication                                            | `mmul({{1,2},{3,4}}, {{5,6},{7,8}})` |
+| `mtranspose(A)`             | Matrix transpose                                                 | `mtranspose({{1,2},{3,4}})`          |
+| `mtrace(A)`                 | Matrix trace (sum of diagonal entries)                           | `mtrace({{1,2},{3,4}})=5`            |
+| `mrank(A)`                  | Matrix rank                                                      | `mrank({{1,2},{3,4}})=2`             |
+| `mdet(A)`                   | Determinant of matrix                                            | `mdet({{1,2},{3,4}})=-2`             |
+| `mrows(A)`                  | Get number of rows in matrix                                     | `mrows({{1,2},{3,4}})=2`             |
+| `mcols(A)`                  | Get number of columns in matrix                                  | `mcols({{1,2},{3,4}})=2`             |
+| `mdiag(A)`                  | Get the diagonal elements of the matrix                          | `mdiag({{1,2},{3,4}})={1,4}`         |
+| `mlu(A)`                    | LU decomposition of the matrix                                   | `mlu({{2,1},{4,3}})`                 |
+| `meigenvals(A)`             | Matrix eigenvalues                                               | `meigenvals({{1,2},{3,4}})`          |
+| `meigenvecs(A)`             | Matrix eigenvectors                                              | `meigenvecs({{1,2},{3,4}})`          |
+| `minverse(A)`               | Inverse matrix                                                   | `minverse({{1,2},{3,4}})`            |
+| `mqr(A)`                    | QR decomposition (Householder transformation)                    | `mqr({{1,2},{3,4}})`                 |
+| `msvd(A)`                   | Singular value decomposition (Jacobi method)                     | `msvd({{1,2},{3,4}})`                |
+| `mcond(A)`, `mcondition(A)` | Condition number of matrix (LU decomposition)                    | `mcond({{1,2},{3,4}})`               |
+| `mlsqr(A,b)`                | Least squares solution (QR method)                               | `mlsqr({{1,2},{3,4}},{1,2})`         |
+| `mnormf(A)`, `mnorm(A)`     | Matrix Frobenius norm                                            | `mnormf({{1,2},{3,4}})`              |
+| `mmaxeigen(A)`              | Matrix maximum eigenvalue                                        | `mmaxeigen({{1,2},{3,4}})`           |
+| `mmineigen(A)`              | Minimum Eigenvalue of Matrix                                     | `mmineigen({{1,2},{3,4}})`           |
+| `msumsv(A)`                 | Sum of Singular Values of Matrix (QR Iterative SVD)              | `msumsv({{1,2},{3,4}})`              |
+| `misse_symmetric(A)`        | Determines matrix symmetry                                       | `misse_symmetric({{1,2},{2,1}})`     |
+| `mispd(A)`                  | Determines matrix positive definiteness (Cholesky decomposition) | `mispd({{2,1},{1,2}})`               |
 
 ---
 
@@ -741,6 +798,16 @@ ImplicitMul     ::= /* When values appear without symbols */ ;
 (* Comparative *)
 Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
 ```
+
+---
+
+## Command-Line Arguments
+
+If a formula is passed as a command-line argument, the solution is output and the session ends.
+The history function cannot be used.
+
+Adding `--batch` to the command-line arguments enables a mode where `In[n]` and `Out[n]` are not displayed.
+This is intended for external program processing.
 
 ---
 

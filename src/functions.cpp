@@ -26,7 +26,7 @@ namespace mm::cal {
  static void registerHyperbolic(SystemConfig &cfg);    // hyper三角関数
  static void registerGeoVec(SystemConfig &cfg);        // 図形, ベクトル
  static void registerVector(SystemConfig &cfg);        // 行列・線形代数
- static void registerSpecialTrig(SystemConfig &cfg);   // hyper三角関数
+ static void registerSignal(SystemConfig &cfg);        // 信号系
  static void registerStatistics(SystemConfig &cfg);    // 統計系
  static void registerComplex(SystemConfig &cfg);       // 複素
  static void registerRandom(SystemConfig &cfg);        // 乱数
@@ -734,33 +734,8 @@ namespace mm::cal {
                               }};
  }
 
- void registerSpecialTrig(SystemConfig &cfg) {
+ void registerSignal(SystemConfig &cfg) {
 
-  // ---- sinc / cosc / tanc /sinhc / tanhc / expc  (degree based) ----
-  // sinc(x) = sin(x)/x
-  // cosc(x) = (1 - cos(x))/x
-  // tanc(x) = tan(x)/x
-  //
-  // この電卓は trig が degree 基準なので、ここも degree 基準。
-  //
-  // sinhc(x) = sinh(x)/x
-  // tanhc(x) = tanh(x)/x
-  // expc(x)  = (exp(x)-1)/x = expm1(x)/x
-  //
-  // x=0 は極限値で定義する
-  // sinhc(0)=1, tanhc(0)=1, expc(0)=1
-
-  // cfg.functions["sinc"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
-  //                           if (isComplex(v[0])) {
-  //                            Complex x = asComplex(v[0]);
-  //                            if (x == Complex(0, 0)) return 1.0;
-  //                            return std::sin(x * deg2rad) / x;
-  //                           }
-
-  //                          double x = v[0].asScalar(ctx.pos);
-  //                          if (x == 0.0) return 1.0;
-  //                          return std::sin(x * deg2rad) / x;
-  //                         }};
   cfg.functions["sinc"] = {1, 1, makeSincLike(deg2rad)};
   cfg.functions["sincR"] = {1, 1, makeSincLike(1.0)};
   cfg.functions["cosc"] = {1, 1, makeCoscLike(deg2rad)};
@@ -770,6 +745,56 @@ namespace mm::cal {
   cfg.functions["sinhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::sinh(x); }, [](double x) { return std::sinh(x); }, 1.0)};
   cfg.functions["tanhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::tanh(x); }, [](double x) { return std::tanh(x); }, 1.0)};
   cfg.functions["expc"] = {1, 1, makeExpc()};
+  cfg.functions["fft"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                           if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "fft requires vector/matrix", ctx.pos);
+
+                           const auto &mv = v[0].asMultiRef(ctx.pos);
+
+                           if (!mv.empty() && mv[0].isMulti()) return fft2D(v[0], false, ctx);
+
+                           auto x = toComplexVector1D(v[0], ctx);
+                           return fromComplexVector(fft_dispatch(x, false, ctx));
+                          }};
+  cfg.functions["ifft"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "ifft requires vector/matrix", ctx.pos);
+
+                            const auto &mv = v[0].asMultiRef(ctx.pos);
+
+                            if (!mv.empty() && mv[0].isMulti()) return fft2D(v[0], true, ctx);
+
+                            auto x = toComplexVector1D(v[0], ctx);
+                            return fromComplexVector(fft_dispatch(x, true, ctx));
+                           }};
+  cfg.functions["dft"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                           auto x = toComplexVector1D(v[0], ctx);
+                           return fromComplexVector(dft_impl(x, false));
+                          }};
+  cfg.functions["hilbert"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                               auto x = toComplexVector1D(v[0], ctx);
+                               size_t N = x.size();
+
+                               auto X = fft_dispatch(x, false, ctx);
+
+                               std::vector<double> h(N, 0.0);
+
+                               if (N % 2 == 0) {
+                                h[0] = 1;
+                                h[N / 2] = 1;
+                                for (size_t i = 1; i < N / 2; i++)
+                                 h[i] = 2;
+                               } else {
+                                h[0] = 1;
+                                for (size_t i = 1; i <= (N - 1) / 2; i++)
+                                 h[i] = 2;
+                               }
+
+                               for (size_t i = 0; i < N; i++)
+                                X[i] *= h[i];
+
+                               X = fft_dispatch(X, true, ctx);
+
+                               return fromComplexVector(X);
+                              }};
  }
 
  void registerGeoVec(SystemConfig &cfg) {
@@ -1255,83 +1280,6 @@ namespace mm::cal {
                                return (double)(sum / x.size());
                               }};
 
-  // --- Fourier transforms (簡易版) ---
-  cfg.functions["fft"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                           auto x = collectReals(v, ctx);
-                           size_t N = x.size();
-                           if (N == 0) throwDomain(ctx.pos);
-
-                           // 簡易FFT: DFT の振幅平均
-                           double amp_sum = 0;
-                           for (size_t k = 0; k < N; ++k) {
-                            std::complex<double> sum = 0;
-                            for (size_t n = 0; n < N; ++n)
-                             sum += x[n] * std::exp(std::complex<double>(0, -2.0 * PI * k * n / N));
-                            amp_sum += std::abs(sum);
-                           }
-
-                           return amp_sum / N;
-                          }};
-  cfg.functions["ifft"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            auto x = collectReals(v, ctx);
-                            size_t N = x.size();
-                            if (N == 0) throwDomain(ctx.pos);
-                            double amp_sum = 0;
-                            for (size_t n = 0; n < N; ++n) {
-                             std::complex<double> sum = 0;
-                             for (size_t k = 0; k < N; ++k)
-                              sum += x[k] * std::exp(std::complex<double>(0, 2.0 * PI * k * n / N));
-                             sum /= static_cast<double>(N);
-                             amp_sum += std::abs(sum);
-                            }
-                            return amp_sum / N; // スカラー
-                           }};
-
-  cfg.functions["dftR"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            auto x = collectReals(v, ctx);
-                            size_t N = x.size();
-                            if (N == 0) throwDomain(ctx.pos);
-
-                            double amp_sum = 0;
-                            for (size_t k = 0; k < N; ++k) {
-                             std::complex<double> sum = 0;
-                             for (size_t n = 0; n < N; ++n)
-                              sum += x[n] * std::exp(std::complex<double>(0, -2.0 * PI * k * n / N));
-                             amp_sum += std::abs(sum); // 振幅の合計
-                            }
-
-                            return amp_sum / N;
-                           }};
-
-  // --- Hilbert transform & convolution（簡易スカラ版） ---
-  cfg.functions["hilbertR"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                                auto x = collectReals(v, ctx);
-                                size_t N = x.size();
-                                if (N == 0) throwDomain(ctx.pos);
-                                // DFT
-                                std::vector<std::complex<double>> X(N);
-                                for (size_t k = 0; k < N; ++k) {
-                                 std::complex<double> sum = 0;
-                                 for (size_t n = 0; n < N; ++n)
-                                  sum += x[n] * std::exp(std::complex<double>(0, -2.0 * PI * k * n / N));
-                                 X[k] = sum;
-                                }
-                                // ハーフスペクトルをゼロ化
-                                for (size_t k = 1; k < N / 2; ++k)
-                                 X[k] *= 2;
-                                for (size_t k = N / 2 + 1; k < N; ++k)
-                                 X[k] = 0;
-                                // IFFT
-                                double amp_sum = 0;
-                                for (size_t n = 0; n < N; ++n) {
-                                 std::complex<double> sum = 0;
-                                 for (size_t k = 0; k < N; ++k)
-                                  sum += X[k] * std::exp(std::complex<double>(0, 2.0 * PI * k * n / N));
-                                 sum /= static_cast<double>(N);
-                                 amp_sum += std::abs(sum);
-                                }
-                                return amp_sum / N;
-                               }};
   cfg.functions["convolve"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                                 if (v.size() < 2) throwDomain(ctx.pos);
 
@@ -3457,13 +3405,14 @@ namespace mm::cal {
  ////!!!
 
  void initFunctions(SystemConfig &cfg) {
+  cfg.functions.reserve(400);
   registerBasicMath(cfg);     // 基本関数
   registerExpLog(cfg);        // log系
   registerTrig(cfg);          // 三角関数
   registerHyperbolic(cfg);    // hyper三角関数
   registerGeoVec(cfg);        // 図形, ベクトル
   registerVector(cfg);        // 行列・線形代数
-  registerSpecialTrig(cfg);   // hyper三角関数
+  registerSignal(cfg);        // 信号系
   registerStatistics(cfg);    // 統計系
   registerComplex(cfg);       // 複素
   registerRandom(cfg);        // 乱数

@@ -853,7 +853,7 @@ namespace mm::cal {
     for (size_t j = 0; j < i; ++j)
      y[i] -= L[i][j] * y[j];
 
-   for (int i = n - 1; i >= 0; --i) {
+   for (size_t i = n - 1; i >= 0; --i) {
     for (size_t j = i + 1; j < n; ++j)
      y[i] -= U[i][j] * x[j];
     y[i] /= U[i][i];
@@ -1128,4 +1128,164 @@ namespace mm::cal {
  // for (size_t i = 0; i < n; ++i)
  //  S[i] = std::fabs(B[i][i]);
  //}
+
+ // 信号系
+
+ bool isPowerOfTwo(size_t n) { return n && !(n & (n - 1)); }
+
+ std::vector<std::complex<double>> toComplexVector1D(const Value &v, FunctionContext &ctx) {
+  if (!v.isMulti()) throw CalcError(CalcErrorType::TypeError, "vector required", ctx.pos);
+
+  const auto &mv = v.asMultiRef(ctx.pos);
+  std::vector<std::complex<double>> out;
+  out.reserve(mv.size());
+
+  for (const auto &e : mv.elems())
+   out.push_back(e.toComplex(ctx.pos));
+
+  return out;
+ }
+
+ Value fromComplexVector(const std::vector<std::complex<double>> &vec) {
+  std::vector<Value> elems;
+  elems.reserve(vec.size());
+
+  for (auto &c : vec) {
+   if (std::abs(c.imag()) < cnst_precision_inv) elems.emplace_back(c.real());
+   else elems.emplace_back(c);
+  }
+  return Value(std::make_shared<MultiValue>(std::move(elems)));
+ }
+
+ std::vector<std::complex<double>> dft_impl(const std::vector<std::complex<double>> &x, bool inverse) {
+
+  size_t N = x.size();
+  std::vector<std::complex<double>> X(N);
+
+  double sign = inverse ? 1.0 : -1.0;
+
+  for (size_t k = 0; k < N; ++k) {
+   std::complex<double> sum = 0;
+   for (size_t n = 0; n < N; ++n) {
+    double angle = 2.0 * PI * k * n / N;
+    sum += x[n] * std::exp(std::complex<double>(0, sign * angle));
+   }
+   if (inverse) sum /= static_cast<double>(N);
+   X[k] = sum;
+  }
+
+  return X;
+ }
+
+ void fft_rec(std::vector<std::complex<double>> &a) {
+
+  size_t N = a.size();
+  if (N <= 1) return;
+
+  size_t half = N / 2;
+
+  std::vector<std::complex<double>> even(half), odd(half);
+
+  for (size_t i = 0; i < half; ++i) {
+   even[i] = a[2 * i];
+   odd[i] = a[2 * i + 1];
+  }
+
+  fft_rec(even);
+  fft_rec(odd);
+
+  std::complex<double> w = 1.0;
+  std::complex<double> wn = std::exp(std::complex<double>(0, -2.0 * PI / N));
+
+  for (size_t k = 0; k < half; ++k) {
+   std::complex<double> t = w * odd[k];
+
+   a[k] = even[k] + t;
+   a[k + half] = even[k] - t;
+
+   w *= wn;
+  }
+ }
+
+ std::vector<std::complex<double>> fft_dispatch(const std::vector<std::complex<double>> &x, bool inverse, FunctionContext &ctx) {
+
+  if (!isPowerOfTwo(x.size())) {
+   calcWarn(ctx, "FFT fallback to O(N^2) DFT (non power-of-two length)");
+   return dft_impl(x, inverse);
+  }
+
+  std::vector<std::complex<double>> out = x;
+
+  if (inverse) {
+   for (auto &c : out)
+    c = std::conj(c);
+  }
+
+  fft_rec(out);
+
+  if (inverse) {
+   for (auto &c : out)
+    c = std::conj(c);
+
+   double N = static_cast<double>(out.size());
+   for (auto &c : out)
+    c /= N;
+  }
+
+  return out;
+ }
+
+ Value fft2D(const Value &v, bool inverse, FunctionContext &ctx) {
+
+  const auto &mv = v.asMultiRef(ctx.pos);
+
+  size_t rows = mv.size();
+  if (rows == 0) return v;
+
+  size_t cols = mv[0].asMultiRef(ctx.pos).size();
+
+  std::vector<std::vector<std::complex<double>>> mat(rows, std::vector<std::complex<double>>(cols));
+
+  for (size_t i = 0; i < rows; i++) {
+   const auto &row = mv[i].asMultiRef(ctx.pos);
+   for (size_t j = 0; j < cols; j++)
+    mat[i][j] = row[j].toComplex(ctx.pos);
+  }
+
+  // 行方向
+  for (size_t i = 0; i < rows; i++)
+   mat[i] = fft_dispatch(mat[i], inverse, ctx);
+
+  // 列方向
+  for (size_t j = 0; j < cols; j++) {
+   std::vector<std::complex<double>> col(rows);
+   for (size_t i = 0; i < rows; i++)
+    col[i] = mat[i][j];
+
+   col = fft_dispatch(col, inverse, ctx);
+
+   for (size_t i = 0; i < rows; i++)
+    mat[i][j] = col[i];
+  }
+
+  // 戻す
+  std::vector<Value> outRows;
+  outRows.reserve(rows);
+
+  for (size_t i = 0; i < rows; i++) {
+   std::vector<Value> rowVals;
+   rowVals.reserve(cols);
+
+   for (size_t j = 0; j < cols; j++) {
+    auto &c = mat[i][j];
+    if (std::abs(c.imag()) < cnst_precision_inv) rowVals.emplace_back(c.real());
+    else rowVals.emplace_back(c);
+   }
+
+   outRows.emplace_back(std::make_shared<MultiValue>(std::move(rowVals)));
+  }
+
+  return Value(std::make_shared<MultiValue>(std::move(outRows)));
+ }
+
 } // namespace mm::cal
