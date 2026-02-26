@@ -10,6 +10,15 @@ namespace mm::cal {
    地獄の無限関数定義編
    ============================ */
 
+ class FunctionBuilder {
+   SystemConfig &cfg;
+
+  public:
+   FunctionBuilder(SystemConfig &c) : cfg(c) {}
+
+   template <typename F> void def(const std::string &name, int min, int max, F f) { cfg.functions[name] = {min, max, f}; }
+ };
+
  ///!!!!
  static void registerBasicMath(SystemConfig &cfg);     // 基本関数
  static void registerExpLog(SystemConfig &cfg);        // log系

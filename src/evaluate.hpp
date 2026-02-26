@@ -23,6 +23,9 @@ namespace mm::cal {
  std::string formatReal(double x, const SystemConfig &cfg);
  std::string formatComplex(const std::complex<double> &c, const SystemConfig &cfg);
  std::string formatResult(const Value &v, const SystemConfig &cfg);
+ std::string formatMultiValue(const MultiValue &mv, const SystemConfig &cfg, int indent = 0);
+
+ std::string formatResultMulti(const Value &v, const SystemConfig &cfg, int indent = 0);
 
  /* ============================
   表示

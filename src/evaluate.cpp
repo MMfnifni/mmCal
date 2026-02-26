@@ -2,6 +2,8 @@
 
 namespace mm::cal {
 
+ static constexpr int INDENT_WIDTH = 2;
+
  /* ============================
     評価マン
     ============================ */
@@ -55,59 +57,208 @@ namespace mm::cal {
    フォーマッタ
    ============================ */
 
- std::string formatReal(double x, const SystemConfig &cfg) {
-  std::ostringstream oss;
+ inline static double normalizeZero(double x) {
+  return (x == 0.0 ? 0.0 : x); // -0 → 0
+ }
 
-  if (cfg.trimTrailingZeros) {
-   oss << std::fixed << std::setprecision(cfg.precision);
-  } else {
-   oss << std::setprecision(cfg.precision);
-  }
+ inline static double epsilon(int precision) { return std::pow(10.0, -precision); }
 
-  oss << x;
-  std::string s = oss.str();
+ inline static bool nearlyZero(double x, int precision) { return std::abs(x) < epsilon(precision); }
 
-  // fixed + trimTrailingZeros のとき末尾処理
-  if (cfg.trimTrailingZeros && s.find('.') != std::string::npos) {
+ inline static void trimZeros(std::string &s) {
+  if (auto pos = s.find('.'); pos != std::string::npos) {
    while (!s.empty() && s.back() == '0')
     s.pop_back();
    if (!s.empty() && s.back() == '.') s.pop_back();
   }
+ }
+
+ std::string formatReal(double x, const SystemConfig &cfg) {
+  if (std::isnan(x)) return "Indeterminate";
+
+  if (std::isinf(x)) return x > 0 ? "Infinity" : "-Infinity";
+
+  x = normalizeZero(x);
+
+  std::array<char, 64> buffer;
+  auto *begin = buffer.data();
+  auto *end = buffer.data() + buffer.size();
+
+  std::chars_format fmt = cfg.trimTrailingZeros ? std::chars_format::fixed : std::chars_format::general;
+
+  auto result = std::to_chars(begin, end, x, fmt, cfg.precision);
+
+  if (result.ec != std::errc{}) return "0"; // fallback（ほぼ起きない）
+
+  std::string s(begin, result.ptr);
+
+  if (cfg.trimTrailingZeros) trimZeros(s);
 
   return s;
  }
 
  std::string formatComplex(const std::complex<double> &c, const SystemConfig &cfg) {
-  double re = c.real();
-  double im = c.imag();
+  double re = normalizeZero(c.real());
+  double im = normalizeZero(c.imag());
 
-  double eps = std::pow(10.0, -(cnst_precision));
-  bool re0 = std::abs(re) < eps;
-  bool im0 = std::abs(im) < eps;
+  const bool re0 = nearlyZero(re, cfg.precision);
+  const bool im0 = nearlyZero(im, cfg.precision);
 
-  // 純実数
   if (im0) return formatReal(re, cfg);
 
-  std::ostringstream oss;
+  std::string out;
 
-  // 実部
-  if (!re0) oss << formatReal(re, cfg);
+  // ---- 実部 ----
+  if (!re0) out += formatReal(re, cfg);
 
-  // 虚部の符号
-  if (!re0 && im > 0) oss << "+";
+  // ---- 虚部 ----
+  auto appendImag = [&](double value) {
+   const bool neg = value < 0;
+   const double absIm = std::abs(value);
 
-  // 虚部の大きさ
-  if (std::abs(im - 1.0) < eps) oss << "I";
-  else if (std::abs(im + 1.0) < eps) oss << "-I";
-  else oss << formatReal(im, cfg) << "I";
+   if (!out.empty()) out += (neg ? "-" : "+");
+   else if (neg) out += "-";
 
-  return oss.str();
+   // ±1I のとき数値を出さない
+   if (!nearlyZero(absIm - 1.0, cfg.precision)) out += formatReal(absIm, cfg);
+
+   out += "I";
+  };
+
+  appendImag(im);
+
+  return out;
+ }
+
+ std::string formatMultiValue(const MultiValue &mv, const SystemConfig &cfg, int indent) {
+  if (mv.elems_.empty()) return "{}";
+
+  // ----- 1D判定 -----
+  bool isVector = std::all_of(mv.elems_.begin(), mv.elems_.end(), [](const Value &v) { return !v.isMulti(); });
+  // ----- n×1 行列判定（縦ベクトル） -----
+  bool isColumnVector = true;
+
+  if (!mv.elems_.empty()) {
+   for (const auto &e : mv.elems_) {
+    if (!e.isMulti()) {
+     isColumnVector = false;
+     break;
+    }
+
+    const auto &inner = *e.asMulti(0);
+    if (inner.elems_.size() != 1) {
+     isColumnVector = false;
+     break;
+    }
+   }
+  } else {
+   isColumnVector = false;
+  }
+
+  if (isColumnVector) {
+   std::string out = "{";
+   for (size_t i = 0; i < mv.elems_.size(); ++i) {
+    if (i > 0) out += ", ";
+    out += formatResultMulti(mv.elems_[i], cfg, indent);
+   }
+   out += "}";
+   return out;
+  }
+  if (isVector) {
+   std::string out = "{";
+   for (size_t i = 0; i < mv.elems_.size(); ++i) {
+    if (i > 0) out += ", ";
+    out += formatResultMulti(mv.elems_[i], cfg, indent);
+   }
+   out += "}";
+   return out;
+  }
+
+  // ----- すべてが「1行行列」なら横圧縮 -----
+  bool allSingleRowMatrix = true;
+
+  for (const auto &e : mv.elems_) {
+
+   if (!e.isMulti()) {
+    allSingleRowMatrix = false;
+    break;
+   }
+
+   const auto &inner = *e.asMulti(0);
+
+   // 行列であること
+   if (inner.elems_.empty()) {
+    allSingleRowMatrix = false;
+    break;
+   }
+
+   // 1行のみか？
+   bool isSingleRow = true;
+   for (const auto &row : inner.elems_) {
+    if (row.isMulti()) {
+     isSingleRow = false;
+     break;
+    }
+   }
+
+   if (!isSingleRow) {
+    allSingleRowMatrix = false;
+    break;
+   }
+  }
+
+  if (allSingleRowMatrix) {
+   std::string out = "{";
+   for (size_t i = 0; i < mv.elems_.size(); ++i) {
+    if (i > 0) out += ", ";
+    out += formatResultMulti(mv.elems_[i], cfg, indent);
+   }
+   out += "}";
+   return out;
+  }
+
+  // ----- 2D以上 -----
+  std::string ind(indent, ' ');
+  std::string out = "{\n";
+
+  for (size_t i = 0; i < mv.elems_.size(); ++i) {
+
+   out += std::string(indent + INDENT_WIDTH, ' ');
+   out += formatResultMulti(mv.elems_[i], cfg, indent + INDENT_WIDTH);
+
+   if (i + 1 < mv.elems_.size()) out += ",";
+
+   out += "\n";
+  }
+
+  out += ind + "}";
+
+  return out;
  }
 
  // std::string formatResult(const Value &v, const SystemConfig &cfg) {
  //  if (isReal(v)) return formatReal(std::get<double>(v), cfg);
  //  return formatComplex(std::get<std::complex<double>>(v), cfg);
  // }
+ static inline bool containsMultiValue(const MultiValue &mv) {
+  for (const auto &e : mv.elems_) {
+   if (std::holds_alternative<std::shared_ptr<MultiValue>>(e.storage())) { return true; }
+  }
+  return false;
+ }
+ static inline std::string indentStr(int indent) { return std::string(indent * 2, ' '); }
+
+ static inline int depthOf(const Value &v) {
+  if (!std::holds_alternative<std::shared_ptr<MultiValue>>(v.storage())) return 0;
+
+  const auto &mv = *std::get<std::shared_ptr<MultiValue>>(v.storage());
+
+  int maxChild = 0;
+  for (const auto &e : mv.elems_) {
+   maxChild = std::max(maxChild, depthOf(e));
+  }
+  return 1 + maxChild;
+ }
 
  std::string formatResult(const Value &v, const SystemConfig &cfg) {
 
@@ -159,6 +310,28 @@ namespace mm::cal {
         return "Invalid";
        } else {
         static_assert(always_false<T>, "Unhandled Value type");
+       }
+      },
+      v.storage());
+ }
+
+ std::string formatResultMulti(const Value &v, const SystemConfig &cfg, int indent) {
+  return std::visit(
+      [&](auto &&x) -> std::string {
+       using T = std::decay_t<decltype(x)>;
+
+       if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
+        return formatMultiValue(*x, cfg, indent);
+       } else if constexpr (std::is_same_v<T, double>) {
+        return formatReal(x, cfg);
+       } else if constexpr (std::is_same_v<T, std::complex<double>>) {
+        return formatComplex(x, cfg);
+       } else if constexpr (std::is_same_v<T, std::string>) {
+        return x;
+       } else if constexpr (std::is_same_v<T, InvalidValue>) {
+        return "Invalid";
+       } else {
+        throw std::runtime_error("Unknown Value type");
        }
       },
       v.storage());
