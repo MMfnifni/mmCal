@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "core.hpp"
+#include "evaluate.hpp"
 #include "math_util.hpp"
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 namespace mm::cal {
 

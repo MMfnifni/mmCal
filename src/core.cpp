@@ -43,11 +43,11 @@ namespace mm::cal {
   return false;
  }
 
+ Value::Value(const EvalResult &r) : data_(std::monostate{}) { *this = r.value; }
+
  // multi util
  inline const MultiValue &Value::asMultiRef(size_t pos) const { return *asMulti(pos); }
-
  std::size_t Value::multiSize(size_t pos) const { return asMultiRef(pos).size(); }
-
  bool Value::multiEmpty(size_t pos) const { return asMultiRef(pos).size() == 0; }
 
  const Value &Value::multiAt(std::size_t i, size_t pos) const {
@@ -116,6 +116,109 @@ namespace mm::cal {
   }
 
   return A;
+ }
+
+ std::string whatByteUnit(size_t filesize) {
+  const char *suffix[] = {"B", "KB", "MB", "GB", "TB"};
+  size_t unit_index = 0;
+  while (filesize > 1024 && unit_index < 4) {
+   filesize /= 1024;
+   ++unit_index;
+  }
+  return std::to_string(static_cast<int>(filesize)).append(suffix[unit_index]);
+ }
+
+ void serializeValueImpl(const Value &v, std::ostream &os, const SystemConfig &cfg, int depth = 0) {
+  auto formatReal = [&](double x) -> std::string {
+   if (!std::isfinite(x)) return "NaN";
+
+   if (std::abs(x) < cnst_precision_inv) x = 0.0;
+
+   std::ostringstream ss;
+   ss << std::fixed << std::setprecision(cfg.precision) << x;
+
+   std::string s = ss.str();
+
+   if (cfg.trimTrailingZeros) {
+    auto pos = s.find('.');
+    if (pos != std::string::npos) {
+     size_t end = s.size() - 1;
+
+     while (end > pos && s[end] == '0')
+      --end;
+
+     if (s[end] == '.') --end;
+
+     s.resize(end + 1);
+    }
+   }
+
+   return s;
+  };
+
+  std::visit(
+      [&](auto &&x) {
+       using X = std::decay_t<decltype(x)>;
+
+       if constexpr (std::is_same_v<X, std::monostate>) {
+        os << "Invalid";
+       }
+
+       else if constexpr (std::is_same_v<X, double>) {
+        os << formatReal(x);
+       }
+
+       else if constexpr (std::is_same_v<X, std::complex<double>>) {
+        double re = x.real();
+        double im = x.imag();
+
+        bool hasRe = std::abs(re) > cnst_precision_inv;
+        bool hasIm = std::abs(im) > cnst_precision_inv;
+
+        if (!hasRe && !hasIm) {
+         os << "0";
+         return;
+        }
+
+        if (hasRe) os << formatReal(re);
+
+        if (hasIm) {
+         if (im > 0 && hasRe) os << "+";
+
+         if (std::abs(im - 1.0) < cnst_precision_inv) os << "I";
+         else if (std::abs(im + 1.0) < cnst_precision_inv) os << "-I";
+         else os << formatReal(im) << "I";
+        }
+       }
+
+       else if constexpr (std::is_same_v<X, std::string>) {
+        os << "\"" << x << "\"";
+       }
+
+       else if constexpr (std::is_same_v<X, Value::MultiPtr>) {
+        if (!x) {
+         os << "{}";
+         return;
+        }
+
+        os << "{";
+
+        const auto &elems = x->elems();
+
+        for (size_t i = 0; i < elems.size(); ++i) {
+         if (i > 0) os << ",";
+
+         serializeValueImpl(elems[i], os, cfg, depth + 1);
+        }
+
+        os << "}";
+       }
+
+       else {
+        os << "Unknown";
+       }
+      },
+      v.storage());
  }
 
 } // namespace mm::cal

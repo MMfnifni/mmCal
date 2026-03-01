@@ -94,7 +94,6 @@ namespace mmCal_UI {
                     existingHash = ComputeHash(fs);
                 }
 
-                // ⭐ ここが本体判定
                 if (existingVersion == embeddedVersion &&
                     existingHash == embeddedHash) {
                     shouldExtract = false;

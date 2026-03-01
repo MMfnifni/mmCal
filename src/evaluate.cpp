@@ -8,19 +8,26 @@ namespace mm::cal {
     評価マン
     ============================ */
 
- Value evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) {
+ EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) {
   Parser p(cfg, src);
-  std::unique_ptr<Parser::ASTNode> ast = p.parseCompare();
+  auto ast = p.parseCompare();
+
   if (p.cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), p.cur.pos);
-  return ast->eval(cfg, hist, base);
+
+  EvaluationContext ctx{cfg, hist, base};
+
+  Value v = ast->eval(ctx);
+
+  return {v, std::move(ctx.sideEffects)};
+  // return {v};
  }
 
  CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base) {
   try {
-   Value v = evaluate(expr, cfg, history, base);
+   EvalResult v = evaluate(expr, cfg, history, base);
 
    // 表示用に丸め
-   Value vr = roundValue(v, cfg);
+   Value vr = roundValue(v.value, cfg);
    std::string out = formatResult(vr, cfg);
 
    history.push_back({expr, vr});
@@ -35,22 +42,15 @@ namespace mm::cal {
 
  EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history) {
   EvalResult res{};
+  rt.suppressDisplay = false;
+  rt.messageOverride.clear();
 
-  try {
-   Value v = evaluate(line, cfg, history, static_cast<int>(history.size()));
-   res.kind = EvalKind::Value;
-   res.value = v;
-   return res;
-  } catch (const ClearRequest &) {
-   rt.shouldClear = true;
-   res.kind = EvalKind::Clear;
-   return res;
-  } catch (const ExitRequest &) {
-   rt.shouldExit = true;
-   std::cout << "bye...nara\n";
-   res.kind = EvalKind::Exit;
-   return res;
-  }
+  EvalResult v = evaluate(line, cfg, history, static_cast<int>(history.size()));
+  // applySideEffects(res.sideEffects, runtime);
+
+  // if (!runtime.suppressDisplay) print(res.value);
+  res.value = v.value;
+  return res;
  }
 
  /* ============================
@@ -307,7 +307,8 @@ namespace mm::cal {
  }
 
  std::string formatResultMulti(const Value &v, const SystemConfig &cfg, int indent) {
-  return std::visit(
+  std::string r, chk;
+  r = std::visit(
       [&](auto &&x) -> std::string {
        using T = std::decay_t<decltype(x)>;
 
@@ -322,10 +323,19 @@ namespace mm::cal {
        } else if constexpr (std::is_same_v<T, InvalidValue>) {
         return "Invalid";
        } else {
-        throw std::runtime_error("Unknown Value type");
+        throw CalcError(CalcErrorType::RuntimeError, "Unknown Value type", 0);
        }
       },
       v.storage());
+  // 以下の方式はUI版で破壊的。要検討
+  // if (r.length() >= cfg.maxDisplayElements) {
+  // calcWarn("[WARN] result too large for CLI display.");
+  // std::cout << "Are you sure you want to output? (yes/no): ";
+  // std::cin >> chk;
+  // if (chk == "YES" || chk == "yes" || chk == "y" || chk == "Y" || chk == "1") std::cout << "Suppress display(Evaluate succeed)\n";
+  // else throw CalcError(CalcErrorType::RuntimeError, "user Interrupt", 0);
+  //}
+  return r;
  }
 
  std::string formatResult(const Value &v, const SystemConfig &cfg) {
@@ -337,10 +347,116 @@ namespace mm::cal {
   return out;
  }
 
+ std::string dataExplainStructure(const Value &value) {
+  std::function<std::string(const Value &)> dump = [&](const Value &v) -> std::string {
+   if (v.isMulti()) {
+    auto mv = v.asMulti(0);
+
+    std::string out = "{";
+
+    for (size_t i = 0; i < mv->size(); ++i) {
+     if (i > 0) out += ",";
+
+     out += dump((*mv)[i]);
+    }
+
+    out += "}";
+    return out;
+   }
+
+   if (v.isScalar()) return "R";
+   if (v.isComplex()) return "C";
+   if (v.isString()) return "S";
+
+   return "I";
+  };
+
+  return "Structural Overview: " + dump(value);
+ }
+
+ std::string dataExplain(Value value, const SystemConfig &cfg) {
+  std::ostringstream oss;
+
+  oss << "\n[Data Explain]\n\n";
+
+  std::string displayed = formatResult(value, cfg);
+
+  oss << "Type = ";
+  if (value.isScalar()) oss << "Real Number\n";
+  else if (value.isComplex()) oss << "Complex Number\n";
+  else if (value.isString()) oss << "String\n";
+  else if (value.isMulti()) oss << "MultiValue\n";
+  else oss << "Invalid\n";
+
+  oss << "Displayed = " << displayed << "\n";
+
+  // 数値系のみ誤差解析
+  if (value.isNumeric()) {
+   std::complex<double> z = value.toComplex(0);
+
+   double re = z.real();
+   double im = z.imag();
+
+   re = normalizeZero(re);
+   im = normalizeZero(im);
+
+   oss << "Raw = ";
+
+   if (im == 0.0) oss << formatReal(re, cfg);
+   else oss << formatComplex(z, cfg);
+
+   oss << "\n";
+
+   double threshold = cnst_precision_inv;
+
+   double errMag = std::abs(z);
+
+   oss << "Magnitude = " << formatReal(errMag, cfg) << "\n";
+
+   oss << "Noise threshold = " << formatReal(threshold, cfg) << "\n";
+
+   // if (errMag < threshold) oss << "Status = Numerical noise level\n";
+   // else oss << "Status = Significant magnitude\n";
+
+  } else if (value.isMulti()) {
+   auto mv = value.asMulti(0);
+   oss << "MultiValue = true\n";
+
+   // 再帰的に構造表示
+   std::function<void(const MultiValue &, int)> dumpStructure = [&](const MultiValue &m, int depth) {
+    oss << std::string(depth * 2, ' ') << "MultiValue(depth=" << depth << ") "
+        << "size=" << m.size() << "\n";
+
+    size_t index = 0;
+    for (const auto &elem : m.elems_) {
+
+     oss << std::string(depth * 2 + 2, ' ') << "[" << index++ << "] = ";
+
+     if (elem.isMulti()) {
+      oss << "\n";
+      dumpStructure(*elem.asMulti(0), depth + 1);
+     } else if (elem.isScalar()) {
+      oss << formatReal(elem.asScalar(0), cfg) << "\n";
+     } else if (elem.isComplex()) {
+      oss << formatComplex(elem.asComplex(0), cfg) << "\n";
+     } else if (elem.isString()) {
+      oss << elem.asString(0) << "\n";
+     } else {
+      oss << "Invalid\n";
+     }
+    }
+   };
+
+   dumpStructure(*mv, 0);
+  }
+  oss << dataExplainStructure(value) << "\n\n[Data Explain END]\n\n";
+  return oss.str();
+ }
+
  /* ============================
     ユーティリティの兄貴
     ============================ */
- Value Parser::ASTNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const { return Value(); }
+ Value Parser::ASTNode::evalImpl(EvaluationContext &ectx) const { return Value(); }
 
  /* ============================
    DLL
@@ -437,8 +553,8 @@ namespace mm::cal {
    }
 
    try {
-    Value v = evaluate(expr, ctx->cfg, ctx->history, ctx->base);
-    Value vr = roundValue(v, ctx->cfg);
+    EvalResult v = evaluate(expr, ctx->cfg, ctx->history, ctx->base);
+    Value vr = roundValue(v.value, ctx->cfg);
     std::string s = formatResult(vr, ctx->cfg);
 
     ctx->history.push_back({expr, vr});
@@ -467,12 +583,20 @@ namespace mm::cal {
     write_out(err, err_cap, ctx->last_error);
     return MMCAL_E_CALC_ERROR;
 
-   } catch (const ClearRequest &) {
-    ctx->history.clear();
-    ctx->last_error.clear();
-    ctx->last_error_pos = -1;
-    return MMCAL_S_CLEARED;
-   } catch (const ExitRequest &) { return MMCAL_S_EXIT; } catch (const std::exception &e) {
+   } catch (ControlRequest &e) {
+    switch (e.kind) {
+     case ControlRequest::Kind::Exit: return MMCAL_S_EXIT;
+     case ControlRequest::Kind::Clear:
+      ctx->history.clear();
+      ctx->last_error.clear();
+      ctx->last_error_pos = -1;
+      return MMCAL_S_CLEARED;
+     case ControlRequest::Kind::Explain:
+     case ControlRequest::Kind::FileWrite:
+     case ControlRequest::Kind::ClipboardCopy:
+     default: return MMCAL_E_UNKNOWN;
+    }
+   } catch (const std::exception &e) {
     ctx->last_error = e.what();
     ctx->last_error_pos = -1;
 

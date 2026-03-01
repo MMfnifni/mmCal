@@ -6,7 +6,9 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <format>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -22,13 +24,19 @@ namespace mm::cal {
  inline constexpr double cnst_precision_inv = 1e-12;
 
  struct InvalidValue {};
- struct ExitRequest {};
- struct ClearRequest {};
+ struct ControlRequest : std::exception {
+   enum class Kind { Exit, Clear, Explain, FileWrite, ClipboardCopy };
+   Kind kind;
+
+   explicit ControlRequest(Kind k) : kind(k) {}
+ };
  struct SystemConfig;
  struct FunctionContext;
  struct FunctionDef;
  struct InputEntry;
  struct MultiValue;
+ struct SideEffect;
+ struct EvalResult;
 
  /* ============================
     エラー
@@ -60,6 +68,7 @@ namespace mm::cal {
   InternalError,
   SyntaxError,
   RuntimeError,
+  IOError,
  };
 
  constexpr const char *errorMessage(CalcErrorType t) {
@@ -89,6 +98,7 @@ namespace mm::cal {
    case CalcErrorType::InternalError: return "InternalError";
    case CalcErrorType::SyntaxError: return "SyntaxError";
    case CalcErrorType::RuntimeError: return "RuntimeError";
+   case CalcErrorType::IOError: return "IOError";
   }
   return "unknown calculation error";
  }
@@ -217,6 +227,7 @@ namespace mm::cal {
    // visitor access
    const Storage &storage() const noexcept { return data_; }
    Storage &storage() noexcept { return data_; }
+   explicit Value(const EvalResult &r);
 
    template <class Visitor> decltype(auto) visit(Visitor &&v) { return std::visit(std::forward<Visitor>(v), data_); }
    template <class Visitor> decltype(auto) visit(Visitor &&v) const { return std::visit(std::forward<Visitor>(v), data_); }
@@ -256,20 +267,13 @@ namespace mm::cal {
 
    std::vector<std::vector<double>> toMatrix() const;
  };
- // 以下のほうが高速になる。可読性とのトレードオフ
- // struct Value {
- //  enum { Real, Complex } type;
- //  double r;
- //  std::complex<double> c;
- //};
- //
 
  using Complex = std::complex<double>;
 
  struct FunctionContext;
  struct RuntimeState {
-   bool shouldExit = false;
-   bool shouldClear = false;
+   bool suppressDisplay = false;
+   std::string messageOverride = "";
  };
  struct InputEntry {
    std::string expr; // In[n]
@@ -280,10 +284,26 @@ namespace mm::cal {
    std::string output;  // 成功時: 計算結果 / 失敗時: エラーメッセージ
    size_t errorPos = 0; // エラー時のみ
  };
- enum class EvalKind { None, Value, Clear, Exit };
  struct EvalResult {
-   EvalKind kind = EvalKind::None;
    Value value{};
+   std::vector<SideEffect> sideEffects;
+
+   Value getValue() const { return value; }
+ };
+
+ struct SideEffect {
+   enum class Kind { FileWrite, ClipboardCopy, Message, Explain, SuppressDisplay };
+
+   Kind kind;
+   std::string a; // path or text
+   std::string b; // file content (for write)
+ };
+
+ struct EvaluationContext {
+   SystemConfig &cfg;
+   const std::vector<InputEntry> &hist;
+   int base;
+   std::vector<SideEffect> sideEffects;
  };
 
  using FuncImpl = std::function<Value(const std::vector<Value> &, FunctionContext &)>;
@@ -303,12 +323,14 @@ namespace mm::cal {
    int precision = cnst_precision; // 表示精度（有効桁）
    bool trimTrailingZeros = true;  // 末尾の 0 を削るか
    std::unordered_map<std::string, FunctionDef> functions;
+   std::size_t maxDisplayElements = 10000;
  };
  struct FunctionContext {
    SystemConfig &cfg;
    const std::vector<InputEntry> &hist;
    int base;
    size_t pos;
+   std::vector<SideEffect> &sideEffects;
    const double deg2rad = PI / 180.0;
    const double rad2deg = 180.0 / PI;
  };
@@ -326,7 +348,7 @@ namespace mm::cal {
  template <class> inline constexpr bool always_false = false;
 
  EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history);
- CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
+ // CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
 
  /* ============================
     補助関数(ヘルパーマン)
@@ -472,10 +494,16 @@ namespace mm::cal {
  inline void calcWarn(const FunctionContext &ctx, const std::string &msg) { std::cerr << "[WARN] pos=" << ctx.pos << " " << msg << "\n"; }
  inline void calcWarn(SystemConfig &cfg, size_t pos, const std::string &msg) { std::cerr << "[WARN] pos=" << pos << " " << msg << "\n"; }
  inline void calcWarn(size_t pos, const std::string &msg) { std::cerr << "[WARN] pos=" << pos << " " << msg << "\n"; }
+ inline void calcWarn(const std::string &msg) { std::cerr << "[WARN] " << msg << "\n"; }
 
  Value roundValue(const Value &v, const SystemConfig &cfg);
 
  std::vector<std::vector<double>> toMatrix(const Value &val, const FunctionContext &ctx);
+
+ // その他ユーティリティ
+ std::string whatByteUnit(size_t filesize);
+ void serializeValueImpl(const Value &v, std::ostream &os, const SystemConfig &cfg, int depth);
+ inline void serializeValue(const Value &v, std::ostream &os, const SystemConfig &cfg) { serializeValueImpl(v, os, cfg, 0); }
 
  template <class F> inline void Value::forEachMulti(size_t pos, F &&f) const {
   if (!isMulti()) return;

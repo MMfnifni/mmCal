@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "core.hpp"
+#include "functions.hpp"
 #include "syntax.hpp"
 #include <iomanip>
 #include <sstream>
@@ -12,7 +13,7 @@ namespace mm::cal {
     評価マン
     ============================ */
 
- Value evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base); // sytaxにあるよ
+ EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base);
  CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base);
  EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history);
 
@@ -23,6 +24,10 @@ namespace mm::cal {
  std::string formatReal(double x, const SystemConfig &cfg);
  std::string formatComplex(const std::complex<double> &c, const SystemConfig &cfg);
  std::string formatResult(const Value &v, const SystemConfig &cfg);
+
+ std::string dataExplainStructure(const Value &value);
+
+ std::string dataExplain(Value value, const SystemConfig &cfg);
 
  void appendValue(const Value &v, const SystemConfig &cfg, std::string &out);
 
@@ -66,15 +71,15 @@ namespace mm::cal {
   return mulReal(v, k, pos);
  }
 
- /* ============================
-    ユーティリティの兄貴
-    ============================ */
-
- // Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx);//syntaxにあるよ
-
- /* ============================
-   DLL
+/* ============================
+   ユーティリティの兄貴
    ============================ */
+
+// Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx);//syntaxにあるよ
+
+/* ============================
+  DLL
+  ============================ */
 #ifdef __cplusplus
  extern "C" {
 #endif

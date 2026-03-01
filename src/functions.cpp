@@ -1,8 +1,10 @@
 ﻿#include "functions.hpp"
 #include "constants.hpp"
 #include "core.hpp"
-#include "evaluate.hpp"
 #include "math_util.hpp"
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 
 namespace mm::cal {
 
@@ -36,7 +38,7 @@ namespace mm::cal {
  static void registerFinance(SystemConfig &cfg);       // 財務系
  static void registerOthers(SystemConfig &cfg);        // アミューズ
 
- void registerBasicMath(SystemConfig &cfg) { // 基本関数
+ static void registerBasicMath(SystemConfig &cfg) { // 基本関数
   cfg.functions["abs"] = {1, 1, [](auto &v, auto &ctx) -> Value { return applyUnaryNumeric(v[0], [](double d) { return std::fabs(d); }, [](Complex c) { return std::abs(c); }, ctx.pos); }};
 
   cfg.functions["sign"] = {1, 1, [](auto &v, auto &ctx) -> Value {
@@ -82,7 +84,7 @@ namespace mm::cal {
   cfg.functions["GtoR"] = {1, 1, [](auto &v, auto &ctx) -> Value { return grad2rad_v(v[0], ctx.pos); }};
  }
 
- void registerExpLog(SystemConfig &cfg) { // log, exp系
+ static void registerExpLog(SystemConfig &cfg) { // log, exp系
   cfg.functions["exp"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::exp(toComplex(v[0], ctx.pos))); }};
   cfg.functions["log10"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                              double x = requireReal(v[0], ctx.pos);
@@ -98,9 +100,7 @@ namespace mm::cal {
                            auto ln_real = [](double x) { return std::log(x); };
                            auto ln_complex = [](std::complex<double> z) { return std::log(z); };
 
-                           // --------------------------
                            // 1引数: ln(x)
-                           // --------------------------
                            if (args.size() == 1) {
                             const Value &v = args[0];
 
@@ -122,10 +122,7 @@ namespace mm::cal {
                             return ln_complex(z);
                            }
 
-                           // --------------------------
                            // 2引数: log(base, x)
-                           // --------------------------
-
                            std::complex<double> base = args[0].toComplex(ctx.pos);
                            std::complex<double> x = args[1].toComplex(ctx.pos);
 
@@ -156,7 +153,7 @@ namespace mm::cal {
                             }};
  }
 
- void registerTrig(SystemConfig &cfg) {
+ static void registerTrig(SystemConfig &cfg) {
   cfg.functions["sin"] = {1, 1, [=](auto &v, auto &ctx) -> Value { return realIfPossible(std::sin(toComplex(v[0], ctx.pos) * deg2rad)); }};
   cfg.functions["cos"] = {1, 1, [=](auto &v, auto &ctx) -> Value { return realIfPossible(std::cos(toComplex(v[0], ctx.pos) * deg2rad)); }};
   // cfg.functions["tan"] = {1, 1, [=](auto &v, auto &) -> Value { return std::tan(asComplex(v[0]) * deg2rad); }};
@@ -214,7 +211,7 @@ namespace mm::cal {
                             }};
  }
 
- void registerHyperbolic(SystemConfig &cfg) { // hyper三角関数
+ static void registerHyperbolic(SystemConfig &cfg) { // hyper三角関数
   cfg.functions["sinh"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::sinh(toComplex(v[0], ctx.pos))); }};
   cfg.functions["cosh"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::cosh(toComplex(v[0], ctx.pos))); }};
   cfg.functions["tanh"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::tanh(toComplex(v[0], ctx.pos))); }};
@@ -250,7 +247,7 @@ namespace mm::cal {
                            }};
  }
 
- void registerStatistics(SystemConfig &cfg) {
+ static void registerStatistics(SystemConfig &cfg) {
   cfg.functions["fact"] = {1, 1, [](auto &v, auto &ctx) -> Value { return (double)factLD(requireInt(v[0], ctx.pos), ctx.pos); }};
   cfg.functions["gcd"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                            if (v.size() < 2) throwDomain(ctx.pos, "need at least 2 arguments");
@@ -381,7 +378,6 @@ namespace mm::cal {
                                 const double t = idx - (double)i0;
                                 return std::lerp(x0, x1, t);
                                }};
-
   cfg.functions["min"] = {1, -1, [](auto &v, auto &ctx) -> Value {
                            if (v.empty()) throwDomain(ctx.pos);
                            double m = v[0].asScalar(ctx.pos);
@@ -531,7 +527,7 @@ namespace mm::cal {
                              curCnt = 1;
                             }
                             if (curCnt > bestCnt) best = cur; // 最後の run
-                            return best;                      // 同率なら最小値が残る（仕様として自然）
+                            return best;                      // 同率なら最小値が残る
                            }};
 
   cfg.functions["erf"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::erf(v[0].asScalar(ctx.pos)); }};
@@ -651,7 +647,6 @@ namespace mm::cal {
   cfg.functions["trimmean"] = {2, INT_MAX, [](auto &v, auto &ctx) -> Value {
                                 const double p = v[0].asScalar(ctx.pos);
                                 if (!(p >= 0.0 && p < 0.5)) throwDomain(ctx.pos);
-                                // v[1..] を直接 gather できるならそれが理想
                                 std::vector<double> a;
                                 a.reserve(v.size() - 1);
                                 for (size_t i = 1; i < v.size(); ++i)
@@ -734,23 +729,26 @@ namespace mm::cal {
                               }};
  }
 
- void registerSignal(SystemConfig &cfg) {
+ static void registerSignal(SystemConfig &cfg) {
 
   cfg.functions["sinc"] = {1, 1, makeSincLike(deg2rad)};
-  cfg.functions["sincR"] = {1, 1, makeSincLike(1.0)};
   cfg.functions["cosc"] = {1, 1, makeCoscLike(deg2rad)};
-  cfg.functions["coscR"] = {1, 1, makeCoscLike(1.0)};
   cfg.functions["tanc"] = {1, 1, makeTancLike(deg2rad)};
-  cfg.functions["tancR"] = {1, 1, makeTancLike(1.0)};
   cfg.functions["sinhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::sinh(x); }, [](double x) { return std::sinh(x); }, 1.0)};
   cfg.functions["tanhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::tanh(x); }, [](double x) { return std::tanh(x); }, 1.0)};
   cfg.functions["expc"] = {1, 1, makeExpc()};
   cfg.functions["fft"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "fft requires vector/matrix", ctx.pos);
-
                            const auto &mv = v[0].asMultiRef(ctx.pos);
+                           if (mv.empty()) return v[0];
+                           bool is2D = true;
+                           for (const auto &row : mv)
+                            if (!row.isMulti()) {
+                             is2D = false;
+                             break;
+                            }
 
-                           if (!mv.empty() && mv[0].isMulti()) return fft2D(v[0], false, ctx);
+                           if (is2D) return fft2D(v[0], false, ctx);
 
                            auto x = toComplexVector1D(v[0], ctx);
                            return fromComplexVector(fft_dispatch(x, false, ctx));
@@ -797,13 +795,11 @@ namespace mm::cal {
                               }};
  }
 
- void registerGeoVec(SystemConfig &cfg) {
+ static void registerGeoVec(SystemConfig &cfg) {
   cfg.functions["hypot"] = {2, 2, [](auto &v, auto &ctx) -> Value { return std::hypot(requireReal(v[0], ctx.pos), requireReal(v[1], ctx.pos)); }};
   cfg.functions["norm"] = {1, -1, [](auto &v, auto &ctx) -> Value {
                             if (v.empty()) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
                             double acc = 0.0;
-                            // for (const auto &x : v)
-                            //  acc += std::pow(x.asScalar(ctx.pos), 2);
                             for (const auto &x : v) {
                              const double r = x.asScalar(ctx.pos);
                              acc += r * r; // pow(r,2) より圧倒的に速い
@@ -1306,7 +1302,7 @@ namespace mm::cal {
                                }};
  }
 
- void registerVector(SystemConfig &cfg) {
+ static void registerVector(SystemConfig &cfg) {
   // 任意サイズ行列の作成
   cfg.functions["matrix"] = {0, -1, [](auto &v, auto &ctx) -> Value {
                               if (v.empty()) throw CalcError(CalcErrorType::TypeError, "matrix requires at least one row", ctx.pos);
@@ -2627,7 +2623,7 @@ namespace mm::cal {
                             }};
  }
 
- void registerComplex(SystemConfig &cfg) {
+ static void registerComplex(SystemConfig &cfg) {
   cfg.functions["re"] = {1, 1, [](auto &v, auto &ctx) -> Value { return v[0].isComplex() ? v[0].asComplex(ctx.pos).real() : v[0].asScalar(ctx.pos); }};
   cfg.functions["real"] = cfg.functions["re"];
   cfg.functions["im"] = {1, 1, [](auto &v, auto &ctx) -> Value { return v[0].isComplex() ? v[0].asComplex(ctx.pos).imag() : 0.0; }};
@@ -2663,7 +2659,7 @@ namespace mm::cal {
   cfg.functions["mag"] = cfg.functions["abs"];
  }
 
- void registerRandom(SystemConfig &cfg) {
+ static void registerRandom(SystemConfig &cfg) {
   cfg.functions["rand"] = {0, 2, [](auto &v, auto &ctx) -> Value {
                             static thread_local std::mt19937_64 rng{std::random_device{}()};
                             auto make = [&](double lo, double hi) -> Value {
@@ -2714,7 +2710,7 @@ namespace mm::cal {
   cfg.functions["fma"] = {3, 3, [](auto &v, auto &ctx) -> Value { return std::fma(v[0].asScalar(ctx.pos), v[1].asScalar(ctx.pos), v[2].asScalar(ctx.pos)); }};
  }
 
- void registerAreaVol(SystemConfig &cfg) {
+ static void registerAreaVol(SystemConfig &cfg) {
   cfg.functions["area_circle"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                                    double d = v[0].asScalar(ctx.pos);
                                    if (d < 0) throwDomain(ctx.pos, "diameter must be >= 0");
@@ -2773,7 +2769,7 @@ namespace mm::cal {
                                 }};
  }
 
- void registerEngineering(SystemConfig &cfg) { // stress(F, A) = F/A
+ static void registerEngineering(SystemConfig &cfg) { // stress(F, A) = F/A
   cfg.functions["stress"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                               double F = v[0].asScalar(ctx.pos);
                               double A = v[1].asScalar(ctx.pos);
@@ -2869,7 +2865,7 @@ namespace mm::cal {
                                }};
  }
 
- void registerMoldInjection(SystemConfig &cfg) {
+ static void registerMoldInjection(SystemConfig &cfg) {
   cfg.functions["mold_clamp"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                                   double P_avg = v[0].asScalar(ctx.pos);  // 平均型内圧
                                   double A_proj = v[1].asScalar(ctx.pos); // 投影面積
@@ -2959,7 +2955,7 @@ namespace mm::cal {
                                             }};
  }
 
- void registerFinance(SystemConfig &cfg) {
+ static void registerFinance(SystemConfig &cfg) {
   // ------------------ 基本キャッシュフロー ------------------
 
   // 将来価値 FV
@@ -3287,7 +3283,7 @@ namespace mm::cal {
                                }};
  }
 
- void registerOthers(SystemConfig &cfg) {
+ static void registerOthers(SystemConfig &cfg) {
   cfg.functions["cnst"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             // v[0] が string であることを要求
                             const std::string &name = v[0].asString(ctx.pos);
@@ -3386,7 +3382,7 @@ namespace mm::cal {
   cfg.functions["In"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                           int i = (int)requireInt(v[0], ctx.pos);
                           if (i <= 0 || i > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
-                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base);
+                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base).getValue();
                          }};
   cfg.functions["Out"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            int i = (int)requireInt(v[0], ctx.pos);
@@ -3399,8 +3395,121 @@ namespace mm::cal {
                             if (idx <= 0 || idx > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
                             return ctx.hist[idx - 1].value;
                            }};
-  cfg.functions["Clear"] = {0, 0, [](auto &, auto &) -> Value { throw ClearRequest{}; }};
-  cfg.functions["Exit"] = {0, 0, [](auto &, auto &) -> Value { throw ExitRequest{}; }};
+  cfg.functions["Clear"] = {0, 0, [](auto &, auto &) -> Value { throw ControlRequest{ControlRequest::Kind::Clear}; }};
+  cfg.functions["Exit"] = {0, 0, [](auto &, auto &) -> Value { throw ControlRequest{ControlRequest::Kind::Exit}; }};
+
+  cfg.functions["filein"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                              namespace fs = std::filesystem;
+
+                              const std::string &utf8 = v[0].asString(ctx.pos);
+                              fs::path path = fs::path{std::u8string_view(reinterpret_cast<const char8_t *>(utf8.data()), utf8.size())};
+
+                              std::ifstream ifs;
+                              ifs.exceptions(std::ios::failbit | std::ios::badbit);
+
+                              try {
+                               ifs.open(path, std::ios::in);
+                              } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: cannot open file", ctx.pos); }
+
+                              std::string content;
+
+                              try {
+                               ifs.seekg(0, std::ios::end);
+                               std::size_t size = static_cast<std::size_t>(ifs.tellg());
+                               ifs.seekg(0, std::ios::beg);
+
+                               content.resize(size);
+                               ifs.read(content.data(), size);
+                              } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: read failure", ctx.pos); }
+                              EvalResult result;
+                              try {
+                               result = evaluate(content, ctx.cfg, ctx.hist, ctx.base);
+                              } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: readed file cannot evaluate", ctx.pos); }
+
+                              return result.getValue();
+                             }};
+  cfg.functions["fileout"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                               namespace fs = std::filesystem;
+
+                               const std::string &utf8 = v[1].asString(ctx.pos);
+                               fs::path path = fs::path{std::u8string_view(reinterpret_cast<const char8_t *>(utf8.data()), utf8.size())};
+
+                               fs::path tmp = path;
+                               tmp += ".tmp";
+
+                               std::ofstream ofs;
+                               size_t filesize = 0;
+                               ofs.exceptions(std::ios::failbit | std::ios::badbit);
+
+                               try {
+                                ofs.open(tmp, std::ios::out | std::ios::trunc);
+
+                                // 直接ストリーム出力（巨大データ対応）
+                                serializeValue(v[0], ofs, ctx.cfg);
+
+                                ofs.flush();
+                                filesize = static_cast<size_t>(ofs.tellp());
+                                ofs.close();
+
+                                fs::rename(tmp, path);
+                               } catch (const std::exception &) {
+
+                                std::error_code ec;
+                                fs::remove(tmp, ec); // 失敗時はtmp削除
+
+                                throw CalcError(CalcErrorType::IOError, "IOError: write failure", ctx.pos);
+                               }
+                               // ctx.rt.suppressDisplay = true;
+                               std::cout << "file write completed (" << whatByteUnit(filesize) << ")\n";
+                               throw ControlRequest{ControlRequest::Kind::FileWrite};
+                              }};
+
+  cfg.functions["clip"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            std::string s = formatResult(v[0], ctx.cfg);
+
+                            if (s.size() >= 10 * 1024 * 1024) calcWarn("this data size is over 10MB");
+                            if (s.size() >= 100 * 1024 * 1024) throw CalcError(CalcErrorType::RuntimeError, "this data size is over 100MB. Cancelled for safety.", ctx.pos);
+                            if (!OpenClipboard(nullptr)) throw CalcError(CalcErrorType::IOError, "OpenClipboard failed", ctx.pos);
+                            try {
+                             if (!EmptyClipboard()) throw CalcError(CalcErrorType::RuntimeError, "EmptyClipboard failed", ctx.pos);
+                             // UTF8 → UTF16変換
+                             int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+                             if (size <= 0) throw CalcError(CalcErrorType::RuntimeError, "UTF8->UTF16 convert failed", ctx.pos);
+                             HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size * sizeof(wchar_t));
+                             if (!hMem) throw CalcError(CalcErrorType::RuntimeError, "GlobalAlloc failed", ctx.pos);
+
+                             wchar_t *buf = (wchar_t *)GlobalLock(hMem);
+                             if (!buf) {
+                              GlobalFree(hMem);
+                              throw CalcError(CalcErrorType::RuntimeError, "GlobalLock failed", ctx.pos);
+                             }
+
+                             MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, buf, size);
+                             GlobalUnlock(hMem);
+                             if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
+                              GlobalFree(hMem);
+                              throw CalcError(CalcErrorType::RuntimeError, "SetClipboardData failed", ctx.pos);
+                             }
+                            } catch (...) {
+                             CloseClipboard();
+                             throw;
+                            }
+                            CloseClipboard();
+                            std::cout << "clipboard pasted (" << whatByteUnit(s.size()) << ")\n";
+                            throw ControlRequest{ControlRequest::Kind::ClipboardCopy};
+                           }};
+  // cfg.functions["silent"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+  //                             ctx.rt.suppressDisplay = true;
+  //                             return v[0];
+  //                            }};
+  // cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
+  //                             ctx.sideEffects.push_back({SideEffect::Kind::Explain, dataExplain(v[0], ctx.cfg), {}});
+  //                             return v[0];
+  //                            }};
+  cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
+                               std::cout << dataExplain(v[0], ctx.cfg);
+                               throw ControlRequest{ControlRequest::Kind::Explain};
+                              }};
  }
  ////!!!
 

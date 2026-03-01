@@ -163,7 +163,7 @@ namespace mm::cal {
  bool Parser::isConstantName(const std::string &name) const { return constants.find(name) != constants.end(); }
  bool Parser::isUnitName(const std::string &s) const { return symbols.count(s) != 0; }
 
- bool isValueEnd(TokenType t) {
+ bool Parser::isValueEnd(TokenType t) {
   switch (t) {
    case TokenType::Number:
    case TokenType::Identifier:
@@ -175,7 +175,7 @@ namespace mm::cal {
   }
  }
 
- bool isValueStart(TokenType t) {
+ bool Parser::isValueStart(TokenType t) {
   switch (t) {
    case TokenType::Number:
    case TokenType::Identifier:
@@ -230,7 +230,7 @@ namespace mm::cal {
    else if (isImplicitMul(prev, cur)) {
     size_t p = cur.pos;
 
-    // ★ unit の場合は UnitApplyNode
+    // unit の場合は UnitApplyNode
     if (cur.type == TokenType::Identifier && symbols.count(cur.text)) {
 
      // unitを付けていい左辺を制限する
@@ -474,11 +474,11 @@ namespace mm::cal {
 
  // AST ノード系
  Parser::NumberNode::NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
- Value Parser::NumberNode::evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const { return value; }
+ Value Parser::NumberNode::evalImpl(EvaluationContext &ectx) const { return value; }
  Parser::BinaryNode::BinaryNode(BinOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
- Value Parser::BinaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-  auto a = lhs->eval(cfg, hist, base);
-  auto b = rhs->eval(cfg, hist, base);
+ Value Parser::BinaryNode::evalImpl(EvaluationContext &ectx) const {
+  auto a = lhs->eval(ectx);
+  auto b = rhs->eval(ectx);
   if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "operator not defined for multivalue", pos);
   switch (op) {
    case BinOp::Add: return add(a, b, pos);
@@ -492,8 +492,8 @@ namespace mm::cal {
  }
 
  Parser::UnaryNode::UnaryNode(UnaryOp o, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
- Value Parser::UnaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-  auto v = rhs->eval(cfg, hist, base);
+ Value Parser::UnaryNode::evalImpl(EvaluationContext &ectx) const {
+  auto v = rhs->eval(ectx);
   if (v.isMulti()) throw CalcError(CalcErrorType::TypeError, "unary operator not defined for multivalue", pos);
   if (op == UnaryOp::Minus) return negate(v, pos);
   return v;
@@ -501,8 +501,8 @@ namespace mm::cal {
 
  Parser::PostfixUnaryNode::PostfixUnaryNode(char op, std::unique_ptr<Parser::ASTNode> e, size_t p) : op(op), expr(std::move(e)) { pos = p; }
 
- Value Parser::PostfixUnaryNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-  Value v = expr->eval(cfg, hist, base);
+ Value Parser::PostfixUnaryNode::evalImpl(EvaluationContext &ectx) const {
+  Value v = expr->eval(ectx);
 
   if (op == '!') return mm::cal::factorial(v, pos);
 
@@ -510,9 +510,9 @@ namespace mm::cal {
  }
 
  Parser::CompareNode::CompareNode(CmpOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
- Value Parser::CompareNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-  Value a = lhs->eval(cfg, hist, base);
-  Value b = rhs->eval(cfg, hist, base);
+ Value Parser::CompareNode::evalImpl(EvaluationContext &ectx) const {
+  Value a = lhs->eval(ectx);
+  Value b = rhs->eval(ectx);
 
   if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "comparison not defined for multivalue", pos);
   mm::cal::CompareOp cop;
@@ -530,10 +530,10 @@ namespace mm::cal {
   return mm::cal::compare(a, b, cop, pos);
  }
 
- Value Parser::FunctionCallNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
+ Value Parser::FunctionCallNode::evalImpl(EvaluationContext &ectx) const {
 
-  auto it = cfg.functions.find(name);
-  if (it == cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
+  auto it = ectx.cfg.functions.find(name);
+  if (it == ectx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
 
   auto &f = it->second;
   int argc = static_cast<int>(args.size());
@@ -541,9 +541,9 @@ namespace mm::cal {
   std::vector<Value> v;
   v.reserve(args.size());
   for (auto &a : args)
-   v.push_back(a->eval(cfg, hist, base));
+   v.push_back(a->eval(ectx));
 
-  FunctionContext ctx{cfg, hist, base, pos};
+  FunctionContext ctx{ectx.cfg, ectx.hist, ectx.base, pos, ectx.sideEffects};
   Value r = f.f(v, ctx);
   // double のときだけ有限チェック -> 一括捕捉に変更
   /* if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);*/
@@ -552,7 +552,7 @@ namespace mm::cal {
 
  Parser::SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }
 
- Value Parser::SymbolNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &, int) const {
+ Value Parser::SymbolNode::evalImpl(EvaluationContext &ectx) const {
   if (constants.count(name)) return constants.at(name); // 定数はここで解決できる（parse段階で解決しなくてよくなる）
   if (symbols.count(name)) return name;                 // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
 
@@ -567,8 +567,8 @@ namespace mm::cal {
 
  Parser::UnitApplyNode::UnitApplyNode(std::unique_ptr<ASTNode> e, std::string u, size_t p) : expr(std::move(e)), unit(std::move(u)) { pos = p; }
 
- Value Parser::UnitApplyNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
-  Value v = expr->eval(cfg, hist, base);
+ Value Parser::UnitApplyNode::evalImpl(EvaluationContext &ectx) const {
+  Value v = expr->eval(ectx);
   double x = v.asScalar(pos);
 
   // angle
@@ -587,12 +587,12 @@ namespace mm::cal {
   elems = std::move(e);
  }
 
- Value Parser::MultiLiteralNode::evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const {
+ Value Parser::MultiLiteralNode::evalImpl(EvaluationContext &ectx) const {
   std::vector<Value> values;
   values.reserve(elems.size());
 
   for (const auto &n : elems) {
-   Value v = n->eval(cfg, hist, base);
+   Value v = n->eval(ectx);
    values.push_back(std::move(v));
   }
 
@@ -601,16 +601,16 @@ namespace mm::cal {
 
  Parser::OutNode::OutNode(int idx, size_t p) : index(idx) { pos = p; }
 
- Value Parser::OutNode::evalImpl(SystemConfig &, const std::vector<InputEntry> &hist, int) const {
+ Value Parser::OutNode::evalImpl(EvaluationContext &ectx) const {
   if (index == 0) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
 
   int i;
   if (index > 0) i = index;
-  else i = static_cast<int>(hist.size()) + index + 1;
+  else i = static_cast<int>(ectx.hist.size()) + index + 1;
 
-  if (i <= 0 || i > static_cast<int>(hist.size())) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
+  if (i <= 0 || i > static_cast<int>(ectx.hist.size())) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
 
-  return hist[i - 1].value;
+  return ectx.hist[i - 1].value;
  }
 
 } // namespace mm::cal

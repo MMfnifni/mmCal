@@ -32,8 +32,13 @@ int main(int argc, char *argv[]) {
 
    try {
     auto res = evalLine(line, syscfg, rtmstt, history);
+    if (rtmstt.suppressDisplay) std::cout << "Silent: evaluate sucsess" << '\n' << std::flush;
     std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
-   } catch (const std::exception &e) { std::cout << "Error: " << e.what() << '\n'; }
+   }
+
+   catch (const std::exception &e) {
+    std::cout << "Error: " << e.what() << '\n';
+   }
   }
 
   return 0;
@@ -48,10 +53,14 @@ int main(int argc, char *argv[]) {
   try {
    EvalResult res = evalLine(line, syscfg, rtmstt, history);
 
-   if (res.kind == EvalKind::Value) { std::cout << formatResult(res.value, syscfg) << "\n"; }
+   if (rtmstt.suppressDisplay) std::cout << "Silent: evaluate sucsess" << '\n' << std::flush;
+   std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
    // Clear / None / Exit は何も出さず終了
   } catch (const CalcError &e) {
    std::cout << "Error: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n";
+   return 1;
+  } catch (const ControlRequest &e) {
+   std::cout << "Error: " << e.what() << "\n" << line << "\n";
    return 1;
   }
 
@@ -75,27 +84,35 @@ int main(int argc, char *argv[]) {
   if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
 
   // ---- メタコマンド ----
-  if (line.starts_with("SetFix")) {
-   syscfg.precision = std::stoi(line.substr(6));
-   continue;
-  }
+  // if (line.starts_with("SetFix")) {
+  // syscfg.precision = std::stoi(line.substr(6));
+  // continue;
+  //}
 
   try {
    EvalResult res = evalLine(line, syscfg, rtmstt, history);
+   history.push_back({line, res.value});
+   if (!rtmstt.messageOverride.empty()) { std::cout << rtmstt.messageOverride << "\n"; }
 
-   switch (res.kind) {
-    case EvalKind::Clear: history.clear(); break;
-
-    case EvalKind::Exit: return 0;
-
-    case EvalKind::Value:
-     history.push_back({line, res.value});
-     std::cout << "Out[" << history.size() << "] := " << formatResultMulti(res.value, syscfg) << "\n\n";
+   if (rtmstt.suppressDisplay) {
+    std::cout << "Out[" << history.size() << "] := " << "evaluate sucsess" << '\n' << std::flush;
+    continue;
+   }
+   std::cout << "Out[" << history.size() << "] := " << formatResultMulti(res.value, syscfg) << "\n\n";
+  } catch (ControlRequest &e) {
+   switch (e.kind) {
+    case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;
+    case ControlRequest::Kind::Clear:
+     std::cout << "histories cleared.\n";
+     history.clear();
      break;
-
-    case EvalKind::None: break;
+    case ControlRequest::Kind::Explain: continue;
+    case ControlRequest::Kind::FileWrite: continue;
+    case ControlRequest::Kind::ClipboardCopy: continue;
+    default: continue;
    }
   } catch (const CalcError &e) { std::cout << "\nError: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n\n"; }
  }
  std::cout << "bye...nara\n";
+ return 0;
 }

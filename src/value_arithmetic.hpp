@@ -5,10 +5,7 @@ namespace mm::cal {
  template <class Op> inline Value numericBinaryOp(const Value &a, const Value &b, size_t pos, Op op) {
   return std::visit(Overloaded{
 
-                        // --------------------------
                         // scalar / complex
-                        // --------------------------
-
                         [&](double x, double y) -> Value { return op(x, y); },
 
                         [&](double x, std::complex<double> y) -> Value { return op(std::complex<double>(x, 0.0), y); },
@@ -17,10 +14,7 @@ namespace mm::cal {
 
                         [&](std::complex<double> x, std::complex<double> y) -> Value { return op(x, y); },
 
-                        // --------------------------
                         // multi + scalar/complex
-                        // --------------------------
-
                         [&](std::shared_ptr<MultiValue> m, double y) -> Value {
                          auto result = std::make_shared<MultiValue>();
 
@@ -39,10 +33,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        // --------------------------
                         // scalar/complex + multi
-                        // --------------------------
-
                         [&](double x, std::shared_ptr<MultiValue> m) -> Value {
                          auto result = std::make_shared<MultiValue>();
 
@@ -61,10 +52,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        // --------------------------
                         // multi + multi
-                        // --------------------------
-
                         [&](std::shared_ptr<MultiValue> m1, std::shared_ptr<MultiValue> m2) -> Value {
                          if (m1->elems_.size() != m2->elems_.size()) throw CalcError(CalcErrorType::DimensionMismatch, "multi-value size mismatch", pos);
 
@@ -77,10 +65,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        // --------------------------
                         // invalid
-                        // --------------------------
-
                         [&](auto &&, auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand types", pos); }
 
                     },

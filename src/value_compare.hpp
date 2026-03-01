@@ -7,18 +7,11 @@ namespace mm::cal {
 
  enum class CompareOp { Eq, Ne, Lt, Le, Gt, Ge };
 
- // ---------------------------------------------
  // 内部的にイコールとする
- // ---------------------------------------------
-
  inline bool tolerantEqual(double a, double b) { return std::abs(a - b) <= cnst_precision_inv; }
-
  inline bool tolerantEqual(std::complex<double> a, std::complex<double> b) { return tolerantEqual(a.real(), b.real()) && tolerantEqual(a.imag(), b.imag()); }
 
- // ---------------------------------------------
  // 数値比較のdispatcher
- // ---------------------------------------------
-
  inline bool compareNumeric(double x, double y, CompareOp op) {
   switch (op) {
    case CompareOp::Eq: return tolerantEqual(x, y);
@@ -47,9 +40,7 @@ namespace mm::cal {
   return false;
  }
 
- // ---------------------------------------------
  // main
- // ---------------------------------------------
  inline Value compare(const Value &a, const Value &b, CompareOp op, size_t pos) {
 
   auto result = std::visit(Overloaded{

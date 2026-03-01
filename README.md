@@ -6,13 +6,13 @@
 
 # Overview
 
-This project is a **mathematical expression evaluation engine** featuring **numerical computation, complex number arithmetic, and high-precision mathematical functions**.
+### Want a handy little calculator that lets you instantly reference calculation results with % symbols, perform continuous calculations, and use pre-built functions you need? No installation required—just one executable that works anywhere? Well, here it is!!
 
-While it can be used as a calculator, it is primarily designed for **CAD, Mechanical machining, and practical use at manufacturing and design sites**, where both numerical accuracy and usability are required.
+This project is a formula evaluation engine featuring **numeric, complex, vector, and matrix operations, along with high-precision mathematical functions**.
+
+It's designed as a function calculator to make quick, consecutive calculations convenient in design/development environments and practical work.
 
 The design is inspired by _Mathematica_ in spirit, but **variable assignment and symbolic computation are intentionally not implemented**.
-
----
 
 ## Enough theory — let’s dive straight into practical examples!
 
@@ -94,16 +94,16 @@ Out[23] := 23
 - Supports complex numbers
 - Angles default to degrees but can be specified with `rad`, etc.
 - Extensive set of functions and constants!(Matrices, Vectors also acceptable)
-- UI version is available, not just the CLI!
 
 # Detailed implementation
+
+The following is closer to a **technical note** and is not organized. Please bear with me for a moment.
 
 ## Numeric Types
 
 - **Real numbers**: IEEE 754 `double` (displayed with up to 12 decimal digits)
 - **Complex numbers**: `a + bI`
-
----
+- **Array** `{}` Arrays can contain real numbers, complex numbers, or other arrays.
 
 ### Constants
 
@@ -118,8 +118,6 @@ All constants start with a capital letter.
 | `NA`  | Avogadro constant              | `6.02214076e23`                         |
 | `I`   | Imaginary unit                 | `0+I`                                   |
 | `ESP` | Internal convergence tolerance | `1e-12`                                 |
-
----
 
 ### Operators
 
@@ -137,17 +135,13 @@ All constants start with a capital letter.
 -2^2 = -(2^2)
 ```
 
----
-
 ### Unary Operators
 
 - Unary `+` and `-` may be chained arbitrarily.
 
 ```text
----5 = -5
+5 = -5
 ```
-
----
 
 ### Implicit Multiplication
 
@@ -182,13 +176,9 @@ cos(15+30)
 
 Functions must always be enclosed in `()` or `[]`.
 
----
-
 ### Functions
 
 Below is a complete list of all currently implemented functions. For each function, the function name, a brief description, and representative input/output examples are provided.
-
----
 
 ### Basic Math (Algebra, Exponentials, Logarithms, Rounding)
 
@@ -214,8 +204,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `fact(x)`        | Factorial                                 | `fact(10)=3628800`               |
 | `mod(x,y)`       | Surplus                                   | `mod(11,3)=2`                    |
 
----
-
 ### Special Functions
 
 | Function Name | Description            | Example Inputs/Outputs        |
@@ -224,8 +212,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `lgamma(x)`   | Log-gamma function     | `lgamma(5)=3.178053830348...` |
 | `erf(x)`      | Error function         | `erf(1)=0.842700792949...`    |
 | `erfc(x)`     | Complementary error fn | `erfc(1)=0.157299207050...`   |
-
----
 
 #### Angle Conversion
 
@@ -237,8 +223,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `RtoG(x)`     | Radian → Grad   | `RtoG(Pi)=200`         |
 | `GtoD(x)`     | Grad → Degree   | `GtoD(200)=180`        |
 | `GtoR(x)`     | Grad → Radian   | `GtoR(200)=Pi`         |
-
----
 
 ### Trigonometric Functions (Degree Mode / degree)
 
@@ -258,8 +242,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `sech(x)`     | Hyperbolic tangent function `1/cosh(x)`         | `sech(0)=1`            |
 | `coth(x)`     | Hyperbolic cotangent function `cosh(x)/sinh(x)` | `coth(1)=1.313...`     |
 
----
-
 ### Hyperbolic Functions
 
 | Function Name | Description             | Example Inputs/Outputs |
@@ -270,8 +252,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `asinh(x)`    | Inverse hyperbolic sine | `asinh(1)=0.881...`    |
 | `acosh(x)`    | Inverse hyperbolic cos  | `acosh(1)=0`           |
 | `atanh(x)`    | Inverse hyperbolic tan  | `atanh(0.5)=0.549...`  |
-
----
 
 ### Signal
 
@@ -290,6 +270,7 @@ Below is a complete list of all currently implemented functions. For each functi
 
 - Since sin/cos/tan assume degree input, these also take degree input.
 - When `x` is extremely small, loss-of-significance countermeasures are applied.
+- When `fft` and `ifft` are not `N^2`, they are processed as `dft`.
 
 | Function Name | Description    | Example Inputs/Outputs |
 | ------------- | -------------- | ---------------------- |
@@ -299,8 +280,6 @@ Below is a complete list of all currently implemented functions. For each functi
 
 - These interpret `x` as radians.
 - For the signal-processing-style “sinc”, this is generally the one you want.
-
----
 
 ### Number Theory / Combinatorics
 
@@ -314,8 +293,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `nextprime(n)` | The smallest prime number exceeding                    | `nextprime(11) = 13`   |
 | `prevprime(n)` | The largest prime number less than _n_                 | `prevprime(11) = 7`    |
 | `fib(x)`       | Fibonacci sequence                                     | `fib(25)=75025`        |
-
----
 
 ### Statistics (Descriptive Statistics / Aggregation)
 
@@ -348,8 +325,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                    |
 | `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                        |
 
----
-
 ### Financial Functions
 
 | Function Name                           | Description                                           | Input and Output Example                      |
@@ -371,8 +346,7 @@ Below is a complete list of all currently implemented functions. For each functi
 | `fin_cagr(start,end,n)`                 | Compound Annual Growth Rate (CAGR)                    | `fin_cagr(1000,2000,10)=0.071...`             |
 
 - `fin_irr`may fail to find roots when the negative value is strong.
-
----
+- This is an experimental implementation. `fin_cumipmt`, `fin_cumprinc`, `fin_irr`, etc., have large errors.
 
 ### Correlation / Covariance / Uncategorized(ToDo: To be organized)
 
@@ -385,10 +359,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `polylog(s, z)`           | Polylog calculation using a multiple series (`\|z\|<1`)                                | `polylog(2, 0.5)=0.582240526465`  |
 | `totient(n)`              | Euler's totient function φ(n)                                                          | `totient(9)=6`                    |
 
-- This program currently does not support multiple values for what should be received as a vector, so it is a simplified version (returning the average value).
-
----
-
 ### Numerical Computation (Floating-Point Utilities)
 
 | Function Name | Description                                  | Example Inputs/Outputs |
@@ -396,8 +366,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `hypot(x,y)`  | √(x² + y²) (robust against cancellation)     | `hypot(3,4)=5`         |
 | `fma(a,b,c)`  | Compute a\*b + c with a single rounding step | `fma(10,10,2)=102`     |
 | `rms(...)`    | Root mean square                             | `rms(1,-1,1,-1)=1`     |
-
----
 
 ### Complex Numbers
 
@@ -412,8 +380,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `mag(z)`                            | Alias of `abs(z)`              | `mag(3+4I)=5`          |
 | `proj(z)`                           | Riemann sphere projection      | `proj(3+4I)=3+4I`      |
 | `unit(z)`, `csgn(z)`                | Unit complex number `z/abs(z)` | `unit(3+4I)=0.6+0.8I`  |
-
----
 
 #### Geometry / Vectors
 
@@ -436,8 +402,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `vangle(a,b)`                       | Angle between two vectors (degrees)   | `vangle({1,0},{0,1})=90`          |
 | `vreflect(a,n)`                     | Reflect vector a with normal vector n | `vreflect({1,1},{0,1})={1,-1}`    |
 | `vunit(a)`                          | Unit vector                           | `vunit({3,4})={0.6,0.8}`          |
-
----
 
 ### Matrix
 
@@ -473,8 +437,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `misse_symmetric(A)`        | Determines matrix symmetry                                       | `misse_symmetric({{1,2},{2,1}})`     |
 | `mispd(A)`                  | Determines matrix positive definiteness (Cholesky decomposition) | `mispd({{2,1},{1,2}})`               |
 
----
-
 ### Random Numbers
 
 | Function Name      | Description                                           | Example Inputs/Outputs                |
@@ -490,8 +452,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `randn(mu)`        | Normal random N(mu,1)                                 | `randn(10)=9.61...`                   |
 | `randn(mu,sigma)`  | Normal random N(mu,sigma)                             | `randn(0,2)=1.74...`                  |
 
----
-
 ### Area and Volume
 
 | Function Name                         | Description                                  | Input and Output Example          |
@@ -506,8 +466,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `vol_sphere(d)`                       | Volume of a sphere (diameter specified)      | `vol_sphere(2)=4.18879...`        |
 | `vol_prism(x0,y0,...,xn,yn,h)`        | Volume of prism with base polygon and height | `vol_prism(0,0,1,0,1,1,0,1,2)=2`  |
 
----
-
 ### Strength of Materials (Stress, Strain, Elasticity)
 
 | Function Name      | Description            | Example                   |
@@ -515,8 +473,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `stress(F,A)`      | Stress: σ = F/A        | `stress(1000,10)=100`     |
 | `strain(dL,L)`     | Strain: ε = dL/L       | `strain(0.1,100)=0.001`   |
 | `young(sigma,eps)` | Young’s modulus: E=σ/ε | `young(200,0.001)=200000` |
-
----
 
 ### Section Properties (I, Z, J)
 
@@ -528,8 +484,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `sectionmod_circle(d)` | Circular section modulus: Z=π\*d³/32   | `sectionmod_circle(10)=98.17`  |
 | `torsion_J_circle(d)`  | Polar moment of inertia: J=π\*d⁴/32    | `torsion_J_circle(10)=981.74`  |
 | `polarZ_circle(d)`     | Polar section modulus: Zp=π\*d³/16     | `polarZ_circle(10)=196.35`     |
-
----
 
 ### Mold & Injection Molding
 
@@ -552,8 +506,6 @@ Below is a complete list of all currently implemented functions. For each functi
 
 - This is an experimental implementation. In the future, self-evident and unnecessary functions may be removed, and the unit system may be subject to change.
 
----
-
 ### Fasteners / Friction (Bolts, Torque)
 
 | Function Name                | Description                     | Example                                  |
@@ -562,8 +514,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `torque_from_preload(F,d,K)` | Tightening torque: T = K F d    | `torque_from_preload(10000,0.01,0.2)=20` |
 | `preload_from_torque(T,d,K)` | Inverse conversion: F = T/(K d) | `preload_from_torque(20,0.01,0.2)=10000` |
 | `friction(mu,N)`             | Friction force: F = μ N         | `friction(0.2,100)=20`                   |
-
----
 
 ### Utilities
 
@@ -575,24 +525,24 @@ Below is a complete list of all currently implemented functions. For each functi
 
 Refer to the following for the list of constants-> [【List of Constants】](constants_list.md)
 
----
-
 #### History
 
 ```text
 In[n], Out[n], %, %%, %%%...
 ```
 
----
-
 #### System Functions
 
-| Function Name | Description                                   |
-| ------------- | --------------------------------------------- |
-| `Clear[]`     | clears history and resets`In[n] / Out[n]`to 1 |
-| `Exit[]`      | terminates the program                        |
+System functions are not intended for use with other functions or formulas.
 
----
+| Function Name               | Description                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `Clear[]`                   | Clear erases history and sets `In[n] / Out[n]` to `n=1`                               |
+| `Exit[]`                    | Terminates the program                                                                |
+| `filein("filename")`        | Reads input from an external file and evaluates it. The result is stored in `Out[n]`  |
+| `fileout(data, "filename")` | Outputs to a file. `[n]` does not increment.                                          |
+| `clip(data)`                | Copies to the clipboard. `[n]` does not increment.                                    |
+| `explain(data)`             | Displays information such as data type and internal values. `[n]` does not increment. |
 
 ## Operator Precedence Table
 
@@ -615,8 +565,6 @@ The following table shows **operator precedence (high → low)** in this engine:
 - Implicit multiplication has higher precedence than explicit `* /`
 - Comparison operators are always evaluated last
 
----
-
 ### Comparison Operators
 
 | Operator    | Meaning               |
@@ -626,16 +574,12 @@ The following table shows **operator precedence (high → low)** in this engine:
 
 - Results are **1 (true) / 0 (false)**
 
----
-
 ### Complex Number Behavior
 
 - `sqrt(-1) = I`
 - `exp(I)` follows Euler’s formula
 - Real numbers are automatically promoted to complex numbers when required
 - `+0I` and `-0I` both evaluate to zero. Therefore, `arg(-1+0I) = 180` and `arg(-1-0I) = 180` are obtained respectively.
-
----
 
 ### Error Handling
 
@@ -671,14 +615,10 @@ The following conditions are explicitly treated as **Errors**:
 - IEEE754 results (`inf`, `-inf`) are distinguished from errors
 - Distinction between returning `inf` and `result is infinite` is currently ambiguous (needs improvement)
 
----
-
 #### Singularities and Exceptions
 
 - When an error occurs, subsequent evaluations are not performed
 - Errors are not propagated as values but are displayed immediately
-
----
 
 ### Key Points Express
 
@@ -701,8 +641,6 @@ You can specify radians when explicitly stated as follows.
 sin(Pi/2 rad) = 1
 ```
 
----
-
 ### Numerical Precision
 
 - Internally uses `double`
@@ -717,15 +655,11 @@ atan(0.57735026919) = 30.000000000016
 
 Displayed values and history are rounded to 12 decimal places.
 
----
-
 ### Intentional Limitations
 
 - No variable assignment
 - No user-defined functions
 - No symbolic computation
-
----
 
 ### Known Behavior
 
@@ -733,14 +667,10 @@ Displayed values and history are rounded to 12 decimal places.
 - `-0` may be displayed
 - Expressions inside `In[] / Out[]` are undefined
 
----
-
 ### Specification behavior
 
 - Spaces are generally ignored, but between numbers they are treated as implicit multiplication. `3 2` -> `3*2`
 - In principle, complex solutions are returned as complex numbers, but `cbrt` returns real solutions. (`(-8)^(1/3)=1+1.732050807569I`, `cbrt(-8)=-2`)
-
----
 
 ## Grammar Definition (EBNF)
 
@@ -800,8 +730,6 @@ ImplicitMul     ::= /* When values appear without symbols */ ;
 Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
 ```
 
----
-
 ## Command-Line Arguments
 
 If a formula is passed as a command-line argument, the solution is output and the session ends.
@@ -810,16 +738,12 @@ The history function cannot be used.
 Adding `--batch` to the command-line arguments enables a mode where `In[n]` and `Out[n]` are not displayed.
 This is intended for external program processing.
 
----
-
 ## UI Version
 
 This is a UI wrapper around the CLI version. Usage is the same as the CLI version.  
 However, it requires the following runtime:
 
-[.NET 8 Runtime](https://dotnet.microsoft.com/ja-jp/download/dotnet/8.0)
-
----
+[.NET8.0 Runtime](https://dotnet.microsoft.com/ja-jp/download/dotnet/8.0)
 
 ## License
 
@@ -831,7 +755,9 @@ If you use this software in academic papers or commercial products, please clear
 
 A short notice would be appreciated.(and feel delight)
 
----
+However, **simply repackaging** this DLL or source code with a different platform or UI for commercial use is technically permissible under the license, but it's a real letdown.
+
+We'd be thrilled if you integrate it as part of some other software.
 
 ## Tests
 
@@ -839,17 +765,19 @@ This project includes **600 automated tests**, covering:
 
 - Operator precedence and associativity
 - Error handling
-- Complex arithmetic
+- Complex, Vector, Matrix arithmetic
 - Boundary and edge cases
+- Perform FFT->IFFT on a random array and measure maximum absolute error, mean absolute error, maximum relative error, and energy conservation.
 
----
+Refer to the test_set folder for test details.
 
 ## Notes
 
 This project aims to reconcile rigorous operator semantics with practical formula evaluation.
+
 It also seeks to operate with ease in any environment, whether for designers or on the production floor.
 
----
+And I'm just making what I want.
 
 ### **Disclaimer**
 
@@ -859,24 +787,19 @@ The author or copyright holder shall not be liable for any claims, damages, or o
 By using this software, you acknowledge and automatically agree that all risks associated with its use are your responsibility.
 The author assumes no responsibility for any damage resulting from data loss, system malfunction, or other consequences arising from the use of this software.
 
----
-
 ### Acknowledgments
 
 I express my gratitude to my past self who inspired the development of this tool, to my university and professors who served as my place of learning, and to my current workplace as the environment where it is actually used.
-
----
 
 ## Requests / Contributions
 
 Please submit them via Github.I love to hear any suggestions for implementation, especially those needed in manufacturing or design environments.
 
----
-
 ### Future Plans
 
-- Support for different bases (_N_ notation, 0x, 0b, plus add() and shift())
+- Support for different bases (_N_ notation, 0x, 0b, add(), shift(), >>)
 - AngleMode support (setAngle = RADIAN)
+- Arbitrary precision (setFix=5)
 - `eval` now supports `expect`
 - Basic calculus stuff
 - Variables aren’t really supported on purpose, but loop-like stuff (like `for`) would be nice

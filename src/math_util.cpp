@@ -853,15 +853,15 @@ namespace mm::cal {
     for (size_t j = 0; j < i; ++j)
      y[i] -= L[i][j] * y[j];
 
-   for (size_t i = n - 1; i >= 0; --i) {
+   for (size_t i = n; i-- > 0;) {
     for (size_t j = i + 1; j < n; ++j)
-     y[i] -= U[i][j] * x[j];
+     y[i] -= U[i][j] * y[j];
     y[i] /= U[i][i];
    }
 
    double nrm = norm(y);
    for (size_t i = 0; i < n; ++i)
-    x[i] = y[i] / nrm;
+    if (nrm > 1e-14) x[i] = y[i] / nrm;
   }
 
   return x;
@@ -1209,10 +1209,7 @@ namespace mm::cal {
 
  std::vector<std::complex<double>> fft_dispatch(const std::vector<std::complex<double>> &x, bool inverse, FunctionContext &ctx) {
 
-  if (!isPowerOfTwo(x.size())) {
-   calcWarn(ctx, "FFT fallback to O(N^2) DFT (non power-of-two length)");
-   return dft_impl(x, inverse);
-  }
+  if (!isPowerOfTwo(x.size())) { return dft_impl(x, inverse); }
 
   std::vector<std::complex<double>> out = x;
 
@@ -1243,6 +1240,7 @@ namespace mm::cal {
   if (rows == 0) return v;
 
   size_t cols = mv[0].asMultiRef(ctx.pos).size();
+  if (!isPowerOfTwo(rows) || !isPowerOfTwo(cols)) { calcWarn(ctx, "2D FFT fallback to O(N^2) DFT (non power-of-two dimension)"); }
 
   std::vector<std::vector<std::complex<double>>> mat(rows, std::vector<std::complex<double>>(cols));
 

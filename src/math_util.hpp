@@ -677,7 +677,7 @@ namespace mm::cal {
  double condition_number(const std::vector<std::vector<double>> &A);
  void bidiagonalize(std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
  void bidiagonal_qr(std::vector<std::vector<double>> &B, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
- void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
+ // void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
  void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
  bool isPowerOfTwo(size_t n);
  std::vector<std::complex<double>> toComplexVector1D(const Value &v, FunctionContext &ctx);
@@ -686,4 +686,5 @@ namespace mm::cal {
  void fft_rec(std::vector<std::complex<double>> &a);
  std::vector<std::complex<double>> fft_dispatch(const std::vector<std::complex<double>> &x, bool inverse, FunctionContext &ctx);
  Value fft2D(const Value &v, bool inverse, FunctionContext &ctx);
+
 } // namespace mm::cal

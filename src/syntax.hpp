@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "core.hpp"
-#include "functions.hpp"
 #include "math_util.hpp"
 #include "value_arithmetic.hpp"
 #include "value_compare.hpp"
@@ -129,15 +128,15 @@ Token / Lexer
      virtual ~ASTNode() = default;
 
      // 外から呼ばれる唯一の eval
-     virtual Value eval(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const final {
-      Value v = evalImpl(cfg, hist, base);
-      checkFinite(v, pos);
+     virtual Value eval(EvaluationContext &ectx) const final {
+      Value v = evalImpl(ectx);
+      Value::checkFinite(v, pos);
       return v;
      }
 
     protected:
      // 派生クラスはこれだけ実装する
-     virtual Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const = 0;
+     virtual Value evalImpl(EvaluationContext &) const = 0;
    };
 
    /* ---------- Number ---------- */
@@ -145,7 +144,7 @@ Token / Lexer
      Value value;
 
      NumberNode(Value v, size_t p);
-     Value evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Binary ---------- */
@@ -156,7 +155,7 @@ Token / Lexer
 
      BinaryNode(BinOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p);
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Unary ---------- */
@@ -165,7 +164,7 @@ Token / Lexer
      std::unique_ptr<ASTNode> rhs;
      UnaryNode(UnaryOp o, std::unique_ptr<ASTNode> r, size_t p);
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Postfix ---------- */
@@ -175,7 +174,7 @@ Token / Lexer
 
      PostfixUnaryNode(char op, std::unique_ptr<ASTNode> e, size_t p);
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Compare ---------- */
@@ -185,7 +184,7 @@ Token / Lexer
 
      CompareNode(CmpOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p);
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Function ---------- */
@@ -195,7 +194,7 @@ Token / Lexer
      std::vector<std::unique_ptr<ASTNode>> args;
      std::unordered_map<std::string, std::unique_ptr<ASTNode>> options;
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- SymbolNode ---------- */
@@ -204,7 +203,7 @@ Token / Lexer
      std::string name;
      SymbolNode(std::string n, size_t p);
 
-     Value evalImpl(SystemConfig &, const std::vector<InputEntry> &, int) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- Unit ---------- */
@@ -214,7 +213,7 @@ Token / Lexer
      std::string unit;
 
      UnitApplyNode(std::unique_ptr<ASTNode> e, std::string u, size_t p);
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- MultiLiteral ---------- */
@@ -224,7 +223,7 @@ Token / Lexer
      MultiLiteralNode(std::vector<std::unique_ptr<ASTNode>> e, size_t p);
 
     protected:
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
 
    /* ---------- History % ---------- */
@@ -248,14 +247,14 @@ Token / Lexer
      int index; // 正: Out[n], 負: % / %%
      OutNode(int idx, size_t p);
 
-     Value evalImpl(SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) const override;
+     Value evalImpl(EvaluationContext &ectx) const override;
    };
    /* ============================
       ユーティリティ先輩
       ============================ */
 
-   inline bool isValueEnd(TokenType t);
-   inline bool isValueStart(TokenType t);
+   bool isValueEnd(TokenType t);
+   bool isValueStart(TokenType t);
 
  }; // class Parser
  Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx);
