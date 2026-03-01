@@ -2,7 +2,7 @@
 
 #include "core.hpp"
 #include "functions.hpp"
-#include "syntax.hpp"
+#include "lexer_paser.hpp"
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -13,9 +13,8 @@ namespace mm::cal {
     評価マン
     ============================ */
 
- EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base);
- CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base);
- EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history);
+ EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base, EvaluationContext &ectx);
+ CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base, EvaluationContext &ectx);
 
  /* ============================
    フォーマッタ

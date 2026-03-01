@@ -13,8 +13,8 @@ using namespace mm::cal;
 
 int main(int argc, char *argv[]) {
  SystemConfig syscfg;
- RuntimeState rtmstt;
  std::vector<InputEntry> history;
+ EvaluationContext ectx{syscfg, history, 0};
 
  initFunctions(syscfg);
 
@@ -31,8 +31,13 @@ int main(int argc, char *argv[]) {
    if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
 
    try {
-    auto res = evalLine(line, syscfg, rtmstt, history);
-    if (rtmstt.suppressDisplay) std::cout << "Silent: evaluate sucsess" << '\n' << std::flush;
+    auto res = evalLine(line, syscfg, history, ectx);
+    applySideEffects(ectx, res);
+    if (res.explain != "") { std::cout << res.explain; }
+    if (res.suppressDisplay) {
+     std::cout << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
+     continue;
+    }
     std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
    }
 
@@ -51,9 +56,11 @@ int main(int argc, char *argv[]) {
   std::string line = argv[1];
 
   try {
-   EvalResult res = evalLine(line, syscfg, rtmstt, history);
+   EvalResult res = evalLine(line, syscfg, history, ectx);
+   applySideEffects(ectx, res);
 
-   if (rtmstt.suppressDisplay) std::cout << "Silent: evaluate sucsess" << '\n' << std::flush;
+   if (res.explain != "") std::cout << res.explain;
+   if (res.suppressDisplay) std::cout << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
    std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
    // Clear / None / Exit は何も出さず終了
   } catch (const CalcError &e) {
@@ -90,12 +97,13 @@ int main(int argc, char *argv[]) {
   //}
 
   try {
-   EvalResult res = evalLine(line, syscfg, rtmstt, history);
+   EvalResult res = evalLine(line, syscfg, history, ectx);
+   applySideEffects(ectx, res);
    history.push_back({line, res.value});
-   if (!rtmstt.messageOverride.empty()) { std::cout << rtmstt.messageOverride << "\n"; }
 
-   if (rtmstt.suppressDisplay) {
-    std::cout << "Out[" << history.size() << "] := " << "evaluate sucsess" << '\n' << std::flush;
+   if (res.explain != "") { std::cout << res.explain; }
+   if (res.suppressDisplay) {
+    std::cout << "Out[" << history.size() << "] := " << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
     continue;
    }
    std::cout << "Out[" << history.size() << "] := " << formatResultMulti(res.value, syscfg) << "\n\n";
@@ -103,10 +111,10 @@ int main(int argc, char *argv[]) {
    switch (e.kind) {
     case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;
     case ControlRequest::Kind::Clear:
-     std::cout << "histories cleared.\n";
      history.clear();
+     ectx.variables.clear();
+     std::cout << "variables and histories cleared\n";
      break;
-    case ControlRequest::Kind::Explain: continue;
     case ControlRequest::Kind::FileWrite: continue;
     case ControlRequest::Kind::ClipboardCopy: continue;
     default: continue;

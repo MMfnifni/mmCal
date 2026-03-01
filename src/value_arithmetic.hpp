@@ -104,7 +104,7 @@ namespace mm::cal {
  }
 
  inline Value power(const Value &a, const Value &b, size_t pos) {
-  if (!a.isNumeric() || !b.isNumeric()) throw CalcError(CalcErrorType::TypeError, "numeric required", pos);
+  if (!a.isNumeric() || !b.isNumeric()) throw CalcError(CalcErrorType::TypeError, "TypeError: numeric required", pos);
 
   // ===== real × real fast path =====
   if (a.isScalar() && b.isScalar()) {
@@ -112,7 +112,7 @@ namespace mm::cal {
    double exp = b.asScalar(pos);
 
    // 0^0
-   if (base == 0.0 && exp == 0.0) throw CalcError(CalcErrorType::DomainError, "0^0 is indeterminate", pos);
+   if (base == 0.0 && exp == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0^0 is indeterminate", pos);
 
    // 0^negative
    if (base == 0.0) {
@@ -141,7 +141,7 @@ namespace mm::cal {
   std::complex<double> z = a.toComplex(pos);
   std::complex<double> w = b.toComplex(pos);
 
-  if (std::abs(z) == 0.0 && std::abs(w) == 0.0) throw CalcError(CalcErrorType::DomainError, "0^0 is indeterminate", pos);
+  if (std::abs(z) == 0.0 && std::abs(w) == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0^0 is indeterminate", pos);
 
   std::complex<double> result = std::pow(z, w);
 
@@ -174,10 +174,10 @@ namespace mm::cal {
  }
 
  inline double factorialScalar(double x, size_t pos) {
-  if (x < 0.0) throw CalcError(CalcErrorType::DomainError, "factorial undefined for negative values", pos);
+  if (x < 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: factorial undefined for negative values", pos);
 
   double intpart;
-  if (std::modf(x, &intpart) != 0.0) throw CalcError(CalcErrorType::DomainError, "factorial requires integer value", pos);
+  if (std::modf(x, &intpart) != 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: factorial requires integer value", pos);
 
   if (x > 170.0) // double overflow safety
    throw CalcError(CalcErrorType::Overflow, "factorial overflow", pos);

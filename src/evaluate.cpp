@@ -8,23 +8,18 @@ namespace mm::cal {
     評価マン
     ============================ */
 
- EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base) {
+ EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base, EvaluationContext &ectx) {
   Parser p(cfg, src);
-  auto ast = p.parseCompare();
+  auto ast = p.parse();
 
-  if (p.cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), p.cur.pos);
-
-  EvaluationContext ctx{cfg, hist, base};
-
-  Value v = ast->eval(ctx);
-
-  return {v, std::move(ctx.sideEffects)};
-  // return {v};
+  if (p.cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "Syntax Error: not closed", p.cur.pos);
+  Value v = ast->eval(ectx);
+  return {v};
  }
 
- CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base) {
+ CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base, EvaluationContext &ectx) {
   try {
-   EvalResult v = evaluate(expr, cfg, history, base);
+   EvalResult v = evaluate(expr, cfg, history, base, ectx);
 
    // 表示用に丸め
    Value vr = roundValue(v.value, cfg);
@@ -40,12 +35,11 @@ namespace mm::cal {
   } catch (...) { return {false, "unknown error", 0}; }
  }
 
- EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history) {
+ EvalResult evalLine(const std::string &line, SystemConfig &cfg, std::vector<InputEntry> &history, EvaluationContext &ectx) {
   EvalResult res{};
-  rt.suppressDisplay = false;
-  rt.messageOverride.clear();
 
-  EvalResult v = evaluate(line, cfg, history, static_cast<int>(history.size()));
+  ectx.sideEffects.clear();
+  EvalResult v = evaluate(line, cfg, history, static_cast<int>(history.size()), ectx);
   // applySideEffects(res.sideEffects, runtime);
 
   // if (!runtime.suppressDisplay) print(res.value);
@@ -456,7 +450,7 @@ namespace mm::cal {
  /* ============================
     ユーティリティの兄貴
     ============================ */
- Value Parser::ASTNode::evalImpl(EvaluationContext &ectx) const { return Value(); }
+ Value evalImpl(EvaluationContext &ectx) { return Value(); }
 
  /* ============================
    DLL
@@ -553,7 +547,8 @@ namespace mm::cal {
    }
 
    try {
-    EvalResult v = evaluate(expr, ctx->cfg, ctx->history, ctx->base);
+    EvaluationContext ectx{ctx->cfg, ctx->history, ctx->base};
+    EvalResult v = evaluate(expr, ctx->cfg, ctx->history, ctx->base, ectx);
     Value vr = roundValue(v.value, ctx->cfg);
     std::string s = formatResult(vr, ctx->cfg);
 
@@ -636,7 +631,7 @@ namespace mm::cal {
 
    try {
     Parser p(ctx->cfg, expr);
-    std::unique_ptr<Parser::ASTNode> ast = p.parseCompare();
+    std::unique_ptr<ASTNode> ast = p.parseCompare();
 
     // 未消化トークンがあれば構文エラー
     if (p.cur.type != TokenType::End) {

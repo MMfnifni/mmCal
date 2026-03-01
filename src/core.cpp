@@ -52,7 +52,7 @@ namespace mm::cal {
 
  const Value &Value::multiAt(std::size_t i, size_t pos) const {
   const auto &mv = asMultiRef(pos);
-  if (i >= mv.size()) throw CalcError(CalcErrorType::OutOfRange, "multivalue index out of range", pos);
+  if (i >= mv.size()) throw CalcError(CalcErrorType::OutOfRange, "OutOfRange: multivalue index out of range", pos);
   return mv[i];
  }
 
@@ -85,7 +85,7 @@ namespace mm::cal {
  std::vector<std::vector<double>> MultiValue::toMatrix() const {
   std::vector<std::vector<double>> matrix;
   for (const auto &row : elems_) {
-   if (!row.isMulti()) { throw CalcError(CalcErrorType::TypeError, "Invalid matrix row", 0); }
+   if (!row.isMulti()) { throw CalcError(CalcErrorType::TypeError, "TypeError: Invalid matrix row", 0); }
    std::vector<double> row_vals;
    const auto &multi_row = row.asMultiRef(0);
    for (size_t i = 0; i < multi_row.size(); ++i) {
@@ -100,7 +100,7 @@ namespace mm::cal {
   const auto &M = val.asMultiRef(ctx.pos);
 
   size_t rows = M.size();
-  if (rows == 0) throw CalcError(CalcErrorType::DomainError, "empty matrix", ctx.pos);
+  if (rows == 0) throw CalcError(CalcErrorType::DomainError, "DomainError: empty matrix", ctx.pos);
 
   size_t cols = M[0].asMultiRef(ctx.pos).size();
 
@@ -109,7 +109,7 @@ namespace mm::cal {
   for (size_t i = 0; i < rows; ++i) {
    const auto &row = M[i].asMultiRef(ctx.pos);
 
-   if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "irregular matrix", ctx.pos);
+   if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "DomainError: irregular matrix", ctx.pos);
 
    for (size_t j = 0; j < cols; ++j)
     A[i][j] = row[j].asScalar(ctx.pos);
@@ -219,6 +219,16 @@ namespace mm::cal {
        }
       },
       v.storage());
+ }
+
+ void applySideEffects(EvaluationContext &ectx, EvalResult &result) {
+  for (const auto &e : ectx.sideEffects) {
+   switch (e.kind) {
+    case SideEffect::Kind::Explain: result.explain = e.a; break;
+    case SideEffect::Kind::SuppressDisplay: result.suppressDisplay = true; break;
+    default: break;
+   }
+  }
  }
 
 } // namespace mm::cal

@@ -37,6 +37,8 @@ namespace mm::cal {
  struct MultiValue;
  struct SideEffect;
  struct EvalResult;
+ struct ASTNode; // 実装はsyntax.hppへ
+ struct UserFunction;
 
  /* ============================
     エラー
@@ -146,23 +148,23 @@ namespace mm::cal {
 
    // getters
    double asScalar(size_t pos) const {
-    if (!isScalar()) throw CalcError(CalcErrorType::TypeError, "asScalar: expected scalar", pos);
+    if (!isScalar()) throw CalcError(CalcErrorType::TypeError, "TypeError: asScalar: expected scalar", pos);
     return std::get<double>(data_);
    }
 
    std::complex<double> asComplex(size_t pos) const {
     if (auto p = std::get_if<std::complex<double>>(&data_)) return *p;
     if (auto p = std::get_if<double>(&data_)) return std::complex<double>(*p, 0.0);
-    throw CalcError(CalcErrorType::TypeError, "asComplex: expected complex", pos);
+    throw CalcError(CalcErrorType::TypeError, "TypeError: asComplex: expected complex", pos);
    }
 
    const std::string &asString(size_t pos) const {
-    if (!isString()) throw CalcError(CalcErrorType::TypeError, "asString: expected string", pos);
+    if (!isString()) throw CalcError(CalcErrorType::TypeError, "TypeError: asString: expected string", pos);
     return std::get<std::string>(data_);
    }
 
    MultiPtr asMulti(size_t pos) const {
-    if (!isMulti()) throw CalcError(CalcErrorType::TypeError, "asMulti: expected multivalue", pos);
+    if (!isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: asMulti: expected multivalue", pos);
     return std::get<MultiPtr>(data_);
    }
    const MultiValue &asMultiRef(size_t pos) const;
@@ -172,15 +174,15 @@ namespace mm::cal {
     if (isScalar()) return {std::get<double>(data_), 0.0};
     if (isComplex()) return std::get<std::complex<double>>(data_);
 
-    throw CalcError(CalcErrorType::TypeError, "toComplex: numeric required", pos);
+    throw CalcError(CalcErrorType::TypeError, "TypeError: toComplex: numeric required", pos);
    }
 
    int64_t toInt64(size_t pos) const {
     double x = asScalar(pos);
 
-    if (!std::isfinite(x)) throw CalcError(CalcErrorType::DomainError, "nan/inf", pos);
-    if (std::floor(x) != x) throw CalcError(CalcErrorType::TypeError, "integer required", pos);
-    if (x < (double)LLONG_MIN || x > (double)LLONG_MAX) throw CalcError(CalcErrorType::OutOfRange, "int64 overflow", pos);
+    if (!std::isfinite(x)) throw CalcError(CalcErrorType::DomainError, "DomainError: nan/inf", pos);
+    if (std::floor(x) != x) throw CalcError(CalcErrorType::TypeError, "TypeError: integer required", pos);
+    if (x < (double)LLONG_MIN || x > (double)LLONG_MAX) throw CalcError(CalcErrorType::OutOfRange, "OutOfRange: int64 overflow", pos);
 
     return static_cast<int64_t>(x);
    }
@@ -256,7 +258,7 @@ namespace mm::cal {
    template <class F> Value map(F &&f) const;
 
    template <class F> Value mapMulti(size_t pos, F &&f) const {
-    if (!Value::isMulti()) throw CalcError(CalcErrorType::TypeError, "multivalue required", pos);
+    if (!Value::isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: multivalue required", pos);
     return Value::asMultiRef(pos).map(std::forward<F>(f));
    }
 
@@ -286,8 +288,9 @@ namespace mm::cal {
  };
  struct EvalResult {
    Value value{};
-   std::vector<SideEffect> sideEffects;
 
+   std::string explain = "";
+   bool suppressDisplay = false;
    Value getValue() const { return value; }
  };
 
@@ -297,14 +300,6 @@ namespace mm::cal {
    Kind kind;
    std::string a; // path or text
    std::string b; // file content (for write)
- };
-
- struct EvaluationContext {
-   SystemConfig &cfg;
-   const std::vector<InputEntry> &hist;
-   int base;
-   std::vector<SideEffect> sideEffects;              // おくすり
-   std::unordered_map<std::string, Value> variables; // ユーザ変数
  };
 
  using FuncImpl = std::function<Value(const std::vector<Value> &, FunctionContext &)>;
@@ -324,6 +319,7 @@ namespace mm::cal {
    int precision = cnst_precision; // 表示精度（有効桁）
    bool trimTrailingZeros = true;  // 末尾の 0 を削るか
    std::unordered_map<std::string, FunctionDef> functions;
+   // std::unordered_map<std::string, UserFunction> userFunctions; // ユーザ関数
    std::size_t maxDisplayElements = 10000;
  };
  struct FunctionContext {
@@ -334,6 +330,18 @@ namespace mm::cal {
    std::vector<SideEffect> &sideEffects;
    const double deg2rad = PI / 180.0;
    const double rad2deg = 180.0 / PI;
+ };
+ struct EvaluationContext {
+   SystemConfig &cfg;
+   const std::vector<InputEntry> &hist;
+   int base = 0;
+   std::vector<SideEffect> sideEffects;                        // おくすり
+   std::unordered_map<std::string, Value> variables;           // ユーザ変数
+   std::vector<std::unordered_map<std::string, Value>> scopes; // ユーザ関数
+   std::vector<std::string> callStack;
+
+   // EvaluationContext() = default;
+   EvaluationContext(SystemConfig &c, const std::vector<InputEntry> &h, int b) : cfg(c), hist(h), base(b) {}
  };
 
  inline const std::unordered_map<std::string, Value> constants = {
@@ -348,7 +356,7 @@ namespace mm::cal {
 
  template <class> inline constexpr bool always_false = false;
 
- EvalResult evalLine(const std::string &line, SystemConfig &cfg, RuntimeState &rt, std::vector<InputEntry> &history);
+ EvalResult evalLine(const std::string &line, SystemConfig &cfg, std::vector<InputEntry> &history, EvaluationContext &ectx);
  // CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
 
  /* ============================
@@ -378,7 +386,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "numeric argument required", pos); }
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: numeric argument required", pos); }
 
                     },
                     v.storage());
@@ -411,7 +419,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for real multiplication", pos); }
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: invalid operand for real multiplication", pos); }
 
                     },
                     v.storage());
@@ -436,7 +444,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for real division", pos); }
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: invalid operand for real division", pos); }
 
                     },
                     v.storage());
@@ -505,7 +513,10 @@ namespace mm::cal {
  std::string whatByteUnit(size_t filesize);
  void serializeValueImpl(const Value &v, std::ostream &os, const SystemConfig &cfg, int depth);
  inline void serializeValue(const Value &v, std::ostream &os, const SystemConfig &cfg) { serializeValueImpl(v, os, cfg, 0); }
-
+ void applySideEffects(EvaluationContext &ectx, EvalResult &result);
+ // 内部的にイコールとする
+ inline bool tolerantEqual(double a, double b) { return std::abs(a - b) <= cnst_precision_inv; }
+ inline bool tolerantEqual(std::complex<double> a, std::complex<double> b) { return tolerantEqual(a.real(), b.real()) && tolerantEqual(a.imag(), b.imag()); }
  template <class F> inline void Value::forEachMulti(size_t pos, F &&f) const {
   if (!isMulti()) return;
   const auto &mv = asMultiRef(pos);

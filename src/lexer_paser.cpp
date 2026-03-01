@@ -1,4 +1,4 @@
-﻿#include "syntax.hpp"
+﻿#include "lexer_paser.hpp"
 #include "core.hpp"
 
 namespace mm::cal {
@@ -105,7 +105,7 @@ namespace mm::cal {
     ++p;
    }
 
-   if (p >= src.size()) { throw CalcError(CalcErrorType::SyntaxError, "unterminated string", start); }
+   if (p >= src.size()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nterminated string", start); }
 
    ++p; // closing "
    return {TokenType::String, s, 0.0, start};
@@ -203,18 +203,18 @@ namespace mm::cal {
   return true;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parse() {
+ std::unique_ptr<ASTNode> Parser::parse() {
   auto node = parseAssignment(); // パースの入口が変わったここを変えること(どうせ私は忘れてる)
-  if (cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "unexpected token", cur.pos);
+  if (cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nexpected token", cur.pos);
   return node;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parseAssignment() {
+ std::unique_ptr<ASTNode> Parser::parseAssignment() {
   auto left = parseCompare();
 
   if (cur.type == TokenType::Assign) {
    auto ident = dynamic_cast<SymbolNode *>(left.get());
-   if (!ident) throw CalcError(CalcErrorType::SyntaxError, "left side of assignment must be identifier", cur.pos);
+   if (!ident) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: left side of assignment must be identifier", cur.pos);
    advance();
    auto rhs = parseAssignment();
    return std::make_unique<AssignNode>(ident->name, std::move(rhs));
@@ -222,7 +222,7 @@ namespace mm::cal {
   return left;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parseExpression() {
+ std::unique_ptr<ASTNode> Parser::parseExpression() {
   auto n = parseTerm();
   while (cur.type == TokenType::Plus || cur.type == TokenType::Minus) {
    BinOp op = tokenToBinOp(cur.type);
@@ -234,7 +234,7 @@ namespace mm::cal {
   return n;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parseTerm() {
+ std::unique_ptr<ASTNode> Parser::parseTerm() {
   auto n = parseUnary();
 
   while (true) {
@@ -263,7 +263,7 @@ namespace mm::cal {
      // 直前トークンが Identifier の場合は「定数だけOK」
      if (prev.type == TokenType::Identifier) { okLhs = isConstantName(prev.text); }
 
-     if (!okLhs) { throw CalcError(CalcErrorType::SyntaxError, "unit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
+     if (!okLhs) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
 
      std::string u = cur.text;
      advance(); // unit消費
@@ -281,7 +281,7 @@ namespace mm::cal {
   return n;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parsePower() {
+ std::unique_ptr<ASTNode> Parser::parsePower() {
   auto n = parsePostfix();
   if (cur.type == TokenType::Pow) {
    size_t p = cur.pos;
@@ -292,7 +292,7 @@ namespace mm::cal {
   }
   return n;
  }
- std::unique_ptr<Parser::ASTNode> Parser::parseUnary() {
+ std::unique_ptr<ASTNode> Parser::parseUnary() {
   if (cur.type == TokenType::Plus || cur.type == TokenType::Minus) {
    UnaryOp op = (cur.type == TokenType::Minus) ? UnaryOp::Minus : UnaryOp::Plus;
    size_t p = cur.pos;
@@ -301,7 +301,7 @@ namespace mm::cal {
   }
   return parsePower();
  }
- std::unique_ptr<Parser::ASTNode> Parser::parsePostfix() {
+ std::unique_ptr<ASTNode> Parser::parsePostfix() {
   auto node = parsePrimary();
 
   while (cur.type == TokenType::Bang) {
@@ -313,7 +313,7 @@ namespace mm::cal {
   return node;
  }
 
- std::unique_ptr<Parser::ASTNode> Parser::parsePrimary() {
+ std::unique_ptr<ASTNode> Parser::parsePrimary() {
 
   // ---- number ----
   if (cur.type == TokenType::Number) {
@@ -407,8 +407,8 @@ namespace mm::cal {
 
    // ----- identifier only -----
    if (constants.count(name)) { return std::make_unique<NumberNode>(constants.at(name), p); }
-   if (symbols.count(name)) { throw CalcError(CalcErrorType::SyntaxError, "unit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
-   return std::make_unique<SymbolNode>(std::move(name), p);                                                              // それ以外は「オプション指定子」としてASTに残す
+   if (symbols.count(name)) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
+   return std::make_unique<SymbolNode>(std::move(name), p);                                                                          // それ以外は「オプション指定子」としてASTに残す
   }
 
   // ---- grouped expression ----
@@ -421,11 +421,11 @@ namespace mm::cal {
    return n;
   }
 
-  throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), cur.pos);
+  throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: invalid parentheses", cur.pos);
  }
 
  // <,>,<=,>=,==,!=
- std::unique_ptr<Parser::ASTNode> Parser::parseCompare() {
+ std::unique_ptr<ASTNode> Parser::parseCompare() {
   auto n = parseExpression();
 
   while (cur.type == TokenType::Less || cur.type == TokenType::LessEq || cur.type == TokenType::Greater || cur.type == TokenType::GreaterEq || cur.type == TokenType::Equal || cur.type == TokenType::NotEqual) {
@@ -440,197 +440,6 @@ namespace mm::cal {
   }
 
   return n;
- }
-
- /* ============================
-    AST ヘルパくん
-    ============================ */
-
- Parser::CmpOp Parser::tokenToCmpOp(TokenType t) {
-  switch (t) {
-   case TokenType::Less: return CmpOp::Less;
-   case TokenType::LessEq: return CmpOp::LessEq;
-   case TokenType::Greater: return CmpOp::Greater;
-   case TokenType::GreaterEq: return CmpOp::GreaterEq;
-   case TokenType::Equal: return CmpOp::Equal;
-   case TokenType::NotEqual: return CmpOp::NotEqual;
-   default: throw std::logic_error("not a compare token");
-  }
- }
- Parser::BinOp Parser::tokenToBinOp(TokenType t) {
-  switch (t) {
-   case TokenType::Plus: return BinOp::Add;
-   case TokenType::Minus: return BinOp::Sub;
-   case TokenType::Mul: return BinOp::Mul;
-   case TokenType::Div: return BinOp::Div;
-   case TokenType::Pow: return BinOp::Pow;
-   default: throw CalcError(CalcErrorType::InvalidOperation, errorMessage(CalcErrorType::InvalidOperation), 0);
-  }
- }
-
- Value evalCompare(const Value &lhs, const Value &rhs, Parser::CmpOp op, FunctionContext &ctx) {
-  // 複素数は大小比較不可
-  if (lhs.isComplex() || rhs.isComplex()) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
-  double a = lhs.asScalar(ctx.pos), b = rhs.asScalar(ctx.pos);
-  bool r = false;
-  int prec = ctx.cfg.precision;
-
-  switch (op) {
-   case Parser::CmpOp::Equal: r = tolerantEqual(a, b, prec); break;
-   case Parser::CmpOp::NotEqual: r = !tolerantEqual(a, b, prec); break;
-   case Parser::CmpOp::Less: r = a < b && !tolerantEqual(a, b, prec); break;
-   case Parser::CmpOp::LessEq: r = a < b || tolerantEqual(a, b, prec); break;
-   case Parser::CmpOp::Greater: r = a > b && !tolerantEqual(a, b, prec); break;
-   case Parser::CmpOp::GreaterEq: r = a > b || tolerantEqual(a, b, prec); break;
-  }
-
-  return r ? 1.0 : 0.0;
- }
-
- /* ============================
-    AST
-    ============================ */
-
- // AST ノード系
- Parser::NumberNode::NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
- Value Parser::NumberNode::evalImpl(EvaluationContext &ectx) const { return value; }
- Value Parser::AssignNode::evalImpl(EvaluationContext &ctx) const {
-  Value v = expr->eval(ctx);
-  ctx.variables[name] = v;
-  return v;
- }
- Parser::BinaryNode::BinaryNode(BinOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
- Value Parser::BinaryNode::evalImpl(EvaluationContext &ectx) const {
-  auto a = lhs->eval(ectx);
-  auto b = rhs->eval(ectx);
-  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "operator not defined for multivalue", pos);
-  switch (op) {
-   case BinOp::Add: return add(a, b, pos);
-   case BinOp::Sub: return sub(a, b, pos);
-   case BinOp::Mul: return mul(a, b, pos);
-   case BinOp::Div: return div(a, b, pos);
-   case BinOp::Pow: return power(a, b, pos);
-  }
-
-  throw CalcError(CalcErrorType::InvalidOperation, "invalid op", pos);
- }
-
- Parser::UnaryNode::UnaryNode(UnaryOp o, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
- Value Parser::UnaryNode::evalImpl(EvaluationContext &ectx) const {
-  auto v = rhs->eval(ectx);
-  if (v.isMulti()) throw CalcError(CalcErrorType::TypeError, "unary operator not defined for multivalue", pos);
-  if (op == UnaryOp::Minus) return negate(v, pos);
-  return v;
- }
-
- Parser::PostfixUnaryNode::PostfixUnaryNode(char op, std::unique_ptr<Parser::ASTNode> e, size_t p) : op(op), expr(std::move(e)) { pos = p; }
-
- Value Parser::PostfixUnaryNode::evalImpl(EvaluationContext &ectx) const {
-  Value v = expr->eval(ectx);
-
-  if (op == '!') return mm::cal::factorial(v, pos);
-
-  throw CalcError(CalcErrorType::InvalidOperation, "invalid postfix", pos);
- }
-
- Parser::CompareNode::CompareNode(CmpOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
- Value Parser::CompareNode::evalImpl(EvaluationContext &ectx) const {
-  Value a = lhs->eval(ectx);
-  Value b = rhs->eval(ectx);
-
-  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "comparison not defined for multivalue", pos);
-  mm::cal::CompareOp cop;
-
-  switch (op) {
-   case CmpOp::Equal: cop = CompareOp::Eq; break;
-   case CmpOp::NotEqual: cop = CompareOp::Ne; break;
-   case CmpOp::Less: cop = CompareOp::Lt; break;
-   case CmpOp::LessEq: cop = CompareOp::Le; break;
-   case CmpOp::Greater: cop = CompareOp::Gt; break;
-   case CmpOp::GreaterEq: cop = CompareOp::Ge; break;
-   default: throw CalcError(CalcErrorType::InvalidOperation, "invalid operator", pos);
-  }
-
-  return mm::cal::compare(a, b, cop, pos);
- }
-
- Value Parser::FunctionCallNode::evalImpl(EvaluationContext &ectx) const {
-
-  auto it = ectx.cfg.functions.find(name);
-  if (it == ectx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
-
-  auto &f = it->second;
-  int argc = static_cast<int>(args.size());
-  if (!f.validArgc(argc)) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
-  std::vector<Value> v;
-  v.reserve(args.size());
-  for (auto &a : args)
-   v.push_back(a->eval(ectx));
-
-  FunctionContext ctx{ectx.cfg, ectx.hist, ectx.base, pos, ectx.sideEffects};
-  Value r = f.f(v, ctx);
-  // double のときだけ有限チェック -> 一括捕捉に変更
-  /* if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);*/
-  return r;
- }
-
- Parser::SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }
-
- Value Parser::SymbolNode::evalImpl(EvaluationContext &ectx) const {
-  if (ectx.variables.contains(name)) return ectx.variables.at(name); // ユーザ変数(パーサは置換するものじゃない)
-  if (constants.count(name)) return constants.at(name);              // 定数はここで解決できる（parse段階で解決しなくてよくなる）
-  if (symbols.count(name)) return name;                              // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
-  // return name; // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
-
-  throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
- }
-
- Parser::UnitApplyNode::UnitApplyNode(std::unique_ptr<ASTNode> e, std::string u, size_t p) : expr(std::move(e)), unit(std::move(u)) { pos = p; }
-
- Value Parser::UnitApplyNode::evalImpl(EvaluationContext &ectx) const {
-  Value v = expr->eval(ectx);
-  double x = v.asScalar(pos);
-
-  // angle
-  if (unit == "deg") return x;
-  if (unit == "rad") { return x * 180.0 / PI; }
-  if (unit == "grad") { return x * 0.9; }
-
-  // length (将来)
-  if (unit == "mm" || unit == "cm" || unit == "m" || unit == "inch") { throw CalcError(CalcErrorType::NotImplemented, "length units are not implemented yet", pos); }
-
-  throw CalcError(CalcErrorType::UnknownIdentifier, "unknown unit: " + unit, pos);
- }
-
- Parser::MultiLiteralNode::MultiLiteralNode(std::vector<std::unique_ptr<ASTNode>> e, size_t p) {
-  pos = p;
-  elems = std::move(e);
- }
-
- Value Parser::MultiLiteralNode::evalImpl(EvaluationContext &ectx) const {
-  std::vector<Value> values;
-  values.reserve(elems.size());
-
-  for (const auto &n : elems) {
-   Value v = n->eval(ectx);
-   values.push_back(std::move(v));
-  }
-
-  return Value(std::make_shared<MultiValue>(std::move(values)));
- }
-
- Parser::OutNode::OutNode(int idx, size_t p) : index(idx) { pos = p; }
-
- Value Parser::OutNode::evalImpl(EvaluationContext &ectx) const {
-  if (index == 0) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
-
-  int i;
-  if (index > 0) i = index;
-  else i = static_cast<int>(ectx.hist.size()) + index + 1;
-
-  if (i <= 0 || i > static_cast<int>(ectx.hist.size())) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
-
-  return ectx.hist[i - 1].value;
  }
 
 } // namespace mm::cal

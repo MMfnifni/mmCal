@@ -139,7 +139,7 @@ namespace mm::cal {
                               return realIfPossible(std::log(Complex(1, 0) + x));
                              }
                              double x = requireReal(v[0], ctx.pos);
-                             if (x <= -1.0) throw CalcError(CalcErrorType::DomainError, "log1p: x <= -1", ctx.pos);
+                             if (x <= -1.0) throw CalcError(CalcErrorType::DomainError, "DomainError: log1p: x <= -1", ctx.pos);
 
                              return std::log1p(x);
                             }};
@@ -334,9 +334,9 @@ namespace mm::cal {
                                if (v.empty()) throwDomain(ctx.pos);
                                long double sumLog = 0.0L;
                                for (const auto &x : v) {
-                                if (isComplex(x)) throw CalcError(CalcErrorType::DomainError, "geomean: complex", ctx.pos);
+                                if (isComplex(x)) throw CalcError(CalcErrorType::DomainError, "DomainError: geomean: complex", ctx.pos);
                                 const double a = x.asScalar(ctx.pos);
-                                if (a < 0.0) throw CalcError(CalcErrorType::DomainError, "geomean: negative", ctx.pos);
+                                if (a < 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: geomean: negative", ctx.pos);
                                 if (a == 0.0) return 0.0;
                                 sumLog += std::log((long double)a);
                                }
@@ -348,7 +348,7 @@ namespace mm::cal {
                                 if (v.empty()) throwDomain(ctx.pos);
                                 long double acc = 0.0L;
                                 for (const auto &x : v) {
-                                 if (isComplex(x)) throw CalcError(CalcErrorType::DomainError, "harmmean: complex", ctx.pos);
+                                 if (isComplex(x)) throw CalcError(CalcErrorType::DomainError, "DomainError: harmmean: complex", ctx.pos);
                                  const double a = x.asScalar(ctx.pos);
                                  if (a == 0.0) throw CalcError(CalcErrorType::DivisionByZero, "harmmean: zero element", ctx.pos);
                                  acc += 1.0L / (long double)a;
@@ -360,8 +360,8 @@ namespace mm::cal {
 
   cfg.functions["quantile"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                                 const double p = v[0].asScalar(ctx.pos);
-                                if (!(p >= 0.0 && p <= 1.0)) throw CalcError(CalcErrorType::DomainError, "quantile: p out of range", ctx.pos);
-                                if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "quantile: no samples", ctx.pos);
+                                if (!(p >= 0.0 && p <= 1.0)) throw CalcError(CalcErrorType::DomainError, "DomainError: quantile: p out of range", ctx.pos);
+                                if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "DomainError: quantile: no samples", ctx.pos);
                                 std::vector<double> a;
                                 a.reserve(v.size() - 1);
                                 for (size_t i = 1; i < v.size(); ++i)
@@ -396,7 +396,7 @@ namespace mm::cal {
                              const double x = v[0].asScalar(ctx.pos);
                              const double lo = v[1].asScalar(ctx.pos);
                              const double hi = v[2].asScalar(ctx.pos);
-                             if (lo > hi) throw CalcError(CalcErrorType::DomainError, "clamp: lo > hi", ctx.pos);
+                             if (lo > hi) throw CalcError(CalcErrorType::DomainError, "DomainError: clamp: lo > hi", ctx.pos);
                              return std::clamp(x, lo, hi);
                             }};
   cfg.functions["fract"] = {1, 1, [](auto &v, auto &ctx) -> Value {
@@ -406,7 +406,7 @@ namespace mm::cal {
   cfg.functions["gamma"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                              const double x = v[0].asScalar(ctx.pos);
                              // 負の整数は極
-                             if (x < 0 && std::floor(x) == x) throw CalcError(CalcErrorType::DomainError, "gamma: pole at negative integer", ctx.pos);
+                             if (x < 0 && std::floor(x) == x) throw CalcError(CalcErrorType::DomainError, "DomainError: gamma: pole at negative integer", ctx.pos);
                              const double r = std::tgamma(x);
                              if (std::isnan(r)) throwDomain(ctx.pos);
                              if (!std::isfinite(r)) throwOverflow(ctx.pos);
@@ -549,13 +549,13 @@ namespace mm::cal {
   cfg.functions["stddev"] = {1, -1, [](auto &v, auto &ctx) -> Value { return std::sqrt(varianceRealWelford(v, ctx, 0)); }};
   cfg.functions["stddevs"] = {1, -1, [](auto &v, auto &ctx) -> Value { return std::sqrt(varianceRealWelford(v, ctx, 1)); }};
   cfg.functions["median"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                              if (v.empty()) throw CalcError(CalcErrorType::DomainError, "median: no elements", ctx.pos);
+                              if (v.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: median: no elements", ctx.pos);
                               auto a = collectReals(v, ctx);
                               return medianInplace(a);
                              }};
   // MAD (中央値絶対偏差)
   cfg.functions["mad"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value {
-                           if (v.empty()) throw CalcError(CalcErrorType::DomainError, "mad: no elements", ctx.pos);
+                           if (v.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: mad: no elements", ctx.pos);
                            auto a = collectReals(v, ctx);
                            const double med = medianInplace(a);
                            for (double &x : a)
@@ -580,8 +580,8 @@ namespace mm::cal {
   cfg.functions["kurts"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value { return kurtosisExcessSample(v, ctx); }};
   cfg.functions["percentile"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                                   const double p = v[0].asScalar(ctx.pos);
-                                  if (!(p >= 0.0 && p <= 100.0)) throw CalcError(CalcErrorType::DomainError, "percentile: p out of range", ctx.pos);
-                                  if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "percentile: no samples", ctx.pos);
+                                  if (!(p >= 0.0 && p <= 100.0)) throw CalcError(CalcErrorType::DomainError, "DomainError: percentile: p out of range", ctx.pos);
+                                  if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "DomainError: percentile: no samples", ctx.pos);
                                   std::vector<double> a;
                                   a.reserve(v.size() - 1);
                                   for (size_t i = 1; i < v.size(); ++i)
@@ -610,7 +610,7 @@ namespace mm::cal {
 
                           // population variance
                           const long double var = s.m2 / (long double)s.n;
-                          if (!(var >= 0.0L)) throw CalcError(CalcErrorType::DomainError, "cv: invalid variance", ctx.pos);
+                          if (!(var >= 0.0L)) throw CalcError(CalcErrorType::DomainError, "DomainError: cv: invalid variance", ctx.pos);
 
                           const double sd = std::sqrt((double)var);
                           if (!std::isfinite(sd)) throwOverflow(ctx.pos);
@@ -623,7 +623,7 @@ namespace mm::cal {
                               const auto s = welfordMeanM2Real(v, ctx);
                               // population variance
                               const long double var = s.m2 / (long double)s.n;
-                              if (!(var >= 0.0L)) throw CalcError(CalcErrorType::DomainError, "stderr: invalid variance", ctx.pos);
+                              if (!(var >= 0.0L)) throw CalcError(CalcErrorType::DomainError, "DomainError: stderr: invalid variance", ctx.pos);
                               const double sd = std::sqrt((double)var);
                               const double se = sd / std::sqrt((double)s.n);
 
@@ -798,7 +798,7 @@ namespace mm::cal {
  static void registerGeoVec(SystemConfig &cfg) {
   cfg.functions["hypot"] = {2, 2, [](auto &v, auto &ctx) -> Value { return std::hypot(requireReal(v[0], ctx.pos), requireReal(v[1], ctx.pos)); }};
   cfg.functions["norm"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                            if (v.empty()) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
+                            if (v.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: no elements", ctx.pos);
                             double acc = 0.0;
                             for (const auto &x : v) {
                              const double r = x.asScalar(ctx.pos);
@@ -813,7 +813,7 @@ namespace mm::cal {
                             const auto &a = v[0].asMultiRef(ctx.pos);
                             const auto &b = v[1].asMultiRef(ctx.pos);
 
-                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                             auto result = std::make_shared<MultiValue>();
                             result->elems_.reserve(a.size());
@@ -829,7 +829,7 @@ namespace mm::cal {
                             const auto &a = v[0].asMultiRef(ctx.pos);
                             const auto &b = v[1].asMultiRef(ctx.pos);
 
-                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                             auto result = std::make_shared<MultiValue>();
                             result->elems_.reserve(a.size());
@@ -858,7 +858,7 @@ namespace mm::cal {
                             const auto &a = v[0].asMultiRef(ctx.pos);
                             const auto &b = v[1].asMultiRef(ctx.pos);
 
-                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                             double acc = 0.0;
                             for (size_t i = 0; i < a.size(); ++i) {
@@ -873,7 +873,7 @@ namespace mm::cal {
                               const auto &a = v[0].asMultiRef(ctx.pos);
                               const auto &b = v[1].asMultiRef(ctx.pos);
 
-                              if (a.size() != 3 || b.size() != 3) throw CalcError(CalcErrorType::DomainError, "vcross requires 3-dimensional vectors", ctx.pos);
+                              if (a.size() != 3 || b.size() != 3) throw CalcError(CalcErrorType::DomainError, "DomainError: vcross requires 3-dimensional vectors", ctx.pos);
 
                               double x = a[1].asScalar(ctx.pos) * b[2].asScalar(ctx.pos) - a[2].asScalar(ctx.pos) * b[1].asScalar(ctx.pos);
                               double y = a[2].asScalar(ctx.pos) * b[0].asScalar(ctx.pos) - a[0].asScalar(ctx.pos) * b[2].asScalar(ctx.pos);
@@ -900,7 +900,7 @@ namespace mm::cal {
                                   const auto &a = v[0].asMultiRef(ctx.pos);
                                   const auto &b = v[1].asMultiRef(ctx.pos);
 
-                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                                   double sum = 0.0;
                                   for (size_t i = 0; i < a.size(); ++i) {
@@ -915,7 +915,7 @@ namespace mm::cal {
                                   const auto &a = v[0].asMultiRef(ctx.pos);
                                   const auto &b = v[1].asMultiRef(ctx.pos);
 
-                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                  if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                                   double sum = 0.0;
                                   for (size_t i = 0; i < a.size(); ++i) {
@@ -930,8 +930,8 @@ namespace mm::cal {
 
                            const auto &a = v[0].asMultiRef(ctx.pos);
                            const auto &b = v[1].asMultiRef(ctx.pos);
-                           if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
-                           if (a.empty()) throw CalcError(CalcErrorType::DomainError, "dot of empty multivalue", ctx.pos);
+                           if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
+                           if (a.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: dot of empty multivalue", ctx.pos);
                            double acc = 0.0;
                            for (size_t i = 0; i < a.size(); ++i) { // nested Multi は禁止するよん
                             if (a[i].isMulti() || b[i].isMulti()) throw CalcError(CalcErrorType::TypeError, "nested multivalue not allowed", ctx.pos);
@@ -960,7 +960,7 @@ namespace mm::cal {
                                   }
                                   norm = std::sqrt(norm);
 
-                                  if (norm == 0.0) throw CalcError(CalcErrorType::DomainError, "cannot normalize zero vector", ctx.pos);
+                                  if (norm == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot normalize zero vector", ctx.pos);
 
                                   auto result = std::make_shared<MultiValue>();
                                   result->elems_.reserve(vec.size());
@@ -976,7 +976,7 @@ namespace mm::cal {
                                 const auto &a = v[0].asMultiRef(ctx.pos);
                                 const auto &b = v[1].asMultiRef(ctx.pos);
 
-                                if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                                 // 内積計算
                                 double dot_product = 0.0;
@@ -991,7 +991,7 @@ namespace mm::cal {
                                  b_norm_sq += val * val;
                                 }
 
-                                if (std::abs(b_norm_sq) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot project onto zero vector", ctx.pos);
+                                if (std::abs(b_norm_sq) < 1e-15) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot project onto zero vector", ctx.pos);
 
                                 double scalar = dot_product / b_norm_sq;
 
@@ -1009,7 +1009,7 @@ namespace mm::cal {
                               const auto &a = v[0].asMultiRef(ctx.pos);
                               const auto &b = v[1].asMultiRef(ctx.pos);
 
-                              if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                              if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                               // 内積計算
                               double dot_product = 0.0;
@@ -1028,7 +1028,7 @@ namespace mm::cal {
                               norm_a = std::sqrt(norm_a);
                               norm_b = std::sqrt(norm_b);
 
-                              if (norm_a == 0.0 || norm_b == 0.0) throw CalcError(CalcErrorType::DomainError, "cannot calculate angle with zero vector", ctx.pos);
+                              if (norm_a == 0.0 || norm_b == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot calculate angle with zero vector", ctx.pos);
 
                               // cos計算
                               double cos_angle = dot_product / (norm_a * norm_b);
@@ -1046,7 +1046,7 @@ namespace mm::cal {
                                 const auto &a = v[0].asMultiRef(ctx.pos);
                                 const auto &n = v[1].asMultiRef(ctx.pos);
 
-                                if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                                 double dot = 0.0;
                                 double nn = 0.0;
@@ -1058,7 +1058,7 @@ namespace mm::cal {
                                  nn += ni * ni;
                                 }
 
-                                if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot reflect with zero normal vector", ctx.pos);
+                                if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot reflect with zero normal vector", ctx.pos);
 
                                 double factor = 2.0 * dot / nn;
 
@@ -1080,7 +1080,7 @@ namespace mm::cal {
                                      const auto &a = v[0].asMultiRef(ctx.pos);
                                      const auto &n = v[1].asMultiRef(ctx.pos);
 
-                                     if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                     if (a.size() != n.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
 
                                      double dot = 0.0;
                                      double nn = 0.0;
@@ -1092,7 +1092,7 @@ namespace mm::cal {
                                       nn += ni * ni;
                                      }
 
-                                     if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "cannot reflect with zero axis vector", ctx.pos);
+                                     if (std::abs(nn) < 1e-15) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot reflect with zero axis vector", ctx.pos);
 
                                      double factor = 2.0 * dot / nn;
 
@@ -1123,7 +1123,7 @@ namespace mm::cal {
                              }
                              norm = std::sqrt(norm);
 
-                             if (norm == 0.0) throw CalcError(CalcErrorType::DomainError, "cannot create unit vector from zero vector", ctx.pos);
+                             if (norm == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot create unit vector from zero vector", ctx.pos);
 
                              auto result = std::make_shared<MultiValue>();
                              result->elems_.reserve(vec.size());
@@ -1154,9 +1154,9 @@ namespace mm::cal {
                             // return std::lerp(a, b, t); // leapは丸めが微妙なことがあった
                            }};
   cfg.functions["distance"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "dimension mismatch", ctx.pos);
+                                if (v.size() % 2 != 0) throw CalcError(CalcErrorType::DomainError, "DomainError: dimension mismatch", ctx.pos);
                                 size_t n = v.size() / 2;
-                                if (n == 0) throw CalcError(CalcErrorType::DomainError, "no elements", ctx.pos);
+                                if (n == 0) throw CalcError(CalcErrorType::DomainError, "DomainError: no elements", ctx.pos);
                                 double acc = 0.0;
                                 // for (size_t i = 0; i < n; ++i) {
                                 //  acc += std::pow(asReal(v[i + n], ctx.pos) - v[i].asScalar(ctx.pos), 2);
@@ -1327,7 +1327,7 @@ namespace mm::cal {
 
                                const auto &row = v[i].asMultiRef(ctx.pos);
 
-                               if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "all rows must have the same number of columns", ctx.pos);
+                               if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "DomainError: all rows must have the same number of columns", ctx.pos);
 
                                result->elems_.push_back(v[i]);
                               }
@@ -1341,7 +1341,7 @@ namespace mm::cal {
                             const auto &a = v[0].asMultiRef(ctx.pos);
                             const auto &b = v[1].asMultiRef(ctx.pos);
 
-                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "matrix dimension mismatch", ctx.pos);
+                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch", ctx.pos);
 
                             auto result = std::make_shared<MultiValue>();
                             result->elems_.reserve(a.size());
@@ -1350,7 +1350,7 @@ namespace mm::cal {
                              const auto &row_a = a[i].asMultiRef(ctx.pos);
                              const auto &row_b = b[i].asMultiRef(ctx.pos);
 
-                             if (row_a.size() != row_b.size()) { throw CalcError(CalcErrorType::DomainError, "row dimension mismatch", ctx.pos); }
+                             if (row_a.size() != row_b.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: row dimension mismatch", ctx.pos); }
 
                              auto row_result = std::make_shared<MultiValue>();
                              row_result->elems_.reserve(row_a.size());
@@ -1369,7 +1369,7 @@ namespace mm::cal {
                             const auto &a = v[0].asMultiRef(ctx.pos);
                             const auto &b = v[1].asMultiRef(ctx.pos);
 
-                            if (a[0].asMultiRef(ctx.pos).size() != b.size()) { throw CalcError(CalcErrorType::DomainError, "matrix dimension mismatch for multiplication", ctx.pos); }
+                            if (a[0].asMultiRef(ctx.pos).size() != b.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch for multiplication", ctx.pos); }
 
                             auto result = std::make_shared<MultiValue>();
                             result->elems_.reserve(a.size());
@@ -1396,7 +1396,7 @@ namespace mm::cal {
                                   if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mtranspose requires matrix argument", ctx.pos);
                                   const auto &matrix = v[0].asMultiRef(ctx.pos);
 
-                                  if (matrix.empty()) { throw CalcError(CalcErrorType::DomainError, "cannot transpose empty matrix", ctx.pos); }
+                                  if (matrix.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: cannot transpose empty matrix", ctx.pos); }
 
                                   auto result = std::make_shared<MultiValue>();
                                   result->elems_.reserve(matrix[0].asMultiRef(ctx.pos).size());
@@ -1417,7 +1417,7 @@ namespace mm::cal {
                               if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mtrace requires matrix argument", ctx.pos);
                               const auto &matrix = v[0].asMultiRef(ctx.pos);
 
-                              if (matrix.empty() || matrix[0].asMultiRef(ctx.pos).empty()) { throw CalcError(CalcErrorType::DomainError, "cannot calculate trace of empty matrix", ctx.pos); }
+                              if (matrix.empty() || matrix[0].asMultiRef(ctx.pos).empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: cannot calculate trace of empty matrix", ctx.pos); }
 
                               size_t min_dim = std::min(matrix.size(), matrix[0].asMultiRef(ctx.pos).size());
 
@@ -1481,7 +1481,7 @@ namespace mm::cal {
                             size_t rows = matrix.size();
                             size_t cols = matrix[0].asMultiRef(ctx.pos).size();
 
-                            if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "determinant requires square matrix", ctx.pos); }
+                            if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "DomainError: determinant requires square matrix", ctx.pos); }
 
                             // ガウス消去法で行列式を計算
                             std::vector<std::vector<double>> temp(rows, std::vector<double>(cols));
@@ -1520,7 +1520,7 @@ namespace mm::cal {
   // 単位行列の作成
   cfg.functions["identity"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                                 int size = static_cast<int>(v[0].asScalar(ctx.pos));
-                                if (size <= 0) throw CalcError(CalcErrorType::DomainError, "matrix size must be positive", ctx.pos);
+                                if (size <= 0) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix size must be positive", ctx.pos);
 
                                 auto result = std::make_shared<MultiValue>();
                                 result->elems_.reserve(size);
@@ -1540,7 +1540,7 @@ namespace mm::cal {
   cfg.functions["zeros"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                              int rows = static_cast<int>(v[0].asScalar(ctx.pos));
                              int cols = static_cast<int>(v[1].asScalar(ctx.pos));
-                             if (rows <= 0 || cols <= 0) throw CalcError(CalcErrorType::DomainError, "matrix dimensions must be positive", ctx.pos);
+                             if (rows <= 0 || cols <= 0) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimensions must be positive", ctx.pos);
 
                              auto result = std::make_shared<MultiValue>();
                              result->elems_.reserve(rows);
@@ -1563,8 +1563,8 @@ namespace mm::cal {
                             int row = static_cast<int>(v[1].asScalar(ctx.pos));
                             int col = static_cast<int>(v[2].asScalar(ctx.pos));
 
-                            if (row < 0 || row >= static_cast<int>(matrix.size())) { throw CalcError(CalcErrorType::DomainError, "row index out of bounds", ctx.pos); }
-                            if (col < 0 || col >= static_cast<int>(matrix[0].asMultiRef(ctx.pos).size())) { throw CalcError(CalcErrorType::DomainError, "column index out of bounds", ctx.pos); }
+                            if (row < 0 || row >= static_cast<int>(matrix.size())) { throw CalcError(CalcErrorType::DomainError, "DomainError: row index out of bounds", ctx.pos); }
+                            if (col < 0 || col >= static_cast<int>(matrix[0].asMultiRef(ctx.pos).size())) { throw CalcError(CalcErrorType::DomainError, "DomainError: column index out of bounds", ctx.pos); }
 
                             return Value(matrix[row].asMultiRef(ctx.pos)[col].asScalar(ctx.pos));
                            }};
@@ -1612,16 +1612,16 @@ namespace mm::cal {
                            const auto &M = v[0].asMultiRef(ctx.pos);
 
                            size_t n = M.size();
-                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "empty matrix", ctx.pos);
+                           if (n == 0) throw CalcError(CalcErrorType::DomainError, "DomainError: empty matrix", ctx.pos);
 
                            size_t m = M[0].asMultiRef(ctx.pos).size();
 
-                           if (n != m) throw CalcError(CalcErrorType::DomainError, "LU requires square matrix", ctx.pos);
+                           if (n != m) throw CalcError(CalcErrorType::DomainError, "DomainError: LU requires square matrix", ctx.pos);
 
                            std::vector<std::vector<double>> A(n, std::vector<double>(n));
                            for (size_t i = 0; i < n; ++i) {
                             const auto &row = M[i].asMultiRef(ctx.pos);
-                            if (row.size() != n) throw CalcError(CalcErrorType::DomainError, "irregular matrix", ctx.pos);
+                            if (row.size() != n) throw CalcError(CalcErrorType::DomainError, "DomainError: irregular matrix", ctx.pos);
 
                             for (size_t j = 0; j < n; ++j)
                              A[i][j] = row[j].asScalar(ctx.pos);
@@ -1641,7 +1641,7 @@ namespace mm::cal {
                              U[i][j] = A[i][j] - sum;
                             }
 
-                            if (std::fabs(U[i][i]) < 1e-14) throw CalcError(CalcErrorType::DomainError, "singular matrix in LU", ctx.pos);
+                            if (std::fabs(U[i][i]) < 1e-14) throw CalcError(CalcErrorType::DomainError, "DomainError: singular matrix in LU", ctx.pos);
 
                             // --- L 計算 ---
                             L[i][i] = 1.0;
@@ -1919,7 +1919,7 @@ namespace mm::cal {
                                 size_t rows = matrix.size();
                                 size_t cols = matrix[0].asMultiRef(ctx.pos).size();
 
-                                if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "inverse requires square matrix", ctx.pos); }
+                                if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "DomainError: inverse requires square matrix", ctx.pos); }
 
                                 // 単位行列を作成
                                 std::vector<std::vector<double>> augmented(rows, std::vector<double>(2 * cols));
@@ -1945,7 +1945,7 @@ namespace mm::cal {
 
                                  // 原点化
                                  double pivot = augmented[i][i];
-                                 if (std::abs(pivot) < 1e-10) { throw CalcError(CalcErrorType::DomainError, "matrix is singular, cannot invert", ctx.pos); }
+                                 if (std::abs(pivot) < 1e-10) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is singular, cannot invert", ctx.pos); }
 
                                  for (size_t j = i; j < 2 * cols; ++j) {
                                   augmented[i][j] /= pivot;
@@ -2261,7 +2261,7 @@ namespace mm::cal {
 
                              auto S = singular_values(A);
 
-                             if (S.empty()) throw CalcError(CalcErrorType::DomainError, "matrix is empty", ctx.pos);
+                             if (S.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos);
 
                              double smax = *std::max_element(S.begin(), S.end());
                              double smin = *std::min_element(S.begin(), S.end());
@@ -2499,11 +2499,11 @@ namespace mm::cal {
                                        std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
 
                                        size_t m = A.size();
-                                       if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "matrix must be square", ctx.pos);
+                                       if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix must be square", ctx.pos);
 
                                        // 1×1 特殊ケース
                                        if (m == 1) {
-                                        if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "invalid number", ctx.pos);
+                                        if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "DomainError: invalid number", ctx.pos);
 
                                         return Value(A[0][0]);
                                        }
@@ -2516,17 +2516,17 @@ namespace mm::cal {
                                  std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
 
                                  size_t m = A.size();
-                                 if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "matrix must be square", ctx.pos);
+                                 if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix must be square", ctx.pos);
 
                                  // 1×1 特殊ケース
                                  if (m == 1) {
-                                  if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "invalid number", ctx.pos);
+                                  if (!std::isfinite(A[0][0])) throw CalcError(CalcErrorType::DomainError, "DomainError: invalid number", ctx.pos);
 
                                   return Value(A[0][0]);
                                  }
 
                                  auto eig = eigenvalues(A);
-                                 if (eig.empty()) throw CalcError(CalcErrorType::DomainError, "eigenvalues empty", ctx.pos);
+                                 if (eig.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: eigenvalues empty", ctx.pos);
                                  return *std::max_element(eig.begin(), eig.end());
                                 }};
 
@@ -2534,7 +2534,7 @@ namespace mm::cal {
   cfg.functions["msumsv"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                               auto A = toMatrix(v[0], ctx);
 
-                              if (A.empty()) throw CalcError(CalcErrorType::DomainError, "matrix is empty", ctx.pos);
+                              if (A.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos);
 
                               auto S = singular_values(A);
 
@@ -2651,7 +2651,7 @@ namespace mm::cal {
   cfg.functions["unit"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             Complex z = v[0].isComplex() ? v[0].asComplex(ctx.pos) : Complex(v[0].asScalar(ctx.pos), 0.0);
                             double a = std::abs(z);
-                            if (a == 0.0) throw CalcError(CalcErrorType::DomainError, "unit(0) is undefined", ctx.pos);
+                            if (a == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: unit(0) is undefined", ctx.pos);
                             return z / a;
                            }};
 
@@ -2723,7 +2723,7 @@ namespace mm::cal {
                                      double b = v[1].asScalar(ctx.pos);
                                      double c = v[2].asScalar(ctx.pos);
 
-                                     if (a <= 0 || b <= 0 || c <= 0 || a + b <= c || b + c <= a || c + a <= b) { throw CalcError(CalcErrorType::DomainError, "area_triangle: invalid triangle sides", ctx.pos); }
+                                     if (a <= 0 || b <= 0 || c <= 0 || a + b <= c || b + c <= a || c + a <= b) { throw CalcError(CalcErrorType::DomainError, "DomainError: area_triangle: invalid triangle sides", ctx.pos); }
 
                                      double s = 0.5 * (a + b + c);
                                      double area = std::sqrt(s * (s - a) * (s - b) * (s - c));
@@ -2760,7 +2760,7 @@ namespace mm::cal {
                                  }};
 
   cfg.functions["vol_prism"] = {6, -1, [](auto &v, auto &ctx) -> Value {
-                                 if (v.size() < 7 || (v.size() - 1) % 2 != 0) throw CalcError(CalcErrorType::DomainError, "vol_prism: need at least 3 base points + height", ctx.pos);
+                                 if (v.size() < 7 || (v.size() - 1) % 2 != 0) throw CalcError(CalcErrorType::DomainError, "DomainError: vol_prism: need at least 3 base points + height", ctx.pos);
 
                                  double h = v.back().asScalar(ctx.pos);
                                  std::vector<Value> coords(v.begin(), v.end() - 1);
@@ -3051,7 +3051,7 @@ namespace mm::cal {
 
   // IRR
   cfg.functions["fin_irr"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                               if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "fin_irr: at least 2 cash flows required", ctx.pos);
+                               if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "DomainError: fin_irr: at least 2 cash flows required", ctx.pos);
 
                                std::vector<double> cf;
                                for (auto &x : v)
@@ -3133,7 +3133,7 @@ namespace mm::cal {
 
   // MIRR
   cfg.functions["fin_mirr"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                if (v.size() < 3) throw CalcError(CalcErrorType::DomainError, "fin_mirr: at least reinvestRate + 2 cash flows required", ctx.pos);
+                                if (v.size() < 3) throw CalcError(CalcErrorType::DomainError, "DomainError: fin_mirr: at least reinvestRate + 2 cash flows required", ctx.pos);
 
                                 double reinvestRate = v[0].asScalar(ctx.pos);
                                 std::vector<double> cf;
@@ -3379,10 +3379,12 @@ namespace mm::cal {
                               }};
 
   // ---- history / state ----
-  cfg.functions["In"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+  cfg.functions["In"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
                           int i = (int)requireInt(v[0], ctx.pos);
                           if (i <= 0 || i > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
-                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base).getValue();
+
+                          EvaluationContext ectx{ctx.cfg, ctx.hist, ctx.base};
+                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base, ectx).getValue();
                          }};
   cfg.functions["Out"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            int i = (int)requireInt(v[0], ctx.pos);
@@ -3423,7 +3425,9 @@ namespace mm::cal {
                               } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: read failure", ctx.pos); }
                               EvalResult result;
                               try {
-                               result = evaluate(content, ctx.cfg, ctx.hist, ctx.base);
+                               EvaluationContext ectx{ctx.cfg, ctx.hist, ctx.base};
+                               result = evaluate(content, ctx.cfg, ctx.hist, ctx.base, ectx);
+
                               } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: readed file cannot evaluate", ctx.pos); }
 
                               return result.getValue();
@@ -3498,18 +3502,18 @@ namespace mm::cal {
                             std::cout << "clipboard pasted (" << whatByteUnit(s.size()) << ")\n";
                             throw ControlRequest{ControlRequest::Kind::ClipboardCopy};
                            }};
-  // cfg.functions["silent"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-  //                             ctx.rt.suppressDisplay = true;
-  //                             return v[0];
-  //                            }};
-  // cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
-  //                             ctx.sideEffects.push_back({SideEffect::Kind::Explain, dataExplain(v[0], ctx.cfg), {}});
-  //                             return v[0];
-  //                            }};
+  cfg.functions["silent"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
+                              ctx.sideEffects.push_back({SideEffect::Kind::SuppressDisplay, "", ""});
+                              return v[0];
+                             }};
   cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
-                               std::cout << dataExplain(v[0], ctx.cfg);
-                               throw ControlRequest{ControlRequest::Kind::Explain};
+                               ctx.sideEffects.push_back({SideEffect::Kind::Explain, dataExplain(v[0], ctx.cfg), {}});
+                               return v[0];
                               }};
+  // cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
+  //                              std::cout << dataExplain(v[0], ctx.cfg);
+  //                              throw ControlRequest{ControlRequest::Kind::Explain};
+  //                             }};
  }
  ////!!!
 

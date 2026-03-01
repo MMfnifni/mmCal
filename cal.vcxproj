@@ -260,9 +260,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\ast.cpp" />
     <ClCompile Include="src\core.cpp" />
     <ClCompile Include="src\evaluate.cpp" />
     <ClCompile Include="src\functions.cpp" />
+    <ClCompile Include="src\lexer_paser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
     <ClCompile Include="src\syntax.cpp" />
     <ClCompile Include="src\math_util.cpp" />
@@ -278,10 +280,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <ClInclude Include="src\ast.hpp" />
     <ClInclude Include="src\constants.hpp" />
     <ClInclude Include="src\core.hpp" />
     <ClInclude Include="src\evaluate.hpp" />
     <ClInclude Include="src\functions.hpp" />
+    <ClInclude Include="src\lexer_paser.hpp" />
     <ClInclude Include="src\math_util.hpp" />
     <ClInclude Include="src\syntax.hpp" />
     <ClInclude Include="src\value_compare.hpp" />
