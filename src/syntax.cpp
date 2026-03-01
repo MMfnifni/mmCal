@@ -94,7 +94,7 @@ namespace mm::cal {
     ++p;
     return {TokenType::Equal, "==", start};
    }
-   throw CalcError(CalcErrorType::InvalidCharacter, "single '=' not allowed", start);
+   return {TokenType::Assign, "=", start};
   }
 
   if (c == '"') {
@@ -201,6 +201,25 @@ namespace mm::cal {
    return !isFunctionName(prev.text);
   }
   return true;
+ }
+
+ std::unique_ptr<Parser::ASTNode> Parser::parse() {
+  auto node = parseAssignment(); // パースの入口が変わったここを変えること(どうせ私は忘れてる)
+  if (cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "unexpected token", cur.pos);
+  return node;
+ }
+
+ std::unique_ptr<Parser::ASTNode> Parser::parseAssignment() {
+  auto left = parseCompare();
+
+  if (cur.type == TokenType::Assign) {
+   auto ident = dynamic_cast<SymbolNode *>(left.get());
+   if (!ident) throw CalcError(CalcErrorType::SyntaxError, "left side of assignment must be identifier", cur.pos);
+   advance();
+   auto rhs = parseAssignment();
+   return std::make_unique<AssignNode>(ident->name, std::move(rhs));
+  }
+  return left;
  }
 
  std::unique_ptr<Parser::ASTNode> Parser::parseExpression() {
@@ -330,7 +349,7 @@ namespace mm::cal {
    std::vector<std::unique_ptr<ASTNode>> elems;
    if (cur.type != TokenType::RBrace) {
     while (true) {
-     elems.push_back(parseCompare());
+     elems.push_back(parseAssignment());
      if (accept(TokenType::Comma)) continue;
      expect(TokenType::RBrace);
      break;
@@ -363,7 +382,7 @@ namespace mm::cal {
      if ((open == TokenType::LParen && accept(TokenType::RParen)) || (open == TokenType::LBracket && accept(TokenType::RBracket))) { return f; }
 
      while (true) {
-      f->args.push_back(parseCompare());
+      f->args.push_back(parseAssignment());
 
       if (accept(TokenType::Comma)) continue;
 
@@ -475,6 +494,11 @@ namespace mm::cal {
  // AST ノード系
  Parser::NumberNode::NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
  Value Parser::NumberNode::evalImpl(EvaluationContext &ectx) const { return value; }
+ Value Parser::AssignNode::evalImpl(EvaluationContext &ctx) const {
+  Value v = expr->eval(ctx);
+  ctx.variables[name] = v;
+  return v;
+ }
  Parser::BinaryNode::BinaryNode(BinOp o, std::unique_ptr<Parser::ASTNode> l, std::unique_ptr<Parser::ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
  Value Parser::BinaryNode::evalImpl(EvaluationContext &ectx) const {
   auto a = lhs->eval(ectx);
@@ -553,14 +577,10 @@ namespace mm::cal {
  Parser::SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }
 
  Value Parser::SymbolNode::evalImpl(EvaluationContext &ectx) const {
-  if (constants.count(name)) return constants.at(name); // 定数はここで解決できる（parse段階で解決しなくてよくなる）
-  if (symbols.count(name)) return name;                 // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
-
-  // 変数（将来用）
-  // if (cfg.variables.count(name)) return cfg.variables.at(name);
-
-  // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
-  // return name;
+  if (ectx.variables.contains(name)) return ectx.variables.at(name); // ユーザ変数(パーサは置換するものじゃない)
+  if (constants.count(name)) return constants.at(name);              // 定数はここで解決できる（parse段階で解決しなくてよくなる）
+  if (symbols.count(name)) return name;                              // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
+  // return name; // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
 
   throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
  }

@@ -47,6 +47,7 @@ Token / Lexer
   GreaterEq, // >=
   Equal,     // ==
   NotEqual,  // !=
+  Assign,    // =
   String,    // ""
  };
 
@@ -104,6 +105,7 @@ Token / Lexer
    bool isUnitName(const std::string &s) const;
    bool isImplicitMul(const Token &prev, const Token &cur) const;
 
+   std::unique_ptr<ASTNode> parse(); // パースの入口
    std::unique_ptr<ASTNode> parseCompare();
    std::unique_ptr<ASTNode> parseExpression();
    std::unique_ptr<ASTNode> parseTerm();
@@ -111,6 +113,16 @@ Token / Lexer
    std::unique_ptr<ASTNode> parseUnary();
    std::unique_ptr<ASTNode> parsePrimary();
    std::unique_ptr<ASTNode> parsePostfix();
+   std::unique_ptr<ASTNode> parseAssignment();
+
+   //  parse
+   // └ parseCompare
+   //    └ parseExpression
+   //      └ parseTerm
+   //        └ parseUnary
+   //          └ parsePower
+   //            └ parsePostfix
+   //              └ parsePrimar
 
    /* ============================
       AST
@@ -145,6 +157,15 @@ Token / Lexer
 
      NumberNode(Value v, size_t p);
      Value evalImpl(EvaluationContext &ectx) const override;
+   };
+
+   /* ------ User variables ------- */
+
+   struct AssignNode : ASTNode {
+     std::string name;
+     std::unique_ptr<ASTNode> expr;
+
+     Value evalImpl(EvaluationContext &ctx) const override;
    };
 
    /* ---------- Binary ---------- */
@@ -225,22 +246,6 @@ Token / Lexer
     protected:
      Value evalImpl(EvaluationContext &ectx) const override;
    };
-
-   /* ---------- History % ---------- */
-   //
-   // struct OutRelativeNode : ASTNode {
-   //  int offset; // % の個数
-   //
-   //  OutRelativeNode(int n, size_t p) : offset(n) ;
-   //
-   //  Value eval(SystemConfig &, const std::vector<InputEntry> &hist, int base) const override {
-   //   if (offset <= 0 || offset > (int)hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
-   //
-   //   // 相対参照
-   //   return {hist[hist.size() - offset].value, AngleUnit::None};
-   //  }
-   //};
-   //
 
    /* ---------- History Out[n] ---------- */
    struct OutNode : ASTNode {

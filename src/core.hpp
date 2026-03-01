@@ -303,7 +303,8 @@ namespace mm::cal {
    SystemConfig &cfg;
    const std::vector<InputEntry> &hist;
    int base;
-   std::vector<SideEffect> sideEffects;
+   std::vector<SideEffect> sideEffects;              // おくすり
+   std::unordered_map<std::string, Value> variables; // ユーザ変数
  };
 
  using FuncImpl = std::function<Value(const std::vector<Value> &, FunctionContext &)>;

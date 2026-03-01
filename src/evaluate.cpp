@@ -78,7 +78,7 @@ namespace mm::cal {
 
   x = normalizeZero(x);
 
-  std::array<char, 64> buffer;
+  std::array<char, 512> buffer;
   auto *begin = buffer.data();
   auto *end = buffer.data() + buffer.size();
 
