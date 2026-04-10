@@ -3,7 +3,6 @@
 #include "core.hpp"
 #include <algorithm>
 #include <cmath>
-#include <intrin.h>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -536,40 +535,41 @@ namespace mm::cal {
   return std::llabs(x);
  }
 
- //// IRR計算用ヘルパー
- // double fin_irr = [](const std::vector<double> &cf, auto &ctx) -> double {
- //  if (cf.size() < 2) throwDomain(ctx.pos);
- //  double x0 = 0.1; // 初期利率
- //  double eps = 1e-10;
- //  int maxIter = 200;
+ inline long double abs_eps_ld() { return 1e-18L; }
 
- // for (int i = 0; i < maxIter; ++i) {
- //  double f = 0, df = 0;
- //  for (size_t t = 0; t < cf.size(); ++t) {
- //   f += cf[t] / std::pow(1 + x0, t);
- //   if (t > 0) df -= t * cf[t] / std::pow(1 + x0, t + 1);
- //  }
- //  if (std::abs(f) < eps) return x0;
- //  if (df == 0) break; // ゼロ除算防止
- //  x0 -= f / df;
- // }
- // throwDomain(ctx.pos); // 収束しない場合
- //};
+ inline bool nearly_zero_ld(long double x, long double eps = 1e-18L) { return std::fabsl(x) <= eps; }
 
- //  IRR / RATE (Newton-Raphson + 二分法)
- // 精度が悪いので廃止(早いんだけどね)
- // auto newton_raphson = [&](auto f, auto df, double guess, double tol = 1e-10, int maxIter = 200) -> double {
- // double x = guess;
- // for (int i = 0; i < maxIter; ++i) {
- //  double fx = f(x);
- //  double dfx = df(x);
- //  if (std::abs(dfx) < 1e-14) break;
- //  double x1 = x - fx / dfx;
- //  if (std::abs(x1 - x) < tol) return x1;
- //  x = x1;
- // }
- // throwDomain(-1); // 収束失敗
- //};
+ inline long double pow1p_int_ld(long double r, int n) {
+  // (1+r)^n を log1p / exp で安定に計算
+  return std::expl((long double)n * std::log1pl(r));
+ }
+
+ inline long double kahan_sum_ld(const std::vector<long double> &xs) {
+  long double sum = 0.0L;
+  long double c = 0.0L;
+  for (long double x : xs) {
+   long double y = x - c;
+   long double t = sum + y;
+   c = (t - sum) - y;
+   sum = t;
+  }
+  return sum;
+ }
+
+ inline long double fin_pmt_ld(long double rate, int nper, long double pv, int type) {
+  if (nper <= 0) throw std::runtime_error("fin_pmt_ld: nper <= 0");
+
+  if (nearly_zero_ld(rate)) {
+   return pv / (long double)nper; // 正の支払額
+  }
+
+  const long double A = pow1p_int_ld(rate, nper);
+  long double pmt = pv * rate * A / (A - 1.0L); // 期末払い
+  if (type == 1) {
+   pmt /= (1.0L + rate); // 期首払い補正
+  }
+  return pmt; // 正の支払額
+ }
 
  //  NPV
  inline double npv(const std::vector<double> &cf, double r) {

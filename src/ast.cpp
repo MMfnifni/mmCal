@@ -1,6 +1,11 @@
 ﻿#include "ast.hpp"
 
 namespace mm::cal {
+ UserFunction::UserFunction() = default;
+ UserFunction::~UserFunction() = default;
+ UserFunction::UserFunction(UserFunction &&) noexcept = default;
+ UserFunction &UserFunction::operator=(UserFunction &&) noexcept = default;
+
  /* ============================
     AST ヘルパくん
     ============================ */
@@ -34,11 +39,37 @@ namespace mm::cal {
  // AST ノード系
  NumberNode::NumberNode(Value v, size_t p) : value(std::move(v)) { pos = p; }
  Value NumberNode::evalImpl(EvaluationContext &ectx) const { return value; }
- AssignNode::AssignNode(std::string n, std::unique_ptr<ASTNode> e) : name(std::move(n)), expr(std::move(e)) {}
+ AssignNode::AssignNode(std::string n, std::unique_ptr<ASTNode> e, size_t p) : name(std::move(n)), expr(std::move(e)) { pos = p; }
  Value AssignNode::evalImpl(EvaluationContext &ctx) const {
+  if (ctx.userFunctions->contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as function", pos);
   Value v = expr->eval(ctx);
   ctx.variables[name] = v;
   return v;
+ }
+
+ FunctionDefNode::FunctionDefNode(std::string n, std::vector<std::string> s, std::unique_ptr<ASTNode> b, size_t p) : name(std::move(n)), params(std::move(s)), body(std::move(b)) { pos = p; }
+ Value FunctionDefNode::evalImpl(EvaluationContext &ctx) const {
+  if (ctx.variables.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", pos); // 変数との衝突
+  if (ctx.cfg.functions.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: cannot override builtin", pos);   // builtinとの衝突
+  if (ctx.userFunctions->contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: function already defined", pos); // 再定義禁止
+
+  { // 仮引数重複チェック
+   std::unordered_set<std::string> seen;
+   for (const auto &p : params)
+    if (!seen.insert(p).second) throw CalcError(CalcErrorType::RuntimeError, "RuntimeError: duplicate parameter name", pos);
+  }
+
+  UserFunction fn;
+  fn.params = params;
+
+  // bodyは所有権を持たせる(現在の設計ではASTは一回評価用なのでmoveできない。)
+  // clone関数がないならdeep copyが必要。 ここでは簡易的に const_cast + clone前提で記述：
+
+  fn.body = body->clone(); // clone() をASTNodeに用意すること
+
+  (*ctx.userFunctions)[name] = std::move(fn);
+
+  return Value(); // none
  }
  BinaryNode::BinaryNode(BinOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
  Value BinaryNode::evalImpl(EvaluationContext &ectx) const {
@@ -96,23 +127,47 @@ namespace mm::cal {
  }
 
  Value FunctionCallNode::evalImpl(EvaluationContext &ectx) const {
+  if (std::find(ectx.callStack.begin(), ectx.callStack.end(), name) != ectx.callStack.end()) { throw CalcError(CalcErrorType::DefinitionError, "recursion disabled", pos); } // 自己再帰検出
 
+  // user function 優先
+  if (auto uit = ectx.userFunctions->find(name); uit != ectx.userFunctions->end()) {
+   const UserFunction &fn = uit->second;
+   if (args.size() != fn.params.size()) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
+   std::vector<Value> values;
+   values.reserve(args.size());
+   for (auto &a : args)
+    values.push_back(a->eval(ectx));
+
+   ectx.callStack.push_back(name); // 呼び出し開始
+
+   // ローカルコンテキスト生成
+   EvaluationContext local = ectx;
+   // local.variables.clear();
+   for (size_t i = 0; i < fn.params.size(); ++i)
+    local.variables[fn.params[i]] = values[i];
+   Value r = fn.body->eval(local);
+   ectx.callStack.pop_back();
+
+   return r;
+  }
+
+  // 内蔵関数
   auto it = ectx.cfg.functions.find(name);
   if (it == ectx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
 
   auto &f = it->second;
   int argc = static_cast<int>(args.size());
+
   if (!f.validArgc(argc)) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
+
   std::vector<Value> v;
   v.reserve(args.size());
   for (auto &a : args)
    v.push_back(a->eval(ectx));
 
   FunctionContext ctx{ectx.cfg, ectx.hist, ectx.base, pos, ectx.sideEffects};
-  Value r = f.f(v, ctx);
-  // double のときだけ有限チェック -> 一括捕捉に変更
-  /* if (std::holds_alternative<double>(r)) checkFinite(std::get<double>(r), pos);*/
-  return r;
+
+  return f.f(v, ctx);
  }
 
  SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }

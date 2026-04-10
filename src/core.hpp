@@ -6,11 +6,11 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -22,6 +22,8 @@ namespace mm::cal {
  inline constexpr double PI = 3.14159265358979323846264338327950288419716939937510;
  inline constexpr int cnst_precision = 12;
  inline constexpr double cnst_precision_inv = 1e-12;
+
+ using Complex = std::complex<double>;
 
  struct InvalidValue {};
  struct ControlRequest : std::exception {
@@ -37,9 +39,23 @@ namespace mm::cal {
  struct MultiValue;
  struct SideEffect;
  struct EvalResult;
+ struct EvaluationContext;
  struct ASTNode; // 実装はsyntax.hppへ
- struct UserFunction;
-
+ struct UserFunction {
+   std::vector<std::string> params;
+   std::unique_ptr<ASTNode> body;
+   UserFunction();
+   ~UserFunction();
+   UserFunction(UserFunction &&) noexcept;
+   UserFunction &operator=(UserFunction &&) noexcept;
+   UserFunction(const UserFunction &) = delete;
+   UserFunction &operator=(const UserFunction &) = delete;
+ };
+ enum class AngleMode {
+  Deg,
+  Rad,
+  Grad,
+ };
  /* ============================
     エラー
     ============================ */
@@ -71,6 +87,7 @@ namespace mm::cal {
   SyntaxError,
   RuntimeError,
   IOError,
+  DefinitionError,
  };
 
  constexpr const char *errorMessage(CalcErrorType t) {
@@ -101,6 +118,7 @@ namespace mm::cal {
    case CalcErrorType::SyntaxError: return "SyntaxError";
    case CalcErrorType::RuntimeError: return "RuntimeError";
    case CalcErrorType::IOError: return "IOError";
+   case CalcErrorType::DefinitionError: return "DefinitionError";
   }
   return "unknown calculation error";
  }
@@ -225,7 +243,6 @@ namespace mm::cal {
    // finite
    void validateFinite(size_t pos) const;
 
-  public:
    // visitor access
    const Storage &storage() const noexcept { return data_; }
    Storage &storage() noexcept { return data_; }
@@ -234,8 +251,10 @@ namespace mm::cal {
    template <class Visitor> decltype(auto) visit(Visitor &&v) { return std::visit(std::forward<Visitor>(v), data_); }
    template <class Visitor> decltype(auto) visit(Visitor &&v) const { return std::visit(std::forward<Visitor>(v), data_); }
    std::size_t size() const;
- };
 
+   static Value None() { return Value(); } // monostate
+   bool isNone() const { return std::holds_alternative<std::monostate>(data_); };
+ };
  struct MultiValue {
    std::vector<Value> elems_;
    MultiValue() = default;
@@ -270,9 +289,6 @@ namespace mm::cal {
    std::vector<std::vector<double>> toMatrix() const;
  };
 
- using Complex = std::complex<double>;
-
- struct FunctionContext;
  struct RuntimeState {
    bool suppressDisplay = false;
    std::string messageOverride = "";
@@ -319,8 +335,10 @@ namespace mm::cal {
    int precision = cnst_precision; // 表示精度（有効桁）
    bool trimTrailingZeros = true;  // 末尾の 0 を削るか
    std::unordered_map<std::string, FunctionDef> functions;
-   // std::unordered_map<std::string, UserFunction> userFunctions; // ユーザ関数
    std::size_t maxDisplayElements = 10000;
+   AngleMode angleMode = AngleMode::Deg;
+   bool allowVariableRedefinition = true;
+   bool allowFunctionRedefinition = false;
  };
  struct FunctionContext {
    SystemConfig &cfg;
@@ -335,13 +353,13 @@ namespace mm::cal {
    SystemConfig &cfg;
    const std::vector<InputEntry> &hist;
    int base = 0;
-   std::vector<SideEffect> sideEffects;                        // おくすり
-   std::unordered_map<std::string, Value> variables;           // ユーザ変数
-   std::vector<std::unordered_map<std::string, Value>> scopes; // ユーザ関数
+   std::vector<SideEffect> sideEffects;                                          // おくすり
+   std::unordered_map<std::string, Value> variables;                             // ユーザ変数
+   std::shared_ptr<std::unordered_map<std::string, UserFunction>> userFunctions; // ユーザ関数
    std::vector<std::string> callStack;
 
    // EvaluationContext() = default;
-   EvaluationContext(SystemConfig &c, const std::vector<InputEntry> &h, int b) : cfg(c), hist(h), base(b) {}
+   EvaluationContext(SystemConfig &c, const std::vector<InputEntry> &h, int b) : cfg(c), hist(h), base(b), userFunctions(std::make_shared<std::unordered_map<std::string, UserFunction>>()) {}
  };
 
  inline const std::unordered_map<std::string, Value> constants = {

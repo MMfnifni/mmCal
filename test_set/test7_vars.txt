@@ -1,0 +1,64 @@
+:clear => "<cleared>"
+x:=2 => "<defined: x := 2>"
+x => 2
+x:=3 => "<redefined: x := 3 (was 2)>"
+x => 3
+x^x => 27
+
+f(x):=2*x => "<defined: f(x)>"
+f(3) => 6
+f(x) => 6
+
+g(y):=x+y => "<defined: g(y)>"
+g(4) => 7
+
+:unset x => "<unset: x>"
+
+x => Error
+g(4) => Error
+
+:undef f => "<undefined: f>"
+f(3) => Error
+
+:clear => "<cleared>"
+
+x => Error
+g(1) => Error
+
+x:=2 => "<defined: x := 2>"
+h(x):=x+1 => "<defined: h(x)>"
+h(10) => 11
+
+:clear => "<cleared>"
+
+x:=2 => "<defined: x := 2>"
+f(y):=x+y => "<defined: f(y)>"
+f(3) => 5
+
+:clear => "<cleared>"
+
+x:=2 => "<defined: x := 2>"
+f(x):=x+1 => "<defined: f(x)>"
+f(10) => 11
+
+:clear => "<cleared>"
+
+x:=1 => "<defined: x := 1>"
+x(y):=y+1 => Error
+
+f(x):=x+1 => "<defined: f(x)>"
+f:=2 => Error
+
+:unset no_such_var => Error
+:undef no_such_func => Error
+
+:clear => "<cleared>"
+
+x:=2 => "<defined: x := 2>"
+f(y):=x+y => "<defined: f(y)>"
+:clear => "<cleared>"
+x => Error
+f(1) => Error
+
+x=2 => Error
+f(x)=x+1 => Error

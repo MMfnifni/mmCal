@@ -2258,15 +2258,16 @@ namespace mm::cal {
   // 行列の軌道（行列式の絶対値）
   cfg.functions["mcond"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                              auto A = toMatrix(v[0], ctx);
-
                              auto S = singular_values(A);
 
-                             if (S.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos);
+                             if (S.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos); }
 
                              double smax = *std::max_element(S.begin(), S.end());
                              double smin = *std::min_element(S.begin(), S.end());
 
-                             if (smin == 0.0) return Value(std::numeric_limits<double>::infinity());
+                             double tol = std::numeric_limits<double>::epsilon() * std::max(1.0, smax) * static_cast<double>(std::max(A.size(), A[0].size())) * 128.0;
+
+                             if (smin <= tol) { return Value(std::numeric_limits<double>::infinity()); }
 
                              return Value(smax / smin);
                             }};
@@ -3040,143 +3041,134 @@ namespace mm::cal {
   // NPV
   cfg.functions["fin_npv"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                                if (v.size() <= 2) throwDomain(ctx.pos);
-                               double rate = v[0].asScalar(ctx.pos);
-                               std::vector<double> cf = collectReals(v, ctx);
-                               cf.erase(cf.begin()); // rateを除去
-                               double sum = 0;
-                               for (size_t t = 0; t < cf.size(); ++t)
-                                sum += cf[t] / std::pow(1 + rate, t + 1);
-                               return sum;
+
+                               const long double rate = (long double)v[0].asScalar(ctx.pos);
+
+                               std::vector<long double> terms;
+                               terms.reserve(v.size() - 1);
+
+                               for (size_t i = 1; i < v.size(); ++i) {
+                                const long double cf = (long double)v[i].asScalar(ctx.pos);
+                                const long double disc = std::expl((long double)i * std::log1pl(rate));
+                                terms.push_back(cf / disc);
+                               }
+
+                               return (double)kahan_sum_ld(terms);
                               }};
 
   // IRR
   cfg.functions["fin_irr"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                               if (v.size() < 2) throw CalcError(CalcErrorType::DomainError, "DomainError: fin_irr: at least 2 cash flows required", ctx.pos);
+                               if (v.size() < 2) { throw CalcError(CalcErrorType::DomainError, "DomainError: fin_irr: at least 2 cash flows required", ctx.pos); }
 
-                               std::vector<double> cf;
-                               for (auto &x : v)
-                                cf.push_back(x.asScalar(ctx.pos));
+                               std::vector<long double> cf;
+                               for (auto &x : v) {
+                                cf.push_back((long double)x.asScalar(ctx.pos));
+                               }
 
-                               auto f = [&](double r) {
-                                double sum = 0.0;
-                                for (size_t t = 0; t < cf.size(); ++t)
-                                 sum += cf[t] / std::pow(1.0 + r, t);
-                                return sum;
+                               auto f = [&](double r_in) -> double {
+                                const long double r = (long double)r_in;
+                                long double sum = 0.0L;
+                                long double c = 0.0L;
+
+                                for (size_t t = 0; t < cf.size(); ++t) {
+                                 const long double denom = std::expl((long double)t * std::log1pl(r));
+                                 const long double term = cf[t] / denom;
+
+                                 long double y = term - c;
+                                 long double tmp = sum + y;
+                                 c = (tmp - sum) - y;
+                                 sum = tmp;
+                                }
+
+                                return (double)sum;
                                };
 
-                               // 全区間スキャンで符号変化を見つける
-                               double step = 0.0001;
-                               double start = -0.9999, end = 10.0;
-                               std::vector<std::pair<double, double>> brackets;
+                               const double step = 1e-4;
+                               const double start = -0.9999;
+                               const double end = 10.0;
 
+                               std::vector<std::pair<double, double>> brackets;
                                double prev = f(start);
+
                                for (double x = start + step; x <= end; x += step) {
                                 double curr = f(x);
-                                if (prev * curr <= 0) brackets.push_back({x - step, x});
+                                if (prev * curr <= 0.0) { brackets.push_back({x - step, x}); }
                                 prev = curr;
                                }
 
-                               if (brackets.empty()) throw CalcError(CalcErrorType::NonConvergence, "fin_irr: no root bracketed", ctx.pos);
-
-                               // 最初の正の IRR を返す
-                               auto brent = [&](double a, double b) {
-                                double fa = f(a), fb = f(b);
-                                if (fa * fb > 0) throw CalcError(CalcErrorType::NonConvergence, "Brent method not bracketed", ctx.pos);
-
-                                double c = a, fc = fa, d = 0;
-                                bool mflag = true;
-                                double tol = 1e-12;
-
-                                for (int iter = 0; iter < 512; ++iter) {
-                                 double s;
-                                 if (fa != fc && fb != fc) s = a * fb * fc / ((fa - fb) * (fa - fc)) + b * fa * fc / ((fb - fa) * (fb - fc)) + c * fa * fb / ((fc - fa) * (fc - fb));
-                                 else s = b - fb * (b - a) / (fb - fa);
-
-                                 double midpoint = (3 * a + b) / 4;
-                                 bool needBisect =
-                                     !((s > midpoint && s < b) || (s < midpoint && s > b)) || (mflag ? std::abs(s - b) >= std::abs(b - c) / 2 : std::abs(s - b) >= std::abs(c - d) / 2) || (mflag ? std::abs(b - c) < tol : std::abs(c - d) < tol);
-
-                                 if (needBisect) s = (a + b) / 2, mflag = true;
-                                 else mflag = false;
-
-                                 double fs = f(s);
-                                 d = c;
-                                 c = b;
-                                 fc = fb;
-
-                                 if (fa * fs < 0) {
-                                  b = s;
-                                  fb = fs;
-                                 } else {
-                                  a = s;
-                                  fa = fs;
-                                 }
-
-                                 if (std::abs(fa) < std::abs(fb)) {
-                                  std::swap(a, b);
-                                  std::swap(fa, fb);
-                                 }
-
-                                 if (std::abs(b - a) < tol) return b;
-                                }
-                                throw CalcError(CalcErrorType::NonConvergence, "fin_irr: Brent did not converge", ctx.pos);
-                               };
+                               if (brackets.empty()) { throw CalcError(CalcErrorType::NonConvergence, "fin_irr: no root bracketed", ctx.pos); }
 
                                for (auto &[low, high] : brackets) {
                                 try {
-                                 double r = brent(low, high);
-                                 if (r >= -1.0) return r; // 正の IRR 優先
+                                 double r = brent(f, low, high, ctx);
+                                 if (r >= -1.0) return r;
                                 } catch (...) { continue; }
                                }
+
                                throw CalcError(CalcErrorType::NonConvergence, "fin_irr: root not found", ctx.pos);
                               }};
 
   // MIRR
   cfg.functions["fin_mirr"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                if (v.size() < 3) throw CalcError(CalcErrorType::DomainError, "DomainError: fin_mirr: at least reinvestRate + 2 cash flows required", ctx.pos);
+                                if (v.size() < 3) { throw CalcError(CalcErrorType::DomainError, "DomainError: fin_mirr: at least reinvestRate + 2 cash flows required", ctx.pos); }
 
-                                double reinvestRate = v[0].asScalar(ctx.pos);
-                                std::vector<double> cf;
-                                for (size_t i = 1; i < v.size(); ++i)
-                                 cf.push_back(v[i].asScalar(ctx.pos));
-                                size_t n = cf.size();
+                                const long double reinvestRate = (long double)v[0].asScalar(ctx.pos);
 
-                                double positiveFV = 0.0, negativePV = 0.0;
-                                for (size_t t = 0; t < n; ++t) {
-                                 if (cf[t] >= 0) positiveFV += cf[t] * std::pow(1.0 + reinvestRate, n - t - 1);
-                                 else negativePV += cf[t] / std::pow(1.0 + reinvestRate, t);
+                                std::vector<long double> cf;
+                                for (size_t i = 1; i < v.size(); ++i) {
+                                 cf.push_back((long double)v[i].asScalar(ctx.pos));
                                 }
 
-                                if (positiveFV <= 0.0 || negativePV >= 0.0) return reinvestRate;
+                                const int n = (int)cf.size();
 
-                                return std::pow(-positiveFV / negativePV, 1.0 / n) - 1.0;
+                                long double positiveFV = 0.0L;
+                                long double negativePV = 0.0L;
+
+                                for (int t = 0; t < n; ++t) {
+                                 if (cf[t] >= 0.0L) {
+                                  positiveFV += cf[t] * pow1p_int_ld(reinvestRate, n - t - 1);
+                                 } else {
+                                  negativePV += cf[t] / pow1p_int_ld(reinvestRate, t);
+                                 }
+                                }
+
+                                if (positiveFV <= 0.0L || negativePV >= 0.0L) { return (double)reinvestRate; }
+
+                                return (double)(std::powl(-positiveFV / negativePV, 1.0L / (long double)n) - 1.0L);
                                }};
 
   // NPER (期間)
   cfg.functions["fin_nper"] = {3, 3, [](auto &v, auto &ctx) -> Value {
-                                double rate = v[0].asScalar(ctx.pos);
-                                double pmt = v[1].asScalar(ctx.pos);
-                                double pv = v[2].asScalar(ctx.pos);
-                                if (pmt == 0) throwDomain(ctx.pos);
-                                if (rate == 0) return pv / pmt;
-                                double denom = 1 - pv * rate / pmt;
-                                if (denom <= 0) throwDomain(ctx.pos);
-                                return std::log(denom) / std::log(1 + rate);
+                                const long double rate = (long double)v[0].asScalar(ctx.pos);
+                                const long double pmt = (long double)v[1].asScalar(ctx.pos);
+                                const long double pv = (long double)v[2].asScalar(ctx.pos);
+
+                                if (nearly_zero_ld(pmt)) throwDomain(ctx.pos);
+
+                                if (nearly_zero_ld(rate)) { return (double)(pv / pmt); }
+
+                                const long double denom = 1.0L - pv * rate / pmt;
+                                if (denom <= 0.0L) throwDomain(ctx.pos);
+
+                                return (double)(std::logl(denom) / std::log1pl(rate));
                                }};
 
   // RATE (利率)
   cfg.functions["fin_rate"] = {3, 3, [&](const auto &v, auto &ctx) -> Value {
-                                double nper = v[0].asScalar(ctx.pos);
-                                double pmt = v[1].asScalar(ctx.pos);
-                                double pv = v[2].asScalar(ctx.pos);
+                                const long double nper = (long double)v[0].asScalar(ctx.pos);
+                                const long double pmt = (long double)v[1].asScalar(ctx.pos);
+                                const long double pv = (long double)v[2].asScalar(ctx.pos);
 
-                                if (nper <= 0) throwDomain(ctx.pos);
-                                if (pmt == 0.0 && pv == 0.0) return 0.0;
-                                if (pmt == 0.0 && pv != 0.0) throwDomain(ctx.pos);
+                                if (nper <= 0.0L) throwDomain(ctx.pos);
+                                if (nearly_zero_ld(pmt) && nearly_zero_ld(pv)) return 0.0;
+                                if (nearly_zero_ld(pmt) && !nearly_zero_ld(pv)) throwDomain(ctx.pos);
 
-                                auto f = [&](double r) {
-                                 if (r == 0.0) return pv + pmt * nper;
-                                 return pv * std::pow(1.0 + r, nper) + pmt * (std::pow(1.0 + r, nper) - 1.0) / r;
+                                auto f = [&](double r_in) -> double {
+                                 const long double r = (long double)r_in;
+                                 if (nearly_zero_ld(r)) { return (double)(pv + pmt * nper); }
+
+                                 const long double A = std::expl(nper * std::log1pl(r));
+                                 return (double)(pv * A + pmt * (A - 1.0L) / r);
                                 };
 
                                 return brent(f, -0.999, 1e6, ctx);
@@ -3188,77 +3180,98 @@ namespace mm::cal {
   // 3. 元本返済で残高を減らす
   // 4. type = 1 の場合のみ期首補正
   cfg.functions["fin_cumipmt"] = {6, 6, [](auto &v, auto &ctx) -> Value {
-                                   double rate = v[0].asScalar(ctx.pos);
-                                   int nper = (int)v[1].asScalar(ctx.pos);
-                                   double pv = v[2].asScalar(ctx.pos);
-                                   int start = (int)v[3].asScalar(ctx.pos);
-                                   int end = (int)v[4].asScalar(ctx.pos);
-                                   int type = (int)v[5].asScalar(ctx.pos);
+                                   const long double rate = (long double)v[0].asScalar(ctx.pos);
+                                   const int nper = (int)v[1].asScalar(ctx.pos);
+                                   const long double pv = (long double)v[2].asScalar(ctx.pos);
+                                   const int start = (int)v[3].asScalar(ctx.pos);
+                                   const int end = (int)v[4].asScalar(ctx.pos);
+                                   const int type = (int)v[5].asScalar(ctx.pos);
 
-                                   if (rate < 0 || nper <= 0) throwDomain(ctx.pos);
+                                   if (rate < 0.0L || nper <= 0) throwDomain(ctx.pos);
                                    if (start < 1 || end < start || end > nper) throwDomain(ctx.pos);
+                                   if (!(type == 0 || type == 1)) throwDomain(ctx.pos);
 
-                                   const double EPS = 1e-15;
+                                   if (nearly_zero_ld(rate)) { return 0.0; }
 
-                                   double factor = std::pow(1.0 + rate, nper);
-                                   double pmt = (std::fabs(rate) < EPS) ? -pv / nper : -pv * rate * factor / (factor - 1.0);
+                                   const long double pmt = fin_pmt_ld(rate, nper, pv, type); // 正の支払額
+                                   long double balance = pv;
 
-                                   double balance = pv;
+                                   long double sum = 0.0L;
+                                   long double c = 0.0L;
 
-                                   double sum = 0.0;
-                                   double c = 0.0;
-
-                                   auto kahan_add = [&](double x) {
-                                    double y = x - c;
-                                    double t = sum + y;
+                                   auto kahan_add = [&](long double x) {
+                                    long double y = x - c;
+                                    long double t = sum + y;
                                     c = (t - sum) - y;
                                     sum = t;
                                    };
 
-                                   for (int k = 1; k <= end; k++) {
+                                   for (int k = 1; k <= end; ++k) {
+                                    long double interest = 0.0L;
+                                    long double principal = 0.0L;
 
-                                    double interest = 0.0;
+                                    if (type == 1 && k == 1) {
+                                     interest = 0.0L;
+                                     principal = pmt;
+                                     balance -= principal;
+                                    } else {
+                                     interest = balance * rate;
+                                     principal = pmt - interest;
+                                     balance -= principal;
+                                    }
 
-                                    if (!(type == 1 && k == 1)) { interest = balance * rate; }
-
-                                    if (k >= start) kahan_add(interest);
-
-                                    balance = balance * (1.0 + rate) + pmt;
+                                    if (k >= start) { kahan_add(interest); }
                                    }
 
-                                   return sum;
+                                   return (double)sum;
                                   }};
 
   // CUMPRINC (累積元金)
   cfg.functions["fin_cumprinc"] = {6, 6, [](auto &v, auto &ctx) -> Value {
-                                    double rate = v[0].asScalar(ctx.pos);
-                                    int nper = (int)v[1].asScalar(ctx.pos);
-                                    double pv = v[2].asScalar(ctx.pos);
-                                    int start = (int)v[3].asScalar(ctx.pos);
-                                    int end = (int)v[4].asScalar(ctx.pos);
-                                    int type = (int)v[5].asScalar(ctx.pos);
+                                    const long double rate = (long double)v[0].asScalar(ctx.pos);
+                                    const int nper = (int)v[1].asScalar(ctx.pos);
+                                    const long double pv = (long double)v[2].asScalar(ctx.pos);
+                                    const int start = (int)v[3].asScalar(ctx.pos);
+                                    const int end = (int)v[4].asScalar(ctx.pos);
+                                    const int type = (int)v[5].asScalar(ctx.pos);
 
-                                    if (rate < 0 || nper <= 0) throwDomain(ctx.pos);
+                                    if (rate < 0.0L || nper <= 0) throwDomain(ctx.pos);
                                     if (start < 1 || end < start || end > nper) throwDomain(ctx.pos);
+                                    if (!(type == 0 || type == 1)) throwDomain(ctx.pos);
 
-                                    double pmt = (std::fabs(rate) < 1e-15) ? -pv / nper : -pv * rate * std::pow(1 + rate, nper) / (std::pow(1 + rate, nper) - 1);
+                                    if (nearly_zero_ld(rate)) { return (double)(pv * (long double)(end - start + 1) / (long double)nper); }
 
-                                    double balance = pv;
-                                    double sum = 0;
+                                    const long double pmt = fin_pmt_ld(rate, nper, pv, type); // 正の支払額
+                                    long double balance = pv;
 
-                                    for (int k = 1; k <= end; k++) {
+                                    long double sum = 0.0L;
+                                    long double c = 0.0L;
 
-                                     double prev_balance = balance;
+                                    auto kahan_add = [&](long double x) {
+                                     long double y = x - c;
+                                     long double t = sum + y;
+                                     c = (t - sum) - y;
+                                     sum = t;
+                                    };
 
-                                     if (type == 1 && k == 1) balance = balance + pmt;
-                                     else balance = balance * (1 + rate) + pmt;
+                                    for (int k = 1; k <= end; ++k) {
+                                     long double interest = 0.0L;
+                                     long double principal = 0.0L;
 
-                                     double principal = prev_balance - balance;
+                                     if (type == 1 && k == 1) {
+                                      interest = 0.0L;
+                                      principal = pmt;
+                                      balance -= principal;
+                                     } else {
+                                      interest = balance * rate;
+                                      principal = pmt - interest;
+                                      balance -= principal;
+                                     }
 
-                                     if (k >= start) sum += principal;
+                                     if (k >= start) { kahan_add(principal); }
                                     }
 
-                                    return sum;
+                                    return (double)sum;
                                    }};
 
   // EFFECTIVE RATE / NOMINAL RATE / CAGR

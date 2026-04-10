@@ -5,7 +5,7 @@ namespace mm::cal {
  static constexpr int INDENT_WIDTH = 2;
 
  /* ============================
-    評価マン
+    評価マン(ToDo: Semanticの責務を兼ねている)
     ============================ */
 
  EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base, EvaluationContext &ectx) {
@@ -36,16 +36,77 @@ namespace mm::cal {
  }
 
  EvalResult evalLine(const std::string &line, SystemConfig &cfg, std::vector<InputEntry> &history, EvaluationContext &ectx) {
+  if (!line.empty() && line.front() == ':') return evalCommandLine(line, cfg, history, ectx);
+
   EvalResult res{};
 
   ectx.sideEffects.clear();
-  EvalResult v = evaluate(line, cfg, history, static_cast<int>(history.size()), ectx);
-  // applySideEffects(res.sideEffects, runtime);
 
-  // if (!runtime.suppressDisplay) print(res.value);
-  res.value = v.value;
+  Parser p(cfg, line);
+  auto ast = p.parse();
+
+  if (p.cur.type != TokenType::End) { throw CalcError(CalcErrorType::SyntaxError, "Syntax Error: not closed", p.cur.pos); }
+  bool assignWasRedefinition = false;
+  Value oldAssignedValue;
+
+  if (auto *n = dynamic_cast<AssignNode *>(ast.get())) {
+   auto it = ectx.variables.find(n->name);
+   if (it != ectx.variables.end()) {
+    assignWasRedefinition = true;
+    oldAssignedValue = it->second;
+   }
+  }
+
+  Value v = ast->eval(ectx);
+
+  if (auto *n = dynamic_cast<AssignNode *>(ast.get())) {
+   std::string msg;
+
+   if (assignWasRedefinition) {
+    msg = "<redefined: " + n->name + " := " + formatResult(v, cfg) + " (was " + formatResult(oldAssignedValue, cfg) + ")>";
+   } else {
+    msg = "<defined: " + n->name + " := " + formatResult(v, cfg) + ">";
+   }
+
+   res.value = Value(msg);
+   return res;
+  }
+
+  if (auto *n = dynamic_cast<FunctionDefNode *>(ast.get())) {
+   std::string sig = n->name + "(";
+   for (size_t i = 0; i < n->params.size(); ++i) {
+    if (i > 0) sig += ", ";
+    sig += n->params[i];
+   }
+   sig += ")";
+   res.value = Value("<defined: " + sig + ">");
+   return res;
+  }
+
+  res.value = v;
   return res;
  }
+
+ // Value evalAssign(AssignNode *n, EvaluationContext &ctx) {
+ //  if (ctx.userFunctions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as function", 0);
+ //  Value v = n->expr->eval(ctx);
+ //  ctx.variables[n->name] = v;
+ //  return v;
+ // }
+
+ // Value evalFunctionDef(FunctionDefNode *n, EvaluationContext &ctx) {
+ //  if (ctx.variables.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", 0);
+ //  if (ctx.cfg.functions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: cannot override builtin", 0);
+ //  if (ctx.userFunctions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: function already defined", 0);
+
+ // UserFunction fn;
+ // fn.params = n->params;
+ // fn.body = cloneAST(n->body.get()); // 重要
+
+ // ctx.userFunctions[n->name] = std::move(fn);
+
+ // return Value();
+ //}
 
  /* ============================
    フォーマッタ
@@ -269,6 +330,8 @@ namespace mm::cal {
         appendMulti(*x, cfg, out);
        } else if constexpr (std::is_same_v<T, std::string>) {
         out += x;
+       } else if constexpr (std::is_same_v<T, std::monostate>) {
+        // 関数定義などの「値なし」は何も表示しない
        } else {
         out += "Invalid";
        }
@@ -306,7 +369,9 @@ namespace mm::cal {
       [&](auto &&x) -> std::string {
        using T = std::decay_t<decltype(x)>;
 
-       if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
+       if constexpr (std::is_same_v<T, std::monostate>) {
+        return "";
+       } else if constexpr (std::is_same_v<T, std::shared_ptr<MultiValue>>) {
         return formatMultiValue(*x, cfg, indent);
        } else if constexpr (std::is_same_v<T, double>) {
         return formatReal(x, cfg);
@@ -314,21 +379,11 @@ namespace mm::cal {
         return formatComplex(x, cfg);
        } else if constexpr (std::is_same_v<T, std::string>) {
         return x;
-       } else if constexpr (std::is_same_v<T, InvalidValue>) {
-        return "Invalid";
        } else {
         throw CalcError(CalcErrorType::RuntimeError, "Unknown Value type", 0);
        }
       },
       v.storage());
-  // 以下の方式はUI版で破壊的。要検討
-  // if (r.length() >= cfg.maxDisplayElements) {
-  // calcWarn("[WARN] result too large for CLI display.");
-  // std::cout << "Are you sure you want to output? (yes/no): ";
-  // std::cin >> chk;
-  // if (chk == "YES" || chk == "yes" || chk == "y" || chk == "Y" || chk == "1") std::cout << "Suppress display(Evaluate succeed)\n";
-  // else throw CalcError(CalcErrorType::RuntimeError, "user Interrupt", 0);
-  //}
   return r;
  }
 

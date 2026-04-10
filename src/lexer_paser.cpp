@@ -94,7 +94,15 @@ namespace mm::cal {
     ++p;
     return {TokenType::Equal, "==", start};
    }
-   return {TokenType::Assign, "=", start};
+   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: '=' is not allowed; use ':=' for assignment/definition", start);
+  }
+
+  if (c == ':') {
+   if (p < src.size() && src[p] == '=') {
+    ++p;
+    return {TokenType::Assign, ":=", start};
+   }
+   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unexpected ':'", start);
   }
 
   if (c == '"') {
@@ -213,12 +221,30 @@ namespace mm::cal {
   auto left = parseCompare();
 
   if (cur.type == TokenType::Assign) {
-   auto ident = dynamic_cast<SymbolNode *>(left.get());
-   if (!ident) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: left side of assignment must be identifier", cur.pos);
+   size_t assignPos = cur.pos;
    advance();
    auto rhs = parseAssignment();
-   return std::make_unique<AssignNode>(ident->name, std::move(rhs));
+
+   // 変数代入: x = expr
+   if (auto ident = dynamic_cast<SymbolNode *>(left.get())) { return std::make_unique<AssignNode>(ident->name, std::move(rhs), ident->pos); }
+
+   // 関数定義: f(x, y) = expr
+   if (auto call = dynamic_cast<FunctionCallNode *>(left.get())) {
+    std::vector<std::string> params;
+    params.reserve(call->args.size());
+
+    for (const auto &arg : call->args) {
+     auto sym = dynamic_cast<SymbolNode *>(arg.get());
+     if (!sym) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: function parameters must be identifiers", assignPos); }
+     params.push_back(sym->name);
+    }
+
+    return std::make_unique<FunctionDefNode>(call->name, std::move(params), std::move(rhs), call->pos);
+   }
+
+   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: left side of assignment must be identifier or function signature", assignPos);
   }
+
   return left;
  }
 
@@ -372,27 +398,6 @@ namespace mm::cal {
     size_t callPos = cur.pos;
     advance();
 
-    // 関数なら普通に call
-    if (cfg.functions.count(name)) {
-     auto f = std::make_unique<FunctionCallNode>();
-     f->name = name;
-     f->pos = p;
-
-     // no args
-     if ((open == TokenType::LParen && accept(TokenType::RParen)) || (open == TokenType::LBracket && accept(TokenType::RBracket))) { return f; }
-
-     while (true) {
-      f->args.push_back(parseAssignment());
-
-      if (accept(TokenType::Comma)) continue;
-
-      if (open == TokenType::LParen) expect(TokenType::RParen);
-      else expect(TokenType::RBracket);
-      break;
-     }
-     return f;
-    }
-
     // 定数なら「定数 * (expr)」
     if (constants.count(name)) {
      auto lhs = std::make_unique<NumberNode>(constants.at(name), p);
@@ -402,13 +407,30 @@ namespace mm::cal {
      return std::make_unique<BinaryNode>(BinOp::Mul, std::move(lhs), std::move(rhs), callPos);
     }
 
-    throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), p);
+    // それ以外は builtin / user function を区別せず関数呼び出しとして構文木化
+    auto f = std::make_unique<FunctionCallNode>();
+    f->name = name;
+    f->pos = p;
+
+    // no args
+    if ((open == TokenType::LParen && accept(TokenType::RParen)) || (open == TokenType::LBracket && accept(TokenType::RBracket))) { return f; }
+
+    while (true) {
+     f->args.push_back(parseAssignment());
+
+     if (accept(TokenType::Comma)) continue;
+
+     if (open == TokenType::LParen) expect(TokenType::RParen);
+     else expect(TokenType::RBracket);
+     break;
+    }
+    return f;
    }
 
    // ----- identifier only -----
    if (constants.count(name)) { return std::make_unique<NumberNode>(constants.at(name), p); }
-   if (symbols.count(name)) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nit must follow a value (e.g. 30deg)", p); } // 単位は単体では許可しない（30deg の形だけ）
-   return std::make_unique<SymbolNode>(std::move(name), p);                                                                          // それ以外は「オプション指定子」としてASTに残す
+   if (symbols.count(name)) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unit must follow a value (e.g. 30deg)", p); }
+   return std::make_unique<SymbolNode>(std::move(name), p);
   }
 
   // ---- grouped expression ----

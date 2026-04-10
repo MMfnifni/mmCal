@@ -112,6 +112,8 @@ int main(int argc, char *argv[]) {
     case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;
     case ControlRequest::Kind::Clear:
      history.clear();
+     ectx.userFunctions->clear();
+     ectx.callStack.clear();
      ectx.variables.clear();
      std::cout << "variables and histories cleared\n";
      break;

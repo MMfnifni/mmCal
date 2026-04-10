@@ -8,11 +8,18 @@
 
 ### Want a handy little calculator that lets you instantly reference calculation results with % symbols, perform continuous calculations, and use pre-built functions you need? No installation required—just one executable that works anywhere? Well, here it is!!
 
-This project is a formula evaluation engine featuring **numeric, complex, vector, and matrix operations, along with high-precision mathematical functions**.
+mmCalculator is a **high-performance mathematical calculator** designed for engineering, manufacturing, and technical work.
 
-It's designed as a function calculator to make quick, consecutive calculations convenient in design/development environments and practical work.
+It goes beyond a simple calculator by supporting:
 
-The design is inspired by _Mathematica_ in spirit, but **variable assignment and symbolic computation are intentionally not implemented**.
+- Continuous calculations using previous results
+- Variables and user-defined functions
+- Complex numbers, vectors, and matrices
+- Advanced numerical and engineering functions
+
+Unlike heavyweight systems, it remains:
+
+> **Fast, lightweight, and immediately usable — a practical tool for real work**
 
 ## Enough theory — let’s dive straight into practical examples!
 
@@ -20,62 +27,63 @@ The design is inspired by _Mathematica_ in spirit, but **variable assignment and
 In [1] := (2+3)(4+5) + 2Pi
 Out[1] := 51.28318530718
 
-In [2] := hypot(3,4) + norm(3,4) + distance(0,0,3,4)
-Out[2] := 15
+In [2] := a := hypot(3,4)
+Out[2] := <defined: a := 5>
 
-In [3] := round(ln(E^5) + log10(1000) + log2(8), 10)
-Out[3] := 11
+In [3] := f(x) := x^2 + 2x + 1
+Out[3] := <defined: f(x)>
 
-In [4] := fma(10^16, 3, -10^16*3) + expm1(1) - (E-1)
-Out[4] := 0
+In [4] := f(a)
+Out[4] := 36
 
-In [5] := sin(30)^2 + cos(30)^2
-Out[5] := 1
+In [5] := round(ln(E^5) + log10(1000) + log2(8), 10)
+Out[5] := 11
 
-In [6] := tan(45) + cot(Pi/4 rad) + sec(60deg) + csc(Pi/6 rad)
-Out[6] := 6
+In [6] := fma(10^16, 3, -10^16*3) + expm1(1) - (E-1)
+Out[6] := 0
 
-In [7] := asin(0.5) + acos(0.5) + atan(1)
-Out[7] := 135
+In [7] := sin(30)^2 + cos(30)^2
+Out[7] := 1
 
-In [8] := atan2(1,1) + atan2(1,-1) + atan2(-1,-1) + atan2(-1,1)
-Out[8] := 360
+In [8] := tan(45) + cot(Pi/4 rad) + sec(60deg) + csc(Pi/6 rad)
+Out[8] := 6
 
-In [9] :=Out[3]*Out[2]-Out[7]
-Out[9] := 30
+In [9] := atan2(1,1) + atan2(1,-1) + atan2(-1,-1) + atan2(-1,1)
+Out[9] := 360
 
-In [10] := %% / %
-Out[10] := 12
+In [10] := Out[5]*a - %%
+Out[10] := 19
 
-In [11] := 3!^2/%
-Out[11] := 1
+In [11] := %% / %
+Out[11] := 18.947368421053
 
-In [12] := (-8)^(1/3)
-Out[12] := 1+1.732050807569I
+In [12] := 3!^2 / round(%)
+Out[12] := 2
 
-In [13] := exp(I Pi) + 1
-Out[13] := 0
+In [13] := (-8)^(1/3)
+[WARN] pos=4 (-a)^(p/q) : principal value only; other branches may exist
+Out[13] := 1+1.732050807569I
 
-In [14] := polar(2,60) + cis(60)
-Out[14] := 1.5+2.598076211353I
+In [14] := exp(I Pi) + 1
+Out[14] := 0
 
-In [15] := abs(%) + arg(%) + re(%) + im(%)
-Out[15] := 67.098076211353
+In [15] := polar(2,60) + cis(60)
+Out[15] := 1.5+2.598076211353I
 
-In [16] := conj(%%) + unit(%%) - proj(%%)
-Out[16] := 0.5-4.330127018922I
+In [16] := abs(%) + arg(%) + re(%) + im(%)
+Out[16] := 67.098076211353
 
-In [17] := mean(3,5,7,11,13,17) + median(1,3,5) + mode(1,2,2,3)
-Out[17] := 14.3333333333333
+In [17] := conj(%%) + unit(%%) - proj(%%)
+Out[17] := 0.5-4.330127018922I
 
-In [18] := stddevs(3,5,7,11,13,17) + vars(1,2,3) + iqr(1,2,3,4)
-Out[18] := 7.778888771954
+In [18] := mean(3,5,7,11,13,17) + median(1,3,5) + mode(1,2,2,3)
+Out[18] := 14.3333333333333
 
-In [19] := gcd(84,120) + lcm(6,8) + perm(10,3) + comb(10,3)
-Out[19] := 876
+In [19] := stddevs(3,5,7,11,13,17) + vars(1,2,3) + iqr(1,2,3,4)
+Out[19] := 7.778888771954
 
-In [20] := isprime(67280421310721) + fib(25)/75025 + %%%%%%%%%
-Out[20] := 3
+In [20] := gcd(84,120) + lcm(6,8) + perm(10,3) + comb(10,3)
+Out[20] := 876
 
 In [21] := ifft(fft({1+I,2-I,3+2I,4-3I}))
 Out[21] := {1+I,2-I,3+2I,4-3I}
@@ -83,13 +91,14 @@ Out[21] := {1+I,2-I,3+2I,4-3I}
 In [22] := mlsqr({{1,2},{3,4}},{1,2})
 Out[22] := {0, 0.5}
 
-In [23] := vdot({1,2},{3,4})+vmanhattan({0,0},{3,4})+veuclidean({0,0},{3,4})
+In [23] := vdot({1,2},{3,4}) + vmanhattan({0,0},{3,4}) + veuclidean({0,0},{3,4})
 Out[23] := 23
 ```
 
 ## Key Points Express
 
 - Implicit multiplication works (natural input)
+- Support for user-defined variables and functions
 - Use `%` or `Out[n]` to reuse past history in calculations
 - Supports complex numbers
 - Angles default to degrees but can be specified with `rad`, etc.
@@ -140,7 +149,7 @@ All constants start with a capital letter.
 - Unary `+` and `-` may be chained arbitrarily.
 
 ```text
-5 = -5
+---5 = -5
 ```
 
 ### Implicit Multiplication
@@ -175,6 +184,52 @@ cos(15+30)
 ```
 
 Functions must always be enclosed in `()` or `[]`.
+
+### User Variables and Function Definitions
+
+You can define variables or functions using `:=`.
+Variable and function names must comply with the following constraints:
+
+- They must not conflict with built-in functions or variables (e.g., `Pi`, `ave(x)`)
+- You cannot use a name defined as a variable for a function, or vice versa
+- Names must consist only of letters, digits, and underscores, and must begin with a letter
+
+Examples
+
+```
+In [1] := x:=2
+Out[1] := <defined: x := 2>
+
+In [2] := f(y):=y^y
+Out[2] := <defined: f(y)>
+
+In [3] := f (3)
+Out[3] := 27
+
+In [4] := f(x)
+Out[4] := 4
+```
+
+Regarding the function definition `f(x)`, `x` accepts any string that follows the naming conventions.
+However, if `x` has been defined previously, it is recognized as a function variable rather than a user-defined variable within the function definition.
+Additionally, by default, variables are overwritable, while functions are not.
+
+```
+In [6] := h(y):=x^y
+Out[6] := <defined: h(y)>
+
+In [7] := h(2)
+Out[7] := 4
+
+In [8] := x:=3
+Out[8] := <redefined: x := 3 (was 2)>
+
+In [9] := h(2)
+Out[9] := 9
+```
+
+Lists and removal of user-defined variables and functions are provided by commands such as `:unset`.
+For details, see “System Functions”.
 
 ### Functions
 
@@ -296,34 +351,34 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Statistics (Descriptive Statistics / Aggregation)
 
-| Function Name          | Description                                           | Example Inputs/Outputs                                                                                                                                                             |
-| ---------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sum(...)`             | Sum                                                   | `sum(1,2,3)=6`                                                                                                                                                                     |
-| `mean(...)`, `ave()`   | Mean                                                  | `mean(1,2,3)=2`                                                                                                                                                                    |
-| `min(...)`             | Minimum                                               | `min(3,1,2)=1`                                                                                                                                                                     |
-| `max(...)`             | Maximum                                               | `max(3,1,2)=3`                                                                                                                                                                     |
-| `prod(...)`            | Product                                               | `prod(2,3,4)=24`                                                                                                                                                                   |
-| `median(...)`          | Median                                                | `median(1,3,5)=3`                                                                                                                                                                  |
-| `mode(...)`            | Mode                                                  | `mode(1,2,2,3)=2`                                                                                                                                                                  |
-| `percentile(p,...)`    | Percentile                                            | `percentile(50,1,3,5)=3`                                                                                                                                                           |
-| `quantile(p,...)`      | Quantile (`p` in \[0,1\])                             | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                                  |
-| `var(x...)`            | Population variance (divide by _n_)                   | `var(1,2,3)=0.666666666667`                                                                                                                                                        |
-| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)           | `vars(1,2,3)=1`                                                                                                                                                                    |
-| `stddev(x...)`         | Standard deviation                                    | `stddev(1,2,3)=0.816496580928`                                                                                                                                                     |
-| `stddevs(x...)`        | Sample standard deviation (unbiased)                  | `stddevs(1,2,3)=1`                                                                                                                                                                 |
-| `geomean(...)`         | Geometric mean                                        | `geomean(1,4,1/32)=0.5`                                                                                                                                                            |
-| `harmmean(...)`        | Harmonic mean                                         | `harmmean(1,2,6)=1.8`                                                                                                                                                              |
-| `mad(...)`             | Median Absolute Deviation                             | `mad(1,1,2,2,4)=1`                                                                                                                                                                 |
-| `madR(v)`              | Mean Absolute Deviation                               | `madR(1,2,3) = 0.666...`                                                                                                                                                           |
-| `skew(...)`            | Skewness (symmetry measure)                           | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                                         |
-| `kurtp(...)`           | Population Excess kurtosis (normal distribution -> 0) | `kurtp(-1,-0.5,0,0.5,1) < 0 (-1.3)` (light tails)<br>`kurtp(0,0,0,0,0,10) >> 0` (heavy tails)<br>`kurtp(-2,-1,0,1,2) < 0` (uniform-like)<br>`kurtp(0,0,0,0,0,-2,2) > 0` (outliers) |
-| `kurts(...)`           | Sample Excess kurtosis, `n\geq 5`                     | `kurts(-1,-0.5,0,0.5,1)= -7.09`                                                                                                                                                    |
-| `cv(...)`              | Coefficient of variation = stddev/mean                | `cv(10,10,10)=0`                                                                                                                                                                   |
-| `stderr(...)`          | Standard error = stddev/sqrt(n), `n\geq 2`            | `stderr(1,2,3)=0.471...`                                                                                                                                                           |
-| `zscore(x, mu, sigma)` | (x - mu) / sigma                                      | `zscore(5,3,1)=2`                                                                                                                                                                  |
-| `iqr(...)`             | Interquartile range (Q3 - Q1)                         | `iqr(1,2,3,4)=2`                                                                                                                                                                   |
-| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                    |
-| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                        |
+| Function Name          | Description                                           | Example Inputs/Outputs                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sum(...)`             | Sum                                                   | `sum(1,2,3)=6`                                                                                                                                                                                        |
+| `mean(...)`, `ave()`   | Mean                                                  | `mean(1,2,3)=2`                                                                                                                                                                                       |
+| `min(...)`             | Minimum                                               | `min(3,1,2)=1`                                                                                                                                                                                        |
+| `max(...)`             | Maximum                                               | `max(3,1,2)=3`                                                                                                                                                                                        |
+| `prod(...)`            | Product                                               | `prod(2,3,4)=24`                                                                                                                                                                                      |
+| `median(...)`          | Median                                                | `median(1,3,5)=3`                                                                                                                                                                                     |
+| `mode(...)`            | Mode                                                  | `mode(1,2,2,3)=2`                                                                                                                                                                                     |
+| `percentile(p,...)`    | Percentile                                            | `percentile(50,1,3,5)=3`                                                                                                                                                                              |
+| `quantile(p,...)`      | Quantile (`p` in \[0,1\])                             | `quantile(1/4,1,2,3,4,5,6,7)=2.5`                                                                                                                                                                     |
+| `var(x...)`            | Population variance (divide by _n_)                   | `var(1,2,3)=0.666666666667`                                                                                                                                                                           |
+| `vars(x...)`           | Sample variance (unbiased, divide by _n-1_)           | `vars(1,2,3)=1`                                                                                                                                                                                       |
+| `stddev(x...)`         | Standard deviation                                    | `stddev(1,2,3)=0.816496580928`                                                                                                                                                                        |
+| `stddevs(x...)`        | Sample standard deviation (unbiased)                  | `stddevs(1,2,3)=1`                                                                                                                                                                                    |
+| `geomean(...)`         | Geometric mean                                        | `geomean(1,4,1/32)=0.5`                                                                                                                                                                               |
+| `harmmean(...)`        | Harmonic mean                                         | `harmmean(1,2,6)=1.8`                                                                                                                                                                                 |
+| `mad(...)`             | Median Absolute Deviation                             | `mad(1,1,2,2,4)=1`                                                                                                                                                                                    |
+| `madR(v)`              | Mean Absolute Deviation                               | `madR(1,2,3) = 0.666...`                                                                                                                                                                              |
+| `skew(...)`            | Skewness (symmetry measure)                           | `skew(1,2,3,4,5)=0` (symmetric)<br>`skew(0,0,0,0,10) > 0` (right-tailed)<br>`skew(-10,0,0,0,0) < 0` (left-tailed)<br>`skew(-2,-1,0,1,2)=0`                                                            |
+| `kurtp(...)`           | Population Excess kurtosis (normal distribution -> 0) | `kurtp(-1,-0.5,0,0.5,1) < 0 (-1.3)` (light tails)<br>`kurtp(0,0,0,0,0,10) >> 0 (1.2)` (heavy tails)<br>`kurtp(-2,-1,0,1,2) < 0 (-1.3)` (uniform-like)<br>`kurtp(0,0,0,0,0,-2,2) > 0 (0.5)` (outliers) |
+| `kurts(...)`           | Sample Excess kurtosis, `n\geq 5`                     | `kurts(-1,-0.5,0,0.5,1)= -7.09`                                                                                                                                                                       |
+| `cv(...)`              | Coefficient of variation = stddev/mean                | `cv(10,10,10)=0`                                                                                                                                                                                      |
+| `stderr(...)`          | Standard error = stddev/sqrt(n), `n\geq 2`            | `stderr(1,2,3)=0.471...`                                                                                                                                                                              |
+| `zscore(x, mu, sigma)` | (x - mu) / sigma                                      | `zscore(5,3,1)=2`                                                                                                                                                                                     |
+| `iqr(...)`             | Interquartile range (Q3 - Q1)                         | `iqr(1,2,3,4)=2`                                                                                                                                                                                      |
+| `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                                       |
+| `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                                           |
 
 ### Financial Functions
 
@@ -344,9 +399,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `fin_effective_rate(nominal,npery)`     | Effective interest rate (EFFECTIVE RATE)              | `fin_effective_rate(0.06,12)=0.061...`        |
 | `fin_nominal_rate(effective,npery)`     | Nominal Rate (NOMINAL RATE)                           | `fin_nominal_rate(0.0617,12)=0.060...`        |
 | `fin_cagr(start,end,n)`                 | Compound Annual Growth Rate (CAGR)                    | `fin_cagr(1000,2000,10)=0.071...`             |
-
-- `fin_irr`may fail to find roots when the negative value is strong.
-- This is an experimental implementation. `fin_cumipmt`, `fin_cumprinc`, `fin_irr`, etc., have large errors.
 
 ### Correlation / Covariance / Uncategorized(ToDo: To be organized)
 
@@ -544,6 +596,16 @@ System functions are not intended for use with other functions or formulas.
 | `clip(data)`                | Copies to the clipboard. `[n]` does not increment.                                    |
 | `explain(data)`             | Displays information such as data type and internal values. `[n]` does not increment. |
 
+Additionally, functions related to the calculator system are provided by a set of functions beginning with `:`. Some of these are compatible with the above.
+
+| Function Name | Description                                            | Input      | Output Example                                         |
+| ------------- | ------------------------------------------------------ | ---------- | ------------------------------------------------------ |
+| `:clear`      | Same as `Clear[]`                                      | `:clear`   | None                                                   |
+| `:exit`       | Same as `Exit[]`                                       | `:exit`    | None                                                   |
+| `:defs`       | Display a list of user-defined variables and functions | `:defs`    | `definitions => Variables:  x := 2   Functions:  f(x)` |
+| `:unset`      | Delete user-defined variables                          | `:unset x` | `<unset: x>`                                           |
+| `:undef`      | Delete user-defined functions                          | `:undef f` | `<undefined: f>`                                       |
+
 ## Operator Precedence Table
 
 The following table shows **operator precedence (high → low)** in this engine:
@@ -657,7 +719,6 @@ Displayed values and history are rounded to 12 decimal places.
 
 ### Intentional Limitations
 
-- No variable assignment
 - No user-defined functions
 - No symbolic computation
 
@@ -675,59 +736,124 @@ Displayed values and history are rounded to 12 decimal places.
 ## Grammar Definition (EBNF)
 
 ```ebnf
-(* Token Definition (Abstraction) *)
-digit       ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
-letter      ::= "A" | ... | "Z" | "a" | ... | "z" ;
-underscore  ::= "_" ;
-identifier  ::= (letter | underscore) , { letter | digit | underscore } ;
-number      ::= integer | float ;
-string      ::= '"' , { any_character_except_quote } , '"' ;
-constant    ::= "Pi" | "E" | "Phi" | "I" ;
-arguments   ::= expression { "," expression } ;
-integer     ::= digit { digit } ;
-float       ::= digit { digit } "." digit { digit } ;
+(* Lexical elements *)
 
-plus        ::= "+" ;  minus       ::= "-" ;
-mul         ::= "*" ;  div         ::= "/" ;
-pow         ::= "^" ;
-lparen      ::= "(" ;  rparen      ::= ")" ;
-lbracket    ::= "[" ;  rbracket    ::= "]" ;
-comma       ::= "," ;  bang        ::= "!" ;
-lt          ::= "<" ;  le          ::= "<=" ;
-gt          ::= ">" ;  ge          ::= ">=" ;
-eq          ::= "==";  percent     ::= "%";
+digit         ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+letter        ::= "A" | ... | "Z" | "a" | ... | "z" ;
+underscore    ::= "_" ;
+identifier    ::= ( letter | underscore ) , { letter | digit | underscore } ;
 
-(* Basic formula *)
-Expression      ::= Term , { ( plus | minus ) , Term } ;
-Term            ::= Factor , { ( mul | div | ImplicitMul ) , Factor } ;
-Factor          ::= Unary ;
-Unary           ::= [ plus | minus ] , Power ;
-Power           ::= Postfix , [ pow , Unary ] ;
-Postfix         ::= Primary , { bang } ;
+integer       ::= digit , { digit } ;
+float         ::= digit , { digit } , "." , { digit }
+                | "." , digit , { digit } ;
+number        ::= integer | float ;
 
-Primary         ::=
-    | number
-    | string
-    | constant
-    | percent { percent }       (* history reference *)
-    | identifier [ FunctionCallOrUnit ]
-    | "(" , Expression , ")"
-    | "[" , Expression , "]"
-    | "{" , [ Expression , { "," , Expression } ] , "}" ;
+string_char   ::= ? any character except '"' ? ;
+string        ::= '"' , { string_char } , '"' ;
 
-FunctionCallOrUnit ::=
-    | "(" , [ Expression , { comma , Expression } ] , ")"
-    | "[" , [ Expression , { comma , Expression } ] , "]"
-    | UnitIdentifier ;
+constant      ::= "Pi" | "Tau" | "E" | "Phi" | "NA" | "I" | "ESP" ;
+unit_name     ::= "deg" | "rad" | "grad" | "mm" | "cm" | "m" | "inch" ;
 
-UnitIdentifier  ::= identifier ; (* 30deg, 45rad など *)
+plus          ::= "+" ;
+minus         ::= "-" ;
+mul           ::= "*" ;
+div           ::= "/" ;
+pow           ::= "^" ;
+bang          ::= "!" ;
 
-(* Abstracting the concept of implicit multiplication using EBNF ※ In[n], Out[n], %, %% etc. are processed as special tokens at lexer level *)
-ImplicitMul     ::= /* When values appear without symbols */ ;
+assign        ::= ":=" ;
 
+lt            ::= "<" ;
+le            ::= "<=" ;
+gt            ::= ">" ;
+ge            ::= ">=" ;
+eq            ::= "==" ;
+neq           ::= "!=" ;
 
-(* Comparative *)
-Compare         ::= Expression , { ( lt | le | gt | ge | eq ) , Expression } ;
+lparen        ::= "(" ;
+rparen        ::= ")" ;
+lbracket      ::= "[" ;
+rbracket      ::= "]" ;
+lbrace        ::= "{" ;
+rbrace        ::= "}" ;
+comma         ::= "," ;
+percent       ::= "%" ;
+
+(* Entry point *)
+
+Input         ::= Assignment ;
+
+(*  Assignment / definition right-associative *)
+
+Assignment    ::= Compare
+                | Assignable , assign , Assignment ;
+
+Assignable    ::= identifier
+                | FunctionSignature ;
+
+FunctionSignature
+              ::= identifier , CallOpen , [ ParamList ] , CallClose ;
+
+ParamList      ::= identifier , { comma , identifier } ;
+
+(* Comparison left-associative chain *)
+
+Compare       ::= Expression ,
+                  { CompareOp , Expression } ;
+
+CompareOp     ::= lt | le | gt | ge | eq | neq ;
+
+(* Arithmetic *)
+
+Expression    ::= Term ,
+                  { ( plus | minus ) , Term } ;
+
+Term          ::= Unary ,
+                  { ( mul | div | ImplicitMul ) , Unary } ;
+
+Unary         ::= { plus | minus } , Power ;
+
+Power         ::= Postfix ,
+                  [ pow , Unary ] ;
+                  (* parsePostfix "^" parseUnary *)
+
+Postfix       ::= Primary , { bang } ;
+
+(* Primary *)
+
+Primary       ::= number
+                | string
+                | HistoryRef
+                | MultiLiteral
+                | IdentifierExpr
+                | Group ;
+
+HistoryRef    ::= percent , { percent } ;
+                (* %, %%, %%% ... *)
+
+MultiLiteral  ::= lbrace ,
+                  [ Assignment , { comma , Assignment } ] ,
+                  rbrace ;
+
+IdentifierExpr
+              ::= constant
+                | identifier , [ CallSuffix ] ;
+
+CallSuffix    ::= CallOpen ,
+                  [ Assignment , { comma , Assignment } ] ,
+                  CallClose ;
+
+CallOpen      ::= lparen | lbracket ;
+CallClose     ::= rparen | rbracket ;
+
+Group         ::= lparen , Expression , rparen
+                | lbracket , Expression , rbracket ;
+
+(* Implicit multiplication *)
+
+ImplicitMul   ::= /* no token: adjacency-based multiplication */ ;
+
+UnitApplied   ::= ( number | constant ) , unit_name ;
 ```
 
 ## Command-Line Arguments
@@ -773,7 +899,7 @@ Refer to the test_set folder for test details.
 
 ## Notes
 
-This project aims to reconcile rigorous operator semantics with practical formula evaluation.
+This project aims to reconcile rigorous operator semantics with practical formula evaluation.(But, due to incremental additions to the implementation, there is some overlap in responsibilities; I hereby pledge to streamline this.)
 
 It also seeks to operate with ease in any environment, whether for designers or on the production floor.
 

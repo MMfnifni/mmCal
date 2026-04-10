@@ -3,6 +3,7 @@
 #include "core.hpp"
 #include "functions.hpp"
 #include "lexer_paser.hpp"
+#include "repl_command.hpp"
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -12,9 +13,13 @@ namespace mm::cal {
  /* ============================
     評価マン
     ============================ */
+ struct AssignNode;
+ struct FunctionDefNode;
 
  EvalResult evaluate(const std::string &src, SystemConfig &cfg, const std::vector<InputEntry> &hist, int base, EvaluationContext &ectx);
  CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base, EvaluationContext &ectx);
+ Value evalAssign(AssignNode *n, EvaluationContext &ctx);
+ Value evalFunctionDef(FunctionDefNode *n, EvaluationContext &ctx);
 
  /* ============================
    フォーマッタ

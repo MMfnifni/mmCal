@@ -1,5 +1,7 @@
 ﻿#include "math_util.hpp"
 
+#include <intrin.h>
+
 namespace mm::cal {
 
  /* ============================
@@ -997,13 +999,15 @@ namespace mm::cal {
  }
 
  void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V) {
+  using ld = long double;
+
   size_t m = A.size();
   if (m == 0) throw std::runtime_error("empty matrix");
 
   size_t n = A[0].size();
   if (n == 0) throw std::runtime_error("empty matrix");
 
-  // ---- 1x1 special case ----
+  // 1x1
   if (m == 1 && n == 1) {
    U = {{1.0}};
    V = {{1.0}};
@@ -1011,109 +1015,155 @@ namespace mm::cal {
    return;
   }
 
-  // ---- m < n の場合は転置 ----
+  // one-sided Jacobi は m >= n の方が扱いやすい
   bool transposed = false;
-  std::vector<std::vector<double>> B = A;
+  std::vector<std::vector<ld>> B;
 
-  if (m < n) {
-   transposed = true;
-   B.assign(n, std::vector<double>(m));
+  if (m >= n) {
+   B.assign(m, std::vector<ld>(n, 0.0L));
    for (size_t i = 0; i < m; ++i)
     for (size_t j = 0; j < n; ++j)
-     B[j][i] = A[i][j];
+     B[i][j] = static_cast<ld>(A[i][j]);
+  } else {
+   transposed = true;
+   B.assign(n, std::vector<ld>(m, 0.0L));
+   for (size_t i = 0; i < m; ++i)
+    for (size_t j = 0; j < n; ++j)
+     B[j][i] = static_cast<ld>(A[i][j]);
    std::swap(m, n);
   }
 
-  // ---- AtA 計算 ----
-  std::vector<std::vector<double>> AtA(n, std::vector<double>(n, 0.0));
+  // V 初期化
+  std::vector<std::vector<ld>> Vld(n, std::vector<ld>(n, 0.0L));
+  for (size_t i = 0; i < n; ++i)
+   Vld[i][i] = 1.0L;
+
+  auto col_dot = [&](size_t p, size_t q) -> ld {
+   ld s = 0.0L;
+   ld c = 0.0L;
+   for (size_t i = 0; i < m; ++i) {
+    ld x = B[i][p] * B[i][q];
+    ld y = x - c;
+    ld t = s + y;
+    c = (t - s) - y;
+    s = t;
+   }
+   return s;
+  };
+
+  auto col_norm2 = [&](size_t p) -> ld {
+   ld s = 0.0L;
+   ld c = 0.0L;
+   for (size_t i = 0; i < m; ++i) {
+    ld x = B[i][p] * B[i][p];
+    ld y = x - c;
+    ld t = s + y;
+    c = (t - s) - y;
+    s = t;
+   }
+   return s;
+  };
+
+  const int max_sweeps = 100;
+  const ld eps = std::numeric_limits<ld>::epsilon();
+
+  for (int sweep = 0; sweep < max_sweeps; ++sweep) {
+   bool changed = false;
+
+   for (size_t p = 0; p + 1 < n; ++p) {
+    for (size_t q = p + 1; q < n; ++q) {
+     ld app = col_norm2(p);
+     ld aqq = col_norm2(q);
+     ld apq = col_dot(p, q);
+
+     ld scale = std::sqrt(app * aqq);
+     if (scale == 0.0L) continue;
+
+     // 列が十分直交していれば飛ばす
+     if (std::fabsl(apq) <= eps * scale * 64.0L) continue;
+
+     changed = true;
+
+     ld tau = (aqq - app) / (2.0L * apq);
+     ld t = (tau >= 0.0L) ? 1.0L / (tau + std::sqrt(1.0L + tau * tau)) : -1.0L / (-tau + std::sqrt(1.0L + tau * tau));
+     ld c = 1.0L / std::sqrt(1.0L + t * t);
+     ld s = c * t;
+
+     // B の列回転
+     for (size_t i = 0; i < m; ++i) {
+      ld bip = B[i][p];
+      ld biq = B[i][q];
+      B[i][p] = c * bip - s * biq;
+      B[i][q] = s * bip + c * biq;
+     }
+
+     // V の列回転
+     for (size_t i = 0; i < n; ++i) {
+      ld vip = Vld[i][p];
+      ld viq = Vld[i][q];
+      Vld[i][p] = c * vip - s * viq;
+      Vld[i][q] = s * vip + c * viq;
+     }
+    }
+   }
+
+   if (!changed) break;
+  }
+
+  // 特異値
+  std::vector<ld> Sld(n, 0.0L);
+  for (size_t j = 0; j < n; ++j) {
+   Sld[j] = std::sqrt(std::max<ld>(0.0L, col_norm2(j)));
+  }
+
+  // 降順ソート
+  for (size_t i = 0; i + 1 < n; ++i) {
+   size_t best = i;
+   for (size_t j = i + 1; j < n; ++j) {
+    if (Sld[j] > Sld[best]) best = j;
+   }
+   if (best != i) {
+    std::swap(Sld[i], Sld[best]);
+    for (size_t r = 0; r < m; ++r)
+     std::swap(B[r][i], B[r][best]);
+    for (size_t r = 0; r < n; ++r)
+     std::swap(Vld[r][i], Vld[r][best]);
+   }
+  }
+
+  // U = 正規化した B の列
+  std::vector<std::vector<ld>> Uld(m, std::vector<ld>(n, 0.0L));
+  ld smax = 0.0L;
+  for (ld s : Sld)
+   smax = std::max(smax, s);
+
+  const ld sval_tol = eps * std::max<ld>(1.0L, smax) * 128.0L;
+
+  for (size_t j = 0; j < n; ++j) {
+   if (Sld[j] <= sval_tol) continue;
+   for (size_t i = 0; i < m; ++i) {
+    Uld[i][j] = B[i][j] / Sld[j];
+   }
+  }
+
+  // double に戻す
+  U.assign(m, std::vector<double>(n, 0.0));
+  V.assign(n, std::vector<double>(n, 0.0));
+  S.assign(n, 0.0);
+
+  for (size_t i = 0; i < m; ++i)
+   for (size_t j = 0; j < n; ++j)
+    U[i][j] = static_cast<double>(Uld[i][j]);
+
   for (size_t i = 0; i < n; ++i)
    for (size_t j = 0; j < n; ++j)
-    for (size_t k = 0; k < m; ++k)
-     AtA[i][j] += B[k][i] * B[k][j];
+    V[i][j] = static_cast<double>(Vld[i][j]);
 
-  // ---- Jacobi 固有値分解 ----
-  V.assign(n, std::vector<double>(n, 0.0));
   for (size_t i = 0; i < n; ++i)
-   V[i][i] = 1.0;
+   S[i] = static_cast<double>(Sld[i]);
 
-  const int max_iter = 100;
-  const double eps = 1e-12;
-
-  for (int iter = 0; iter < max_iter; ++iter) {
-   bool converged = true;
-
-   for (size_t p = 0; p < n - 1; ++p) {
-    for (size_t q = p + 1; q < n; ++q) {
-
-     if (std::abs(AtA[p][q]) < eps) continue;
-     converged = false;
-
-     double theta = 0.5 * std::atan2(2.0 * AtA[p][q], AtA[q][q] - AtA[p][p]);
-
-     double c = std::cos(theta);
-     double s = std::sin(theta);
-
-     for (size_t i = 0; i < n; ++i) {
-      double ip = AtA[i][p];
-      double iq = AtA[i][q];
-      AtA[i][p] = c * ip - s * iq;
-      AtA[i][q] = s * ip + c * iq;
-     }
-
-     for (size_t i = 0; i < n; ++i) {
-      double pi = AtA[p][i];
-      double qi = AtA[q][i];
-      AtA[p][i] = c * pi - s * qi;
-      AtA[q][i] = s * pi + c * qi;
-     }
-
-     for (size_t i = 0; i < n; ++i) {
-      double vip = V[i][p];
-      double viq = V[i][q];
-      V[i][p] = c * vip - s * viq;
-      V[i][q] = s * vip + c * viq;
-     }
-    }
-   }
-
-   if (converged) break;
-  }
-
-  // ---- 特異値 ----
-  S.resize(n);
-  for (size_t i = 0; i < n; ++i)
-   S[i] = std::sqrt(std::max(0.0, AtA[i][i]));
-
-  // ---- 降順ソート ----
-  for (size_t i = 0; i < n - 1; ++i) {
-   for (size_t j = i + 1; j < n; ++j) {
-    if (S[i] < S[j]) {
-     std::swap(S[i], S[j]);
-     for (size_t k = 0; k < n; ++k)
-      std::swap(V[k][i], V[k][j]);
-    }
-   }
-  }
-
-  // ---- U = B V Σ^-1 ----
-  U.assign(m, std::vector<double>(n, 0.0));
-
-  for (size_t i = 0; i < n; ++i) {
-   if (S[i] < eps) continue;
-
-   for (size_t r = 0; r < m; ++r)
-    for (size_t c = 0; c < n; ++c)
-     U[r][i] += B[r][c] * V[c][i];
-
-   for (size_t r = 0; r < m; ++r)
-    U[r][i] /= S[i];
-  }
-
-  // ---- 転置して戻す ----
-  if (transposed) {
-   // A = U Σ V^T だったが，元は A^T を分解しているので，U と V を入れ替える
-   std::swap(U, V);
-  }
+  // 転置していた場合は U/V を戻す
+  if (transposed) { std::swap(U, V); }
  }
 
  //// svdだけど現状ゴミ

@@ -266,8 +266,8 @@
     <ClCompile Include="src\functions.cpp" />
     <ClCompile Include="src\lexer_paser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
-    <ClCompile Include="src\syntax.cpp" />
     <ClCompile Include="src\math_util.cpp" />
+    <ClCompile Include="src\repl_command.cpp" />
     <ClCompile Include="src\value_arithmetic.hpp" />
     <ClCompile Include="src\将来用value.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">YES</ExcludedFromBuild>
@@ -287,7 +287,7 @@
     <ClInclude Include="src\functions.hpp" />
     <ClInclude Include="src\lexer_paser.hpp" />
     <ClInclude Include="src\math_util.hpp" />
-    <ClInclude Include="src\syntax.hpp" />
+    <ClInclude Include="src\repl_command.hpp" />
     <ClInclude Include="src\value_compare.hpp" />
   </ItemGroup>
   <ItemGroup>
