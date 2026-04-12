@@ -363,7 +363,6 @@ namespace mm::cal {
 
   return static_cast<double>(sxy / std::sqrt(sxx * syy));
  }
- Value areaPolygon(const std::vector<Value> &v, FunctionContext &ctx);
 
  inline constexpr long long gcdLL(long long a, long long b) noexcept { return std::gcd(a, b); }
  long long combLL(long long n, long long r, size_t pos);
@@ -647,9 +646,9 @@ namespace mm::cal {
  /* ============================
    ベクトル系
    ============================ */
- inline std::vector<double> collectNumericVector(const std::vector<Value> &v, const FunctionContext &ctx);
- std::vector<double> compute_eigenvalues(std::vector<std::vector<double>> &matrix, const FunctionContext &ctx);
- std::vector<double> meigenvals(const std::vector<std::vector<double>> &matrix);
+ Value fromVector(const std::vector<double> &xs);
+ Value fromIndexVector(const std::vector<size_t> &xs);
+ Value fromMatrix(const std::vector<std::vector<double>> &A);
  size_t nrows(const std::vector<std::vector<double>> &A);
  size_t ncols(const std::vector<std::vector<double>> &A);
  std::vector<std::vector<double>> identity(size_t n);
@@ -668,7 +667,6 @@ namespace mm::cal {
  double condition_number(const std::vector<std::vector<double>> &A);
  void bidiagonalize(std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
  void bidiagonal_qr(std::vector<std::vector<double>> &B, std::vector<std::vector<double>> &U, std::vector<std::vector<double>> &V);
- // void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
  void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V);
  bool isPowerOfTwo(size_t n);
  std::vector<std::complex<double>> toComplexVector1D(const Value &v, FunctionContext &ctx);

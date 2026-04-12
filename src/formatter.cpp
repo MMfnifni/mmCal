@@ -13,26 +13,26 @@ namespace mm::cal {
    if (!s.empty() && s.back() == '.') s.pop_back();
   }
  }
+
  std::string formatReal(double x, const SystemConfig &cfg) {
-  if (std::isnan(x)) return "Indeterminate";
+  std::ostringstream oss;
 
-  if (std::isinf(x)) return x > 0 ? "Infinity" : "-Infinity";
+  if (std::isnan(x)) return "nan";
+  if (std::isinf(x)) return (x > 0 ? "inf" : "-inf");
 
-  x = normalizeZero(x);
+  x = normalizeZero(x); // ゼロ補正
 
-  std::array<char, 512> buffer;
-  auto *begin = buffer.data();
-  auto *end = buffer.data() + buffer.size();
+  oss << std::fixed << std::setprecision(cnst_precision) << x; // 指数表記禁止(暫定)
 
-  std::chars_format fmt = cfg.trimTrailingZeros ? std::chars_format::fixed : std::chars_format::general;
+  std::string s = oss.str();
 
-  auto result = std::to_chars(begin, end, x, fmt, cfg.precision);
+  if (s.find('.') != std::string::npos) { // 末尾のゼロ消し
+   while (!s.empty() && s.back() == '0')
+    s.pop_back();
+   if (!s.empty() && s.back() == '.') s.pop_back();
+  }
 
-  if (result.ec != std::errc{}) return "0"; // fallback（ほぼ起きない）
-
-  std::string s(begin, result.ptr);
-
-  if (cfg.trimTrailingZeros) trimZeros(s);
+  if (s.empty()) s = "0";
 
   return s;
  }
@@ -139,23 +139,7 @@ namespace mm::cal {
   return out;
  }
 
- inline void appendReal(double x, const SystemConfig &cfg, std::string &out) {
-  if (std::isnan(x)) {
-   out += "Indeterminate";
-   return;
-  }
-
-  if (std::isinf(x)) {
-   out += (x > 0 ? "Infinity" : "-Infinity");
-   return;
-  }
-
-  std::array<char, 64> buffer;
-
-  auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), x, std::chars_format::general, cfg.precision);
-
-  out.append(buffer.data(), result.ptr);
- }
+ inline void appendReal(double x, const SystemConfig &cfg, std::string &out) { out += formatReal(x, cfg); }
 
  inline void appendComplex(const std::complex<double> &c, const SystemConfig &cfg, std::string &out) {
   double re = (c.real() == 0.0 ? 0.0 : c.real());

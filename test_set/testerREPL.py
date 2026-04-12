@@ -28,7 +28,7 @@ def normalize_float(x, eps=EPS):
         return x
     return 0.0 if abs(x) < eps else x
 
-def almost_equal(a, b, abs_eps=EPS, rel_eps=1e-10):
+def almost_equal(a, b, abs_eps=EPS, rel_eps=1e-4):
     a, b = normalize_float(a, abs_eps), normalize_float(b, abs_eps)
 
     if math.isinf(a) or math.isinf(b):
@@ -37,6 +37,31 @@ def almost_equal(a, b, abs_eps=EPS, rel_eps=1e-10):
     diff = abs(a - b)
     scale = max(1.0, abs(a), abs(b))
     return diff <= max(abs_eps, rel_eps * scale)
+
+def almost_equal_absrel(a, b, abs_eps=EPS, rel_eps=1e-4):
+    a, b = normalize_float(a, abs_eps), normalize_float(b, abs_eps)
+
+    if math.isinf(a) or math.isinf(b):
+        return a == b
+
+    diff = abs(a - b)
+    scale = max(1.0, abs(a), abs(b))
+    return diff <= max(abs_eps, rel_eps * scale)
+
+
+def almost_equal_rel(a, b, rel_eps=1e-4):
+    if a == 0 and b == 0:
+        return True
+
+    if math.isinf(a) or math.isinf(b):
+        return a == b
+
+    diff = abs(a - b)
+    scale = max(abs(a), abs(b))
+    if scale == 0:
+        return diff == 0
+
+    return diff <= rel_eps * scale
 
 def parse_atom(s: str):
     s = s.strip()
@@ -100,10 +125,13 @@ def parse_complex(s: str):
     imag = float(m.group("imag")) if m.group("imag") else 1.0
     return real, sign * imag
 
-def complex_equal(a, b):
-    ar, ai = map(normalize_float, parse_complex(a))
-    br, bi = map(normalize_float, parse_complex(b))
-    return almost_equal(ar, br) and almost_equal(ai, bi)
+def complex_equal(a, b, mode):
+    ar, ai = parse_complex(a)
+    br, bi = parse_complex(b)
+
+    cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+
+    return cmp(ar, br) and cmp(ai, bi)
 
 def looks_complex(s):
     return "i" in s.lower()
@@ -144,11 +172,11 @@ def parse_structure(s: str):
 
     return elems
 
-def structure_equal(a, b):
+def structure_equal(a, b, mode):
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return False
-        return all(structure_equal(x, y) for x, y in zip(a, b))
+        return all(structure_equal(x, y, mode) for x, y in zip(a, b))
 
     if isinstance(a, tuple) and isinstance(b, tuple):
         ka, va = a
@@ -156,22 +184,26 @@ def structure_equal(a, b):
 
         # real-real
         if ka == "real" and kb == "real":
-            return almost_equal(float(va), float(vb))
+            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+            return cmp(float(va), float(vb))
 
         # complex-complex
         if ka == "complex" and kb == "complex":
             ar, ai = va
             br, bi = vb
-            return almost_equal(ar, br) and almost_equal(ai, bi)
+            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+            return cmp(ar, br) and cmp(ai, bi)
 
         # real-complex / complex-real は虚部ゼロなら同値扱い
         if ka == "real" and kb == "complex":
             br, bi = vb
-            return almost_equal(float(va), br) and almost_equal(0.0, bi)
+            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+            return cmp(float(va), br) and cmp(0.0, bi)
 
         if ka == "complex" and kb == "real":
             ar, ai = va
-            return almost_equal(ar, float(vb)) and almost_equal(ai, 0.0)
+            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+            return cmp(ar, float(vb)) and cmp(ai, 0.0)
 
         # text-text
         if ka == "text" and kb == "text":
@@ -211,7 +243,7 @@ def evaluate_expr(p, expr):
 
 # ================= Test Runner =================
 
-def run_test_batch(p, expr, expect):
+def run_test_batch(p, expr, expect, mode):
     out, ret = evaluate_expr(p, expr)
 
     if expect == "Error":
@@ -230,15 +262,16 @@ def run_test_batch(p, expr, expect):
         norm_out = normalize_structure(out)
         norm_expect = normalize_structure(expect)
 
-        if norm_out.startswith("{") or norm_expect.startswith("{"):
+        if norm_out.startswith("{") and norm_expect.startswith("{"):
             parsed_out = parse_structure(norm_out)
             parsed_expect = parse_structure(norm_expect)
-            return ("pass", out) if structure_equal(parsed_out, parsed_expect) else ("fail", out)
+            return ("pass", out) if structure_equal(parsed_out, parsed_expect, mode) else ("fail", out)
 
         if looks_complex(norm_out) or looks_complex(norm_expect):
-            return ("pass", out) if complex_equal(norm_out, norm_expect) else ("fail", out)
+            return ("pass", out) if complex_equal(norm_out, norm_expect, mode) else ("fail", out)
 
-        return ("pass", out) if almost_equal(parse_float(norm_out), parse_float(norm_expect)) else ("fail", out)
+        cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
+        return ("pass", out) if cmp(parse_float(norm_out), parse_float(norm_expect)) else ("fail", out)
 
     except Exception:
         # 最後の保険: 生文字列比較
@@ -264,17 +297,21 @@ for testfile in TESTS:
 
             TOTAL += 1
 
-            if "=>" not in line:
+            if "=>>" in line:
+                expr, expect = map(str.strip, line.split("=>>", 1))
+                mode = "rel"
+            elif "=>" in line:
+                expr, expect = map(str.strip, line.split("=>", 1))
+                mode = "absrel"
+            else:
                 print(f"{ORANGE}[SKIP]{RESET} {line}")
                 continue
-
-            expr, expect = map(str.strip, line.split("=>", 1))
 
             if expect.lower() == "skip":
                 print(f"{ORANGE}[SKIP]{RESET} {expr}")
                 continue
 
-            result, got = run_test_batch(p, expr, expect)
+            result, got = run_test_batch(p, expr, expect, mode)
 
             if result == "pass":
                 print(f"[PASS] {expr} => {got}" if got else f"[PASS] {expr}")

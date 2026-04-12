@@ -340,288 +340,6 @@ namespace mm::cal {
   return 1.0 / denom;
  }
 
- inline Value areaPolygon(const std::vector<Value> &v, FunctionContext &ctx) {
-  size_t n = v.size() / 2;
-
-  if (n < 3) throw CalcError(CalcErrorType::DomainError, "area_polygon: need at least 3 points", ctx.pos);
-
-  double area = 0.0;
-
-  for (size_t i = 0; i < n; ++i) {
-
-   double x0 = requireReal(v[2 * i], ctx.pos);
-   double y0 = requireReal(v[2 * i + 1], ctx.pos);
-
-   double x1 = requireReal(v[2 * ((i + 1) % n)], ctx.pos);
-
-   double y1 = requireReal(v[2 * ((i + 1) % n) + 1], ctx.pos);
-
-   area += x0 * y1 - x1 * y0;
-  }
-
-  return std::abs(area) / 2.0;
- }
- inline std::vector<double> collectNumericVector(const std::vector<Value> &v, FunctionContext &ctx) {
-  std::vector<Value> tmp = v;
-  return collectReals(tmp, ctx);
- }
-
- // 固有値を求める関数（QR反復法）
- std::vector<double> compute_eigenvalues(std::vector<std::vector<double>> &matrix, const FunctionContext &ctx) {
-  size_t n = matrix.size();
-  std::vector<double> eigenvals(n);
-
-  // 対角成分を初期化
-  for (size_t i = 0; i < n; ++i) {
-   eigenvals[i] = matrix[i][i];
-  }
-
-  // QR反復法の実装
-  const int max_iterations = 1000;
-  const double epsilon = 1e-12;
-
-  for (int iter = 0; iter < max_iterations; ++iter) {
-   bool converged = true;
-
-   // QR分解を計算
-   std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
-   std::vector<std::vector<double>> R = matrix;
-
-   // 単位行列で初期化
-   for (size_t i = 0; i < n; ++i) {
-    Q[i][i] = 1.0;
-   }
-
-   // ハウスホルダー変換でQR分解
-   for (size_t k = 0; k < n - 1; ++k) {
-    // ベクトルv = R[k:n][k] を取得
-    std::vector<double> v(n - k);
-    for (size_t i = 0; i < n - k; ++i) {
-     v[i] = R[k + i][k];
-    }
-
-    // ノルムを計算
-    double norm = 0.0;
-    for (double val : v) {
-     norm += val * val;
-    }
-    norm = std::sqrt(norm);
-
-    if (norm < epsilon) continue;
-
-    // 通常の符号を持つ値を選択
-    double sign = (v[0] >= 0) ? 1.0 : -1.0;
-    double alpha = -sign * norm;
-
-    // w = v + alpha * e_1
-    std::vector<double> w(v);
-    w[0] += alpha;
-
-    // ノルムを正規化
-    double w_norm = 0.0;
-    for (double val : w) {
-     w_norm += val * val;
-    }
-    w_norm = std::sqrt(w_norm);
-
-    if (w_norm < epsilon) continue;
-
-    // ハウスホルダー変換の計算
-    std::vector<double> u(w);
-    for (double &val : u) {
-     val /= w_norm;
-    }
-
-    // H = I - 2 * u * u^T を計算
-    std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
-    for (size_t i = 0; i < n; ++i) {
-     H[i][i] = 1.0;
-    }
-    for (size_t i = 0; i < n - k; ++i) {
-     for (size_t j = 0; j < n - k; ++j) {
-      H[k + i][k + j] -= 2.0 * u[i] * u[j];
-     }
-    }
-
-    // 行列の積を計算
-    std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
-    for (size_t i = 0; i < n; ++i) {
-     for (size_t j = 0; j < n; ++j) {
-      double sum = 0.0;
-      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-       sum += H[i][k_idx] * R[k_idx][j];
-      }
-      temp_R[i][j] = sum;
-     }
-    }
-    R = temp_R;
-
-    // Q = Q * H^T
-    std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
-    for (size_t i = 0; i < n; ++i) {
-     for (size_t j = 0; j < n; ++j) {
-      double sum = 0.0;
-      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-       sum += Q[i][k_idx] * H[j][k_idx];
-      }
-      temp_Q[i][j] = sum;
-     }
-    }
-    Q = temp_Q;
-   }
-
-   // 収束判定
-   for (size_t i = 0; i < n - 1; ++i) {
-    if (std::abs(R[i][i + 1]) > epsilon) {
-     converged = false;
-     break;
-    }
-   }
-
-   if (converged) {
-    // 固有値を対角成分から取得
-    for (size_t i = 0; i < n; ++i) {
-     eigenvals[i] = R[i][i];
-    }
-    break;
-   }
-  }
-
-  return eigenvals;
- };
-
- // 固有値計算関数
- std::vector<double> meigenvals(const std::vector<std::vector<double>> &matrix) {
-  size_t n = matrix.size();
-
-  // 行列の次元確認
-  if (n == 0) { return {}; }
-
-  // 正方行列でない場合はエラー
-  for (size_t i = 0; i < n; ++i) {
-   if (matrix[i].size() != n) { throw std::runtime_error("Matrix must be square"); }
-  }
-
-  // 行列のコピーを作成（元の行列を変更しない）
-  std::vector<std::vector<double>> A = matrix;
-
-  // 固有値を求める（QR反復法）
-  std::vector<double> eigenvals(n);
-
-  // QR反復法の実装
-  const int max_iterations = 1000;
-  const double epsilon = 1e-12;
-
-  for (int iter = 0; iter < max_iterations; ++iter) {
-   bool converged = true;
-
-   // QR分解を計算
-   std::vector<std::vector<double>> Q(n, std::vector<double>(n, 0.0));
-   std::vector<std::vector<double>> R = A;
-
-   // 単位行列で初期化
-   for (size_t i = 0; i < n; ++i) {
-    Q[i][i] = 1.0;
-   }
-
-   // ガウス・ホルツ変換でQR分解
-   for (size_t k = 0; k < n - 1; ++k) {
-    // ベクトルv = R[k:n][k] を取得
-    std::vector<double> v(n - k);
-    for (size_t i = 0; i < n - k; ++i) {
-     v[i] = R[k + i][k];
-    }
-
-    // ノルムを計算
-    double norm = 0.0;
-    for (double val : v) {
-     norm += val * val;
-    }
-    norm = std::sqrt(norm);
-
-    if (norm < epsilon) continue;
-
-    // 通常の符号を持つ値を選択
-    double sign = (v[0] >= 0) ? 1.0 : -1.0;
-    double alpha = -sign * norm;
-
-    // w = v + alpha * e_1
-    std::vector<double> w(v);
-    w[0] += alpha;
-
-    // ノルムを正規化
-    double w_norm = 0.0;
-    for (double val : w) {
-     w_norm += val * val;
-    }
-    w_norm = std::sqrt(w_norm);
-
-    if (w_norm < epsilon) continue;
-
-    // ハウスホルダー変換の計算
-    std::vector<double> u(w);
-    for (double &val : u) {
-     val /= w_norm;
-    }
-
-    // H = I - 2 * u * u^T を計算
-    std::vector<std::vector<double>> H(n, std::vector<double>(n, 0.0));
-    for (size_t i = 0; i < n; ++i) {
-     H[i][i] = 1.0;
-    }
-    for (size_t i = 0; i < n - k; ++i) {
-     for (size_t j = 0; j < n - k; ++j) {
-      H[k + i][k + j] -= 2.0 * u[i] * u[j];
-     }
-    }
-
-    // 行列の積を計算
-    std::vector<std::vector<double>> temp_R(n, std::vector<double>(n));
-    for (size_t i = 0; i < n; ++i) {
-     for (size_t j = 0; j < n; ++j) {
-      double sum = 0.0;
-      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-       sum += H[i][k_idx] * R[k_idx][j];
-      }
-      temp_R[i][j] = sum;
-     }
-    }
-    R = temp_R;
-
-    // Q = Q * H^T
-    std::vector<std::vector<double>> temp_Q(n, std::vector<double>(n));
-    for (size_t i = 0; i < n; ++i) {
-     for (size_t j = 0; j < n; ++j) {
-      double sum = 0.0;
-      for (size_t k_idx = 0; k_idx < n; ++k_idx) {
-       sum += Q[i][k_idx] * H[j][k_idx];
-      }
-      temp_Q[i][j] = sum;
-     }
-    }
-    Q = temp_Q;
-   }
-
-   // 収束判定
-   for (size_t i = 0; i < n - 1; ++i) {
-    if (std::abs(R[i][i + 1]) > epsilon) {
-     converged = false;
-     break;
-    }
-   }
-
-   if (converged) {
-    // 固有値を対角成分から取得
-    for (size_t i = 0; i < n; ++i) {
-     eigenvals[i] = R[i][i];
-    }
-    break;
-   }
-  }
-
-  return eigenvals;
- }
-
  size_t nrows(const std::vector<std::vector<double>> &A) { return A.size(); }
  size_t ncols(const std::vector<std::vector<double>> &A) { return A.empty() ? 0 : A[0].size(); }
 
@@ -734,36 +452,48 @@ namespace mm::cal {
  }
 
  void qr_decompose(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &Q, std::vector<std::vector<double>> &R) {
-  size_t n = nrows(A);
-  Q = identity(n);
-  R = A;
+  const size_t m = nrows(A);
+  const size_t n = ncols(A);
 
-  for (size_t j = 0; j < n - 1; ++j) {
-   for (size_t i = n - 1; i > j; --i) {
-    double a = R[i - 1][j];
-    double b = R[i][j];
+  if (m == 0 || n == 0) {
+   Q = {};
+   R = A;
+   return;
+  }
+
+  Q = identity(m); // Q は m×m
+  R = A;           // R は m×n
+
+  for (size_t j = 0; j < std::min(m, n); ++j) {
+   for (size_t i = m - 1; i > j; --i) {
+    const double a = R[i - 1][j];
+    const double b = R[i][j];
+
     if (std::fabs(b) < cnst_precision_inv) continue;
 
-    double r = std::hypot(a, b);
-    double c = a / r;
-    double s = -b / r;
+    const double r = std::hypot(a, b);
+    const double c = a / r;
+    const double s = -b / r;
 
+    // R = G * R
     for (size_t k = j; k < n; ++k) {
-     double t1 = R[i - 1][k];
-     double t2 = R[i][k];
+     const double t1 = R[i - 1][k];
+     const double t2 = R[i][k];
      R[i - 1][k] = c * t1 - s * t2;
      R[i][k] = s * t1 + c * t2;
     }
 
-    for (size_t k = 0; k < n; ++k) {
-     double t1 = Q[k][i - 1];
-     double t2 = Q[k][i];
+    // Q = Q * G^T
+    for (size_t k = 0; k < m; ++k) {
+     const double t1 = Q[k][i - 1];
+     const double t2 = Q[k][i];
      Q[k][i - 1] = c * t1 - s * t2;
      Q[k][i] = s * t1 + c * t2;
     }
    }
   }
  }
+
  std::vector<double> eigenvalues(std::vector<std::vector<double>> A, int max_iter) {
   size_t n = nrows(A);
   hessenberg(A);
@@ -863,23 +593,22 @@ namespace mm::cal {
  }
 
  std::vector<double> singular_values(const std::vector<std::vector<double>> &A) {
-  size_t m = A.size();
+  const size_t m = A.size();
   if (m == 0) return {};
 
-  size_t n = A[0].size();
+  const size_t n = A[0].size();
   if (n == 0) return {};
 
-  // 🔹 1x1 special case
-  if (m == 1 && n == 1) return {std::fabs(A[0][0])};
+  for (size_t i = 1; i < m; ++i) {
+   if (A[i].size() != n) { throw std::runtime_error("irregular matrix"); }
+  }
 
-  // 🔹 一般ケース
   std::vector<std::vector<double>> U, V;
   std::vector<double> S;
-
   svd_jacobi(A, U, S, V);
-
   return S;
  }
+
  double condition_number(const std::vector<std::vector<double>> &A) {
   auto sv = singular_values(A);
   double maxv = *std::max_element(sv.begin(), sv.end());
@@ -991,53 +720,172 @@ namespace mm::cal {
   }
  }
 
+ static std::vector<std::vector<long double>> complete_orthonormal_basis(const std::vector<std::vector<long double>> &Qinit, size_t rows) {
+  using ld = long double;
+
+  const ld eps = std::numeric_limits<ld>::epsilon() * 256.0L;
+
+  std::vector<std::vector<ld>> Q(rows, std::vector<ld>(rows, 0.0L));
+
+  auto dot_col = [&](const std::vector<ld> &a, const std::vector<ld> &b) -> ld {
+   ld s = 0.0L;
+   ld c = 0.0L;
+   for (size_t i = 0; i < rows; ++i) {
+    const ld x = a[i] * b[i];
+    const ld y = x - c;
+    const ld t = s + y;
+    c = (t - s) - y;
+    s = t;
+   }
+   return s;
+  };
+
+  auto norm2 = [&](const std::vector<ld> &v) -> ld { return dot_col(v, v); };
+
+  auto normalize = [&](std::vector<ld> &v) -> bool {
+   ld n2 = norm2(v);
+   if (n2 <= eps) return false;
+   ld inv = 1.0L / std::sqrt(n2);
+   for (size_t i = 0; i < rows; ++i)
+    v[i] *= inv;
+   return true;
+  };
+
+  size_t col = 0;
+
+  if (!Qinit.empty()) {
+   const size_t init_cols = Qinit[0].size();
+
+   for (size_t j = 0; j < init_cols && col < rows; ++j) {
+    std::vector<ld> v(rows, 0.0L);
+    for (size_t i = 0; i < rows; ++i)
+     v[i] = Qinit[i][j];
+
+    for (size_t k = 0; k < col; ++k) {
+     std::vector<ld> qk(rows, 0.0L);
+     for (size_t i = 0; i < rows; ++i)
+      qk[i] = Q[i][k];
+     ld proj = dot_col(v, qk);
+     for (size_t i = 0; i < rows; ++i)
+      v[i] -= proj * qk[i];
+    }
+
+    if (!normalize(v)) continue;
+
+    for (size_t i = 0; i < rows; ++i)
+     Q[i][col] = v[i];
+    ++col;
+   }
+  }
+
+  for (size_t base = 0; base < rows && col < rows; ++base) {
+   std::vector<ld> v(rows, 0.0L);
+   v[base] = 1.0L;
+
+   for (size_t k = 0; k < col; ++k) {
+    std::vector<ld> qk(rows, 0.0L);
+    for (size_t i = 0; i < rows; ++i)
+     qk[i] = Q[i][k];
+    ld proj = dot_col(v, qk);
+    for (size_t i = 0; i < rows; ++i)
+     v[i] -= proj * qk[i];
+   }
+
+   if (!normalize(v)) continue;
+
+   for (size_t i = 0; i < rows; ++i)
+    Q[i][col] = v[i];
+   ++col;
+  }
+
+  for (size_t tries = 0; col < rows && tries < rows * 4; ++tries) {
+   std::vector<ld> v(rows, 0.0L);
+   for (size_t i = 0; i < rows; ++i) {
+    v[i] = static_cast<ld>((i + 1) * (tries + 2));
+   }
+
+   for (size_t k = 0; k < col; ++k) {
+    std::vector<ld> qk(rows, 0.0L);
+    for (size_t i = 0; i < rows; ++i)
+     qk[i] = Q[i][k];
+    ld proj = dot_col(v, qk);
+    for (size_t i = 0; i < rows; ++i)
+     v[i] -= proj * qk[i];
+   }
+
+   if (!normalize(v)) continue;
+
+   for (size_t i = 0; i < rows; ++i)
+    Q[i][col] = v[i];
+   ++col;
+  }
+
+  if (col != rows) { throw std::runtime_error("failed to complete orthonormal basis"); }
+
+  return Q;
+ }
+
  void svd_jacobi(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V) {
   using ld = long double;
 
-  size_t m = A.size();
-  if (m == 0) throw std::runtime_error("empty matrix");
+  const size_t m0 = A.size();
+  if (m0 == 0) throw std::runtime_error("empty matrix");
 
-  size_t n = A[0].size();
-  if (n == 0) throw std::runtime_error("empty matrix");
+  const size_t n0 = A[0].size();
+  if (n0 == 0) throw std::runtime_error("empty matrix");
 
-  // 1x1
-  if (m == 1 && n == 1) {
+  for (size_t i = 1; i < m0; ++i) {
+   if (A[i].size() != n0) throw std::runtime_error("irregular matrix");
+  }
+
+  const size_t r0 = std::min(m0, n0);
+
+  if (m0 == 1 && n0 == 1) {
    U = {{1.0}};
    V = {{1.0}};
    S = {std::fabs(A[0][0])};
    return;
   }
 
-  // one-sided Jacobi は m >= n の方が扱いやすい
   bool transposed = false;
+
+  size_t m = m0;
+  size_t n = n0;
   std::vector<std::vector<ld>> B;
 
-  if (m >= n) {
-   B.assign(m, std::vector<ld>(n, 0.0L));
-   for (size_t i = 0; i < m; ++i)
-    for (size_t j = 0; j < n; ++j)
+  if (m0 >= n0) {
+   B.assign(m0, std::vector<ld>(n0, 0.0L));
+   for (size_t i = 0; i < m0; ++i) {
+    for (size_t j = 0; j < n0; ++j) {
      B[i][j] = static_cast<ld>(A[i][j]);
+    }
+   }
   } else {
    transposed = true;
-   B.assign(n, std::vector<ld>(m, 0.0L));
-   for (size_t i = 0; i < m; ++i)
-    for (size_t j = 0; j < n; ++j)
+   m = n0;
+   n = m0;
+   B.assign(m, std::vector<ld>(n, 0.0L));
+   for (size_t i = 0; i < m0; ++i) {
+    for (size_t j = 0; j < n0; ++j) {
      B[j][i] = static_cast<ld>(A[i][j]);
-   std::swap(m, n);
+    }
+   }
   }
 
-  // V 初期化
-  std::vector<std::vector<ld>> Vld(n, std::vector<ld>(n, 0.0L));
-  for (size_t i = 0; i < n; ++i)
-   Vld[i][i] = 1.0L;
+  const size_t r = n; // 内部では常に m >= n
+
+  std::vector<std::vector<ld>> Vthin(n, std::vector<ld>(n, 0.0L));
+  for (size_t i = 0; i < n; ++i) {
+   Vthin[i][i] = 1.0L;
+  }
 
   auto col_dot = [&](size_t p, size_t q) -> ld {
    ld s = 0.0L;
    ld c = 0.0L;
    for (size_t i = 0; i < m; ++i) {
-    ld x = B[i][p] * B[i][q];
-    ld y = x - c;
-    ld t = s + y;
+    const ld x = B[i][p] * B[i][q];
+    const ld y = x - c;
+    const ld t = s + y;
     c = (t - s) - y;
     s = t;
    }
@@ -1048,9 +896,9 @@ namespace mm::cal {
    ld s = 0.0L;
    ld c = 0.0L;
    for (size_t i = 0; i < m; ++i) {
-    ld x = B[i][p] * B[i][p];
-    ld y = x - c;
-    ld t = s + y;
+    const ld x = B[i][p] * B[i][p];
+    const ld y = x - c;
+    const ld t = s + y;
     c = (t - s) - y;
     s = t;
    }
@@ -1065,37 +913,34 @@ namespace mm::cal {
 
    for (size_t p = 0; p + 1 < n; ++p) {
     for (size_t q = p + 1; q < n; ++q) {
-     ld app = col_norm2(p);
-     ld aqq = col_norm2(q);
-     ld apq = col_dot(p, q);
+     const ld app = col_norm2(p);
+     const ld aqq = col_norm2(q);
+     const ld apq = col_dot(p, q);
 
-     ld scale = std::sqrt(app * aqq);
+     const ld scale = std::sqrt(std::max<ld>(0.0L, app * aqq));
      if (scale == 0.0L) continue;
 
-     // 列が十分直交していれば飛ばす
-     if (std::fabsl(apq) <= eps * scale * 64.0L) continue;
+     if (std::abs(apq) <= eps * scale * 64.0L) continue;
 
      changed = true;
 
-     ld tau = (aqq - app) / (2.0L * apq);
-     ld t = (tau >= 0.0L) ? 1.0L / (tau + std::sqrt(1.0L + tau * tau)) : -1.0L / (-tau + std::sqrt(1.0L + tau * tau));
-     ld c = 1.0L / std::sqrt(1.0L + t * t);
-     ld s = c * t;
+     const ld tau = (aqq - app) / (2.0L * apq);
+     const ld t = (tau >= 0.0L) ? 1.0L / (tau + std::sqrt(1.0L + tau * tau)) : -1.0L / (-tau + std::sqrt(1.0L + tau * tau));
+     const ld c = 1.0L / std::sqrt(1.0L + t * t);
+     const ld s = c * t;
 
-     // B の列回転
      for (size_t i = 0; i < m; ++i) {
-      ld bip = B[i][p];
-      ld biq = B[i][q];
+      const ld bip = B[i][p];
+      const ld biq = B[i][q];
       B[i][p] = c * bip - s * biq;
       B[i][q] = s * bip + c * biq;
      }
 
-     // V の列回転
      for (size_t i = 0; i < n; ++i) {
-      ld vip = Vld[i][p];
-      ld viq = Vld[i][q];
-      Vld[i][p] = c * vip - s * viq;
-      Vld[i][q] = s * vip + c * viq;
+      const ld vip = Vthin[i][p];
+      const ld viq = Vthin[i][q];
+      Vthin[i][p] = c * vip - s * viq;
+      Vthin[i][q] = s * vip + c * viq;
      }
     }
    }
@@ -1103,74 +948,94 @@ namespace mm::cal {
    if (!changed) break;
   }
 
-  // 特異値
-  std::vector<ld> Sld(n, 0.0L);
-  for (size_t j = 0; j < n; ++j) {
+  std::vector<ld> Sld(r, 0.0L);
+  for (size_t j = 0; j < r; ++j) {
    Sld[j] = std::sqrt(std::max<ld>(0.0L, col_norm2(j)));
   }
 
-  // 降順ソート
-  for (size_t i = 0; i + 1 < n; ++i) {
+  for (size_t i = 0; i + 1 < r; ++i) {
    size_t best = i;
-   for (size_t j = i + 1; j < n; ++j) {
+   for (size_t j = i + 1; j < r; ++j) {
     if (Sld[j] > Sld[best]) best = j;
    }
    if (best != i) {
     std::swap(Sld[i], Sld[best]);
-    for (size_t r = 0; r < m; ++r)
-     std::swap(B[r][i], B[r][best]);
-    for (size_t r = 0; r < n; ++r)
-     std::swap(Vld[r][i], Vld[r][best]);
+
+    for (size_t row = 0; row < m; ++row) {
+     std::swap(B[row][i], B[row][best]);
+    }
+    for (size_t row = 0; row < n; ++row) {
+     std::swap(Vthin[row][i], Vthin[row][best]);
+    }
    }
   }
 
-  // U = 正規化した B の列
-  std::vector<std::vector<ld>> Uld(m, std::vector<ld>(n, 0.0L));
   ld smax = 0.0L;
   for (ld s : Sld)
    smax = std::max(smax, s);
 
-  const ld sval_tol = eps * std::max<ld>(1.0L, smax) * 128.0L;
+  const ld sval_tol = eps * std::max<ld>(1.0L, smax) * static_cast<ld>(std::max(m, n)) * 128.0L;
 
-  for (size_t j = 0; j < n; ++j) {
+  std::vector<std::vector<ld>> Useed(m, std::vector<ld>(r, 0.0L));
+
+  for (size_t j = 0; j < r; ++j) {
    if (Sld[j] <= sval_tol) continue;
    for (size_t i = 0; i < m; ++i) {
-    Uld[i][j] = B[i][j] / Sld[j];
+    Useed[i][j] = B[i][j] / Sld[j];
    }
   }
 
-  // double に戻す
-  U.assign(m, std::vector<double>(n, 0.0));
-  V.assign(n, std::vector<double>(n, 0.0));
-  S.assign(n, 0.0);
+  std::vector<std::vector<ld>> Ufull = complete_orthonormal_basis(Useed, m);
+  std::vector<std::vector<ld>> Vfull = complete_orthonormal_basis(Vthin, n);
 
-  for (size_t i = 0; i < m; ++i)
-   for (size_t j = 0; j < n; ++j)
-    U[i][j] = static_cast<double>(Uld[i][j]);
+  if (!transposed) {
+   U.assign(m0, std::vector<double>(m0, 0.0));
+   V.assign(n0, std::vector<double>(n0, 0.0));
+   S.assign(r0, 0.0);
 
-  for (size_t i = 0; i < n; ++i)
-   for (size_t j = 0; j < n; ++j)
-    V[i][j] = static_cast<double>(Vld[i][j]);
+   for (size_t i = 0; i < m0; ++i) {
+    for (size_t j = 0; j < m0; ++j) {
+     U[i][j] = static_cast<double>(Ufull[i][j]);
+    }
+   }
 
-  for (size_t i = 0; i < n; ++i)
-   S[i] = static_cast<double>(Sld[i]);
+   for (size_t i = 0; i < n0; ++i) {
+    for (size_t j = 0; j < n0; ++j) {
+     V[i][j] = static_cast<double>(Vfull[i][j]);
+    }
+   }
 
-  // 転置していた場合は U/V を戻す
-  if (transposed) { std::swap(U, V); }
+   for (size_t i = 0; i < r0; ++i) {
+    S[i] = static_cast<double>(Sld[i]);
+   }
+  } else {
+   // B = A^T = U_b * S * V_b^T
+   // A = V_b * S * U_b^T
+   // 元のAに対して:
+   // U = V_b (m0 x m0)
+   // V = U_b (n0 x n0)
+
+   U.assign(m0, std::vector<double>(m0, 0.0));
+   V.assign(n0, std::vector<double>(n0, 0.0));
+   S.assign(r0, 0.0);
+
+   for (size_t i = 0; i < m0; ++i) {
+    for (size_t j = 0; j < m0; ++j) {
+     U[i][j] = static_cast<double>(Vfull[i][j]);
+    }
+   }
+
+   for (size_t i = 0; i < n0; ++i) {
+    for (size_t j = 0; j < n0; ++j) {
+     V[i][j] = static_cast<double>(Ufull[i][j]);
+    }
+   }
+
+   for (size_t i = 0; i < r0; ++i) {
+    S[i] = static_cast<double>(Sld[i]);
+   }
+  }
  }
-
- //// svdだけど現状ゴミ
- // void svd(const std::vector<std::vector<double>> &A, std::vector<std::vector<double>> &U, std::vector<double> &S, std::vector<std::vector<double>> &V) {
- //  std::vector<std::vector<double>> B = A;
- //  bidiagonalize(B, U, V);
- //  bidiagonal_qr(B, U, V);
-
- // size_t n = std::min(nrows(B), ncols(B));
- // S.resize(n);
-
- // for (size_t i = 0; i < n; ++i)
- //  S[i] = std::fabs(B[i][i]);
- //}
 
  // 信号系
 
@@ -1328,5 +1193,43 @@ namespace mm::cal {
 
   return Value(std::make_shared<MultiValue>(std::move(outRows)));
  }
+ Value fromVector(const std::vector<double> &xs) {
+  auto mv = std::make_shared<MultiValue>();
+  mv->elems_.reserve(xs.size());
 
+  for (double x : xs) {
+   mv->elems_.emplace_back(x);
+  }
+
+  return Value(mv);
+ }
+
+ Value fromIndexVector(const std::vector<size_t> &xs) {
+  auto mv = std::make_shared<MultiValue>();
+  mv->elems_.reserve(xs.size());
+
+  for (size_t x : xs) {
+   mv->elems_.emplace_back(static_cast<double>(x));
+  }
+
+  return Value(mv);
+ }
+
+ Value fromMatrix(const std::vector<std::vector<double>> &A) {
+  auto outer = std::make_shared<MultiValue>();
+  outer->elems_.reserve(A.size());
+
+  for (const auto &rowv : A) {
+   auto row = std::make_shared<MultiValue>();
+   row->elems_.reserve(rowv.size());
+
+   for (double x : rowv) {
+    row->elems_.emplace_back(x);
+   }
+
+   outer->elems_.emplace_back(Value(row));
+  }
+
+  return Value(outer);
+ }
 } // namespace mm::cal
