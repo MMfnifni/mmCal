@@ -3397,7 +3397,7 @@ namespace mm::cal {
                           if (i <= 0 || i > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
 
                           EvaluationContext ectx{ctx.cfg, ctx.hist, ctx.base};
-                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base, ectx).getValue();
+                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base, ectx).value;
                          }};
   cfg.functions["Out"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            int i = (int)requireInt(v[0], ctx.pos);
@@ -3443,7 +3443,7 @@ namespace mm::cal {
 
                               } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: readed file cannot evaluate", ctx.pos); }
 
-                              return result.getValue();
+                              return result.value;
                              }};
   cfg.functions["fileout"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                                namespace fs = std::filesystem;

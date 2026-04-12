@@ -1,4 +1,4 @@
-﻿#include "lexer_paser.hpp"
+﻿#include "lexer_parser.hpp"
 #include "core.hpp"
 
 namespace mm::cal {
@@ -113,7 +113,7 @@ namespace mm::cal {
     ++p;
    }
 
-   if (p >= src.size()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nterminated string", start); }
+   if (p >= src.size()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unterminated string", start); }
 
    ++p; // closing "
    return {TokenType::String, s, 0.0, start};
@@ -213,7 +213,7 @@ namespace mm::cal {
 
  std::unique_ptr<ASTNode> Parser::parse() {
   auto node = parseAssignment(); // パースの入口が変わったここを変えること(どうせ私は忘れてる)
-  if (cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nexpected token", cur.pos);
+  if (cur.type != TokenType::End) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unexpected token", cur.pos);
   return node;
  }
 

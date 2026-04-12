@@ -302,12 +302,14 @@ namespace mm::cal {
    std::string output;  // 成功時: 計算結果 / 失敗時: エラーメッセージ
    size_t errorPos = 0; // エラー時のみ
  };
+
  struct EvalResult {
    Value value{};
-
-   std::string explain = "";
+   std::string displayOverride{};
+   std::string explain{};
    bool suppressDisplay = false;
-   Value getValue() const { return value; }
+
+   bool hasDisplayOverride() const { return !displayOverride.empty(); }
  };
 
  struct SideEffect {

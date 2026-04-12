@@ -34,11 +34,17 @@ int main(int argc, char *argv[]) {
     auto res = evalLine(line, syscfg, history, ectx);
     applySideEffects(ectx, res);
     if (res.explain != "") { std::cout << res.explain; }
+
     if (res.suppressDisplay) {
-     std::cout << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
+     std::cout << "evaluate success. display suppressed in silent mode" << '\n' << std::flush;
      continue;
     }
-    std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
+
+    if (res.hasDisplayOverride()) {
+     std::cout << res.displayOverride << '\n' << std::flush;
+    } else {
+     std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
+    }
    }
 
    catch (const std::exception &e) {
@@ -59,9 +65,15 @@ int main(int argc, char *argv[]) {
    EvalResult res = evalLine(line, syscfg, history, ectx);
    applySideEffects(ectx, res);
 
-   if (res.explain != "") std::cout << res.explain;
-   if (res.suppressDisplay) std::cout << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
-   std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
+   if (res.explain != "") { std::cout << res.explain; }
+
+   if (res.suppressDisplay) {
+    std::cout << "evaluate success. suppress display by silent" << '\n' << std::flush;
+   } else if (res.hasDisplayOverride()) {
+    std::cout << res.displayOverride << '\n' << std::flush;
+   } else {
+    std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
+   }
    // Clear / None / Exit は何も出さず終了
   } catch (const CalcError &e) {
    std::cout << "Error: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n";
@@ -102,11 +114,20 @@ int main(int argc, char *argv[]) {
    history.push_back({line, res.value});
 
    if (res.explain != "") { std::cout << res.explain; }
+
    if (res.suppressDisplay) {
-    std::cout << "Out[" << history.size() << "] := " << "evaluate sucsess. suppress display by silent" << '\n' << std::flush;
+    std::cout << "Out[" << history.size() << "] := "
+              << "evaluate success. suppress display by silent" << '\n'
+              << std::flush;
     continue;
    }
-   std::cout << "Out[" << history.size() << "] := " << formatResultMulti(res.value, syscfg) << "\n\n";
+
+   if (res.hasDisplayOverride()) {
+    std::cout << "Out[" << history.size() << "] := " << res.displayOverride << "\n\n";
+   } else {
+    std::cout << "Out[" << history.size() << "] := " << formatResultMulti(res.value, syscfg) << "\n\n";
+   }
+
   } catch (ControlRequest &e) {
    switch (e.kind) {
     case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;

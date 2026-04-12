@@ -68,7 +68,8 @@ namespace mm::cal {
     msg = "<defined: " + n->name + " := " + formatResult(v, cfg) + ">";
    }
 
-   res.value = Value(msg);
+   res.value = v;
+   res.displayOverride = std::move(msg);
    return res;
   }
 
@@ -79,34 +80,15 @@ namespace mm::cal {
     sig += n->params[i];
    }
    sig += ")";
-   res.value = Value("<defined: " + sig + ">");
+
+   res.value = v; // res.value = Value();
+   res.displayOverride = "<defined: " + sig + ">";
    return res;
   }
 
   res.value = v;
   return res;
  }
-
- // Value evalAssign(AssignNode *n, EvaluationContext &ctx) {
- //  if (ctx.userFunctions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as function", 0);
- //  Value v = n->expr->eval(ctx);
- //  ctx.variables[n->name] = v;
- //  return v;
- // }
-
- // Value evalFunctionDef(FunctionDefNode *n, EvaluationContext &ctx) {
- //  if (ctx.variables.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", 0);
- //  if (ctx.cfg.functions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: cannot override builtin", 0);
- //  if (ctx.userFunctions.contains(n->name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: function already defined", 0);
-
- // UserFunction fn;
- // fn.params = n->params;
- // fn.body = cloneAST(n->body.get()); // 重要
-
- // ctx.userFunctions[n->name] = std::move(fn);
-
- // return Value();
- //}
 
  /* ============================
    フォーマッタ

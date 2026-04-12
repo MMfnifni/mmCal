@@ -36,7 +36,7 @@
     <ClCompile Include="src\core.cpp" />
     <ClCompile Include="src\evaluate.cpp" />
     <ClCompile Include="src\functions.cpp" />
-    <ClCompile Include="src\lexer_paser.cpp" />
+    <ClCompile Include="src\lexer_parser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
     <ClCompile Include="src\math_util.cpp" />
     <ClCompile Include="src\value_arithmetic.hpp">
@@ -62,7 +62,7 @@
     <ClInclude Include="src\functions.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="src\lexer_paser.hpp">
+    <ClInclude Include="src\lexer_parser.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="src\math_util.hpp">

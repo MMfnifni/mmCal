@@ -264,7 +264,7 @@
     <ClCompile Include="src\core.cpp" />
     <ClCompile Include="src\evaluate.cpp" />
     <ClCompile Include="src\functions.cpp" />
-    <ClCompile Include="src\lexer_paser.cpp" />
+    <ClCompile Include="src\lexer_parser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
     <ClCompile Include="src\math_util.cpp" />
     <ClCompile Include="src\repl_command.cpp" />
@@ -285,7 +285,7 @@
     <ClInclude Include="src\core.hpp" />
     <ClInclude Include="src\evaluate.hpp" />
     <ClInclude Include="src\functions.hpp" />
-    <ClInclude Include="src\lexer_paser.hpp" />
+    <ClInclude Include="src\lexer_parser.hpp" />
     <ClInclude Include="src\math_util.hpp" />
     <ClInclude Include="src\repl_command.hpp" />
     <ClInclude Include="src\value_compare.hpp" />
