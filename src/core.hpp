@@ -25,9 +25,8 @@ namespace mm::cal {
 
  using Complex = std::complex<double>;
 
- struct InvalidValue {};
  struct ControlRequest : std::exception {
-   enum class Kind { Exit, Clear, Explain, FileWrite, ClipboardCopy };
+   enum class Kind { Exit, Clear };
    Kind kind;
 
    explicit ControlRequest(Kind k) : kind(k) {}
@@ -289,18 +288,9 @@ namespace mm::cal {
    std::vector<std::vector<double>> toMatrix() const;
  };
 
- struct RuntimeState {
-   bool suppressDisplay = false;
-   std::string messageOverride = "";
- };
  struct InputEntry {
    std::string expr; // In[n]
    Value value;      // Out[n]
- };
- struct CalcResult {
-   bool ok;
-   std::string output;  // 成功時: 計算結果 / 失敗時: エラーメッセージ
-   size_t errorPos = 0; // エラー時のみ
  };
 
  struct EvalResult {
@@ -342,27 +332,44 @@ namespace mm::cal {
    bool allowVariableRedefinition = true;
    bool allowFunctionRedefinition = false;
  };
- struct FunctionContext {
+ struct SessionState {
    SystemConfig &cfg;
-   const std::vector<InputEntry> &hist;
-   int base;
+   std::vector<InputEntry> &history;
+   int &base;
+   std::unordered_map<std::string, Value> &globals;
+   std::unordered_map<std::string, UserFunction> &userFunctions;
+
+   SessionState(SystemConfig &c, std::vector<InputEntry> &h, int &b, std::unordered_map<std::string, Value> &g, std::unordered_map<std::string, UserFunction> &uf) : cfg(c), history(h), base(b), globals(g), userFunctions(uf) {}
+ };
+
+ struct FunctionContext {
+   SessionState &session;
    size_t pos;
    std::vector<SideEffect> &sideEffects;
-   const double deg2rad = PI / 180.0;
-   const double rad2deg = 180.0 / PI;
  };
+
  struct EvaluationContext {
-   SystemConfig &cfg;
-   const std::vector<InputEntry> &hist;
-   int base = 0;
-   std::vector<SideEffect> sideEffects;                                          // おくすり
-   std::unordered_map<std::string, Value> variables;                             // ユーザ変数
-   std::shared_ptr<std::unordered_map<std::string, UserFunction>> userFunctions; // ユーザ関数
+   SessionState &session;
+   std::unordered_map<std::string, Value> locals;
+   std::vector<SideEffect> sideEffects;
    std::vector<std::string> callStack;
 
-   // EvaluationContext() = default;
-   EvaluationContext(SystemConfig &c, const std::vector<InputEntry> &h, int b) : cfg(c), hist(h), base(b), userFunctions(std::make_shared<std::unordered_map<std::string, UserFunction>>()) {}
+   EvaluationContext(SessionState &s) : session(s) {}
  };
+
+ inline bool hasVariable(const EvaluationContext &ctx, const std::string &name) { return ctx.locals.contains(name) || ctx.session.globals.contains(name); }
+
+ inline const Value *findVariable(const EvaluationContext &ctx, const std::string &name) {
+  if (auto it = ctx.locals.find(name); it != ctx.locals.end()) return &it->second;
+  if (auto it = ctx.session.globals.find(name); it != ctx.session.globals.end()) return &it->second;
+  return nullptr;
+ }
+
+ inline Value *findVariable(EvaluationContext &ctx, const std::string &name) {
+  if (auto it = ctx.locals.find(name); it != ctx.locals.end()) return &it->second;
+  if (auto it = ctx.session.globals.find(name); it != ctx.session.globals.end()) return &it->second;
+  return nullptr;
+ }
 
  inline const std::unordered_map<std::string, Value> constants = {
      {"Pi", PI},
@@ -375,9 +382,6 @@ namespace mm::cal {
  };
 
  template <class> inline constexpr bool always_false = false;
-
- EvalResult evalLine(const std::string &line, SystemConfig &cfg, std::vector<InputEntry> &history, EvaluationContext &ectx);
- // CalcResult calcEval(const std::string &expr, SystemConfig &cfg, std::vector<InputEntry> &history, int base = 10);
 
  /* ============================
     補助関数(ヘルパーマン)
@@ -535,8 +539,14 @@ namespace mm::cal {
  inline void serializeValue(const Value &v, std::ostream &os, const SystemConfig &cfg) { serializeValueImpl(v, os, cfg, 0); }
  void applySideEffects(EvaluationContext &ectx, EvalResult &result);
  // 内部的にイコールとする
- inline bool tolerantEqual(double a, double b) { return std::abs(a - b) <= cnst_precision_inv; }
- inline bool tolerantEqual(std::complex<double> a, std::complex<double> b) { return tolerantEqual(a.real(), b.real()) && tolerantEqual(a.imag(), b.imag()); }
+ inline constexpr double numeric_epsilon() noexcept { return cnst_precision_inv; }
+ inline bool nearly_equal(double a, double b, double eps = cnst_precision_inv) noexcept { return std::abs(a - b) <= eps * std::max({1.0, std::abs(a), std::abs(b)}); }
+ inline bool nearly_zero(double x, double eps = cnst_precision_inv) noexcept { return std::abs(x) <= eps; }
+ inline bool nearly_equal(std::complex<double> a, std::complex<double> b, double eps = cnst_precision_inv) noexcept { return nearly_equal(a.real(), b.real(), eps) && nearly_equal(a.imag(), b.imag(), eps); }
+ inline bool nearly_zero(std::complex<double> z, double eps = cnst_precision_inv) noexcept { return nearly_zero(z.real(), eps) && nearly_zero(z.imag(), eps); }
+ inline bool tolerantEqual(double a, double b, int /*precision*/) noexcept { return nearly_equal(a, b); }          // 互換用
+ inline bool tolerantEqual(std::complex<double> a, std::complex<double> b) noexcept { return nearly_equal(a, b); } // 互換用
+
  template <class F> inline void Value::forEachMulti(size_t pos, F &&f) const {
   if (!isMulti()) return;
   const auto &mv = asMultiRef(pos);

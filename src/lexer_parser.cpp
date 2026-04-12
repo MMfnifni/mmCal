@@ -76,9 +76,9 @@ namespace mm::cal {
   if (c == '<') {
    if (p < src.size() && src[p] == '=') {
     ++p;
-    return {TokenType::LessEq, "<=", start};
+    return {TokenType::LessEq, "[=", start};
    }
-   return {TokenType::Less, "<", start};
+   return {TokenType::Less, "[", start};
   }
 
   if (c == '>') {
@@ -86,7 +86,7 @@ namespace mm::cal {
     ++p;
     return {TokenType::GreaterEq, ">=", start};
    }
-   return {TokenType::Greater, ">", start};
+   return {TokenType::Greater, "]", start};
   }
 
   if (c == '=') {

@@ -1,6 +1,7 @@
 #include "repl_command.hpp"
 #include "evaluate.hpp"
-
+#include "formatter.hpp"
+#include "session_ops.hpp"
 #include <algorithm>
 #include <sstream>
 #include <string>
@@ -56,9 +57,9 @@ namespace mm::cal {
    if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :defs", 0); }
 
    std::vector<std::string> varLines;
-   varLines.reserve(ectx.variables.size());
+   varLines.reserve(ectx.session.globals.size());
 
-   for (const auto &kv : ectx.variables) {
+   for (const auto &kv : ectx.session.globals) {
     const std::string &name = kv.first;
     const Value &val = kv.second;
 
@@ -68,8 +69,8 @@ namespace mm::cal {
    std::sort(varLines.begin(), varLines.end());
 
    std::vector<std::string> funcSigs;
-   funcSigs.reserve(ectx.userFunctions->size());
-   for (const auto &[name, fn] : *ectx.userFunctions) {
+   funcSigs.reserve(ectx.session.userFunctions.size());
+   for (const auto &[name, fn] : ectx.session.userFunctions) {
     funcSigs.push_back(formatFunctionSignature(name, fn));
    }
    std::sort(funcSigs.begin(), funcSigs.end());
@@ -81,7 +82,7 @@ namespace mm::cal {
    out += "Functions:\n";
    out += joinNamesSorted(funcSigs);
 
-   res.value = Value(out);
+   res.displayOverride = out;
    return res;
   }
 
@@ -89,15 +90,13 @@ namespace mm::cal {
   // :unset <var>
   // -----------------------
   if (cmd == ":unset") {
-   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :unset <variable>", 0); }
+   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :unset <variable]", 0); }
 
    const std::string &name = words[1];
 
-   auto it = ectx.variables.find(name);
-   if (it == ectx.variables.end()) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown variable: " + name, 0); }
+   if (!unsetVariable(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown variable: " + name, 0); }
 
-   ectx.variables.erase(it);
-   res.value = Value("<unset: " + name + ">");
+   res.displayOverride = "[unset: " + name + "]";
    return res;
   }
 
@@ -105,15 +104,13 @@ namespace mm::cal {
   // :undef <func>
   // -----------------------
   if (cmd == ":undef") {
-   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :undef <function>", 0); }
+   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :undef <function]", 0); }
 
    const std::string &name = words[1];
 
-   auto it = ectx.userFunctions->find(name);
-   if (it == ectx.userFunctions->end()) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown function: " + name, 0); }
+   if (!undefFunction(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown function: " + name, 0); }
 
-   ectx.userFunctions->erase(it);
-   res.value = Value("<undefined: " + name + ">");
+   res.displayOverride = "[undefined: " + name + "]";
    return res;
   }
 
@@ -130,14 +127,7 @@ namespace mm::cal {
   // -----------------------
   if (cmd == ":clear") {
    if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :clear", 0); }
-
-   history.clear();
-   ectx.variables.clear();
-   ectx.userFunctions->clear();
-   ectx.callStack.clear();
-
-   res.value = Value("<cleared>");
-   return res;
+   throw ControlRequest(ControlRequest::Kind::Clear);
   }
 
   throw CalcError(CalcErrorType::InvalidArgument, "unknown command: " + cmd, 0);

@@ -15,16 +15,10 @@ namespace mm::cal {
 
  static constexpr double deg2rad = PI / 180.0;
  static constexpr double rad2deg = 180.0 / PI;
- inline constexpr double eps = cnst_precision_inv;
 
  inline constexpr double toDeg(double rad) { return rad * (180.0 / PI); }
  inline constexpr double toRad(double deg) { return deg * (PI / 180.0); }
  inline constexpr double radToDeg(double r) { return r * 180.0 / PI; }
-
- inline bool tolerantEqual(double a, double b, int precision) {
-  double eps = std::pow(10.0, -precision);
-  return std::abs(a - b) <= eps * std::max({1.0, std::abs(a), std::abs(b)});
- }
 
  inline double inf(int sign = +1) { return sign >= 0 ? std::numeric_limits<double>::infinity() : -std::numeric_limits<double>::infinity(); }
 
@@ -35,9 +29,7 @@ namespace mm::cal {
  Value safeInv(double denom, double sign);
  static inline Value signedInfBy(double sign) { return inf(sign >= 0 ? +1 : -1); }
  // denom が 0 に近いときに ±inf を返す（符号は signSource から取る）
- static inline Value invOrSignedInf(double denom, double signSource) { return (std::abs(denom) < eps) ? signedInfBy(signSource) : (1.0 / denom); }
-
- bool eq(double a, double b);
+ static inline Value invOrSignedInf(double denom, double signSource) { return (std::abs(denom) < cnst_precision_inv) ? signedInfBy(signSource) : (1.0 / denom); }
 
  // -------------------------------
  // 基本昇格
@@ -210,7 +202,6 @@ namespace mm::cal {
 
    const long double delta = x - mean;
    const long double delta_n = delta / k;
-   const long double delta_n2 = delta_n * delta_n;
    const long double term1 = delta * delta_n * k1;
 
    mean += delta_n;
@@ -340,7 +331,7 @@ namespace mm::cal {
   return static_cast<double>(c / static_cast<long double>(n));
  }
 
- static double corrPopulationReal(const std::vector<Value> &v, FunctionContext &ctx) {
+ inline double corrPopulationReal(const std::vector<Value> &v, FunctionContext &ctx) {
   const int total = (int)v.size();
   if (total % 2 != 0) throw CalcError(CalcErrorType::InvalidArgument, "corr: argument count must be even", ctx.pos);
 
@@ -535,9 +526,9 @@ namespace mm::cal {
   return std::llabs(x);
  }
 
- inline long double abs_eps_ld() { return 1e-18L; }
+ inline long double abs_cnst_precision_inv_ld() { return 1e-18L; }
 
- inline bool nearly_zero_ld(long double x, long double eps = 1e-18L) { return std::fabsl(x) <= eps; }
+ inline bool nearly_zero_ld(long double x, long double cnst_precision_inv = 1e-18L) { return std::fabsl(x) <= cnst_precision_inv; }
 
  inline long double pow1p_int_ld(long double r, int n) {
   // (1+r)^n を log1p / exp で安定に計算
@@ -580,9 +571,9 @@ namespace mm::cal {
  }
 
  //  根のブラケット探索
- template <typename Func> std::pair<double, double> bracketRoot(Func f, auto &ctx, double start = -0.999, double end = 10.0, double step = 0.001, int maxSteps = 10000) {
+ template <typename Func> std::pair<double, double> bracketRoot(Func f, auto &ctx, double start = -0.999, double end = 10.0, double step = 0.001, int maxStcnst_precision_inv = 10000) {
   double prev = f(start);
-  for (int i = 1; i <= maxSteps && start + i * step <= end; ++i) {
+  for (int i = 1; i <= maxStcnst_precision_inv && start + i * step <= end; ++i) {
    double x = start + i * step;
    double curr = f(x);
    if (prev * curr <= 0.0) return {start + (i - 1) * step, x};
@@ -599,7 +590,7 @@ namespace mm::cal {
  double zetaEulerMaclaurin(double s);
  inline double betacf(double a, double b, double x) {
   const int MAXIT = 200;
-  const double EPS = 3.0e-14;
+  const double cnst_precision_inv = 3.0e-14;
   const double FPMIN = 1e-30;
 
   double qab = a + b;
@@ -632,7 +623,7 @@ namespace mm::cal {
    double del = d * c;
    h *= del;
 
-   if (std::fabs(del - 1.0) < EPS) break;
+   if (std::fabs(del - 1.0) < cnst_precision_inv) break;
   }
 
   return h;

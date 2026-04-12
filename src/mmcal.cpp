@@ -1,6 +1,10 @@
 ﻿#include "core.hpp"
 #include "evaluate.hpp"
+#include "formatter.hpp"
 #include "functions.hpp"
+#include "lexer_parser.hpp"
+#include "repl_command.hpp"
+#include "session_ops.hpp"
 
 #include <iostream>
 #include <string>
@@ -12,9 +16,14 @@ using namespace mm::cal;
   ============================ */
 
 int main(int argc, char *argv[]) {
+ int base = 0;
  SystemConfig syscfg;
  std::vector<InputEntry> history;
- EvaluationContext ectx{syscfg, history, 0};
+ std::unordered_map<std::string, Value> globals;
+ std::unordered_map<std::string, UserFunction> userFunctions;
+
+ SessionState session{syscfg, history, base, globals, userFunctions};
+ EvaluationContext ectx{session};
 
  initFunctions(syscfg);
 
@@ -31,8 +40,9 @@ int main(int argc, char *argv[]) {
    if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
 
    try {
-    auto res = evalLine(line, syscfg, history, ectx);
+    EvalResult res = evalLine(line, syscfg, history, ectx);
     applySideEffects(ectx, res);
+
     if (res.explain != "") { std::cout << res.explain; }
 
     if (res.suppressDisplay) {
@@ -47,8 +57,27 @@ int main(int argc, char *argv[]) {
     }
    }
 
+   catch (ControlRequest &e) {
+    switch (e.kind) {
+     case ControlRequest::Kind::Exit: return 0;
+
+     case ControlRequest::Kind::Clear:
+      resetSession(ectx, history);
+      std::cout << "[cleared]" << '\n' << std::flush;
+      break;
+    }
+   }
+
+   catch (const CalcError &e) {
+    std::cout << "Error: " << e.what() << '\n';
+   }
+
    catch (const std::exception &e) {
     std::cout << "Error: " << e.what() << '\n';
+   }
+
+   catch (...) {
+    std::cout << "Error: Unknown exception\n";
    }
   }
 
@@ -74,12 +103,27 @@ int main(int argc, char *argv[]) {
    } else {
     std::cout << formatResult(res.value, syscfg) << '\n' << std::flush;
    }
-   // Clear / None / Exit は何も出さず終了
+
+  } catch (ControlRequest &e) {
+   switch (e.kind) {
+    case ControlRequest::Kind::Exit: return 0;
+
+    case ControlRequest::Kind::Clear:
+     resetSession(ectx, history);
+     std::cout << "[cleared]\n";
+     return 0;
+   }
+
   } catch (const CalcError &e) {
    std::cout << "Error: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n";
    return 1;
-  } catch (const ControlRequest &e) {
-   std::cout << "Error: " << e.what() << "\n" << line << "\n";
+
+  } catch (const std::exception &e) {
+   std::cout << "Error: " << e.what() << "\n";
+   return 1;
+
+  } catch (...) {
+   std::cout << "Error: Unknown exception\n";
    return 1;
   }
 
@@ -101,12 +145,6 @@ int main(int argc, char *argv[]) {
   if (!std::getline(std::cin, line)) break;
 
   if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
-
-  // ---- メタコマンド ----
-  // if (line.starts_with("SetFix")) {
-  // syscfg.precision = std::stoi(line.substr(6));
-  // continue;
-  //}
 
   try {
    EvalResult res = evalLine(line, syscfg, history, ectx);
@@ -131,19 +169,19 @@ int main(int argc, char *argv[]) {
   } catch (ControlRequest &e) {
    switch (e.kind) {
     case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;
+
     case ControlRequest::Kind::Clear:
-     history.clear();
-     ectx.userFunctions->clear();
-     ectx.callStack.clear();
-     ectx.variables.clear();
+     resetSession(ectx, history);
      std::cout << "variables and histories cleared\n";
      break;
-    case ControlRequest::Kind::FileWrite: continue;
-    case ControlRequest::Kind::ClipboardCopy: continue;
-    default: continue;
    }
-  } catch (const CalcError &e) { std::cout << "\nError: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n\n"; }
+
+  } catch (const CalcError &e) { std::cout << "\nError: " << e.what() << "\n" << line << "\n" << std::string(e.pos, ' ') << "^\n\n"; } catch (const std::exception &e) {
+   std::cout << "\nError: " << e.what() << "\n\n";
+
+  } catch (...) { std::cout << "\nError: Unknown exception\n\n"; }
  }
+
  std::cout << "bye...nara\n";
  return 0;
 }

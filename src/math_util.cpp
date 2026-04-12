@@ -209,15 +209,10 @@ namespace mm::cal {
   std::stable_sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return x[a] < x[b]; });
 
   // ties 判定（相対+絶対）
-  auto eq = [](double a, double b) {
-   const double d = std::abs(a - b);
-   const double s = std::max({1.0, std::abs(a), std::abs(b)});
-   return d <= cnst_precision_inv * s;
-  };
 
   for (size_t i = 0; i < n;) {
    size_t j = i;
-   while (j + 1 < n && eq(x[idx[j + 1]], x[idx[i]]))
+   while (j + 1 < n && nearly_equal(x[idx[j + 1]], x[idx[i]]))
     ++j;
 
    // rank は 1-based
@@ -344,8 +339,6 @@ namespace mm::cal {
   if (std::abs(denom) < cnst_precision_inv) return std::numeric_limits<double>::infinity() * (sign >= 0 ? 1.0 : -1.0);
   return 1.0 / denom;
  }
-
- bool eq(double a, double b) { return std::abs(a - b) < cnst_precision_inv; }
 
  inline Value areaPolygon(const std::vector<Value> &v, FunctionContext &ctx) {
   size_t n = v.size() / 2;
@@ -818,7 +811,7 @@ namespace mm::cal {
      pivot = i;
     }
 
-   if (maxv < cnst_precision_inv) throw std::runtime_error("Singular std::vector<std::vector<double>>");
+   if (maxv < cnst_precision_inv) throw std::runtime_error("Singular std::vector<std::vector<double>]");
 
    if (pivot != k) {
     std::swap(U[k], U[pivot]);

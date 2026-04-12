@@ -1,4 +1,10 @@
 ﻿#include "core.hpp"
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 namespace mm::cal {
 
@@ -224,11 +230,124 @@ namespace mm::cal {
  void applySideEffects(EvaluationContext &ectx, EvalResult &result) {
   for (const auto &e : ectx.sideEffects) {
    switch (e.kind) {
-    case SideEffect::Kind::Explain: result.explain = e.a; break;
-    case SideEffect::Kind::SuppressDisplay: result.suppressDisplay = true; break;
-    default: break;
+    case SideEffect::Kind::Explain:
+     {
+      result.explain += e.a;
+      break;
+     }
+
+    case SideEffect::Kind::SuppressDisplay:
+     {
+      result.suppressDisplay = true;
+      break;
+     }
+
+    case SideEffect::Kind::Message:
+     {
+      if (!result.explain.empty() && result.explain.back() != '\n') { result.explain += '\n'; }
+      result.explain += e.a;
+      if (!result.explain.empty() && result.explain.back() != '\n') { result.explain += '\n'; }
+      break;
+     }
+
+    case SideEffect::Kind::FileWrite:
+     {
+      namespace fs = std::filesystem;
+
+      const std::string &pathUtf8 = e.a;
+      const std::string &content = e.b;
+
+#ifdef _WIN32
+      fs::path path(std::u8string_view(reinterpret_cast<const char8_t *>(pathUtf8.data()), pathUtf8.size()));
+#else
+      fs::path path(pathUtf8);
+#endif
+
+      fs::path tmp = path;
+      tmp += ".tmp";
+
+      try {
+       std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
+       if (!ofs) { throw CalcError(CalcErrorType::IOError, "IOError: failed to open temp file", 0); }
+
+       ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+       if (!ofs) { throw CalcError(CalcErrorType::IOError, "IOError: failed to write file", 0); }
+
+       ofs.close();
+       if (!ofs) { throw CalcError(CalcErrorType::IOError, "IOError: failed to close file", 0); }
+
+       std::error_code ec;
+       fs::rename(tmp, path, ec);
+       if (ec) {
+        fs::remove(path, ec);
+        ec.clear();
+        fs::rename(tmp, path, ec);
+        if (ec) {
+         fs::remove(tmp, ec);
+         throw CalcError(CalcErrorType::IOError, "IOError: failed to replace target file", 0);
+        }
+       }
+
+       if (!result.explain.empty() && result.explain.back() != '\n') { result.explain += '\n'; }
+       result.explain += "file write completed (" + whatByteUnit(content.size()) + ")\n";
+
+      } catch (...) {
+       std::error_code ec;
+       fs::remove(tmp, ec);
+       throw;
+      }
+
+      break;
+     }
+
+    case SideEffect::Kind::ClipboardCopy:
+     {
+#ifdef _WIN32
+      const std::string &s = e.a;
+
+      if (!OpenClipboard(nullptr)) { throw CalcError(CalcErrorType::IOError, "OpenClipboard failed", 0); }
+
+      try {
+       if (!EmptyClipboard()) { throw CalcError(CalcErrorType::RuntimeError, "EmptyClipboard failed", 0); }
+
+       int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+       if (size <= 0) { throw CalcError(CalcErrorType::RuntimeError, "UTF8->UTF16 convert failed", 0); }
+
+       HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size * sizeof(wchar_t));
+       if (!hMem) { throw CalcError(CalcErrorType::RuntimeError, "GlobalAlloc failed", 0); }
+
+       wchar_t *buf = static_cast<wchar_t *>(GlobalLock(hMem));
+       if (!buf) {
+        GlobalFree(hMem);
+        throw CalcError(CalcErrorType::RuntimeError, "GlobalLock failed", 0);
+       }
+
+       MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, buf, size);
+       GlobalUnlock(hMem);
+
+       if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
+        GlobalFree(hMem);
+        throw CalcError(CalcErrorType::RuntimeError, "SetClipboardData failed", 0);
+       }
+
+      } catch (...) {
+       CloseClipboard();
+       throw;
+      }
+
+      CloseClipboard();
+
+      if (!result.explain.empty() && result.explain.back() != '\n') { result.explain += '\n'; }
+      result.explain += "clipboard pasted (" + whatByteUnit(s.size()) + ")\n";
+#else
+      throw CalcError(CalcErrorType::NotImplemented, "clipboard is not supported on this platform", 0);
+#endif
+      break;
+     }
    }
   }
+
+  ectx.sideEffects.clear();
  }
 
 } // namespace mm::cal

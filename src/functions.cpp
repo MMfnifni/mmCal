@@ -1,25 +1,20 @@
 ﻿#include "functions.hpp"
 #include "constants.hpp"
 #include "core.hpp"
+#include "explain_formatter.hpp"
+#include "formatter.hpp"
+#include "lexer_parser.hpp"
 #include "math_util.hpp"
+#include "repl_command.hpp"
+#include "unit_conv.hpp"
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 
 namespace mm::cal {
 
  /* ============================
    地獄の無限関数定義編
    ============================ */
-
- class FunctionBuilder {
-   SystemConfig &cfg;
-
-  public:
-   FunctionBuilder(SystemConfig &c) : cfg(c) {}
-
-   template <typename F> void def(const std::string &name, int min, int max, F f) { cfg.functions[name] = {min, max, f}; }
- };
 
  ///!!!!
  static void registerBasicMath(SystemConfig &cfg);     // 基本関数
@@ -161,7 +156,7 @@ namespace mm::cal {
                            if (v[0].isComplex()) return realIfPossible(std::tan(toComplex(v[0], ctx.pos) * deg2rad));
                            double r = requireReal(v[0], ctx.pos) * deg2rad;
                            double c = std::cos(r);
-                           return (std::abs(c) < eps) ? signedInfBy(std::sin(r)) : std::tan(r);
+                           return (std::abs(c) < cnst_precision_inv) ? signedInfBy(std::sin(r)) : std::tan(r);
                           }};
   cfg.functions["cot"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
                            if (v[0].isComplex()) {
@@ -170,32 +165,32 @@ namespace mm::cal {
                            }
                            double r = requireReal(v[0], ctx.pos) * deg2rad;
                            double s = std::sin(r);
-                           return (std::abs(s) < eps) ? signedInfBy(std::cos(r)) : std::cos(r) / s;
+                           return (std::abs(s) < cnst_precision_inv) ? signedInfBy(std::cos(r)) : std::cos(r) / s;
                           }};
   cfg.functions["sec"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
                            if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::cos(toComplex(v[0], ctx.pos) * deg2rad));
                            double r = requireReal(v[0], ctx.pos) * deg2rad;
                            double c = std::cos(r);
-                           return (std::abs(c) < eps) ? signedInfBy(std::sin(r)) : 1.0 / c;
+                           return (std::abs(c) < cnst_precision_inv) ? signedInfBy(std::sin(r)) : 1.0 / c;
                           }};
   cfg.functions["csc"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
                            if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::sin(toComplex(v[0], ctx.pos) * deg2rad));
                            double r = requireReal(v[0], ctx.pos) * deg2rad;
                            double s = std::sin(r);
-                           return (std::abs(s) < eps) ? signedInfBy(std::cos(r)) : 1.0 / s;
+                           return (std::abs(s) < cnst_precision_inv) ? signedInfBy(std::cos(r)) : 1.0 / s;
                           }};
   cfg.functions["asin"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             if (v[0].isComplex()) return realIfPossible(std::asin(toComplex(v[0], ctx.pos)) * rad2deg);
                             double x = requireReal(v[0], ctx.pos);
                             if (std::abs(x) <= 1.0) return std::asin(x) * rad2deg;
-                            calcWarn(ctx.cfg, ctx.pos, "asin(|x|>1): complex principal value only");
+                            calcWarn(ctx.session.cfg, ctx.pos, "asin(|x|>1): complex principal value only");
                             return realIfPossible(std::asin(Complex(x, 0)) * rad2deg);
                            }};
   cfg.functions["acos"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             if (v[0].isComplex()) return realIfPossible(std::acos(toComplex(v[0], ctx.pos)) * rad2deg);
                             double x = requireReal(v[0], ctx.pos);
                             if (std::abs(x) <= 1.0) return std::acos(x) * rad2deg;
-                            calcWarn(ctx.cfg, ctx.pos, "acos(|x|>1): complex principal value only");
+                            calcWarn(ctx.session.cfg, ctx.pos, "acos(|x|>1): complex principal value only");
                             return realIfPossible(std::acos(Complex(x, 0)) * rad2deg);
                            }};
   cfg.functions["atan"] = {1, 1, [](auto &v, auto &ctx) -> Value {
@@ -222,7 +217,7 @@ namespace mm::cal {
                              if (v[0].isComplex()) return realIfPossible(std::acosh(toComplex(v[0], ctx.pos)));
                              double x = requireReal(v[0], ctx.pos);
                              if (x >= 1.0) return std::acosh(x);
-                             calcWarn(ctx.cfg, ctx.pos, "acosh(x<1): complex principal value only");
+                             calcWarn(ctx.session.cfg, ctx.pos, "acosh(x<1): complex principal value only");
                              return realIfPossible(std::acosh(Complex(x, 0)));
                             }};
 
@@ -230,7 +225,7 @@ namespace mm::cal {
                              if (v[0].isComplex()) return realIfPossible(std::atanh(toComplex(v[0], ctx.pos)));
                              double x = requireReal(v[0], ctx.pos);
                              if (std::abs(x) < 1.0) return std::atanh(x);
-                             calcWarn(ctx.cfg, ctx.pos, "atanh(|x|>=1): complex principal value only");
+                             calcWarn(ctx.session.cfg, ctx.pos, "atanh(|x|>=1): complex principal value only");
                              return realIfPossible(std::atanh(Complex(x, 0)));
                             }};
   cfg.functions["csch"] = {1, 1, [](auto &v, auto &ctx) -> Value {
@@ -427,7 +422,6 @@ namespace mm::cal {
                                // reflection formula
                                if (x < 0.0) {
                                 double rec = evaluateFunction("digamma", {Value(1.0 - x)}, ctx).asScalar(ctx.pos);
-                                double s = std::sin(PI * x);
                                 return rec - PI / std::tan(PI * x);
                                }
                                double result = 0.0;
@@ -464,7 +458,6 @@ namespace mm::cal {
                                  result += 1.0 / (x * x);
                                  x += 1.0;
                                 }
-                                double f = 1.0 / (x * x);
                                 result += 1.0 / (2.0 * x * x) + (1.0 + (1.0 / (6.0 * x * x)) * (1.0 - 1.0 / (30.0 * x * x))) / x;
                                 return result;
                                }};
@@ -511,11 +504,10 @@ namespace mm::cal {
                             auto a = collectReals(v, ctx);
                             if (a.empty()) throwDomain(ctx.pos);
                             std::sort(a.begin(), a.end());
-                            auto eq = [&](double x, double y) { return std::abs(x - y) <= cnst_precision_inv; };
                             double best = a[0], cur = a[0];
                             int bestCnt = 1, curCnt = 1;
                             for (size_t i = 1; i < a.size(); ++i) {
-                             if (eq(a[i], cur)) {
+                             if (nearly_equal(a[i], cur)) {
                               ++curCnt;
                               continue;
                              }
@@ -1735,7 +1727,6 @@ namespace mm::cal {
 
                                   // QR反復法による固有値計算
                                   const int max_iterations = 1000;
-                                  const double epsilon = 1e-12;
 
                                   for (int iter = 0; iter < max_iterations; ++iter) {
                                    bool converged = true;
@@ -1764,7 +1755,7 @@ namespace mm::cal {
                                     }
                                     norm = std::sqrt(norm);
 
-                                    if (norm < epsilon) continue;
+                                    if (norm < cnst_precision_inv) continue;
 
                                     // 通常の符号を持つ値を選択
                                     double sign = (v[0] >= 0) ? 1.0 : -1.0;
@@ -1781,7 +1772,7 @@ namespace mm::cal {
                                     }
                                     w_norm = std::sqrt(w_norm);
 
-                                    if (w_norm < epsilon) continue;
+                                    if (w_norm < cnst_precision_inv) continue;
 
                                     // ハウスホルダー変換の計算
                                     std::vector<double> u(w);
@@ -1829,7 +1820,7 @@ namespace mm::cal {
 
                                    // 収束判定
                                    for (size_t i = 0; i < n - 1; ++i) {
-                                    if (std::abs(R[i][i + 1]) > epsilon) {
+                                    if (!nearly_zero(R[i][i + 1])) {
                                      converged = false;
                                      break;
                                     }
@@ -1864,7 +1855,6 @@ namespace mm::cal {
 
                                    // 連立方程式 (A - λI) x = 0 を解く（簡単な方法）
                                    std::vector<double> eigenvector(n, 0.0);
-                                   bool found = false;
 
                                    // 単純なガウス・ザイデル法で解を求める
                                    const int gauss_iter = 100;
@@ -1876,7 +1866,7 @@ namespace mm::cal {
                                      for (size_t j = 0; j < n; ++j) {
                                       if (i != j) { sum += I_minus_lambda_A[i][j] * eigenvector[j]; }
                                      }
-                                     if (std::abs(I_minus_lambda_A[i][i]) > epsilon) { new_eigenvector[i] = -sum / I_minus_lambda_A[i][i]; }
+                                     if (std::abs(I_minus_lambda_A[i][i]) > cnst_precision_inv) { new_eigenvector[i] = -sum / I_minus_lambda_A[i][i]; }
                                     }
 
                                     // 正規化
@@ -1886,7 +1876,7 @@ namespace mm::cal {
                                     }
                                     norm = std::sqrt(norm);
 
-                                    if (norm > epsilon) {
+                                    if (norm > cnst_precision_inv) {
                                      for (double &val : new_eigenvector) {
                                       val /= norm;
                                      }
@@ -2024,8 +2014,6 @@ namespace mm::cal {
                             norm = std::sqrt(norm);
 
                             // 通常の符号を持つ値を選択
-                            double sign = (v[0] >= 0) ? 1.0 : -1.0;
-                            /*double alpha = -sign * norm;*/
                             double alpha = (v[0] >= 0) ? -norm : norm;
 
                             // w = v + alpha * e_1
@@ -2152,14 +2140,14 @@ namespace mm::cal {
                              V[i][i] = 1.0;
 
                             const int max_iter = 100;
-                            const double eps = 1e-12;
+                            const double cnst_precision_inv = 1e-12;
 
                             for (int iter = 0; iter < max_iter; ++iter) {
                              bool converged = true;
                              for (size_t p = 0; p < n - 1; ++p) {
                               for (size_t q = p + 1; q < n; ++q) {
 
-                               if (std::abs(AtA[p][q]) < eps) continue;
+                               if (std::abs(AtA[p][q]) < cnst_precision_inv) continue;
 
                                converged = false;
 
@@ -2213,7 +2201,7 @@ namespace mm::cal {
                             std::vector<std::vector<double>> U(m, std::vector<double>(n, 0.0));
 
                             for (size_t i = 0; i < n; ++i) {
-                             if (sigma[i] < eps) continue;
+                             if (sigma[i] < cnst_precision_inv) continue;
 
                              for (size_t r = 0; r < m; ++r)
                               for (size_t c = 0; c < n; ++c)
@@ -2341,7 +2329,7 @@ namespace mm::cal {
                                   double min_sv = *std::min_element(svd_values.begin(), svd_values.end());
 
                                   // 最小特異値がゼロに近い場合（数値誤差）
-                                  if (min_sv < 1e-12) { return Value(std::numeric_limits<double>::infinity()); }
+                                  if (nearly_zero(min_sv)) { return Value(std::numeric_limits<double>::infinity()); }
 
                                   return Value(max_sv / min_sv);
                                  }};
@@ -2458,7 +2446,7 @@ namespace mm::cal {
                              std::vector<double> x(n);
                              for (int i = (int)n - 1; i >= 0; --i) {
 
-                              if (std::abs(R[i][i]) < 1e-12) throw CalcError(CalcErrorType::InvalidOperation, "matrix is rank deficient", ctx.pos);
+                              if (nearly_zero(R[i][i])) throw CalcError(CalcErrorType::InvalidOperation, "matrix is rank deficient", ctx.pos);
 
                               x[i] = y[i];
                               for (size_t j = i + 1; j < n; ++j)
@@ -2786,12 +2774,12 @@ namespace mm::cal {
                               return dL / L;
                              }};
 
-  // young(sigma, eps) = sigma/eps
+  // young(sigma, cnst_precision_inv) = sigma/cnst_precision_inv
   cfg.functions["young"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                              double sigma = v[0].asScalar(ctx.pos);
-                             double eps = v[1].asScalar(ctx.pos);
-                             if (eps == 0.0) throwDomain(ctx.pos);
-                             return sigma / eps;
+                             double cnst_precision_inv = v[1].asScalar(ctx.pos);
+                             if (cnst_precision_inv == 0.0) throwDomain(ctx.pos);
+                             return sigma / cnst_precision_inv;
                             }};
 
   // moment_rect(b,h) = b*h^3/12
@@ -3394,21 +3382,21 @@ namespace mm::cal {
   // ---- history / state ----
   cfg.functions["In"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
                           int i = (int)requireInt(v[0], ctx.pos);
-                          if (i <= 0 || i > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
+                          if (i <= 0 || i > (int)ctx.session.history.size()) { throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos); }
 
-                          EvaluationContext ectx{ctx.cfg, ctx.hist, ctx.base};
-                          return evaluate(ctx.hist[i - 1].expr, ctx.cfg, ctx.hist, ctx.base, ectx).value;
+                          EvaluationContext ectx{ctx.session};
+                          return evaluate(ctx.session.history[i - 1].expr, ectx).value;
                          }};
   cfg.functions["Out"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            int i = (int)requireInt(v[0], ctx.pos);
-                           if (i <= 0 || i > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
-                           return ctx.hist[i - 1].value;
+                           if (i <= 0 || i > (int)ctx.session.history.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
+                           return ctx.session.history[i - 1].value;
                           }};
   cfg.functions["Prev"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             int k = (int)requireInt(v[0], ctx.pos);
-                            int idx = ctx.base - k + 1;
-                            if (idx <= 0 || idx > (int)ctx.hist.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
-                            return ctx.hist[idx - 1].value;
+                            int idx = ctx.session.base - k + 1;
+                            if (idx <= 0 || idx > (int)ctx.session.history.size()) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), ctx.pos);
+                            return ctx.session.history[idx - 1].value;
                            }};
   cfg.functions["Clear"] = {0, 0, [](auto &, auto &) -> Value { throw ControlRequest{ControlRequest::Kind::Clear}; }};
   cfg.functions["Exit"] = {0, 0, [](auto &, auto &) -> Value { throw ControlRequest{ControlRequest::Kind::Exit}; }};
@@ -3436,95 +3424,55 @@ namespace mm::cal {
                                content.resize(size);
                                ifs.read(content.data(), size);
                               } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: read failure", ctx.pos); }
-                              EvalResult result;
+
                               try {
-                               EvaluationContext ectx{ctx.cfg, ctx.hist, ctx.base};
-                               result = evaluate(content, ctx.cfg, ctx.hist, ctx.base, ectx);
+                               std::vector<InputEntry> localHistory = ctx.session.history;
+                               int localBase = ctx.session.base;
+                               std::unordered_map<std::string, Value> localGlobals;
+                               std::unordered_map<std::string, UserFunction> localUserFunctions;
 
-                              } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: readed file cannot evaluate", ctx.pos); }
+                               SessionState session{ctx.session.cfg, localHistory, localBase, localGlobals, localUserFunctions};
+                               EvaluationContext ectx{session};
 
-                              return result.value;
+                               EvalResult result = evaluate(content, ectx);
+                               return result.value;
+                              } catch (...) { throw CalcError(CalcErrorType::IOError, "IOError: file content cannot be evaluated", ctx.pos); }
                              }};
   cfg.functions["fileout"] = {2, 2, [](auto &v, auto &ctx) -> Value {
-                               namespace fs = std::filesystem;
+                               std::ostringstream oss;
+                               serializeValue(v[0], oss, ctx.session.cfg);
+                               std::string content = std::move(oss).str();
 
-                               const std::string &utf8 = v[1].asString(ctx.pos);
-                               fs::path path = fs::path{std::u8string_view(reinterpret_cast<const char8_t *>(utf8.data()), utf8.size())};
+                               ctx.sideEffects.push_back({
+                                   SideEffect::Kind::FileWrite,
+                                   v[1].asString(ctx.pos), // path
+                                   std::move(content)      // serialized content
+                               });
 
-                               fs::path tmp = path;
-                               tmp += ".tmp";
-
-                               std::ofstream ofs;
-                               size_t filesize = 0;
-                               ofs.exceptions(std::ios::failbit | std::ios::badbit);
-
-                               try {
-                                ofs.open(tmp, std::ios::out | std::ios::trunc);
-
-                                // 直接ストリーム出力（巨大データ対応）
-                                serializeValue(v[0], ofs, ctx.cfg);
-
-                                ofs.flush();
-                                filesize = static_cast<size_t>(ofs.tellp());
-                                ofs.close();
-
-                                fs::rename(tmp, path);
-                               } catch (const std::exception &) {
-
-                                std::error_code ec;
-                                fs::remove(tmp, ec); // 失敗時はtmp削除
-
-                                throw CalcError(CalcErrorType::IOError, "IOError: write failure", ctx.pos);
-                               }
-                               // ctx.rt.suppressDisplay = true;
-                               std::cout << "file write completed (" << whatByteUnit(filesize) << ")\n";
-                               throw ControlRequest{ControlRequest::Kind::FileWrite};
+                               return v[0];
                               }};
 
   cfg.functions["clip"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            std::string s = formatResult(v[0], ctx.cfg);
+                            std::string s = formatResult(v[0], ctx.session.cfg);
 
                             if (s.size() >= 10 * 1024 * 1024) calcWarn("this data size is over 10MB");
-                            if (s.size() >= 100 * 1024 * 1024) throw CalcError(CalcErrorType::RuntimeError, "this data size is over 100MB. Cancelled for safety.", ctx.pos);
-                            if (!OpenClipboard(nullptr)) throw CalcError(CalcErrorType::IOError, "OpenClipboard failed", ctx.pos);
-                            try {
-                             if (!EmptyClipboard()) throw CalcError(CalcErrorType::RuntimeError, "EmptyClipboard failed", ctx.pos);
-                             // UTF8 → UTF16変換
-                             int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-                             if (size <= 0) throw CalcError(CalcErrorType::RuntimeError, "UTF8->UTF16 convert failed", ctx.pos);
-                             HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size * sizeof(wchar_t));
-                             if (!hMem) throw CalcError(CalcErrorType::RuntimeError, "GlobalAlloc failed", ctx.pos);
+                            if (s.size() >= 100 * 1024 * 1024) { throw CalcError(CalcErrorType::RuntimeError, "this data size is over 100MB. Cancelled for safety.", ctx.pos); }
 
-                             wchar_t *buf = (wchar_t *)GlobalLock(hMem);
-                             if (!buf) {
-                              GlobalFree(hMem);
-                              throw CalcError(CalcErrorType::RuntimeError, "GlobalLock failed", ctx.pos);
-                             }
+                            ctx.sideEffects.push_back({SideEffect::Kind::ClipboardCopy, std::move(s), {}});
 
-                             MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, buf, size);
-                             GlobalUnlock(hMem);
-                             if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
-                              GlobalFree(hMem);
-                              throw CalcError(CalcErrorType::RuntimeError, "SetClipboardData failed", ctx.pos);
-                             }
-                            } catch (...) {
-                             CloseClipboard();
-                             throw;
-                            }
-                            CloseClipboard();
-                            std::cout << "clipboard pasted (" << whatByteUnit(s.size()) << ")\n";
-                            throw ControlRequest{ControlRequest::Kind::ClipboardCopy};
+                            return v[0];
                            }};
+
   cfg.functions["silent"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
                               ctx.sideEffects.push_back({SideEffect::Kind::SuppressDisplay, "", ""});
                               return v[0];
                              }};
   cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
-                               ctx.sideEffects.push_back({SideEffect::Kind::Explain, dataExplain(v[0], ctx.cfg), {}});
+                               ctx.sideEffects.push_back({SideEffect::Kind::Explain, dataExplain(v[0], ctx.session.cfg), {}});
                                return v[0];
                               }};
   // cfg.functions["explain"] = {1, 1, [](auto &v, FunctionContext &ctx) -> Value {
-  //                              std::cout << dataExplain(v[0], ctx.cfg);
+  //                              std::cout << dataExplain(v[0], ctx.session.cfg);
   //                              throw ControlRequest{ControlRequest::Kind::Explain};
   //                             }};
  }
@@ -3550,8 +3498,8 @@ namespace mm::cal {
  }
 
  Value evaluateFunction(const std::string &name, const std::vector<Value> &args, FunctionContext &ctx) {
-  auto it = ctx.cfg.functions.find(name);
-  if (it == ctx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), ctx.pos);
+  auto it = ctx.session.cfg.functions.find(name);
+  if (it == ctx.session.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), ctx.pos);
 
   const FunctionDef &f = it->second;
 

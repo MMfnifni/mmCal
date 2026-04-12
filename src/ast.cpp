@@ -41,17 +41,22 @@ namespace mm::cal {
  Value NumberNode::evalImpl(EvaluationContext &ectx) const { return value; }
  AssignNode::AssignNode(std::string n, std::unique_ptr<ASTNode> e, size_t p) : name(std::move(n)), expr(std::move(e)) { pos = p; }
  Value AssignNode::evalImpl(EvaluationContext &ctx) const {
-  if (ctx.userFunctions->contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as function", pos);
+  if (ctx.session.userFunctions.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as function", pos);
   Value v = expr->eval(ctx);
-  ctx.variables[name] = v;
+  if (ctx.callStack.empty()) {
+   ctx.session.globals[name] = v;
+  } else {
+   ctx.locals[name] = v;
+  }
   return v;
  }
 
  FunctionDefNode::FunctionDefNode(std::string n, std::vector<std::string> s, std::unique_ptr<ASTNode> b, size_t p) : name(std::move(n)), params(std::move(s)), body(std::move(b)) { pos = p; }
  Value FunctionDefNode::evalImpl(EvaluationContext &ctx) const {
-  if (ctx.variables.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", pos); // 変数との衝突
-  if (ctx.cfg.functions.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: cannot override builtin", pos);   // builtinとの衝突
-  if (ctx.userFunctions->contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: function already defined", pos); // 再定義禁止
+  if (ctx.locals.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", pos);           // 変数との衝突
+  if (ctx.session.globals.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: name already used as variable", pos);  // 変数との衝突
+  if (ctx.session.cfg.functions.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: cannot override builtin", pos);  // builtinとの衝突
+  if (ctx.session.userFunctions.contains(name)) throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: function already defined", pos); // 再定義禁止
 
   { // 仮引数重複チェック
    std::unordered_set<std::string> seen;
@@ -67,7 +72,7 @@ namespace mm::cal {
 
   fn.body = body->clone(); // clone() をASTNodeに用意すること
 
-  (*ctx.userFunctions)[name] = std::move(fn);
+  ctx.session.userFunctions[name] = std::move(fn);
 
   return Value(); // none
  }
@@ -130,7 +135,7 @@ namespace mm::cal {
   if (std::find(ectx.callStack.begin(), ectx.callStack.end(), name) != ectx.callStack.end()) { throw CalcError(CalcErrorType::DefinitionError, "recursion disabled", pos); } // 自己再帰検出
 
   // user function 優先
-  if (auto uit = ectx.userFunctions->find(name); uit != ectx.userFunctions->end()) {
+  if (auto uit = ectx.session.userFunctions.find(name); uit != ectx.session.userFunctions.end()) {
    const UserFunction &fn = uit->second;
    if (args.size() != fn.params.size()) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
    std::vector<Value> values;
@@ -138,22 +143,21 @@ namespace mm::cal {
    for (auto &a : args)
     values.push_back(a->eval(ectx));
 
-   ectx.callStack.push_back(name); // 呼び出し開始
-
    // ローカルコンテキスト生成
-   EvaluationContext local = ectx;
-   // local.variables.clear();
-   for (size_t i = 0; i < fn.params.size(); ++i)
-    local.variables[fn.params[i]] = values[i];
-   Value r = fn.body->eval(local);
-   ectx.callStack.pop_back();
+   EvaluationContext local(ectx.session);
+   local.callStack = ectx.callStack;
+   local.callStack.push_back(name);
 
-   return r;
+   for (size_t i = 0; i < fn.params.size(); ++i) {
+    local.locals[fn.params[i]] = values[i];
+   }
+
+   return fn.body->eval(local);
   }
 
   // 内蔵関数
-  auto it = ectx.cfg.functions.find(name);
-  if (it == ectx.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
+  auto it = ectx.session.cfg.functions.find(name);
+  if (it == ectx.session.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
 
   auto &f = it->second;
   int argc = static_cast<int>(args.size());
@@ -165,7 +169,7 @@ namespace mm::cal {
   for (auto &a : args)
    v.push_back(a->eval(ectx));
 
-  FunctionContext ctx{ectx.cfg, ectx.hist, ectx.base, pos, ectx.sideEffects};
+  FunctionContext ctx{ectx.session, pos, ectx.sideEffects};
 
   return f.f(v, ctx);
  }
@@ -173,9 +177,10 @@ namespace mm::cal {
  SymbolNode::SymbolNode(std::string n, size_t p) : name(std::move(n)) { pos = p; }
 
  Value SymbolNode::evalImpl(EvaluationContext &ectx) const {
-  if (ectx.variables.contains(name)) return ectx.variables.at(name); // ユーザ変数(パーサは置換するものじゃない)
-  if (constants.count(name)) return constants.at(name);              // 定数はここで解決できる（parse段階で解決しなくてよくなる）
-  if (symbols.count(name)) return name;                              // symbols(deg, rad, mm...) はオプション指定子としては文字列扱いで返す
+  if (ectx.locals.contains(name)) return ectx.locals.at(name);
+  if (ectx.session.globals.contains(name)) return ectx.session.globals.at(name);
+  if (constants.count(name)) return constants.at(name);
+  if (symbols.count(name)) return name;
   // return name; // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
 
   throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
@@ -222,26 +227,26 @@ namespace mm::cal {
 
   int i;
   if (index > 0) i = index;
-  else i = static_cast<int>(ectx.hist.size()) + index + 1;
+  else i = static_cast<int>(ectx.session.history.size()) + index + 1;
 
-  if (i <= 0 || i > static_cast<int>(ectx.hist.size())) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
+  if (i <= 0 || i > static_cast<int>(ectx.session.history.size())) throw CalcError(CalcErrorType::OutOfRange, errorMessage(CalcErrorType::OutOfRange), pos);
 
-  return ectx.hist[i - 1].value;
+  return ectx.session.history[i - 1].value;
  }
  Value evalCompare(const Value &lhs, const Value &rhs, CmpOp op, FunctionContext &ctx) {
   // 複素数は大小比較不可
   if (lhs.isComplex() || rhs.isComplex()) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
   double a = lhs.asScalar(ctx.pos), b = rhs.asScalar(ctx.pos);
   bool r = false;
-  int prec = ctx.cfg.precision;
+  int prec = ctx.session.cfg.precision;
 
   switch (op) {
-   case CmpOp::Equal: r = tolerantEqual(a, b, prec); break;
-   case CmpOp::NotEqual: r = !tolerantEqual(a, b, prec); break;
-   case CmpOp::Less: r = a < b && !tolerantEqual(a, b, prec); break;
-   case CmpOp::LessEq: r = a < b || tolerantEqual(a, b, prec); break;
-   case CmpOp::Greater: r = a > b && !tolerantEqual(a, b, prec); break;
-   case CmpOp::GreaterEq: r = a > b || tolerantEqual(a, b, prec); break;
+   case CmpOp::Equal: r = nearly_equal(a, b); break;
+   case CmpOp::NotEqual: r = !nearly_equal(a, b); break;
+   case CmpOp::Less: r = a < b && !nearly_equal(a, b); break;
+   case CmpOp::LessEq: r = a < b || nearly_equal(a, b); break;
+   case CmpOp::Greater: r = a > b && !nearly_equal(a, b); break;
+   case CmpOp::GreaterEq: r = a > b || nearly_equal(a, b); break;
   }
   return r ? 1.0 : 0.0;
  }
