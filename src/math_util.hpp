@@ -27,6 +27,7 @@ namespace mm::cal {
 
  // 「1/denom」を安全に返す関数
  Value safeInv(double denom, double sign);
+
  static inline Value signedInfBy(double sign) { return inf(sign >= 0 ? +1 : -1); }
  // denom が 0 に近いときに ±inf を返す（符号は signSource から取る）
  static inline Value invOrSignedInf(double denom, double signSource) { return (std::abs(denom) < cnst_precision_inv) ? signedInfBy(signSource) : (1.0 / denom); }
@@ -652,6 +653,7 @@ namespace mm::cal {
  size_t nrows(const std::vector<std::vector<double>> &A);
  size_t ncols(const std::vector<std::vector<double>> &A);
  std::vector<std::vector<double>> identity(size_t n);
+ bool isSymmetricMatrix(const std::vector<std::vector<double>> &A, double tol);
  std::vector<double> mat_vec(const std::vector<std::vector<double>> &A, const std::vector<double> &x);
  std::vector<std::vector<double>> mat_mul(const std::vector<std::vector<double>> &A, const std::vector<std::vector<double>> &B);
  std::vector<std::vector<double>> transpose(const std::vector<std::vector<double>> &A);
@@ -675,5 +677,60 @@ namespace mm::cal {
  void fft_rec(std::vector<std::complex<double>> &a);
  std::vector<std::complex<double>> fft_dispatch(const std::vector<std::complex<double>> &x, bool inverse, FunctionContext &ctx);
  Value fft2D(const Value &v, bool inverse, FunctionContext &ctx);
+
+ inline void validate_matrix_shape(const std::vector<std::vector<double>> &A, const char *name) {
+  if (A.empty()) return;
+
+  const size_t cols = A[0].size();
+  for (size_t i = 1; i < A.size(); ++i) {
+   if (A[i].size() != cols) { throw std::runtime_error(std::string(name) + ": irregular matrix"); }
+  }
+ }
+
+ inline void ensureFlatVectorValue(const Value &v, FunctionContext &ctx, const char *name) {
+  if (!v.isMulti()) { throw CalcError(CalcErrorType::TypeError, std::string(name) + " requires vector argument", ctx.pos); }
+
+  const auto &mv = v.asMultiRef(ctx.pos);
+  for (const auto &e : mv.elems()) {
+   if (e.isMulti()) { throw CalcError(CalcErrorType::DomainError, std::string("DomainError: ") + name + " requires 1-dimensional vector", ctx.pos); }
+  }
+ }
+
+ inline std::vector<double> toVectorChecked(const Value &v, FunctionContext &ctx, const char *name) {
+  ensureFlatVectorValue(v, ctx, name);
+  const auto &mv = v.asMultiRef(ctx.pos);
+
+  std::vector<double> out;
+  out.reserve(mv.size());
+  for (const auto &e : mv.elems()) {
+   out.push_back(e.asScalar(ctx.pos));
+  }
+  return out;
+ }
+
+ inline Value fromVectorValue(const std::vector<double> &xs) {
+  auto mv = std::make_shared<MultiValue>();
+  mv->elems_.reserve(xs.size());
+  for (double x : xs) {
+   mv->elems_.emplace_back(x);
+  }
+  return Value(mv);
+ }
+
+ inline void ensureMatrixValue(const Value &v, FunctionContext &ctx, const char *name) {
+  if (!v.isMulti()) { throw CalcError(CalcErrorType::TypeError, std::string(name) + " requires matrix argument", ctx.pos); }
+
+  const auto &outer = v.asMultiRef(ctx.pos);
+  for (const auto &row : outer.elems()) {
+   if (!row.isMulti()) { throw CalcError(CalcErrorType::DomainError, std::string("DomainError: ") + name + " requires 2-dimensional matrix", ctx.pos); }
+  }
+ }
+
+ inline std::vector<std::vector<double>> toMatrixChecked(const Value &v, FunctionContext &ctx, const char *name) {
+  ensureMatrixValue(v, ctx, name);
+  auto A = toMatrix(v, ctx);
+  validate_matrix_shape(A, name);
+  return A;
+ }
 
 } // namespace mm::cal

@@ -1,7 +1,5 @@
 ﻿#include "math_util.hpp"
 
-#include <intrin.h>
-
 namespace mm::cal {
 
  /* ============================
@@ -340,6 +338,22 @@ namespace mm::cal {
   return 1.0 / denom;
  }
 
+ static void validate_mat_vec_dims(const std::vector<std::vector<double>> &A, const std::vector<double> &x, const char *name) {
+  validate_matrix_shape(A, name);
+  if (!A.empty() && ncols(A) != x.size()) { throw std::runtime_error(std::string(name) + ": dimension mismatch"); }
+ }
+
+ static void validate_mat_mul_dims(const std::vector<std::vector<double>> &A, const std::vector<std::vector<double>> &B, const char *name) {
+  validate_matrix_shape(A, name);
+  validate_matrix_shape(B, name);
+
+  if (!A.empty() && !B.empty() && ncols(A) != nrows(B)) { throw std::runtime_error(std::string(name) + ": dimension mismatch"); }
+ }
+
+ static void validate_same_size_vector(const std::vector<double> &a, const std::vector<double> &b, const char *name) {
+  if (a.size() != b.size()) { throw std::runtime_error(std::string(name) + ": dimension mismatch"); }
+ }
+
  size_t nrows(const std::vector<std::vector<double>> &A) { return A.size(); }
  size_t ncols(const std::vector<std::vector<double>> &A) { return A.empty() ? 0 : A[0].size(); }
 
@@ -350,23 +364,63 @@ namespace mm::cal {
   return I;
  }
 
+ bool isSymmetricMatrix(const std::vector<std::vector<double>> &A, double tol = 1e-10) {
+  validate_matrix_shape(A, "isSymmetricMatrix");
+
+  const size_t n = A.size();
+  if (n == 0) return false;
+  if (n != A[0].size()) return false;
+
+  for (size_t i = 0; i < n; ++i) {
+   for (size_t j = i + 1; j < n; ++j) {
+    if (std::abs(A[i][j] - A[j][i]) > tol) { return false; }
+   }
+  }
+  return true;
+ }
+
  std::vector<double> mat_vec(const std::vector<std::vector<double>> &A, const std::vector<double> &x) {
-  size_t n = nrows(A);
+  validate_mat_vec_dims(A, x, "mat_vec");
+
+  const size_t n = nrows(A);
+  const size_t m = x.size();
+
   std::vector<double> r(n, 0.0);
-  for (size_t i = 0; i < n; ++i)
-   for (size_t j = 0; j < x.size(); ++j)
+  for (size_t i = 0; i < n; ++i) {
+   for (size_t j = 0; j < m; ++j) {
     r[i] += A[i][j] * x[j];
+   }
+  }
   return r;
  }
 
  std::vector<std::vector<double>> mat_mul(const std::vector<std::vector<double>> &A, const std::vector<std::vector<double>> &B) {
-  size_t n = nrows(A), m = ncols(B), k = ncols(A);
+  validate_mat_mul_dims(A, B, "mat_mul");
+
+  const size_t n = nrows(A);
+  const size_t m = B.empty() ? 0 : ncols(B);
+  const size_t k = A.empty() ? 0 : ncols(A);
+
   std::vector<std::vector<double>> C(n, std::vector<double>(m, 0.0));
-  for (size_t i = 0; i < n; ++i)
-   for (size_t j = 0; j < m; ++j)
-    for (size_t t = 0; t < k; ++t)
-     C[i][j] += A[i][t] * B[t][j];
+  for (size_t i = 0; i < n; ++i) {
+   for (size_t t = 0; t < k; ++t) {
+    const double a_it = A[i][t];
+    for (size_t j = 0; j < m; ++j) {
+     C[i][j] += a_it * B[t][j];
+    }
+   }
+  }
   return C;
+ }
+
+ double dot(const std::vector<double> &a, const std::vector<double> &b) {
+  validate_same_size_vector(a, b, "dot");
+
+  double s = 0.0;
+  for (size_t i = 0; i < a.size(); ++i) {
+   s += a[i] * b[i];
+  }
+  return s;
  }
 
  std::vector<std::vector<double>> transpose(const std::vector<std::vector<double>> &A) {
@@ -384,28 +438,41 @@ namespace mm::cal {
   return std::sqrt(s);
  }
 
- double dot(const std::vector<double> &a, const std::vector<double> &b) {
-  double s = 0;
-  for (size_t i = 0; i < a.size(); ++i)
-   s += a[i] * b[i];
-  return s;
- }
-
  double power_method(const std::vector<std::vector<double>> &A, std::vector<double> &eigenvec, int max_iter) {
-  size_t n = nrows(A);
+  validate_matrix_shape(A, "power_method");
+
+  const size_t n = nrows(A);
+  if (n == 0 || n != ncols(A)) { throw std::runtime_error("power_method: matrix must be non-empty and square"); }
+
   eigenvec.assign(n, 1.0);
 
-  double lambda = 0;
+  double lambda = 0.0;
 
   for (int k = 0; k < max_iter; ++k) {
    std::vector<double> y = mat_vec(A, eigenvec);
-   double new_lambda = dot(y, eigenvec) / dot(eigenvec, eigenvec);
 
-   double nrm = norm(y);
-   for (size_t i = 0; i < n; ++i)
+   const double denom = dot(eigenvec, eigenvec);
+   if (std::abs(denom) < cnst_precision_inv) { throw std::runtime_error("power_method: zero denominator"); }
+
+   const double new_lambda = dot(y, eigenvec) / denom;
+   const double nrm = norm(y);
+
+   if (nrm < cnst_precision_inv) {
+    if (k == 0) {
+     eigenvec.assign(n, 0.0);
+     return 0.0;
+    }
+    break;
+   }
+
+   for (size_t i = 0; i < n; ++i) {
     eigenvec[i] = y[i] / nrm;
+   }
 
-   if (std::fabs(new_lambda - lambda) < cnst_precision_inv) break;
+   if (std::fabs(new_lambda - lambda) < cnst_precision_inv) {
+    lambda = new_lambda;
+    break;
+   }
 
    lambda = new_lambda;
   }

@@ -12,6 +12,14 @@
 
 namespace mm::cal {
 
+ static std::filesystem::path path_from_utf8_string(const std::string &utf8) {
+#ifdef _WIN32
+  return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(utf8.data()), reinterpret_cast<const char8_t *>(utf8.data() + utf8.size())));
+#else
+  return std::filesystem::path(utf8);
+#endif
+ }
+
  /* ============================
    地獄の無限関数定義編
    ============================ */
@@ -877,13 +885,11 @@ namespace mm::cal {
                               return Value(result);
                              }};
   cfg.functions["vnorm"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vnorm requires multivalue argument", ctx.pos);
-                             const auto &vec = v[0].asMultiRef(ctx.pos);
+                             auto a = toVectorChecked(v[0], ctx, "vnorm");
 
                              double sum = 0.0;
-                             for (const auto &elem : vec.elems()) {
-                              double val = elem.asScalar(ctx.pos);
-                              sum += val * val;
+                             for (double x : a) {
+                              sum += x * x;
                              }
                              return Value(std::sqrt(sum));
                             }};
@@ -934,34 +940,28 @@ namespace mm::cal {
                            return Value(acc);
                           }};
   cfg.functions["vsum"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vsum requires multivalue argument", ctx.pos);
-                            const auto &a = v[0].asMultiRef(ctx.pos);
+                            auto a = toVectorChecked(v[0], ctx, "vsum");
                             double sum = 0.0;
-                            for (const auto &elem : a.elems()) {
-                             sum += elem.asScalar(ctx.pos);
-                            }
+                            for (double x : a)
+                             sum += x;
+
                             return Value(sum);
                            }};
   // ベクトルの正規化
   cfg.functions["vnormalize"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                                  if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "vnormalize requires multivalue argument", ctx.pos);
-                                  const auto &vec = v[0].asMultiRef(ctx.pos);
+                                  auto a = toVectorChecked(v[0], ctx, "vnormalize");
 
-                                  double norm = 0.0;
-                                  for (const auto &elem : vec.elems()) {
-                                   double val = elem.asScalar(ctx.pos);
-                                   norm += val * val;
-                                  }
-                                  norm = std::sqrt(norm);
+                                  double nrm2 = 0.0;
+                                  for (double x : a)
+                                   nrm2 += x * x;
 
-                                  if (norm == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: cannot normalize zero vector", ctx.pos);
+                                  const double nrm = std::sqrt(nrm2);
+                                  if (nrm == 0.0) { throw CalcError(CalcErrorType::DomainError, "DomainError: cannot normalize zero vector", ctx.pos); }
 
-                                  auto result = std::make_shared<MultiValue>();
-                                  result->elems_.reserve(vec.size());
-                                  for (const auto &elem : vec.elems()) {
-                                   result->elems_.push_back(Value(elem.asScalar(ctx.pos) / norm));
-                                  }
-                                  return Value(result);
+                                  for (double &x : a)
+                                   x /= nrm;
+
+                                  return fromVectorValue(a);
                                  }};
 
   // ベクトルの射影
@@ -1299,31 +1299,48 @@ namespace mm::cal {
  static void registerVector(SystemConfig &cfg) {
   // 任意サイズ行列の作成
   cfg.functions["matrix"] = {0, -1, [](auto &v, auto &ctx) -> Value {
-                              if (v.empty()) throw CalcError(CalcErrorType::TypeError, "matrix requires at least one row", ctx.pos);
+                              if (v.empty()) { throw CalcError(CalcErrorType::TypeError, "matrix requires at least one row", ctx.pos); }
 
-                              // 1引数で既に2Dならそのまま返す
+                              // 1引数で既に2D matrix なら検証してそのまま返す
                               if (v.size() == 1 && v[0].isMulti()) {
+                               const auto &outer = v[0].asMultiRef(ctx.pos);
 
-                               const auto &first = v[0].asMultiRef(ctx.pos);
+                               if (outer.empty()) { return v[0]; }
 
-                               if (!first.empty() && first[0].isMulti()) {
-                                return v[0]; // すでに2D
+                               bool all_rows_are_multi = true;
+                               for (const auto &row : outer.elems()) {
+                                if (!row.isMulti()) {
+                                 all_rows_are_multi = false;
+                                 break;
+                                }
+                               }
+
+                               if (all_rows_are_multi) {
+                                auto A = toMatrixChecked(v[0], ctx, "matrix");
+                                (void)A;
+                                return v[0];
                                }
                               }
 
-                              size_t rows = v.size();
-                              size_t cols = v[0].asMultiRef(ctx.pos).size();
+                              // 複数引数: 各引数が row vector であることを要求
+                              size_t cols = 0;
+                              bool first = true;
 
                               auto result = std::make_shared<MultiValue>();
-                              result->elems_.reserve(rows);
+                              result->elems_.reserve(v.size());
 
-                              for (size_t i = 0; i < rows; ++i) {
+                              for (const auto &arg : v) {
+                               ensureFlatVectorValue(arg, ctx, "matrix");
+                               const auto &row = arg.asMultiRef(ctx.pos);
 
-                               const auto &row = v[i].asMultiRef(ctx.pos);
+                               if (first) {
+                                cols = row.size();
+                                first = false;
+                               } else if (row.size() != cols) {
+                                throw CalcError(CalcErrorType::DomainError, "DomainError: all rows must have the same number of columns", ctx.pos);
+                               }
 
-                               if (row.size() != cols) throw CalcError(CalcErrorType::DomainError, "DomainError: all rows must have the same number of columns", ctx.pos);
-
-                               result->elems_.push_back(v[i]);
+                               result->elems_.push_back(arg);
                               }
 
                               return Value(result);
@@ -1331,78 +1348,70 @@ namespace mm::cal {
 
   // 任意サイズ行列の和
   cfg.functions["madd"] = {2, 2, [](auto &v, auto &ctx) -> Value {
-                            if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "madd requires two matrix arguments", ctx.pos);
-                            const auto &a = v[0].asMultiRef(ctx.pos);
-                            const auto &b = v[1].asMultiRef(ctx.pos);
+                            if (!v[0].isMulti() || !v[1].isMulti()) { throw CalcError(CalcErrorType::TypeError, "madd requires two matrix arguments", ctx.pos); }
 
-                            if (a.size() != b.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch", ctx.pos);
+                            auto A = toMatrixChecked(v[0], ctx, "madd");
+                            auto B = toMatrixChecked(v[1], ctx, "madd");
 
-                            auto result = std::make_shared<MultiValue>();
-                            result->elems_.reserve(a.size());
+                            if (A.size() != B.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch", ctx.pos); }
 
-                            for (size_t i = 0; i < a.size(); ++i) {
-                             const auto &row_a = a[i].asMultiRef(ctx.pos);
-                             const auto &row_b = b[i].asMultiRef(ctx.pos);
+                            if (A.empty()) { return fromMatrix({}); }
 
-                             if (row_a.size() != row_b.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: row dimension mismatch", ctx.pos); }
+                            if (A[0].size() != B[0].size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: row dimension mismatch", ctx.pos); }
 
-                             auto row_result = std::make_shared<MultiValue>();
-                             row_result->elems_.reserve(row_a.size());
+                            const size_t rows = A.size();
+                            const size_t cols = A[0].size();
 
-                             for (size_t j = 0; j < row_a.size(); ++j) {
-                              row_result->elems_.push_back(Value(row_a[j].asScalar(ctx.pos) + row_b[j].asScalar(ctx.pos)));
+                            std::vector<std::vector<double>> C(rows, std::vector<double>(cols, 0.0));
+                            for (size_t i = 0; i < rows; ++i) {
+                             for (size_t j = 0; j < cols; ++j) {
+                              C[i][j] = A[i][j] + B[i][j];
                              }
-                             result->elems_.push_back(Value(row_result));
                             }
-                            return Value(result);
+
+                            return fromMatrix(C);
                            }};
 
   // 任意サイズ行列の積
   cfg.functions["mmul"] = {2, 2, [](auto &v, auto &ctx) -> Value {
-                            if (!v[0].isMulti() || !v[1].isMulti()) throw CalcError(CalcErrorType::TypeError, "mmul requires two matrix arguments", ctx.pos);
-                            const auto &a = v[0].asMultiRef(ctx.pos);
-                            const auto &b = v[1].asMultiRef(ctx.pos);
+                            if (!v[0].isMulti() || !v[1].isMulti()) { throw CalcError(CalcErrorType::TypeError, "mmul requires two matrix arguments", ctx.pos); }
 
-                            if (a[0].asMultiRef(ctx.pos).size() != b.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch for multiplication", ctx.pos); }
+                            auto A = toMatrixChecked(v[0], ctx, "mmul");
+                            auto B = toMatrixChecked(v[1], ctx, "mmul");
 
-                            auto result = std::make_shared<MultiValue>();
-                            result->elems_.reserve(a.size());
+                            if (A.empty() || B.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos); }
 
-                            for (size_t i = 0; i < a.size(); ++i) {
-                             const auto &row_a = a[i].asMultiRef(ctx.pos);
-                             auto row_result = std::make_shared<MultiValue>();
-                             row_result->elems_.reserve(b[0].asMultiRef(ctx.pos).size());
+                            if (A[0].size() != B.size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix dimension mismatch for multiplication", ctx.pos); }
 
-                             for (size_t j = 0; j < b[0].asMultiRef(ctx.pos).size(); ++j) {
-                              double sum = 0.0;
-                              for (size_t k = 0; k < row_a.size(); ++k) {
-                               sum += row_a[k].asScalar(ctx.pos) * b[k].asMultiRef(ctx.pos)[j].asScalar(ctx.pos);
-                              }
-                              row_result->elems_.push_back(Value(sum));
-                             }
-                             result->elems_.push_back(Value(row_result));
-                            }
-                            return Value(result);
+                            auto C = mat_mul(A, B);
+                            return fromMatrix(C);
                            }};
 
   // 行列の転置
   cfg.functions["mtranspose"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                                  if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mtranspose requires matrix argument", ctx.pos);
-                                  const auto &matrix = v[0].asMultiRef(ctx.pos);
+                                  if (!v[0].isMulti()) { throw CalcError(CalcErrorType::TypeError, "mtranspose requires matrix argument", ctx.pos); }
 
-                                  if (matrix.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: cannot transpose empty matrix", ctx.pos); }
+                                  auto A = toMatrixChecked(v[0], ctx, "mtranspose");
+
+                                  if (A.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: cannot transpose empty matrix", ctx.pos); }
+
+                                  const size_t rows = A.size();
+                                  const size_t cols = A[0].size();
 
                                   auto result = std::make_shared<MultiValue>();
-                                  result->elems_.reserve(matrix[0].asMultiRef(ctx.pos).size());
+                                  result->elems_.reserve(cols);
 
-                                  for (size_t j = 0; j < matrix[0].asMultiRef(ctx.pos).size(); ++j) {
+                                  for (size_t j = 0; j < cols; ++j) {
                                    auto row_result = std::make_shared<MultiValue>();
-                                   row_result->elems_.reserve(matrix.size());
-                                   for (size_t i = 0; i < matrix.size(); ++i) {
-                                    row_result->elems_.push_back(matrix[i].asMultiRef(ctx.pos)[j]);
+                                   row_result->elems_.reserve(rows);
+
+                                   for (size_t i = 0; i < rows; ++i) {
+                                    row_result->elems_.push_back(Value(A[i][j]));
                                    }
+
                                    result->elems_.push_back(Value(row_result));
                                   }
+
                                   return Value(result);
                                  }};
 
@@ -1424,91 +1433,117 @@ namespace mm::cal {
 
   // 行列のランク
   cfg.functions["mrank"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mrank requires matrix argument", ctx.pos);
-                             const auto &matrix = v[0].asMultiRef(ctx.pos);
+                             if (!v[0].isMulti()) { throw CalcError(CalcErrorType::TypeError, "mrank requires matrix argument", ctx.pos); }
 
-                             if (matrix.empty() || matrix[0].asMultiRef(ctx.pos).empty()) { return Value(0.0); }
+                             auto A = toMatrixChecked(v[0], ctx, "mrank");
 
-                             // シンプルなランク計算（ガウス消去法の簡易版）
-                             size_t rows = matrix.size();
-                             size_t cols = matrix[0].asMultiRef(ctx.pos).size();
+                             if (A.empty()) { return Value(0.0); }
 
-                             // 行列をコピー
-                             std::vector<std::vector<double>> temp(rows, std::vector<double>(cols));
-                             for (size_t i = 0; i < rows; ++i) {
-                              for (size_t j = 0; j < cols; ++j) {
-                               temp[i][j] = matrix[i].asMultiRef(ctx.pos)[j].asScalar(ctx.pos);
-                              }
-                             }
+                             const size_t rows = A.size();
+                             const size_t cols = A[0].size();
+
+                             if (cols == 0) { return Value(0.0); }
+
+                             std::vector<std::vector<double>> M = A;
+                             const double eps = 1e-10;
 
                              size_t rank = 0;
-                             for (size_t col = 0; col < cols && rank < rows; ++col) {
+                             size_t pivot_col = 0;
+
+                             while (rank < rows && pivot_col < cols) {
                               size_t pivot = rank;
-                              for (size_t row = rank + 1; row < rows; ++row) {
-                               if (std::abs(temp[row][col]) > std::abs(temp[pivot][col])) { pivot = row; }
-                              }
+                              double best = std::abs(M[pivot][pivot_col]);
 
-                              if (std::abs(temp[pivot][col]) < 1e-10) continue;
-
-                              // 行の交換
-                              if (pivot != rank) { std::swap(temp[rank], temp[pivot]); }
-
-                              // 前進消去
-                              for (size_t row = rank + 1; row < rows; ++row) {
-                               double factor = temp[row][col] / temp[rank][col];
-                               for (size_t k = col; k < cols; ++k) {
-                                temp[row][k] -= factor * temp[rank][k];
+                              for (size_t i = rank + 1; i < rows; ++i) {
+                               const double cand = std::abs(M[i][pivot_col]);
+                               if (cand > best) {
+                                best = cand;
+                                pivot = i;
                                }
                               }
-                              rank++;
+
+                              if (best < eps) {
+                               ++pivot_col;
+                               continue;
+                              }
+
+                              if (pivot != rank) { std::swap(M[rank], M[pivot]); }
+
+                              const double diag = M[rank][pivot_col];
+
+                              for (size_t i = rank + 1; i < rows; ++i) {
+                               const double factor = M[i][pivot_col] / diag;
+                               if (std::abs(factor) < eps) continue;
+
+                               M[i][pivot_col] = 0.0;
+                               for (size_t j = pivot_col + 1; j < cols; ++j) {
+                                M[i][j] -= factor * M[rank][j];
+                               }
+                              }
+
+                              ++rank;
+                              ++pivot_col;
                              }
+
                              return Value(static_cast<double>(rank));
                             }};
 
   // 行列の決定因子（行列式）
   cfg.functions["mdet"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mdet requires matrix argument", ctx.pos);
-                            const auto &matrix = v[0].asMultiRef(ctx.pos);
+                            if (!v[0].isMulti()) { throw CalcError(CalcErrorType::TypeError, "mdet requires matrix argument", ctx.pos); }
 
-                            if (matrix.empty() || matrix[0].asMultiRef(ctx.pos).empty()) { return Value(0.0); }
+                            auto A = toMatrixChecked(v[0], ctx, "mdet");
 
-                            size_t rows = matrix.size();
-                            size_t cols = matrix[0].asMultiRef(ctx.pos).size();
+                            if (A.empty()) { return Value(0.0); }
+
+                            const size_t rows = A.size();
+                            const size_t cols = A[0].size();
 
                             if (rows != cols) { throw CalcError(CalcErrorType::DomainError, "DomainError: determinant requires square matrix", ctx.pos); }
 
-                            // ガウス消去法で行列式を計算
-                            std::vector<std::vector<double>> temp(rows, std::vector<double>(cols));
-                            for (size_t i = 0; i < rows; ++i) {
-                             for (size_t j = 0; j < cols; ++j) {
-                              temp[i][j] = matrix[i].asMultiRef(ctx.pos)[j].asScalar(ctx.pos);
-                             }
-                            }
+                            std::vector<std::vector<double>> M = A;
+                            const double eps = 1e-10;
+                            long double det = 1.0L;
+                            int sign = 1;
 
-                            double det = 1.0;
-                            for (size_t i = 0; i < rows; ++i) {
-                             size_t pivot = i;
-                             for (size_t j = i + 1; j < rows; ++j) {
-                              if (std::abs(temp[j][i]) > std::abs(temp[pivot][i])) { pivot = j; }
-                             }
+                            for (size_t k = 0; k < rows; ++k) {
+                             size_t pivot = k;
+                             double best = std::abs(M[k][k]);
 
-                             if (std::abs(temp[pivot][i]) < 1e-10) { return Value(0.0); }
-
-                             if (pivot != i) {
-                              std::swap(temp[i], temp[pivot]);
-                              det *= -1.0;
+                             for (size_t i = k + 1; i < rows; ++i) {
+                              const double cand = std::abs(M[i][k]);
+                              if (cand > best) {
+                               best = cand;
+                               pivot = i;
+                              }
                              }
 
-                             det *= temp[i][i];
+                             if (best < eps) { return Value(0.0); }
 
-                             for (size_t j = i + 1; j < rows; ++j) {
-                              double factor = temp[j][i] / temp[i][i];
-                              for (size_t k = i; k < cols; ++k) {
-                               temp[j][k] -= factor * temp[i][k];
+                             if (pivot != k) {
+                              std::swap(M[k], M[pivot]);
+                              sign = -sign;
+                             }
+
+                             const double diag = M[k][k];
+                             det *= static_cast<long double>(diag);
+
+                             for (size_t i = k + 1; i < rows; ++i) {
+                              const double factor = M[i][k] / diag;
+                              if (std::abs(factor) < eps) continue;
+
+                              M[i][k] = 0.0;
+                              for (size_t j = k + 1; j < cols; ++j) {
+                               M[i][j] -= factor * M[k][j];
                               }
                              }
                             }
-                            return Value(det);
+
+                            det *= static_cast<long double>(sign);
+
+                            double out = static_cast<double>(det);
+                            if (std::abs(out) < eps) out = 0.0;
+                            return Value(out);
                            }};
 
   // 単位行列の作成
@@ -1552,51 +1587,47 @@ namespace mm::cal {
 
   // 行列の要素アクセス
   cfg.functions["mget"] = {3, 3, [](auto &v, auto &ctx) -> Value {
-                            if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mget requires matrix argument", ctx.pos);
-                            const auto &matrix = v[0].asMultiRef(ctx.pos);
-                            int row = static_cast<int>(v[1].asScalar(ctx.pos));
-                            int col = static_cast<int>(v[2].asScalar(ctx.pos));
+                            auto A = toMatrixChecked(v[0], ctx, "mget");
 
-                            if (row < 0 || row >= static_cast<int>(matrix.size())) { throw CalcError(CalcErrorType::DomainError, "DomainError: row index out of bounds", ctx.pos); }
-                            if (col < 0 || col >= static_cast<int>(matrix[0].asMultiRef(ctx.pos).size())) { throw CalcError(CalcErrorType::DomainError, "DomainError: column index out of bounds", ctx.pos); }
+                            const int row = static_cast<int>(requireInt(v[1], ctx.pos));
+                            const int col = static_cast<int>(requireInt(v[2], ctx.pos));
 
-                            return Value(matrix[row].asMultiRef(ctx.pos)[col].asScalar(ctx.pos));
+                            if (row < 0 || row >= static_cast<int>(A.size())) { throw CalcError(CalcErrorType::DomainError, "DomainError: row index out of bounds", ctx.pos); }
+
+                            const int cols = A.empty() ? 0 : static_cast<int>(A[0].size());
+                            if (col < 0 || col >= cols) { throw CalcError(CalcErrorType::DomainError, "DomainError: column index out of bounds", ctx.pos); }
+
+                            return Value(A[row][col]);
                            }};
 
   // 行列の行数取得
   cfg.functions["mrows"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mrows requires matrix argument", ctx.pos);
-                             const auto &matrix = v[0].asMultiRef(ctx.pos);
-                             return Value(static_cast<double>(matrix.size()));
+                             auto A = toMatrixChecked(v[0], ctx, "mrows");
+                             return Value(static_cast<double>(A.size()));
                             }};
 
   // 行列の列数取得
   cfg.functions["mcols"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mcols requires matrix argument", ctx.pos);
-                             const auto &matrix = v[0].asMultiRef(ctx.pos);
-                             if (matrix.empty()) return Value(0.0);
-                             return Value(static_cast<double>(matrix[0].asMultiRef(ctx.pos).size()));
+                             auto A = toMatrixChecked(v[0], ctx, "mcols");
+                             if (A.empty()) { return Value(0.0); }
+                             return Value(static_cast<double>(A[0].size()));
                             }};
 
   // 行列の対角成分取得
   cfg.functions["mdiag"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                             if (!v[0].isMulti()) throw CalcError(CalcErrorType::TypeError, "mdiag requires matrix argument", ctx.pos);
-                             const auto &matrix = v[0].asMultiRef(ctx.pos);
+                             auto A = toMatrixChecked(v[0], ctx, "mdiag");
 
-                             if (matrix.empty() || matrix[0].asMultiRef(ctx.pos).empty()) {
-                              auto result = std::make_shared<MultiValue>();
-                              return Value(result);
+                             if (A.empty()) { return fromVectorValue({}); }
+
+                             const size_t d = std::min(A.size(), A[0].size());
+                             std::vector<double> diag;
+                             diag.reserve(d);
+
+                             for (size_t i = 0; i < d; ++i) {
+                              diag.push_back(A[i][i]);
                              }
 
-                             size_t min_dim = std::min(matrix.size(), matrix[0].asMultiRef(ctx.pos).size());
-
-                             auto result = std::make_shared<MultiValue>();
-                             result->elems_.reserve(min_dim);
-
-                             for (size_t i = 0; i < min_dim; ++i) {
-                              result->elems_.push_back(matrix[i].asMultiRef(ctx.pos)[i]);
-                             }
-                             return Value(result);
+                             return fromVectorValue(diag);
                             }};
 
   // 行列のLU分解
@@ -1626,6 +1657,8 @@ namespace mm::cal {
 
                                   if (A.size() == 1 && A[0].size() == 1) { return fromVector({A[0][0]}); }
 
+                                  if (!isSymmetricMatrix(A, 1e-10)) { calcWarn(ctx, "meigenvals currently returns only real eigenvalue approximations; non-symmetric matrices may be unreliable"); }
+
                                   auto eig = eigenvalues(A);
                                   std::sort(eig.begin(), eig.end(), std::greater<double>());
                                   return fromVector(eig);
@@ -1640,8 +1673,9 @@ namespace mm::cal {
 
                                   const size_t n = A.size();
 
-                                  // 1x1 の固有ベクトルは [1]
                                   if (n == 1) { return fromMatrix({{1.0}}); }
+
+                                  if (!isSymmetricMatrix(A, 1e-10)) { throw CalcError(CalcErrorType::InvalidOperation, "meigenvecs currently supports only matrices with real eigenvectors reliably; use a symmetric matrix", ctx.pos); }
 
                                   auto eig = eigenvalues(A);
                                   if (eig.empty()) { throw CalcError(CalcErrorType::InvalidOperation, "failed to compute eigenvalues", ctx.pos); }
@@ -1685,7 +1719,6 @@ namespace mm::cal {
                                     xi /= nrm;
                                    }
 
-                                   // 符号規約: 最初の十分大きい成分を正にする
                                    for (double xi : x) {
                                     if (!nearly_zero(xi)) {
                                      if (xi < 0.0) {
@@ -1778,17 +1811,19 @@ namespace mm::cal {
                             std::vector<double> S;
                             svd_jacobi(A, U, S, V);
 
-                            std::vector<std::vector<double>> VT(V[0].size(), std::vector<double>(V.size(), 0.0));
+                            // API仕様として msvd は {U, S, Vt} を返す
+                            std::vector<std::vector<double>> Vt(V.empty() ? 0 : V[0].size(), std::vector<double>(V.size(), 0.0));
+
                             for (size_t i = 0; i < V.size(); ++i) {
                              for (size_t j = 0; j < V[i].size(); ++j) {
-                              VT[j][i] = V[i][j];
+                              Vt[j][i] = V[i][j];
                              }
                             }
 
                             auto result = std::make_shared<MultiValue>();
                             result->elems_.emplace_back(fromMatrix(U));
                             result->elems_.emplace_back(fromVector(S));
-                            result->elems_.emplace_back(fromMatrix(VT));
+                            result->elems_.emplace_back(fromMatrix(Vt));
                             return Value(result);
                            }};
 
@@ -2898,7 +2933,7 @@ namespace mm::cal {
                               namespace fs = std::filesystem;
 
                               const std::string &utf8 = v[0].asString(ctx.pos);
-                              fs::path path = fs::path{std::u8string_view(reinterpret_cast<const char8_t *>(utf8.data()), utf8.size())};
+                              fs::path path = path_from_utf8_string(utf8);
 
                               std::ifstream ifs;
                               ifs.exceptions(std::ios::failbit | std::ios::badbit);
