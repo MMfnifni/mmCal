@@ -39,6 +39,7 @@ namespace mm::cal {
  void registerEngineering(SystemConfig &cfg);
  void registerMoldInjection(SystemConfig &cfg);
  void registerFinance(SystemConfig &cfg);
+ void registerCalculus(SystemConfig &cfg);
  void registerOthers(SystemConfig &cfg);
 
  void initFunctions(SystemConfig &cfg);

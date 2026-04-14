@@ -23,7 +23,7 @@ factorial(-1)=>Error
 1.5!=>Error
 perm(-1,2)=>Error
 comb(5,6)=>0
-comb(-1,2)=>0
+comb(-1,2)=>Error
 Out[0]=>Error
 Out[-100]=>Error
 Out[100]=>Error
@@ -211,3 +211,57 @@ vadd({1,2},{}))=>Error
 mlsqr({{1,2}}, {1})=>Error
 mmul({{1,2}}, {{3,4}})=>Error
 fft({"a","b"}) => Error
+
+geomean(-1,2)=>Error
+geomean(1,I)=>Error
+harmmean(1,0,2)=>Error
+harmmean(1,I)=>Error
+zscore(1,0,0)=>Error
+iqr(1)=>Error
+winsor(0.5,1,2,3,4)=>Error
+winsorR(0.6,1,2,3,4)=>Error
+ibeta(1,1,-0.1)=>Error
+ibeta(1,1,1.1)=>Error
+betaln(0,1)=>Error
+polylog(1,1)=>Error
+nextpow2(0)=>Error
+totient(0)=>Error
+real({1,2})=>Error
+imag({1,2})=>Error
+csch(0)=>Error
+coth(0)=>Error
+dot({},{})=>Error
+mmaxeigen_power({{1,2,3},{4,5,6}})=>Error
+area_triangle(1,2,3)=>Error
+vol_prism(0,0,1,0)=>Error
+vol_prism(0,0,1,0,1,1,-1)=>Error
+mold_flowrate(1,0)=>Error
+
+# ========================================
+# BUG-CATCHER想定: 仕様が妥当なら追加したいが、現実装では落ちる可能性が高いもの
+# 先に仕様固定してから投入推奨
+# ========================================
+
+# area / volume should likely reject negative geometry
+# area_circle(-1)=>Error
+# area_triangle(-3,4)=>Error
+# area_trapezoid(3,5,-2)=>Error
+# vol_cylinder(2,-3)=>Error
+# vol_cone(2,-3)=>Error
+# vol_sphere(-2)=>Error
+# vol_prism(0,0,1,0,1,1,0,1,-2)=>Error
+
+# mold functions should likely guard zero / negative denominators
+# mold_gate_velocity(1,0)=>Error
+# mold_shear_gate(1,1,0)=>Error
+# mold_shear_runner(1,0)=>Error
+# mold_pressure_loss_runner(1,1,1,0)=>Error
+# mold_pin_stress(1,0,1)=>Error
+# mold_pin_stress(1,1,0)=>Error
+# mold_plate_deflection(1,1,1,0,1)=>Error
+# mold_plate_deflection(1,1,1,1,0)=>Error
+
+# if you want a deterministic random sanity block, use only degenerate cases
+# rand(5,5)=>5
+# randint(5,5)=>5
+# randn(1,0)=>1

@@ -112,6 +112,27 @@ gamma(0.5)=>1.772453850905516
 lgamma(1)=>0
 lgamma(5)=>3.1780538303479458
 
+betaln(1,1) => 0
+beta(2,3) => 0.0833333333333
+betaln(2,3) => -2.484906649788
+
+binom(5,2) => 10
+binom(0.5,2) => -0.125
+binom(10,0) => 1
+binom(10,10) => 1
+binom(-1,2) => 1
+binom(-1,3) => -1
+binom(5,2) => 10
+binom(0.5,2) => -0.125
+
+fallingfact(5,2) => 20
+fallingfact(5,0) => 1
+fallingfact(3.5,2) => 8.75
+
+risingfact(5,2) => 30
+risingfact(5,0) => 1
+risingfact(3.5,2) => 15.75
+
 erf(0)=>0
 erf(1)=>0.8427007929497149
 erfc(0)=>1
@@ -405,3 +426,68 @@ fin_cagr(1000,2000,10)=>0.071773462536
 
 
 
+
+# integer factorization
+factorint(1) => {1}
+factorint(2) => {2}
+factorint(360) => {2,2,2,3,3,5}
+primefactors(360) => {2,2,2,3,3,5}
+factorint(-84) => {-1,2,2,3,7}
+primefactors(-84) => {-1,2,2,3,7}
+factorint(97) => {97}
+
+factorint(0) => Error
+factorint(1.5) => Error
+primefactors(2.5) => Error
+
+factorint(0) => Error
+factorint(3.5) => Error
+
+
+
+
+# alias / supplemental statistics
+ave(1,2,3)=>2
+geomean(1,4,16)=>4
+harmmean(1,2,4)=>1.7142857142857142
+madR(1,2,3,4)=>1
+zscore(7,5,2)=>1
+iqr(1,2,3,4,5)=>2
+winsor(0.2,1,2,100,101,102)=>61.2
+winsorR(0.2,1,2,100,101,102)=>61.2
+percentrank(3,1,2,3,4,5)=>60
+covmatrix(1,2,3)=>1
+corrmatrix(1,2,3,1,2,3)=>1
+
+# special functions
+ibeta(1,1,0)=>0
+ibeta(1,1,1)=>1
+ibeta(1,1,0.25)=>0.25
+digamma(1)=>-0.5772156649015329
+trigamma(1)=>1.6449340668482264
+zeta(2)=>1.6449340668482264
+polylog(1,0.5)=>0.6931471805599453
+
+# number theory / misc deterministic
+nextpow2(1)=>0
+nextpow2(9)=>4
+nextprime(14)=>17
+prevprime(14)=>13
+totient(1)=>1
+totient(9)=>6
+
+# complex aliases / hyperbolic reciprocals
+real(3+4I)=>3
+imag(3+4I)=>4
+mag(3+4I)=>5
+csgn(3+4I)=>0.6+0.8I
+csgn(-3)=>-1
+csch(1)=>0.8509181282393216
+sech(1)=>0.6480542736638855
+coth(1)=>1.3130352854993315
+
+# vector aliases / supplemental vector stats
+vlength({3,4})=>5
+vsum({1,2,3,4})=>10
+dot({1,2},{3,4})=>11
+scalar({1,2},3)=>{3,6}

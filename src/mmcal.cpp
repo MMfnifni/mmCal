@@ -149,9 +149,15 @@ int main(int argc, char *argv[]) {
   try {
    EvalResult res = evalLine(line, syscfg, history, ectx);
    applySideEffects(ectx, res);
-   history.push_back({line, res.value});
-
    if (res.explain != "") { std::cout << res.explain; }
+
+   if (!res.skipHistory) { history.push_back({line, res.value}); }
+
+   if (res.skipHistory) {
+    if (res.hasDisplayOverride()) { std::cout << res.displayOverride << "\n"; }
+    std::cout << '\n';
+    continue;
+   }
 
    if (res.suppressDisplay) {
     std::cout << "Out[" << history.size() << "] := "
@@ -169,6 +175,7 @@ int main(int argc, char *argv[]) {
   } catch (ControlRequest &e) {
    switch (e.kind) {
     case ControlRequest::Kind::Exit: std::cout << "bye...nara\n"; return 0;
+    case ControlRequest::Kind::Relax: break;
 
     case ControlRequest::Kind::Clear:
      resetSession(ectx, history);

@@ -249,18 +249,35 @@ namespace mm::cal {
                              return result;
                             }};
 
-  cfg.functions["numdiff"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                               auto x = collectReals(v, ctx);
-                               if (x.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
+  cfg.functions["betaln"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                              const double x = requireReal(v[0], ctx.pos);
+                              const double y = requireReal(v[1], ctx.pos);
 
-                               double sumsq = 0;
-                               for (size_t i = 0; i < x.size() - 1; ++i) {
-                                double d = x[i + 1] - x[i];
-                                sumsq += d * d;
-                               }
+                              if (!(x > 0.0) || !(y > 0.0)) { throw CalcError(CalcErrorType::DomainError, "DomainError: betaln: x and y must be > 0", ctx.pos); }
 
-                               return std::sqrt(sumsq / (x.size() - 1));
-                              }};
+                              const double r = std::lgamma(x) + std::lgamma(y) - std::lgamma(x + y);
+                              if (std::isnan(r)) throwDomain(ctx.pos);
+                              if (!std::isfinite(r)) throwOverflow(ctx.pos);
+                              return r;
+                             }};
+
+  cfg.functions["binom"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                             const double x = requireReal(v[0], ctx.pos);
+                             const double y = requireReal(v[1], ctx.pos);
+                             return binomGeneral(x, y, ctx.pos);
+                            }};
+
+  cfg.functions["fallingfact"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                   const double x = requireReal(v[0], ctx.pos);
+                                   const double n = requireReal(v[1], ctx.pos);
+                                   return fallfactGeneral(x, n, ctx.pos);
+                                  }};
+
+  cfg.functions["risingfact"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                  const double x = requireReal(v[0], ctx.pos);
+                                  const double n = requireReal(v[1], ctx.pos);
+                                  return risefactGeneral(x, n, ctx.pos);
+                                 }};
 
   cfg.functions["mode"] = {1, INT_MAX, [](auto &v, auto &ctx) -> Value {
                             auto a = collectReals(v, ctx);
@@ -481,5 +498,11 @@ namespace mm::cal {
                                if (!std::isfinite(sum)) throwOverflow(ctx.pos);
                                return sum;
                               }};
+
+  cfg.functions["factorint"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                                 const long long n = requireInt(v[0], ctx.pos);
+                                 return Value(makeFactorList(n, ctx.pos));
+                                }};
+  cfg.functions["primefactors"] = cfg.functions["factorint"];
  }
 } // namespace mm::cal

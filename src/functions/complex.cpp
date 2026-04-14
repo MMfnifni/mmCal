@@ -5,7 +5,11 @@ namespace mm::cal {
  void registerComplex(SystemConfig &cfg) {
   cfg.functions["re"] = {1, 1, [](auto &v, auto &ctx) -> Value { return v[0].isComplex() ? v[0].asComplex(ctx.pos).real() : v[0].asScalar(ctx.pos); }};
   cfg.functions["real"] = cfg.functions["re"];
-  cfg.functions["im"] = {1, 1, [](auto &v, auto &ctx) -> Value { return v[0].isComplex() ? v[0].asComplex(ctx.pos).imag() : 0.0; }};
+  cfg.functions["im"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                          if (v[0].isComplex()) return v[0].asComplex(ctx.pos).imag();
+                          (void)v[0].asScalar(ctx.pos); // scalar以外はここでTypeError
+                          return 0.0;
+                         }};
   cfg.functions["imag"] = cfg.functions["im"];
   cfg.functions["arg"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            auto z = v[0].toComplex(ctx.pos);

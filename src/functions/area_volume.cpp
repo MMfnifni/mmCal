@@ -55,6 +55,7 @@ namespace mm::cal {
                                  if (v.size() < 7 || (v.size() - 1) % 2 != 0) throw CalcError(CalcErrorType::DomainError, "DomainError: vol_prism: need at least 3 base points + height", ctx.pos);
 
                                  double h = v.back().asScalar(ctx.pos);
+                                 if (h < 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: vol_prism: height must be >= 0", ctx.pos);
                                  std::vector<Value> coords(v.begin(), v.end() - 1);
 
                                  return area_polygon_impl(coords, ctx).asScalar(ctx.pos) * h;

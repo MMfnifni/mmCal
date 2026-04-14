@@ -26,7 +26,7 @@ namespace mm::cal {
  using Complex = std::complex<double>;
 
  struct ControlRequest : std::exception {
-   enum class Kind { Exit, Clear };
+   enum class Kind { Exit, Clear, Relax };
    Kind kind;
 
    explicit ControlRequest(Kind k) : kind(k) {}
@@ -270,7 +270,7 @@ namespace mm::cal {
    std::string displayOverride{};
    std::string explain{};
    bool suppressDisplay = false;
-
+   bool skipHistory = false;
    bool hasDisplayOverride() const { return !displayOverride.empty(); }
  };
 

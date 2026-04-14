@@ -1,0 +1,102 @@
+# =========================
+# Calculus / factorization
+# =========================
+
+# numeric differentiation
+:clear => "[cleared]"
+f(x):=x^2 => "[defined: f(x)]"
+diff(f,3) => 6
+diff(f,3,1e-4) => 6
+diff2(f,3) => 2
+diff2(f,3,1e-4) => 2
+:undef f => "[undefined: f]"
+
+f(x):=x^3 => "[defined: f(x)]"
+diff(f,2) => 12
+diff2(f,2) => 12
+:undef f => "[undefined: f]"
+
+f(x):=sin(x) => "[defined: f(x)]"
+diff(f,0) => 0.01745329252
+diff(f,30) => 0.015114994702
+:undef f => "[undefined: f]"
+
+f(x):=cos(x) => "[defined: f(x)]"
+diff(f,0) => 0
+diff2(f,0) => -0.00030461742
+:undef f => "[undefined: f]"
+
+# numeric integration (degree-based trig)
+f(x):=sin(x) => "[defined: f(x)]"
+integrate(f,0,180) => 114.591559646363
+simpson(f,0,180,200) => 114.591559064924
+trapz(f,0,180,1000) => 114.59146477837
+integrate(f,180,0) => -114.591559646363
+integrate(f,30,30) => 0
+:undef f => "[undefined: f]"
+
+f(x):=x => "[defined: f(x)]"
+integrate(f,0,10) => 50
+simpson(f,0,10,100) => 50
+trapz(f,0,10,100) => 50
+:undef f => "[undefined: f]"
+
+f(x):=x^2 => "[defined: f(x)]"
+integrate(f,0,3) => 9
+simpson(f,0,3,100) => 9
+trapz(f,0,3,1000) => 9.0000045
+:undef f => "[undefined: f]"
+
+
+# errors
+diff(no_such_func,1) => Error
+diff(3,1) => Error
+diff2(3,1) => Error
+diff2(sin,0,0) => Error
+integrate(no_such_func,0,1) => Error
+integrate(3,0,1) => Error
+integrate(sin,0,180,3) => Error
+simpson(sin,0,180,3) => Error
+trapz(sin,0,180,0) => Error
+integrate(f,0,1,3) => Error
+simpson(f,0,1,3) => Error
+
+
+:clear => "[cleared]"
+
+f(x):=x^2  => "[defined: f(x)]"
+diff(f,3) => 6
+diff2(f,3) => 2
+
+:undef f => "[undefined: f]"
+
+f(x):=x^3  => "[defined: f(x)]"
+diff(f,2) => 12
+diff2(f,2) => 12
+
+:undef f => "[undefined: f]"
+
+f(x):=sin(x)  => "[defined: f(x)]"
+diff(f,0) => 0.01745329252
+
+integrate(f,0,180) => 114.591559
+simpson(f,0,180,200) => 114.591559
+trapz(f,0,180,1000) => 114.591464
+
+:undef f => "[undefined: f]"
+
+f(x):=x  => "[defined: f(x)]"
+integrate(f,0,3) => 4.5
+simpson(f,0,3,100) => 4.5
+
+:clear => "[cleared]"
+
+factorint(360) => {2,2,2,3,3,5}
+factorint(1) => {1}
+factorint(-12) => {-1,2,2,3}
+
+primefactors(360) => {2,2,2,3,3,5}
+primefactors(-84) => {-1,2,2,3,7}
+
+diff(3,1) => Error
+diff2(3,1) => Error

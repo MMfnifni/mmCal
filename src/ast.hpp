@@ -234,6 +234,10 @@ namespace mm::cal {
   if (!n) return nullptr;
   return n->clone();
  }
+
+ bool isFunctionNameConsumer(const std::string &name);
+ std::string extractFunctionNameArg(const ASTNode *node, const EvaluationContext &ectx, size_t pos);
+
  struct UserFunction;
 
 } // namespace mm::cal

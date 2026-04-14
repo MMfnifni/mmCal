@@ -388,16 +388,19 @@ namespace mm::cal {
                                if (n > 1) phi -= phi / n;
                                return (double)phi;
                               }};
-  cfg.functions["covmatrix"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+  cfg.functions["covmatrix"] = {1, -1, [](auto &v, auto &ctx) -> Value {
                                  auto x = collectReals(v, ctx);
-                                 if (x.size() < 2) throwDomain(ctx.pos);
+                                 if (x.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
+
                                  double mean = 0.0;
-                                 for (auto d : x)
+                                 for (double d : x)
                                   mean += d;
                                  mean /= x.size();
+
                                  double cov = 0.0;
-                                 for (auto d : x)
+                                 for (double d : x)
                                   cov += (d - mean) * (d - mean);
+
                                  return cov / (x.size() - 1);
                                 }};
   cfg.functions["corrmatrix"] = {2, -1, [](auto &v, auto &ctx) -> Value {

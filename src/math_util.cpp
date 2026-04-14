@@ -11,7 +11,7 @@ namespace mm::cal {
    ============================ */
 
  long long combLL(long long n, long long r, size_t pos) {
-  if (r < 0) throw CalcError(CalcErrorType::DomainError, "DomainError: comb: r must be >= 0", pos);
+  if (n < 0 || r < 0) { throw CalcError(CalcErrorType::DomainError, "DomainError: comb: n and r must be >= 0", pos); }
   if (r > n) return 0;
 
   r = std::min(r, n - r);
@@ -29,7 +29,6 @@ namespace mm::cal {
    res /= g2;
    den /= g2;
 
-   // den は必ず 1 になる（整数の二項係数なので）
    res = checkedMul(res, num, pos);
   }
   return res;
@@ -1300,4 +1299,172 @@ namespace mm::cal {
 
   return Value(outer);
  }
+
+ std::string requireFunctionName(const Value &v, size_t pos) {
+  if (!v.isString()) { throw CalcError(CalcErrorType::TypeError, "TypeError: expected function name", pos); }
+  return v.asString(pos);
+ }
+
+ double defaultDiffStep(double x) {
+  const double scale = std::max(1.0, std::abs(x));
+  return std::sqrt(std::numeric_limits<double>::epsilon()) * scale;
+ }
+ double defaultDiffStep2(double x) {
+  const double scale = std::max(1.0, std::abs(x));
+  return std::pow(std::numeric_limits<double>::epsilon(), 0.25) * scale;
+ }
+
+ std::shared_ptr<MultiValue> makeFactorList(long long n, size_t pos) {
+  if (n == 0) throw CalcError(CalcErrorType::DomainError, "DomainError: factorint undefined for zero", pos);
+
+  auto out = std::make_shared<MultiValue>();
+
+  if (n < 0) {
+   out->elems_.push_back(Value(-1.0));
+   if (n == LLONG_MIN) {
+    out->elems_.push_back(Value(2.0));
+    unsigned long long m = static_cast<unsigned long long>(-(n / 2));
+    while ((m & 1ULL) == 0ULL) {
+     out->elems_.push_back(Value(2.0));
+     m >>= 1ULL;
+    }
+    for (unsigned long long p = 3; p <= m / p; p += 2) {
+     while (m % p == 0ULL) {
+      out->elems_.push_back(Value(static_cast<double>(p)));
+      m /= p;
+     }
+    }
+    if (m > 1ULL) out->elems_.push_back(Value(static_cast<double>(m)));
+    return out;
+   }
+   n = -n;
+  }
+
+  if (n == 1) {
+   out->elems_.push_back(Value(1.0));
+   return out;
+  }
+
+  while ((n % 2) == 0) {
+   out->elems_.push_back(Value(2.0));
+   n /= 2;
+  }
+
+  for (long long p = 3; p <= n / p; p += 2) {
+   while ((n % p) == 0) {
+    out->elems_.push_back(Value(static_cast<double>(p)));
+    n /= p;
+   }
+  }
+
+  if (n > 1) out->elems_.push_back(Value(static_cast<double>(n)));
+  return out;
+ }
+
+ // 一般化二項係数の「級数的」版。
+ // y が整数 n >= 0 のときは falling factorial / n! を使う。
+ double binomGeneral(double x, double y, size_t pos) {
+  if (!std::isfinite(x) || !std::isfinite(y)) { throw CalcError(CalcErrorType::DomainError, "DomainError: binom: arguments must be finite", pos); }
+
+  // y が非負整数なら積の形を優先
+  if (std::floor(y) == y) {
+   const long long n = static_cast<long long>(y);
+   if (n < 0) { throw CalcError(CalcErrorType::DomainError, "DomainError: binom: integer y must be >= 0", pos); }
+   if (n == 0) return 1.0;
+
+   long double num = 1.0L;
+   long double den = 1.0L;
+   for (long long k = 1; k <= n; ++k) {
+    num *= static_cast<long double>(x - (k - 1));
+    den *= static_cast<long double>(k);
+   }
+   const long double r = num / den;
+   if (std::isnan((double)r)) throwDomain(pos);
+   if (!std::isfinite((double)r)) throwOverflow(pos);
+   return static_cast<double>(r);
+  }
+
+  // それ以外は Γ ベース
+  const double a = x + 1.0;
+  const double b = y + 1.0;
+  const double c = x - y + 1.0;
+
+  if (isGammaPole(a) || isGammaPole(b) || isGammaPole(c)) { throw CalcError(CalcErrorType::DomainError, "DomainError: binom undefined at gamma pole", pos); }
+
+  const double logabs = std::lgamma(a) - std::lgamma(b) - std::lgamma(c);
+  if (std::isnan(logabs)) throwDomain(pos);
+  if (!std::isfinite(logabs)) throwOverflow(pos);
+
+  const double sgn = gammaSign(a) / (gammaSign(b) * gammaSign(c));
+  const double r = sgn * std::exp(logabs);
+
+  if (std::isnan(r)) throwDomain(pos);
+  if (!std::isfinite(r)) throwOverflow(pos);
+  return r;
+ }
+
+ double fallfactGeneral(double x, double n, size_t pos) {
+  if (!std::isfinite(x) || !std::isfinite(n)) { throw CalcError(CalcErrorType::DomainError, "DomainError: fallfact: arguments must be finite", pos); }
+
+  // n が非負整数なら積の形を優先
+  if (std::floor(n) == n) {
+   const long long m = static_cast<long long>(n);
+   if (m < 0) { throw CalcError(CalcErrorType::DomainError, "DomainError: fallfact: integer n must be >= 0", pos); }
+   long double r = 1.0L;
+   for (long long k = 0; k < m; ++k) {
+    r *= static_cast<long double>(x - k);
+   }
+   if (std::isnan((double)r)) throwDomain(pos);
+   if (!std::isfinite((double)r)) throwOverflow(pos);
+   return static_cast<double>(r);
+  }
+
+  const double a = x + 1.0;
+  const double b = x - n + 1.0;
+  if (isGammaPole(a) || isGammaPole(b)) { throw CalcError(CalcErrorType::DomainError, "DomainError: fallfact undefined at gamma pole", pos); }
+
+  const double logabs = std::lgamma(a) - std::lgamma(b);
+  if (std::isnan(logabs)) throwDomain(pos);
+  if (!std::isfinite(logabs)) throwOverflow(pos);
+
+  const double sgn = gammaSign(a) / gammaSign(b);
+  const double r = sgn * std::exp(logabs);
+
+  if (std::isnan(r)) throwDomain(pos);
+  if (!std::isfinite(r)) throwOverflow(pos);
+  return r;
+ }
+
+ double risefactGeneral(double x, double n, size_t pos) {
+  if (!std::isfinite(x) || !std::isfinite(n)) { throw CalcError(CalcErrorType::DomainError, "DomainError: risefact: arguments must be finite", pos); }
+
+  // n が非負整数なら積の形を優先
+  if (std::floor(n) == n) {
+   const long long m = static_cast<long long>(n);
+   if (m < 0) { throw CalcError(CalcErrorType::DomainError, "DomainError: risefact: integer n must be >= 0", pos); }
+   long double r = 1.0L;
+   for (long long k = 0; k < m; ++k) {
+    r *= static_cast<long double>(x + k);
+   }
+   if (std::isnan((double)r)) throwDomain(pos);
+   if (!std::isfinite((double)r)) throwOverflow(pos);
+   return static_cast<double>(r);
+  }
+
+  const double a = x + n;
+  const double b = x;
+  if (isGammaPole(a) || isGammaPole(b)) { throw CalcError(CalcErrorType::DomainError, "DomainError: risefact undefined at gamma pole", pos); }
+
+  const double logabs = std::lgamma(a) - std::lgamma(b);
+  if (std::isnan(logabs)) throwDomain(pos);
+  if (!std::isfinite(logabs)) throwOverflow(pos);
+
+  const double sgn = gammaSign(a) / gammaSign(b);
+  const double r = sgn * std::exp(logabs);
+
+  if (std::isnan(r)) throwDomain(pos);
+  if (!std::isfinite(r)) throwOverflow(pos);
+  return r;
+ }
+
 } // namespace mm::cal

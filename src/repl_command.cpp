@@ -43,8 +43,8 @@ namespace mm::cal {
  }
 
  EvalResult evalCommandLine(const std::string &line, SystemConfig &cfg, std::vector<InputEntry> &history, EvaluationContext &ectx) {
-  (void)cfg;
   EvalResult res{};
+  res.skipHistory = true;
 
   auto words = splitWords(line);
   if (words.empty()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: empty command", 0); }
@@ -136,7 +136,6 @@ namespace mm::cal {
   // -----------------------
   if (cmd == ":help") {
    if (words.size() == 1) {
-    EvalResult res{};
     res.value = Value();
     res.displayOverride = getFunctionHelpIndex();
     return res;
@@ -148,7 +147,6 @@ namespace mm::cal {
     // 関数として未登録なら明示
     if (!cfg.functions.contains(name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown function: " + name, 0); }
 
-    EvalResult res{};
     res.value = Value();
     res.displayOverride = getFunctionHelp(name);
     return res;

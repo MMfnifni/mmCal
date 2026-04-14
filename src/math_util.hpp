@@ -650,6 +650,13 @@ namespace mm::cal {
  Value fromVector(const std::vector<double> &xs);
  Value fromIndexVector(const std::vector<size_t> &xs);
  Value fromMatrix(const std::vector<std::vector<double>> &A);
+ std::string requireFunctionName(const Value &v, size_t pos);
+ double defaultDiffStep(double x);
+ double defaultDiffStep2(double x);
+ std::shared_ptr<MultiValue> makeFactorList(long long n, size_t pos);
+ double binomGeneral(double x, double y, size_t pos);
+ double fallfactGeneral(double x, double n, size_t pos);
+ double risefactGeneral(double x, double n, size_t pos);
  size_t nrows(const std::vector<std::vector<double>> &A);
  size_t ncols(const std::vector<std::vector<double>> &A);
  std::vector<std::vector<double>> identity(size_t n);
@@ -731,6 +738,14 @@ namespace mm::cal {
   auto A = toMatrix(v, ctx);
   validate_matrix_shape(A, name);
   return A;
+ }
+
+ inline bool isGammaPole(double z) { return z <= 0.0 && std::floor(z) == z; }
+
+ inline double gammaSign(double z) {
+  if (z > 0.0) return 1.0;
+  const double k = std::floor(-z);
+  return (static_cast<long long>(k) % 2 == 0) ? -1.0 : 1.0;
  }
 
 } // namespace mm::cal

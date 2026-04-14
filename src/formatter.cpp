@@ -22,7 +22,7 @@ namespace mm::cal {
 
   x = normalizeZero(x); // ゼロ補正
 
-  oss << std::fixed << std::setprecision(cnst_precision) << x; // 指数表記禁止(暫定)
+  oss << std::fixed << std::setprecision(cnst_precision + 1) << x; // 指数表記禁止(暫定)
 
   std::string s = oss.str();
 

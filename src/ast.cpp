@@ -67,10 +67,7 @@ namespace mm::cal {
   UserFunction fn;
   fn.params = params;
 
-  // bodyは所有権を持たせる(現在の設計ではASTは一回評価用なのでmoveできない。)
-  // clone関数がないならdeep copyが必要。 ここでは簡易的に const_cast + clone前提で記述：
-
-  fn.body = body->clone(); // clone() をASTNodeに用意すること
+  fn.body = body->clone();
 
   ctx.session.userFunctions[name] = std::move(fn);
 
@@ -138,6 +135,7 @@ namespace mm::cal {
   if (auto uit = ectx.session.userFunctions.find(name); uit != ectx.session.userFunctions.end()) {
    const UserFunction &fn = uit->second;
    if (args.size() != fn.params.size()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: wrong number of arguments for user-defined function: " + name, pos); }
+
    std::vector<Value> values;
    values.reserve(args.size());
    for (auto &a : args)
@@ -157,7 +155,7 @@ namespace mm::cal {
 
   // 内蔵関数
   auto it = ectx.session.cfg.functions.find(name);
-  if (it == ectx.session.cfg.functions.end()) throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
+  if (it == ectx.session.cfg.functions.end()) { throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos); }
 
   auto &f = it->second;
   int argc = static_cast<int>(args.size());
@@ -166,11 +164,23 @@ namespace mm::cal {
 
   std::vector<Value> v;
   v.reserve(args.size());
-  for (auto &a : args)
-   v.push_back(a->eval(ectx));
+
+  if (isFunctionNameConsumer(name)) {
+   if (args.empty()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: wrong number of arguments for function: " + name, pos); }
+
+   // 第1引数は未評価で関数名として扱う
+   v.push_back(Value(extractFunctionNameArg(args[0].get(), ectx, pos)));
+
+   // 残りは普通に評価するよん
+   for (size_t i = 1; i < args.size(); ++i) {
+    v.push_back(args[i]->eval(ectx));
+   }
+  } else {
+   for (auto &a : args)
+    v.push_back(a->eval(ectx));
+  }
 
   FunctionContext ctx{ectx.session, pos, ectx.sideEffects};
-
   return f.f(v, ctx);
  }
 
@@ -181,7 +191,11 @@ namespace mm::cal {
   if (ectx.session.globals.contains(name)) return ectx.session.globals.at(name);
   if (constants.count(name)) return constants.at(name);
   if (symbols.count(name)) return name;
-  // return name; // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
+
+  //  以下既存函数が文字列扱いになる
+  // if (ectx.session.userFunctions.contains(name)) return name;
+  // if (ectx.session.cfg.functions.contains(name)) return name;
+  //  return name; // それ以外も「オプション指定子」として許可するならここで返す(要検討!!!)
 
   throw CalcError(CalcErrorType::UnknownIdentifier, errorMessage(CalcErrorType::UnknownIdentifier), pos);
  }
@@ -250,4 +264,22 @@ namespace mm::cal {
   }
   return r ? 1.0 : 0.0;
  }
+
+ bool isFunctionNameConsumer(const std::string &name) { return name == "diff" || name == "diff2" || name == "integrate" || name == "simpson" || name == "trapz"; }
+
+ std::string extractFunctionNameArg(const ASTNode *node, const EvaluationContext &ectx, size_t pos) {
+  if (!node) { throw CalcError(CalcErrorType::InternalError, "InternalError: null AST node for function-name argument", pos); }
+
+  if (const auto *sym = dynamic_cast<const SymbolNode *>(node)) {
+   const std::string &fname = sym->name;
+
+   if (ectx.session.userFunctions.find(fname) != ectx.session.userFunctions.end()) return fname;
+   if (ectx.session.cfg.functions.find(fname) != ectx.session.cfg.functions.end()) return fname;
+
+   throw CalcError(CalcErrorType::UnknownIdentifier, "UnknownIdentifier: function not found: " + fname, pos);
+  }
+
+  throw CalcError(CalcErrorType::TypeError, "TypeError: expected function name as first argument", pos);
+ }
+
 } // namespace mm::cal

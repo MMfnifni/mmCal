@@ -6,8 +6,6 @@
 
 # Overview
 
-### Want a handy little calculator that lets you instantly reference calculation results with % symbols, perform continuous calculations, and use pre-built functions you need? No installation required—just one executable that works anywhere? Well, here it is!!
-
 mmCalculator is a **high-performance mathematical calculator** designed for engineering, manufacturing, and technical work.
 
 It goes beyond a simple calculator by supporting:
@@ -240,6 +238,7 @@ Below is a complete list of all currently implemented functions. For each functi
 | Function Name    | Description                               | Example Inputs/Outputs           |
 | ---------------- | ----------------------------------------- | -------------------------------- |
 | `abs(x)`         | Absolute value (supports complex numbers) | `abs(-3) = 3`<br>`abs(3+4I) = 5` |
+| `pow(x,y)`       | Power function                            | `pow(2,10)=1024`                 |
 | `sign(x)`        | Sign function                             | `sign(-5) = -1`<br>`sign(0) = 0` |
 | `sqrt(x)`        | Square root (negative → complex)          | `sqrt(4) = 2`<br>`sqrt(-4) = 2I` |
 | `cbrt(x)`        | Cube root                                 | `cbrt(8) = 2`                    |
@@ -256,17 +255,27 @@ Below is a complete list of all currently implemented functions. For each functi
 | `round(x)`       | Rounding (nearest integer)                | `round(2.6) = 3`                 |
 | `round(x,n)`     | Rounding to _n_ digits                    | `round(1.2345,2)=1.23`           |
 | `fract(x)`       | Fractional part                           | `fract(3.14)=0.14`               |
-| `fact(x)`        | Factorial                                 | `fact(10)=3628800`               |
+| `fact(x)`        | Factorial (non-negative integers only)    | `fact(5)=120`                    |
 | `mod(x,y)`       | Surplus                                   | `mod(11,3)=2`                    |
+| `nextpow2(x)`    | The smallest n such that 2^n >= x         | `nextpow2(9)=4`                  |
 
 ### Special Functions
 
-| Function Name | Description            | Example Inputs/Outputs        |
-| ------------- | ---------------------- | ----------------------------- |
-| `gamma(x)`    | Gamma function         | `gamma(5)=24`                 |
-| `lgamma(x)`   | Log-gamma function     | `lgamma(5)=3.178053830348...` |
-| `erf(x)`      | Error function         | `erf(1)=0.842700792949...`    |
-| `erfc(x)`     | Complementary error fn | `erfc(1)=0.157299207050...`   |
+| Function Name   | Description                          | Example Inputs/Outputs        |
+| --------------- | ------------------------------------ | ----------------------------- |
+| `gamma(x)`      | Gamma function                       | `gamma(5)=24`                 |
+| `lgamma(x)`     | Log-gamma function                   | `lgamma(5)=3.178053830348...` |
+| `erf(x)`        | Error function                       | `erf(1)=0.842700792949...`    |
+| `erfc(x)`       | Complementary error fn               | `erfc(1)=0.157299207050...`   |
+| `digamma(x)`    | Digamma function                     | `digamma(1)=-0.57721...`      |
+| `trigamma(x)`   | Trigamma function                    | `trigamma(1)=1.64493...`      |
+| `zeta(s)`       | Riemann zeta function (`s>1`)        | `zeta(2)=1.64493...`          |
+| `beta(x,y)`     | Beta function                        | `beta(2,3)=0.0833333...`      |
+| `ibeta(a,b,x)`  | Regularized incomplete beta function | `ibeta(2,3,0.5)=0.6875`       |
+| `betaln(x,y)`   | Beta-log function                    | `betaln(2,3)=-2.48490...`     |
+| `binom(x,y)`    | Generalized binomial coefficient     | `binom(1/2,2)=-0.125`         |
+| `fallfact(x,n)` | Falling factorial                    | `fallfact(5,3)=60`            |
+| `risefact(x,n)` | Rising factorial                     | `risefact(5,3)=210`           |
 
 #### Angle Conversion
 
@@ -338,16 +347,17 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Number Theory / Combinatorics
 
-| Function Name  | Description                                            | Example Inputs/Outputs |
-| -------------- | ------------------------------------------------------ | ---------------------- |
-| `gcd(a,b,...)` | Greatest common divisor                                | `gcd(12,18,24)=6`      |
-| `lcm(a,b,...)` | Least common multiple                                  | `lcm(6,8)=24`          |
-| `perm(n,r)`    | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`         |
-| `comb(n,r)`    | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`         |
-| `isprime(x)`   | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(9973)=1`      |
-| `nextprime(n)` | The smallest prime number exceeding                    | `nextprime(11) = 13`   |
-| `prevprime(n)` | The largest prime number less than _n_                 | `prevprime(11) = 7`    |
-| `fib(x)`       | Fibonacci sequence                                     | `fib(25)=75025`        |
+| Function Name                     | Description                                            | Example Inputs/Outputs         |
+| --------------------------------- | ------------------------------------------------------ | ------------------------------ |
+| `gcd(a,b,...)`                    | Greatest common divisor                                | `gcd(12,18,24)=6`              |
+| `lcm(a,b,...)`                    | Least common multiple                                  | `lcm(6,8)=24`                  |
+| `perm(n,r)`                       | Permutations [(returns 0 if r<0 or r>n)]               | `perm(5,2)=20`                 |
+| `comb(n,r)`                       | Combinations [(returns 0 if r<0 or r>n)]               | `comb(5,2)=10`                 |
+| `isprime(x)`                      | Prime number determination<br>(0: non-prime, 1: prime) | `isprime(9973)=1`              |
+| `nextprime(n)`                    | The smallest prime number exceeding                    | `nextprime(11) = 13`           |
+| `prevprime(n)`                    | The largest prime number less than _n_                 | `prevprime(11) = 7`            |
+| `fib(x)`                          | Fibonacci sequence                                     | `fib(25)=75025`                |
+| `factorint(n)`, `primefactors(n)` | Prime factorization (returns a list of prime factors)  | `factorint(84) = {2, 2, 3, 7}` |
 
 ### Statistics (Descriptive Statistics / Aggregation)
 
@@ -380,6 +390,19 @@ Below is a complete list of all currently implemented functions. For each functi
 | `trimmean(p,...)`      | Trimmed mean (discard fraction _p_ from both ends)    | `trimmean(0.2,1,2,100,3,4)=2.5`                                                                                                                                                                       |
 | `winsor(p,...)`        | Winsorization (clip fraction _p_ from both ends)      | `winsor(0.2,1,2,100,3,4)=3`                                                                                                                                                                           |
 
+### Numerical Calculus (Preliminary Implementation)
+
+| Function Name                            | Description                                                | Input and Output Examples         |
+| ---------------------------------------- | ---------------------------------------------------------- | --------------------------------- |
+| `diff(f,x)`                              | Numerical first-order derivative (central difference)      | `diff(sin,30)=0.015114...`        |
+| `diff(f,x,h)`                            | Numerical first-order derivative with specified step size  | `diff(exp,1,1e-6)=2.71828...`     |
+| `diff2(f,x)`                             | Numerical second-order derivative                          | `diff2(sin,0)=-0.000304... `      |
+| `diff2(f,x,h)`                           | Numerical second-order derivative with specified step size | `diff2(exp,1,1e-4)=2.71828...`    |
+| `simpson(f,a,b)`, `integrate(f,a,b)`     | Numerical integration using Simpson's rule                 | `simpson(sin,0,180)=114.59...`    |
+| `simpson(f,a,b,n)`, `integrate(f,a,b,n)` | Simpson's rule with specified number of segments           | `simpson(exp,0,1,200)=1.718...`   |
+| `trapz(f,a,b)`                           | Numerical integration using the trapezoidal rule           | `trapz(exp,0,1)=1.718...`         |
+| `trapz(f,a,b,n)`                         | Trapezoidal rule with specified number of segments         | `trapz(sin,0,180,1000)=114.59...` |
+
 ### Financial Functions
 
 | Function Name                           | Description                                           | Input and Output Example                      |
@@ -392,6 +415,7 @@ Below is a complete list of all currently implemented functions. For each functi
 | `fin_ipmt(rate,nper,per,pv)`            | Interest Payment Amount (IPMT, Period Specified)      | `fin_ipmt(0.05,10,3,1000)=37.049...`          |
 | `fin_npv(rate,cf...)`                   | Net Present Value (NPV)                               | `fin_npv(0.1,100,-50,-50)=12.021... `         |
 | `fin_irr(cf...)`                        | Internal Rate of Return (IRR, Brent)                  | `fin_irr(-100,50,60)=0.063...`                |
+| `fin_mirr(rate,cf...)`                  | Modified Internal Rate of Return (MIRR)               | `fin_mirr(0.1,-100,60,60)=...`                |
 | `fin_rate(nper,pmt,pv)`                 | Interest Rate Calculation (RATE, Brent)               | `fin_rate(10,100,1000)=0.05`                  |
 | `fin_nper(rate,pmt,pv)`                 | Period Calculation (NPER)                             | `fin_nper(0.05,100,1000)=10`                  |
 | `fin_cumipmt(rate,nper,pmt,start,end)`  | Cumulative interest over specified period (CUMIPMT)   | `fin_cumipmt(0.05,10,100,1,5)=210.562...`     |
@@ -402,14 +426,15 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Correlation / Covariance / Uncategorized(ToDo: To be organized)
 
-| Function Name             | Description                                                                            | Example Inputs/Outputs            |
-| ------------------------- | -------------------------------------------------------------------------------------- | --------------------------------- |
-| `cov(x...,y...)`          | Covariance                                                                             | `cov(1,2,3,2,4,6)=0.666...`       |
-| `corr(x...,y...)`         | Correlation coefficient                                                                | `corr(1,2,3,2,4,6)=1`             |
-| `corrspearman(x...,y...)` | Spearman correlation (rank correlation)                                                | `corrspearman(1,2,3, 10,20,30)=1` |
-| `numdiff(v)`              | Evaluates the magnitude of the derivative using the root mean square of the difference | `numdiff(1,3,6)=2.549509756796`   |
-| `polylog(s, z)`           | Polylog calculation using a multiple series (`\|z\|<1`)                                | `polylog(2, 0.5)=0.582240526465`  |
-| `totient(n)`              | Euler's totient function φ(n)                                                          | `totient(9)=6`                    |
+| Function Name             | Description                                             | Example Inputs/Outputs            |
+| ------------------------- | ------------------------------------------------------- | --------------------------------- |
+| `cov(x...,y...)`          | Covariance                                              | `cov(1,2,3,2,4,6)=0.666...`       |
+| `corr(x...,y...)`         | Correlation coefficient                                 | `corr(1,2,3,2,4,6)=1`             |
+| `corrspearman(x...,y...)` | Spearman correlation (rank correlation)                 | `corrspearman(1,2,3, 10,20,30)=1` |
+| `polylog(s, z)`           | Polylog calculation using a multiple series (`\|z\|<1`) | `polylog(2, 0.5)=0.582240526465`  |
+| `totient(n)`              | Euler's totient function φ(n)                           | `totient(9)=6`                    |
+| `winsorR(p,...)`          | Returns the winsorized data series                      | `winsorR(0.2,1,2,100,3,4)=...`    |
+| `convolve(a,b)`           | Discrete convolution                                    | `convolve({1,2},{3,4})={3,10,8}`  |
 
 ### Numerical Computation (Floating-Point Utilities)
 
@@ -438,7 +463,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | Function Name                       | Description                           | Example                           |
 | ----------------------------------- | ------------------------------------- | --------------------------------- |
 | `norm(x,y)`                         | Vector length                         | `norm(3,4)=5`                     |
-| `cross(x1,y1,x2,y2)`                | Cross product (Z-component)           | `cross(1,0,0,1)=1`                |
 | `lerp(a,b,t) `                      | Linear interpolation                  | `lerp(0,10,0.5)=5`                |
 | `distance(x1,y1,x2,y2)`             | Distance                              | `distance(0,0,3,4)=5`             |
 | `vadd(a,b)`                         | Vector addition                       | `vadd({1,2},{3,4})={4,6}`         |
@@ -459,35 +483,38 @@ Below is a complete list of all currently implemented functions. For each functi
 
 - Prioritizing rigor over execution speed, these operations can become extremely slow with large matrices.
 
-| Function Name               | Description                                                      | Input and Output Examples            |
-| --------------------------- | ---------------------------------------------------------------- | ------------------------------------ |
-| `matrix(a,b,c,...)`         | Create a matrix of arbitrary size                                | `matrix({1,2},{3,4})`                |
-| `identity(n)`               | Create an n×n identity matrix                                    | `identity(3)`                        |
-| `zeros(rows,cols)`          | Create a zero matrix of size rows x cols                         | `zeros(2,3)`                         |
-| `mget(A,row,col)`           | Access matrix elements                                           | `mget({{1,2},{3,4}},0,1)=2`          |
-| `madd(A,B)`                 | Matrix addition                                                  | `madd({{1,2},{3,4}}, {{5,6},{7,8}})` |
-| `mmul(A,B)`                 | Matrix multiplication                                            | `mmul({{1,2},{3,4}}, {{5,6},{7,8}})` |
-| `mtranspose(A)`             | Matrix transpose                                                 | `mtranspose({{1,2},{3,4}})`          |
-| `mtrace(A)`                 | Matrix trace (sum of diagonal entries)                           | `mtrace({{1,2},{3,4}})=5`            |
-| `mrank(A)`                  | Matrix rank                                                      | `mrank({{1,2},{3,4}})=2`             |
-| `mdet(A)`                   | Determinant of matrix                                            | `mdet({{1,2},{3,4}})=-2`             |
-| `mrows(A)`                  | Get number of rows in matrix                                     | `mrows({{1,2},{3,4}})=2`             |
-| `mcols(A)`                  | Get number of columns in matrix                                  | `mcols({{1,2},{3,4}})=2`             |
-| `mdiag(A)`                  | Get the diagonal elements of the matrix                          | `mdiag({{1,2},{3,4}})={1,4}`         |
-| `mlu(A)`                    | LU decomposition of the matrix                                   | `mlu({{2,1},{4,3}})`                 |
-| `meigenvals(A)`             | Matrix eigenvalues                                               | `meigenvals({{1,2},{3,4}})`          |
-| `meigenvecs(A)`             | Matrix eigenvectors                                              | `meigenvecs({{1,2},{3,4}})`          |
-| `minverse(A)`               | Inverse matrix                                                   | `minverse({{1,2},{3,4}})`            |
-| `mqr(A)`                    | QR decomposition (Householder transformation)                    | `mqr({{1,2},{3,4}})`                 |
-| `msvd(A)`                   | Singular value decomposition (Jacobi method)                     | `msvd({{1,2},{3,4}})`                |
-| `mcond(A)`, `mcondition(A)` | Condition number of matrix (LU decomposition)                    | `mcond({{1,2},{3,4}})`               |
-| `mlsqr(A,b)`                | Least squares solution (QR method)                               | `mlsqr({{1,2},{3,4}},{1,2})`         |
-| `mnormf(A)`, `mnorm(A)`     | Matrix Frobenius norm                                            | `mnormf({{1,2},{3,4}})`              |
-| `mmaxeigen(A)`              | Matrix maximum eigenvalue                                        | `mmaxeigen({{1,2},{3,4}})`           |
-| `mmineigen(A)`              | Minimum Eigenvalue of Matrix                                     | `mmineigen({{1,2},{3,4}})`           |
-| `msumsv(A)`                 | Sum of Singular Values of Matrix (QR Iterative SVD)              | `msumsv({{1,2},{3,4}})`              |
-| `misse_symmetric(A)`        | Determines matrix symmetry                                       | `misse_symmetric({{1,2},{2,1}})`     |
-| `mispd(A)`                  | Determines matrix positive definiteness (Cholesky decomposition) | `mispd({{2,1},{1,2}})`               |
+| Function Name               | Description                                                                         | Input and Output Examples                                                       |
+| --------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `matrix(a,b,c,...)`         | Create a matrix of arbitrary size                                                   | `matrix({1,2},{3,4})`                                                           |
+| `identity(n)`               | Create an n×n identity matrix                                                       | `identity(3)`                                                                   |
+| `zeros(rows,cols)`          | Create a zero matrix of size rows x cols                                            | `zeros(2,3)`                                                                    |
+| `mget(A,row,col)`           | Access matrix elements                                                              | `mget({{1,2},{3,4}},0,1)=2`                                                     |
+| `madd(A,B)`                 | Matrix addition                                                                     | `madd({{1,2},{3,4}}, {{5,6},{7,8}})`                                            |
+| `mmul(A,B)`                 | Matrix multiplication                                                               | `mmul({{1,2},{3,4}}, {{5,6},{7,8}})`                                            |
+| `mtranspose(A)`             | Matrix transpose                                                                    | `mtranspose({{1,2},{3,4}})`                                                     |
+| `mtrace(A)`                 | Matrix trace (sum of diagonal entries)                                              | `mtrace({{1,2},{3,4}})=5`                                                       |
+| `mrank(A)`                  | Matrix rank                                                                         | `mrank({{1,2},{3,4}})=2`                                                        |
+| `mdet(A)`                   | Determinant of matrix                                                               | `mdet({{1,2},{3,4}})=-2`                                                        |
+| `mrows(A)`                  | Get number of rows in matrix                                                        | `mrows({{1,2},{3,4}})=2`                                                        |
+| `mcols(A)`                  | Get number of columns in matrix                                                     | `mcols({{1,2},{3,4}})=2`                                                        |
+| `mdiag(A)`                  | Get the diagonal elements of the matrix                                             | `mdiag({{1,2},{3,4}})={1,4}`                                                    |
+| `mlu(A)`                    | LU decomposition of a matrix (with partial pivoting). The return value is `{P,L,U}` | `mlu({{2,1},{4,3}})= {{1,0},{...}}`                                             |
+| `meigenvals(A)`             | Matrix eigenvalues                                                                  | `meigenvals({{1,2},{3,4}})={5.372.., -0.372..}`                                 |
+| `meigenvecs(A)`             | Matrix eigenvectors                                                                 | `meigenvecs({{1,2},{3,4}})={{0.415.., 0.909..}, {0.824.., -0.565..}}`           |
+| `minverse(A)`               | Inverse matrix                                                                      | `minverse({{1,2},{3,4}})={{-2,1},{1.5,-0.5}}={{-2,1},{1.5,-0.5}}`               |
+| `mqr(A)`                    | QR decomposition (Householder transformation)                                       | `mqr({{1,2},{3,4}})={{{0.316227766017, ..},  {.., ..}},  {{.., ..}, {.., ..}}}` |
+| `msvd(A)`                   | Singular value decomposition (Jacobi method)                                        | `msvd({{1,2},{3,4}})`                                                           |
+| `mcond(A)`, `mcondition(A)` | Condition number of matrix (LU decomposition)                                       | `mcond({{1,2},{3,4}})`                                                          |
+| `mlsqr(A,b)`                | Least squares solution (QR method)                                                  | `mlsqr({{1,2},{3,4}},{1,2})`                                                    |
+| `mnormf(A)`, `mnorm(A)`     | Matrix Frobenius norm                                                               | `mnormf({{1,2},{3,4}})`                                                         |
+| `mmaxeigen(A)`              | Matrix maximum eigenvalue                                                           | `mmaxeigen({{1,2},{3,4}})`                                                      |
+| `mmaxeigen_power(A)`        | Maximum eigenvalue of a matrix (power method)                                       | `mmaxeigen_power({{1,2},{3,4}})=5.37228132327`                                  |
+| `msumsv(A)`                 | Sum of Singular Values of Matrix (QR Iterative SVD)                                 | `msumsv({{1,2},{3,4}})`                                                         |
+| `misse_symmetric(A)`        | Determines matrix symmetry                                                          | `misse_symmetric({{1,2},{2,1}})`                                                |
+| `mispd(A)`                  | Determines matrix positive definiteness (Cholesky decomposition)                    | `mispd({{2,1},{1,2}})`                                                          |
+| `covmatrix(M)`              | Covariance matrix                                                                   | `covmatrix({{1,2},{3,4}})=...`                                                  |
+| `corrmatrix(...)`           | Correlation matrix                                                                  | `corrmatrix({1,2,3},{2,4,6})=...`                                               |
+| `percentrank(x,...)`        | Percentile rank                                                                     | `percentrank(3,1,2,3,4,5)=0.5`                                                  |
 
 ### Random Numbers
 
@@ -587,24 +614,27 @@ In[n], Out[n], %, %%, %%%...
 
 System functions are not intended for use with other functions or formulas.
 
-| Function Name               | Description                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `Clear[]`                   | Clear erases history and sets `In[n] / Out[n]` to `n=1`                               |
-| `Exit[]`                    | Terminates the program                                                                |
-| `filein("filename")`        | Reads input from an external file and evaluates it. The result is stored in `Out[n]`  |
-| `fileout(data, "filename")` | Outputs to a file. `[n]` does not increment.                                          |
-| `clip(data)`                | Copies to the clipboard. `[n]` does not increment.                                    |
-| `explain(data)`             | Displays information such as data type and internal values. `[n]` does not increment. |
+| Function Name               | Description                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------------- |
+| `Clear[]`                   | Clear erases history and sets `In[n] / Out[n]` to `n=1`                                   |
+| `Exit[]`                    | Terminates the program                                                                    |
+| `filein("filename")`        | Reads input from an external file and evaluates it. The result is stored in `Out[n]`      |
+| `fileout(data, "filename")` | Outputs to a file. `[n]` does not increment.                                              |
+| `clip(data)`                | Copies to the clipboard. `[n]` does not increment.                                        |
+| `explain(data)`             | Displays information such as data type and internal values. `[n]` does not increment.     |
+| `if(cond,a,b)`              | Conditional branching (experimental)                                                      |
+| `silent(x)`                 | Utility for suppressing output (useful for suppressing the output of long matrices, etc.) |
 
 Additionally, functions related to the calculator system are provided by a set of functions beginning with `:`. Some of these are compatible with the above.
 
-| Function Name | Description                                            | Input      | Output Example                                         |
-| ------------- | ------------------------------------------------------ | ---------- | ------------------------------------------------------ |
-| `:clear`      | Same as `Clear[]`                                      | `:clear`   | None                                                   |
-| `:exit`       | Same as `Exit[]`                                       | `:exit`    | None                                                   |
-| `:defs`       | Display a list of user-defined variables and functions | `:defs`    | `definitions => Variables:  x := 2   Functions:  f(x)` |
-| `:unset`      | Delete user-defined variables                          | `:unset x` | `<unset: x>`                                           |
-| `:undef`      | Delete user-defined functions                          | `:undef f` | `<undefined: f>`                                       |
+| Function Name | Description                                            | Input         | Output Example                                                                                         |
+| ------------- | ------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `:clear`      | Same as `Clear[]`                                      | `:clear`      | None                                                                                                   |
+| `:exit`       | Same as `Exit[]`                                       | `:exit`       | None                                                                                                   |
+| `:defs`       | Display a list of user-defined variables and functions | `:defs`       | `definitions => Variables:  x := 2   Functions:  f(x)`                                                 |
+| `:unset`      | Delete user-defined variables                          | `:unset x`    | `<unset: x>`                                                                                           |
+| `:undef`      | Delete user-defined functions                          | `:undef f`    | `<undefined: f>`                                                                                       |
+| `:help`       | Function help                                          | `:help ibeta` | `ibeta[a, b, x]: regularized incomplete beta function I_x[a, b], where a > 0, b > 0, and 0 <= x <= 1.` |
 
 ## Operator Precedence Table
 
@@ -719,7 +749,6 @@ Displayed values and history are rounded to 12 decimal places.
 
 ### Intentional Limitations
 
-- No user-defined functions
 - No symbolic computation
 
 ### Known Behavior
@@ -930,7 +959,7 @@ Please submit them via Github.I love to hear any suggestions for implementation,
 - AngleMode support (setAngle = RADIAN)
 - Arbitrary precision (setFix=5)
 - `eval` now supports `expect`
-- Basic calculus stuff
+- Basic calculus stuff -> Placeholder implementation
 - Variables aren’t really supported on purpose, but loop-like stuff (like `for`) would be nice
 - `plot` function for graphing
 - BigInt? (still depends on double, so very large numbers can get a bit messy at the lower digits)

@@ -112,7 +112,7 @@ namespace mm::cal {
    double exp = b.asScalar(pos);
 
    // 0^0
-   if (base == 0.0 && exp == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0^0 is indeterminate", pos);
+   if (base == 0.0 && exp == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0 ^ 0 is indeterminate on this calculator", pos);
 
    // 0^negative
    if (base == 0.0) {
@@ -141,7 +141,7 @@ namespace mm::cal {
   std::complex<double> z = a.toComplex(pos);
   std::complex<double> w = b.toComplex(pos);
 
-  if (std::abs(z) == 0.0 && std::abs(w) == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0^0 is indeterminate", pos);
+  if (std::abs(z) == 0.0 && std::abs(w) == 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: 0 ^ 0 is indeterminate on this calculator", pos);
 
   std::complex<double> result = std::pow(z, w);
 

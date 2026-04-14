@@ -64,6 +64,7 @@
     <ClCompile Include="src\functions\trig_hyperbolic.cpp" />
     <ClCompile Include="src\functions\vector_matrix.cpp" />
     <ClCompile Include="src\functions\help.cpp" />
+    <ClCompile Include="src\functions\calculus.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
