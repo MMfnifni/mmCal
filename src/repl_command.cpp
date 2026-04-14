@@ -1,6 +1,7 @@
-#include "repl_command.hpp"
+﻿#include "repl_command.hpp"
 #include "evaluate.hpp"
 #include "formatter.hpp"
+#include "functions/functions.hpp"
 #include "session_ops.hpp"
 #include <algorithm>
 #include <sstream>
@@ -46,7 +47,7 @@ namespace mm::cal {
   EvalResult res{};
 
   auto words = splitWords(line);
-  if (words.empty()) { throw CalcError(CalcErrorType::SyntaxError, "empty command", 0); }
+  if (words.empty()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: empty command", 0); }
 
   const std::string &cmd = words[0];
 
@@ -54,7 +55,7 @@ namespace mm::cal {
   // :defs
   // -----------------------
   if (cmd == ":defs") {
-   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :defs", 0); }
+   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :defs", 0); }
 
    std::vector<std::string> varLines;
    varLines.reserve(ectx.session.globals.size());
@@ -90,11 +91,11 @@ namespace mm::cal {
   // :unset <var>
   // -----------------------
   if (cmd == ":unset") {
-   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :unset <variable]", 0); }
+   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :unset <variable]", 0); }
 
    const std::string &name = words[1];
 
-   if (!unsetVariable(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown variable: " + name, 0); }
+   if (!unsetVariable(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "UnknownIdentifier: unknown variable: " + name, 0); }
 
    res.displayOverride = "[unset: " + name + "]";
    return res;
@@ -104,11 +105,11 @@ namespace mm::cal {
   // :undef <func>
   // -----------------------
   if (cmd == ":undef") {
-   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :undef <function]", 0); }
+   if (words.size() != 2) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :undef <function]", 0); }
 
    const std::string &name = words[1];
 
-   if (!undefFunction(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown function: " + name, 0); }
+   if (!undefFunction(ectx, name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "UnknownIdentifier: unknown function: " + name, 0); }
 
    res.displayOverride = "[undefined: " + name + "]";
    return res;
@@ -118,7 +119,7 @@ namespace mm::cal {
   // :exit
   // -----------------------
   if (cmd == ":exit") {
-   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :exit", 0); }
+   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :exit", 0); }
    throw ControlRequest(ControlRequest::Kind::Exit);
   }
 
@@ -126,11 +127,37 @@ namespace mm::cal {
   // :clear
   // -----------------------
   if (cmd == ":clear") {
-   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "Usage: :clear", 0); }
+   if (words.size() != 1) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :clear", 0); }
    throw ControlRequest(ControlRequest::Kind::Clear);
   }
 
-  throw CalcError(CalcErrorType::InvalidArgument, "unknown command: " + cmd, 0);
+  // -----------------------
+  // :help
+  // -----------------------
+  if (cmd == ":help") {
+   if (words.size() == 1) {
+    EvalResult res{};
+    res.value = Value();
+    res.displayOverride = getFunctionHelpIndex();
+    return res;
+   }
+
+   if (words.size() == 2) {
+    const std::string &name = words[1];
+
+    // 関数として未登録なら明示
+    if (!cfg.functions.contains(name)) { throw CalcError(CalcErrorType::UnknownIdentifier, "unknown function: " + name, 0); }
+
+    EvalResult res{};
+    res.value = Value();
+    res.displayOverride = getFunctionHelp(name);
+    return res;
+   }
+
+   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :help [function]", 0);
+  }
+
+  throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unknown command: " + cmd, 0);
  }
 
 } // namespace mm::cal

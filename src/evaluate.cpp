@@ -1,7 +1,7 @@
 ﻿#include "evaluate.hpp"
 #include "display_messages.hpp"
 #include "formatter.hpp"
-#include "functions.hpp"
+#include "functions/functions.hpp"
 #include "lexer_parser.hpp"
 #include "repl_command.hpp"
 #include <iomanip>
@@ -17,7 +17,7 @@ namespace mm::cal {
   Parser p(ectx.session.cfg, src);
   auto ast = p.parse();
 
-  if (p.cur.type != TokenType::End) { throw CalcError(CalcErrorType::SyntaxError, "Syntax Error: not closed", p.cur.pos); }
+  if (p.cur.type != TokenType::End) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expression not closed", p.cur.pos); }
 
   Value v = ast->eval(ectx);
   return {v};
@@ -33,7 +33,7 @@ namespace mm::cal {
   Parser p(cfg, line);
   auto ast = p.parse();
 
-  if (p.cur.type != TokenType::End) { throw CalcError(CalcErrorType::SyntaxError, "Syntax Error: not closed", p.cur.pos); }
+  if (p.cur.type != TokenType::End) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expression not closed", p.cur.pos); }
   bool assignWasRedefinition = false;
   Value oldAssignedValue;
 

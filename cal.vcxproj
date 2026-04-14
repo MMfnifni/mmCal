@@ -142,6 +142,7 @@
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -164,6 +165,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -186,6 +188,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -202,6 +205,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -227,6 +231,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -252,6 +257,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -267,7 +273,22 @@
     <ClCompile Include="src\evaluate.cpp" />
     <ClCompile Include="src\explain_formatter.cpp" />
     <ClCompile Include="src\formatter.cpp" />
-    <ClCompile Include="src\functions.cpp" />
+    <ClCompile Include="src\functions\area_volume.cpp" />
+    <ClCompile Include="src\functions\basic_math.cpp" />
+    <ClCompile Include="src\functions\complex.cpp" />
+    <ClCompile Include="src\functions\engineering.cpp" />
+    <ClCompile Include="src\functions\exp_log.cpp" />
+    <ClCompile Include="src\functions\finance.cpp" />
+    <ClCompile Include="src\functions\geovec.cpp" />
+    <ClCompile Include="src\functions\help.cpp" />
+    <ClCompile Include="src\functions\init.cpp" />
+    <ClCompile Include="src\functions\mold_injection.cpp" />
+    <ClCompile Include="src\functions\others.cpp" />
+    <ClCompile Include="src\functions\random.cpp" />
+    <ClCompile Include="src\functions\signal.cpp" />
+    <ClCompile Include="src\functions\statistics.cpp" />
+    <ClCompile Include="src\functions\trig_hyperbolic.cpp" />
+    <ClCompile Include="src\functions\vector_matrix.cpp" />
     <ClCompile Include="src\lexer_parser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
     <ClCompile Include="src\math_util.cpp" />
@@ -293,7 +314,7 @@
     <ClInclude Include="src\evaluate.hpp" />
     <ClInclude Include="src\explain_formatter.hpp" />
     <ClInclude Include="src\formatter.hpp" />
-    <ClInclude Include="src\functions.hpp" />
+    <ClInclude Include="src\functions\functions.hpp" />
     <ClInclude Include="src\lexer_parser.hpp" />
     <ClInclude Include="src\math_util.hpp" />
     <ClInclude Include="src\repl_command.hpp" />

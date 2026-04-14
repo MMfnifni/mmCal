@@ -54,7 +54,7 @@ namespace mm::cal {
 
                         // multi + multi
                         [&](std::shared_ptr<MultiValue> m1, std::shared_ptr<MultiValue> m2) -> Value {
-                         if (m1->elems_.size() != m2->elems_.size()) throw CalcError(CalcErrorType::DimensionMismatch, "multi-value size mismatch", pos);
+                         if (m1->elems_.size() != m2->elems_.size()) throw CalcError(CalcErrorType::DomainError, "DomainError: multi-value size mismatch", pos);
 
                          auto result = std::make_shared<MultiValue>();
                          result->elems_.reserve(m1->elems_.size());
@@ -66,7 +66,7 @@ namespace mm::cal {
                         },
 
                         // invalid
-                        [&](auto &&, auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand types", pos); }
+                        [&](auto &&, auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: invalid operand types", pos); }
 
                     },
                     a.storage(), b.storage());
@@ -167,7 +167,7 @@ namespace mm::cal {
                          return result;
                         },
 
-                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for unary -", pos); }
+                        [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: invalid operand for unary -", pos); }
 
                     },
                     v.storage());
@@ -180,7 +180,7 @@ namespace mm::cal {
   if (std::modf(x, &intpart) != 0.0) throw CalcError(CalcErrorType::DomainError, "DomainError: factorial requires integer value", pos);
 
   if (x > 170.0) // double overflow safety
-   throw CalcError(CalcErrorType::Overflow, "factorial overflow", pos);
+   throw CalcError(CalcErrorType::Overflow, "Overflow: factorial overflow", pos);
 
   double result = 1.0;
   for (int i = 1; i <= static_cast<int>(x); ++i)
@@ -205,7 +205,7 @@ namespace mm::cal {
                                },
 
                                // invalid
-                               [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "invalid operand for factorial", pos); }
+                               [&](auto &&) -> Value { throw CalcError(CalcErrorType::TypeError, "TypeError: invalid operand for factorial", pos); }
 
                     },
                     v.storage());

@@ -28,7 +28,7 @@ namespace mm::cal {
    case TokenType::Mul: return BinOp::Mul;
    case TokenType::Div: return BinOp::Div;
    case TokenType::Pow: return BinOp::Pow;
-   default: throw CalcError(CalcErrorType::InvalidOperation, errorMessage(CalcErrorType::InvalidOperation), 0);
+   default: throw CalcError(CalcErrorType::InternalError, "InternalError: invalid binary operator token", 0);
   }
  }
 
@@ -61,7 +61,7 @@ namespace mm::cal {
   { // 仮引数重複チェック
    std::unordered_set<std::string> seen;
    for (const auto &p : params)
-    if (!seen.insert(p).second) throw CalcError(CalcErrorType::RuntimeError, "RuntimeError: duplicate parameter name", pos);
+    if (!seen.insert(p).second) throw CalcError(CalcErrorType::InternalError, "InternalError: duplicate parameter name", pos);
   }
 
   UserFunction fn;
@@ -80,7 +80,7 @@ namespace mm::cal {
  Value BinaryNode::evalImpl(EvaluationContext &ectx) const {
   auto a = lhs->eval(ectx);
   auto b = rhs->eval(ectx);
-  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "operator not defined for multivalue", pos);
+  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: operator not defined for multivalue", pos);
   switch (op) {
    case BinOp::Add: return add(a, b, pos);
    case BinOp::Sub: return sub(a, b, pos);
@@ -89,13 +89,13 @@ namespace mm::cal {
    case BinOp::Pow: return power(a, b, pos);
   }
 
-  throw CalcError(CalcErrorType::InvalidOperation, "invalid op", pos);
+  throw CalcError(CalcErrorType::InternalError, "InternalError: invalid binary operator", pos);
  }
 
  UnaryNode::UnaryNode(UnaryOp o, std::unique_ptr<ASTNode> r, size_t p) : op(o), rhs(std::move(r)) { pos = p; }
  Value UnaryNode::evalImpl(EvaluationContext &ectx) const {
   auto v = rhs->eval(ectx);
-  if (v.isMulti()) throw CalcError(CalcErrorType::TypeError, "unary operator not defined for multivalue", pos);
+  if (v.isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: unary operator not defined for multivalue", pos);
   if (op == UnaryOp::Minus) return negate(v, pos);
   return v;
  }
@@ -107,7 +107,7 @@ namespace mm::cal {
 
   if (op == '!') return mm::cal::factorial(v, pos);
 
-  throw CalcError(CalcErrorType::InvalidOperation, "invalid postfix", pos);
+  throw CalcError(CalcErrorType::InternalError, "InternalError: invalid postfix operator", pos);
  }
 
  CompareNode::CompareNode(CmpOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r, size_t p) : op(o), lhs(std::move(l)), rhs(std::move(r)) { pos = p; }
@@ -115,7 +115,7 @@ namespace mm::cal {
   Value a = lhs->eval(ectx);
   Value b = rhs->eval(ectx);
 
-  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "comparison not defined for multivalue", pos);
+  if (a.isMulti() || b.isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: comparison not defined for multivalue", pos);
   mm::cal::CompareOp cop;
 
   switch (op) {
@@ -125,19 +125,19 @@ namespace mm::cal {
    case CmpOp::LessEq: cop = CompareOp::Le; break;
    case CmpOp::Greater: cop = CompareOp::Gt; break;
    case CmpOp::GreaterEq: cop = CompareOp::Ge; break;
-   default: throw CalcError(CalcErrorType::InvalidOperation, "invalid operator", pos);
+   default: throw CalcError(CalcErrorType::InternalError, "InternalError: invalid comparison operator", pos);
   }
 
   return mm::cal::compare(a, b, cop, pos);
  }
 
  Value FunctionCallNode::evalImpl(EvaluationContext &ectx) const {
-  if (std::find(ectx.callStack.begin(), ectx.callStack.end(), name) != ectx.callStack.end()) { throw CalcError(CalcErrorType::DefinitionError, "recursion disabled", pos); } // 自己再帰検出
+  if (std::find(ectx.callStack.begin(), ectx.callStack.end(), name) != ectx.callStack.end()) { throw CalcError(CalcErrorType::DefinitionError, "DefinitionError: recursion disabled", pos); } // 自己再帰検出
 
   // user function 優先
   if (auto uit = ectx.session.userFunctions.find(name); uit != ectx.session.userFunctions.end()) {
    const UserFunction &fn = uit->second;
-   if (args.size() != fn.params.size()) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
+   if (args.size() != fn.params.size()) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: wrong number of arguments for user-defined function: " + name, pos); }
    std::vector<Value> values;
    values.reserve(args.size());
    for (auto &a : args)
@@ -162,7 +162,7 @@ namespace mm::cal {
   auto &f = it->second;
   int argc = static_cast<int>(args.size());
 
-  if (!f.validArgc(argc)) throw CalcError(CalcErrorType::FunctionMissing, errorMessage(CalcErrorType::FunctionMissing), pos);
+  if (!f.validArgc(argc)) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: wrong number of arguments for function: " + name, pos); }
 
   std::vector<Value> v;
   v.reserve(args.size());
@@ -198,7 +198,7 @@ namespace mm::cal {
   if (unit == "grad") { return x * 0.9; }
 
   // length (将来)
-  if (unit == "mm" || unit == "cm" || unit == "m" || unit == "inch") { throw CalcError(CalcErrorType::NotImplemented, "length units are not implemented yet", pos); }
+  if (unit == "mm" || unit == "cm" || unit == "m" || unit == "inch") { throw CalcError(CalcErrorType::InternalError, "InternalError: length unit application is not implemented yet", pos); }
 
   throw CalcError(CalcErrorType::UnknownIdentifier, "unknown unit: " + unit, pos);
  }
@@ -235,7 +235,7 @@ namespace mm::cal {
  }
  Value evalCompare(const Value &lhs, const Value &rhs, CmpOp op, FunctionContext &ctx) {
   // 複素数は大小比較不可
-  if (lhs.isComplex() || rhs.isComplex()) throw CalcError(CalcErrorType::NotImplemented, "complex comparison is not implemented", ctx.pos);
+  if (lhs.isComplex() || rhs.isComplex()) { throw CalcError(CalcErrorType::TypeError, "TypeError: comparison is not defined for complex values", ctx.pos); }
   double a = lhs.asScalar(ctx.pos), b = rhs.asScalar(ctx.pos);
   bool r = false;
   int prec = ctx.session.cfg.precision;

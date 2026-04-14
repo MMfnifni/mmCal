@@ -60,64 +60,32 @@ namespace mm::cal {
     ============================ */
 
  enum class CalcErrorType {
-  NotImplemented,
   UnknownIdentifier,
-  InvalidCharacter,
-  MismatchedParen,
-  OperandMissing,
-  FunctionMissing,
-  DivisionByZero,
-  AngleWithoutdouble,
-  DomainError,
-  NaNResult,
-  InfiniteResult,
-  OutOfRange,
-  NeedInteger,
-  NonConvergence,
-  Overflow,
-  InvalidNumber,
-  InvalidOperation,
-  TypeError,
-  InvalidArgument,
-  NaNDetected,
-  InfinityDetected,
-  DimensionMismatch,
-  InternalError,
   SyntaxError,
-  RuntimeError,
+  TypeError,
+  DomainError,
+  DivisionByZero,
+  OutOfRange,
+  Overflow,
+  NonConvergence,
   IOError,
   DefinitionError,
+  InternalError,
  };
 
  constexpr const char *errorMessage(CalcErrorType t) {
   switch (t) {
-   case CalcErrorType::NotImplemented: return "this feature is not yet implemented";
    case CalcErrorType::UnknownIdentifier: return "unknown identifier";
-   case CalcErrorType::InvalidCharacter: return "invalid character";
-   case CalcErrorType::MismatchedParen: return "mismatched parentheses";
-   case CalcErrorType::OperandMissing: return "operand missing";
-   case CalcErrorType::FunctionMissing: return "function argument missing(many or few args)";
-   case CalcErrorType::DivisionByZero: return "division by zero";
-   case CalcErrorType::AngleWithoutdouble: return "angle without value";
+   case CalcErrorType::SyntaxError: return "syntax error";
+   case CalcErrorType::TypeError: return "type error";
    case CalcErrorType::DomainError: return "domain error";
-   case CalcErrorType::NaNResult: return "result is NaN";
-   case CalcErrorType::InfiniteResult: return "result is infinite";
-   case CalcErrorType::OutOfRange: return "history out of range";
-   case CalcErrorType::NeedInteger: return "this func need integer";
-   case CalcErrorType::NonConvergence: return "did not converge";
+   case CalcErrorType::DivisionByZero: return "division by zero";
+   case CalcErrorType::OutOfRange: return "OutOfRange: history out of range";
    case CalcErrorType::Overflow: return "overflow detected";
-   case CalcErrorType::InvalidNumber: return "invalid number";
-   case CalcErrorType::InvalidOperation: return "invalid operation";
-   case CalcErrorType::TypeError: return "double or complex type error";
-   case CalcErrorType::InvalidArgument: return "invalid argument count";
-   case CalcErrorType::NaNDetected: return "NaN detected";
-   case CalcErrorType::InfinityDetected: return "Infinity detected";
-   case CalcErrorType::DimensionMismatch: return "Dimension mismatch";
-   case CalcErrorType::InternalError: return "InternalError";
-   case CalcErrorType::SyntaxError: return "SyntaxError";
-   case CalcErrorType::RuntimeError: return "RuntimeError";
-   case CalcErrorType::IOError: return "IOError";
-   case CalcErrorType::DefinitionError: return "DefinitionError";
+   case CalcErrorType::NonConvergence: return "did not converge";
+   case CalcErrorType::IOError: return "I/O error";
+   case CalcErrorType::DefinitionError: return "definition error";
+   case CalcErrorType::InternalError: return "internal error";
   }
   return "unknown calculation error";
  }
@@ -131,8 +99,12 @@ namespace mm::cal {
  [[noreturn]] inline void throwOverflow(size_t pos) { throw CalcError(CalcErrorType::Overflow, errorMessage(CalcErrorType::Overflow), pos); }
  [[noreturn]] inline void throwDomain(size_t pos) { throw CalcError(CalcErrorType::DomainError, errorMessage(CalcErrorType::DomainError), pos); }
  [[noreturn]] inline void throwDomain(size_t pos, const char *msg) { throw CalcError(CalcErrorType::DomainError, msg, pos); }
- [[noreturn]] inline void throwInvalid(size_t pos, const char *msg) { throw CalcError(CalcErrorType::InvalidArgument, msg, pos); }
- //[[noreturn]] inline void throwRuntime(const char *msg) { throw CalcError(CalcErrorType::RuntimeError, msg, 0); }
+ [[noreturn]] inline void throwType(size_t pos) { throw CalcError(CalcErrorType::TypeError, errorMessage(CalcErrorType::TypeError), pos); }
+ [[noreturn]] inline void throwType(size_t pos, const char *msg) { throw CalcError(CalcErrorType::TypeError, msg, pos); }
+ [[noreturn]] inline void throwSyntax(size_t pos) { throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), pos); }
+ [[noreturn]] inline void throwSyntax(size_t pos, const char *msg) { throw CalcError(CalcErrorType::SyntaxError, msg, pos); }
+ [[noreturn]] inline void throwUnknown(size_t pos, const std::string &msg) { throw CalcError(CalcErrorType::UnknownIdentifier, msg, pos); }
+ [[noreturn]] inline void throwInternal(size_t pos, const char *msg) { throw CalcError(CalcErrorType::InternalError, msg, pos); }
 
  /* ============================
    値だぞっ
@@ -506,7 +478,7 @@ namespace mm::cal {
   if (isInvalid()) { return 0; }
   // scalar / complex → 要素1とみなす
   if (isNumeric()) { return 1; }
-  throw CalcError(CalcErrorType::RuntimeError, "RuntimeError: Value->size()???", 0);
+  throw CalcError(CalcErrorType::InternalError, "RuntimeError: Value->size()???", 0);
  }
 
  // 有限性チェックたち

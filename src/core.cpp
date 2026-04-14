@@ -308,18 +308,18 @@ namespace mm::cal {
       if (!OpenClipboard(nullptr)) { throw CalcError(CalcErrorType::IOError, "OpenClipboard failed", 0); }
 
       try {
-       if (!EmptyClipboard()) { throw CalcError(CalcErrorType::RuntimeError, "EmptyClipboard failed", 0); }
+       if (!EmptyClipboard()) { throw CalcError(CalcErrorType::InternalError, "EmptyClipboard failed", 0); }
 
        int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-       if (size <= 0) { throw CalcError(CalcErrorType::RuntimeError, "UTF8->UTF16 convert failed", 0); }
+       if (size <= 0) { throw CalcError(CalcErrorType::InternalError, "UTF8->UTF16 convert failed", 0); }
 
        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size * sizeof(wchar_t));
-       if (!hMem) { throw CalcError(CalcErrorType::RuntimeError, "GlobalAlloc failed", 0); }
+       if (!hMem) { throw CalcError(CalcErrorType::InternalError, "GlobalAlloc failed", 0); }
 
        wchar_t *buf = static_cast<wchar_t *>(GlobalLock(hMem));
        if (!buf) {
         GlobalFree(hMem);
-        throw CalcError(CalcErrorType::RuntimeError, "GlobalLock failed", 0);
+        throw CalcError(CalcErrorType::InternalError, "GlobalLock failed", 0);
        }
 
        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, buf, size);
@@ -327,7 +327,7 @@ namespace mm::cal {
 
        if (!SetClipboardData(CF_UNICODETEXT, hMem)) {
         GlobalFree(hMem);
-        throw CalcError(CalcErrorType::RuntimeError, "SetClipboardData failed", 0);
+        throw CalcError(CalcErrorType::InternalError, "SetClipboardData failed", 0);
        }
 
       } catch (...) {
@@ -340,7 +340,7 @@ namespace mm::cal {
       if (!result.explain.empty() && result.explain.back() != '\n') { result.explain += '\n'; }
       result.explain += "clipboard pasted (" + whatByteUnit(s.size()) + ")\n";
 #else
-      throw CalcError(CalcErrorType::NotImplemented, "clipboard is not supported on this platform", 0);
+      throw CalcError(CalcErrorType::InternalError, "clipboard is not supported on this platform", 0);
 #endif
       break;
      }

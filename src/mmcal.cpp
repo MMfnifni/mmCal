@@ -1,7 +1,7 @@
 ﻿#include "core.hpp"
 #include "evaluate.hpp"
 #include "formatter.hpp"
-#include "functions.hpp"
+#include "functions/functions.hpp"
 #include "lexer_parser.hpp"
 #include "repl_command.hpp"
 #include "session_ops.hpp"

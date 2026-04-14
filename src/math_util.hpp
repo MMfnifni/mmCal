@@ -92,7 +92,7 @@ namespace mm::cal {
 
  inline long long requireInt(const Value &v, size_t pos) {
   double d = v.asScalar(pos);
-  if (std::floor(d) != d) throw CalcError(CalcErrorType::NeedInteger, errorMessage(CalcErrorType::NeedInteger), pos);
+  if (std::floor(d) != d) throw CalcError(CalcErrorType::TypeError, errorMessage(CalcErrorType::TypeError), pos);
   return static_cast<int64_t>(d);
  }
  inline std::complex<double> requireComplex(const Value &v, size_t pos) { return v.asComplex(pos); }
@@ -249,7 +249,7 @@ namespace mm::cal {
 
  inline double kurtosisExcessSample(const std::vector<Value> &v, FunctionContext &ctx) {
   const size_t n = v.size();
-  if (n < 4) throw CalcError(CalcErrorType::DomainError, "kurts: need at least 4 elements", ctx.pos);
+  if (n < 4) throw CalcError(CalcErrorType::DomainError, "DomainError: kurts: need at least 4 elements", ctx.pos);
 
   long double mean = 0.0L;
   long double m2 = 0.0L, m3 = 0.0L, m4 = 0.0L;
@@ -334,7 +334,7 @@ namespace mm::cal {
 
  inline double corrPopulationReal(const std::vector<Value> &v, FunctionContext &ctx) {
   const int total = (int)v.size();
-  if (total % 2 != 0) throw CalcError(CalcErrorType::InvalidArgument, "corr: argument count must be even", ctx.pos);
+  if (total % 2 != 0) throw CalcError(CalcErrorType::SyntaxError, "corr: argument count must be even", ctx.pos);
 
   const int n = total / 2;
   if (n < 2) throw CalcError(CalcErrorType::DomainError, "corr: too few samples", ctx.pos);
@@ -360,7 +360,7 @@ namespace mm::cal {
    sxy += dx * (y - my);
   }
 
-  if (sxx == 0.0L || syy == 0.0L) throw CalcError(CalcErrorType::DomainError, "corr: zero variance", ctx.pos);
+  if (sxx == 0.0L || syy == 0.0L) throw CalcError(CalcErrorType::DomainError, "DomainError: corr: zero variance", ctx.pos);
 
   return static_cast<double>(sxy / std::sqrt(sxx * syy));
  }

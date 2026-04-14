@@ -11,7 +11,7 @@ namespace mm::cal {
    ============================ */
 
  long long combLL(long long n, long long r, size_t pos) {
-  if (r < 0) throwDomain(pos);
+  if (r < 0) throw CalcError(CalcErrorType::DomainError, "DomainError: comb: r must be >= 0", pos);
   if (r > n) return 0;
 
   r = std::min(r, n - r);
@@ -36,7 +36,7 @@ namespace mm::cal {
  }
 
  long long permLL(long long n, long long r, size_t pos) {
-  if (n < 0 || r < 0) throwDomain(pos);
+  if (n < 0 || r < 0) throw CalcError(CalcErrorType::DomainError, "DomainError: perm: n and r must be >= 0", pos);
   if (r > n) return 0;
 
   long long res = 1;
@@ -47,9 +47,9 @@ namespace mm::cal {
  }
 
  double factorial(double x, size_t pos) {
-  if (!std::isfinite(x)) throwDomain(pos);
-  if (x < 0) throwDomain(pos);
-  if (std::floor(x) != x) throwDomain(pos);
+  if (!std::isfinite(x)) { throw CalcError(CalcErrorType::DomainError, "DomainError: factorial: value must be finite", pos); }
+  if (x < 0) { throw CalcError(CalcErrorType::DomainError, "DomainError: factorial undefined for negative values", pos); }
+  if (std::floor(x) != x) { throw CalcError(CalcErrorType::DomainError, "DomainError: factorial requires integer value", pos); }
   if (x > 170) // 171! は double overflow
    throwOverflow(pos);
 
@@ -60,7 +60,7 @@ namespace mm::cal {
  }
 
  long double factLD(long long n, size_t pos) {
-  if (n < 0) throw CalcError(CalcErrorType::DomainError, "fact: n < 0", pos);
+  if (n < 0) throw CalcError(CalcErrorType::DomainError, "DomainError: fact: n < 0", pos);
 
   long double acc = 1.0L;
   for (long long i = 2; i <= n; ++i) {
@@ -79,7 +79,7 @@ namespace mm::cal {
 
   auto sub = [&](unsigned long long x, unsigned long long y) -> unsigned long long {
    // 本来 fib の内部では起きないが、式を安全にするため入れておく
-   if (x < y) throw CalcError(CalcErrorType::Overflow, "fib: underflow", pos);
+   if (x < y) throw CalcError(CalcErrorType::Overflow, "Overflow: fib: underflow", pos);
    return x - y;
   };
 
@@ -122,7 +122,7 @@ namespace mm::cal {
  Value area_polygon_impl(const std::vector<Value> &v, FunctionContext &ctx) {
   size_t n = v.size() / 2;
 
-  if (n < 3) throw CalcError(CalcErrorType::DomainError, "area_polygon: need at least 3 points", ctx.pos);
+  if (n < 3) throw CalcError(CalcErrorType::DomainError, "DomainError: area_polygon: need at least 3 points", ctx.pos);
 
   double area = 0.0;
 
@@ -148,7 +148,7 @@ namespace mm::cal {
   for (const auto &x : v) {
    if (isComplex(x)) {
     const auto z = x.asComplex(pos);
-    if (std::abs(std::imag(z)) > cnst_precision_inv) throwDomain(pos);
+    if (std::abs(std::imag(z)) > cnst_precision_inv) { throw CalcError(CalcErrorType::TypeError, "TypeError: real value required", pos); }
     a.push_back(std::real(z));
    } else {
     a.push_back(x.asScalar(pos));
@@ -180,7 +180,8 @@ namespace mm::cal {
  double stddevPopulation(const std::vector<double> &a, double mu) { return std::sqrt(variancePopulation(a, mu)); }
 
  double quantileLinear(std::vector<double> a, double p, size_t pos) {
-  if (!(0.0 <= p && p <= 1.0) || a.empty()) throwDomain(pos);
+  if (!(0.0 <= p && p <= 1.0)) { throw CalcError(CalcErrorType::DomainError, "DomainError: quantile: p out of range", pos); }
+  if (a.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: quantile: no samples", pos); }
   std::sort(a.begin(), a.end());
   if (a.size() == 1) return a[0];
   const double x = p * (double)(a.size() - 1);
@@ -197,7 +198,7 @@ namespace mm::cal {
 
   // NaN は統計として扱えない（sortの前提も壊れる）
   for (double v : x) {
-   if (std::isnan(v)) throwDomain(pos);
+   if (std::isnan(v)) { throw CalcError(CalcErrorType::DomainError, "DomainError: rankAverageTies: NaN not allowed", pos); }
   }
 
   std::vector<size_t> idx(n);
@@ -225,7 +226,7 @@ namespace mm::cal {
  }
 
  double pearsonCorr(const std::vector<double> &x, const std::vector<double> &y, size_t pos) {
-  if (x.size() != y.size() || x.empty()) throwDomain(pos);
+  if (x.size() != y.size() || x.empty()) throw CalcError(CalcErrorType::DomainError, "DomainError: corr: zero variance", pos);
   long double mx = 0.0L, my = 0.0L;
   long double sxx = 0.0L, syy = 0.0L, sxy = 0.0L;
   for (size_t i = 0; i < x.size(); ++i) {
@@ -239,7 +240,7 @@ namespace mm::cal {
    syy += dy * (yi - my);
    sxy += dx * (yi - my);
   }
-  if (sxx == 0.0L || syy == 0.0L) throwDomain(pos);
+  if (sxx == 0.0L || syy == 0.0L) throw CalcError(CalcErrorType::DomainError, "DomainError: corr: zero variance", pos);
   return (double)(sxy / std::sqrt(sxx * syy));
  }
 
@@ -282,7 +283,7 @@ namespace mm::cal {
 
  double brent(std::function<double(double)> f, double a, double b, FunctionContext &ctx, double tol, int maxIter) {
   double fa = f(a), fb = f(b);
-  if (fa * fb > 0) throw CalcError(CalcErrorType::NonConvergence, "Brent method did not converge (root not bracketed)", ctx.pos);
+  if (fa * fb > 0) { throw CalcError(CalcErrorType::NonConvergence, "NonConvergence: Brent method did not converge (root not bracketed)", ctx.pos); }
   if (std::abs(fa) < std::abs(fb)) {
    std::swap(a, b);
    std::swap(fa, fb);
@@ -320,7 +321,7 @@ namespace mm::cal {
    if (std::abs(b - a) < tol) return b;
   }
 
-  throw CalcError(CalcErrorType::NonConvergence, "Brent method did not converge", ctx.pos);
+  throw CalcError(CalcErrorType::NonConvergence, "NonConvergence: Brent method did not converge", ctx.pos);
  }
 
  std::pair<double, double> fullScanBracket(std::function<double(double)> f, double start, double end, double step, FunctionContext &ctx) {
@@ -330,7 +331,7 @@ namespace mm::cal {
    if (prev * curr <= 0) return {x - step, x};
    prev = curr;
   }
-  throw CalcError(CalcErrorType::NonConvergence, "IRR root not bracketed in full scan", ctx.pos);
+  throw CalcError(CalcErrorType::NonConvergence, "NonConvergence: IRR root not bracketed in full scan", ctx.pos);
  }
 
  Value safeInv(double denom, double sign) {

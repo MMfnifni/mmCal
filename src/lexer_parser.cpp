@@ -51,12 +51,12 @@ namespace mm::cal {
    double value;
    auto [ptr, ec] = std::from_chars(begin, end, value);
 
-   if (ec == std::errc::invalid_argument) throw CalcError(CalcErrorType::InvalidNumber, "invalid number", p);
+   if (ec == std::errc::invalid_argument) throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: invalid number", p);
 
-   if (ec == std::errc::result_out_of_range) throw CalcError(CalcErrorType::Overflow, "number out of range", p);
+   if (ec == std::errc::result_out_of_range) throw CalcError(CalcErrorType::Overflow, "Overflow: number out of range", p);
 
    // 1..1, 1.2.3潰し
-   if (ptr < end && *ptr == '.') { throw CalcError(CalcErrorType::InvalidNumber, "multiple '.' in number", static_cast<size_t>(ptr - src.data())); }
+   if (ptr < end && *ptr == '.') { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: multiple '.' in number", static_cast<size_t>(ptr - src.data())); }
 
    size_t len = static_cast<size_t>(ptr - begin);
    std::string s(src.substr(p, len));
@@ -76,9 +76,9 @@ namespace mm::cal {
   if (c == '<') {
    if (p < src.size() && src[p] == '=') {
     ++p;
-    return {TokenType::LessEq, "[=", start};
+    return {TokenType::LessEq, "<=", start};
    }
-   return {TokenType::Less, "[", start};
+   return {TokenType::Less, "<", start};
   }
 
   if (c == '>') {
@@ -86,7 +86,7 @@ namespace mm::cal {
     ++p;
     return {TokenType::GreaterEq, ">=", start};
    }
-   return {TokenType::Greater, "]", start};
+   return {TokenType::Greater, ">", start};
   }
 
   if (c == '=') {
@@ -138,7 +138,7 @@ namespace mm::cal {
     // case '"': return {TokenType::String, '"', start};
   }
 
-  throw CalcError(CalcErrorType::InvalidCharacter, std::string("unexpected character: ") + c, start);
+  throw CalcError(CalcErrorType::SyntaxError, std::string("SyntaxError: unexpected character: ") + c, start);
  }
 
  /* ============================
@@ -161,7 +161,14 @@ namespace mm::cal {
  }
 
  void Parser::expect(TokenType t) {
-  if (!accept(t)) throw CalcError(CalcErrorType::SyntaxError, errorMessage(CalcErrorType::SyntaxError), cur.pos);
+  if (accept(t)) return;
+  switch (t) {
+   case TokenType::RParen: throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expected ')'", cur.pos);
+   case TokenType::RBracket: throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expected ']'", cur.pos);
+   case TokenType::RBrace: throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expected '}'", cur.pos);
+   case TokenType::Comma: throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expected ','", cur.pos);
+   default: throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unexpected token", cur.pos);
+  }
  }
 
  bool Parser::startsPrimary() const {
@@ -289,7 +296,7 @@ namespace mm::cal {
      // 直前トークンが Identifier の場合は「定数だけOK」
      if (prev.type == TokenType::Identifier) { okLhs = isConstantName(prev.text); }
 
-     if (!okLhs) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: nit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
+     if (!okLhs) { throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unit can follow only a number or constant (e.g. 30deg, PI rad)", p); }
 
      std::string u = cur.text;
      advance(); // unit消費
@@ -443,7 +450,7 @@ namespace mm::cal {
    return n;
   }
 
-  throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: invalid parentheses", cur.pos);
+  throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: expected primary expression", cur.pos);
  }
 
  // <,>,<=,>=,==,!=

@@ -1,7 +1,7 @@
 ﻿#include "dll_api.hpp"
 #include "evaluate.hpp"
 #include "formatter.hpp"
-#include "functions.hpp"
+#include "functions/functions.hpp"
 #include "lexer_parser.hpp"
 
 #include <cstring>

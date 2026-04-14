@@ -35,7 +35,6 @@
     <ClCompile Include="src\ast.cpp" />
     <ClCompile Include="src\core.cpp" />
     <ClCompile Include="src\evaluate.cpp" />
-    <ClCompile Include="src\functions.cpp" />
     <ClCompile Include="src\lexer_parser.cpp" />
     <ClCompile Include="src\mmcal.cpp" />
     <ClCompile Include="src\math_util.cpp" />
@@ -49,6 +48,22 @@
     <ClCompile Include="src\explain_formatter.cpp" />
     <ClCompile Include="src\dll_api.cpp" />
     <ClCompile Include="src\session_ops.cpp" />
+    <ClCompile Include="src\functions\area_volume.cpp" />
+    <ClCompile Include="src\functions\basic_math.cpp" />
+    <ClCompile Include="src\functions\complex.cpp" />
+    <ClCompile Include="src\functions\engineering.cpp" />
+    <ClCompile Include="src\functions\exp_log.cpp" />
+    <ClCompile Include="src\functions\finance.cpp" />
+    <ClCompile Include="src\functions\geovec.cpp" />
+    <ClCompile Include="src\functions\init.cpp" />
+    <ClCompile Include="src\functions\mold_injection.cpp" />
+    <ClCompile Include="src\functions\others.cpp" />
+    <ClCompile Include="src\functions\random.cpp" />
+    <ClCompile Include="src\functions\signal.cpp" />
+    <ClCompile Include="src\functions\statistics.cpp" />
+    <ClCompile Include="src\functions\trig_hyperbolic.cpp" />
+    <ClCompile Include="src\functions\vector_matrix.cpp" />
+    <ClCompile Include="src\functions\help.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
@@ -62,9 +77,6 @@
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="src\evaluate.hpp">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
-    <ClInclude Include="src\functions.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="src\lexer_parser.hpp">
@@ -95,6 +107,9 @@
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="src\session_ops.hpp">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="src\functions\functions.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
   </ItemGroup>

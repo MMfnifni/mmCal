@@ -204,7 +204,7 @@ namespace mm::cal {
        } else if constexpr (std::is_same_v<T, std::monostate>) {
         // 関数定義などの「値なし」は何も表示しない
        } else {
-        out += "Invalid";
+        out += "[internal-error]";
        }
       },
       v.storage());
@@ -247,7 +247,7 @@ namespace mm::cal {
        } else if constexpr (std::is_same_v<T, std::string>) {
         return x;
        } else {
-        throw CalcError(CalcErrorType::RuntimeError, "Unknown Value type", 0);
+        throw CalcError(CalcErrorType::InternalError, "InternalError: unknown Value type", 0);
        }
       },
       v.storage());
