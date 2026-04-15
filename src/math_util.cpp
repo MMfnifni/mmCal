@@ -280,6 +280,49 @@ namespace mm::cal {
   return sum;
  }
 
+ long double zeta_euler_maclaurin_ld(long double s) {
+  if (!(s > 1.0L)) { throw std::domain_error("zeta: s must be > 1"); }
+
+  // Bernoulli numbers B2, B4, ..., B16
+  static const long double B[] = {1.0L / 6.0L, -1.0L / 30.0L, 1.0L / 42.0L, -1.0L / 30.0L, 5.0L / 66.0L, -691.0L / 2730.0L, 7.0L / 6.0L, -3617.0L / 510.0L};
+
+  const int M = 8;
+  int N = 32;
+
+  auto rising_factorial = [&](long double a, int k) -> long double {
+   long double r = 1.0L;
+   for (int i = 0; i < k; ++i)
+    r *= (a + i);
+   return r;
+  };
+
+  long double prev = std::numeric_limits<long double>::infinity();
+
+  for (;;) {
+   long double sum = 0.0L;
+   for (int n = 1; n < N; ++n) {
+    sum += 1.0L / std::powl((long double)n, s);
+   }
+
+   long double Ns = std::powl((long double)N, -s);
+   long double corr = std::powl((long double)N, 1.0L - s) / (s - 1.0L) + 0.5L * Ns;
+
+   for (int k = 1; k <= M; ++k) {
+    long double coeff = B[k - 1] / std::tgammal((long double)(2 * k + 1));
+    long double rf = rising_factorial(s, 2 * k - 1);
+    corr += coeff * rf * std::powl((long double)N, -(s + 2 * k - 1));
+   }
+
+   long double val = sum + corr;
+
+   if (std::fabsl(val - prev) <= 1e-18L * std::max<long double>(1.0L, std::fabsl(val))) { return val; }
+
+   prev = val;
+   N *= 2;
+   if (N > 1 << 20) return val;
+  }
+ }
+
  double brent(std::function<double(double)> f, double a, double b, FunctionContext &ctx, double tol, int maxIter) {
   double fa = f(a), fb = f(b);
   if (fa * fb > 0) { throw CalcError(CalcErrorType::NonConvergence, "NonConvergence: Brent method did not converge (root not bracketed)", ctx.pos); }
@@ -1465,6 +1508,149 @@ namespace mm::cal {
   if (std::isnan(r)) throwDomain(pos);
   if (!std::isfinite(r)) throwOverflow(pos);
   return r;
+ }
+
+ std::vector<double> requireRealVectorArg(const Value &val, size_t pos) {
+  if (!val.isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: vector argument required", pos);
+  const auto &mv = val.asMultiRef(pos);
+  std::vector<double> out;
+  out.reserve(mv.size());
+  for (const auto &e : mv.elems()) {
+   if (e.isMulti()) throw CalcError(CalcErrorType::TypeError, "TypeError: nested multivalue not allowed", pos);
+   out.push_back(e.asScalar(pos));
+  }
+  return out;
+ }
+
+ Value makeRowMajorMatrixValue(const std::vector<std::vector<double>> &a) {
+  auto rows = std::make_shared<MultiValue>();
+  rows->elems_.reserve(a.size());
+  for (const auto &row : a) {
+   auto r = std::make_shared<MultiValue>();
+   r->elems_.reserve(row.size());
+   for (double x : row)
+    r->elems_.push_back(Value(x));
+   rows->elems_.push_back(Value(r));
+  }
+  return Value(rows);
+ }
+
+ long double kahanAddLongDouble(long double sum, long double x, long double &c) {
+  long double y = x - c;
+  long double t = sum + y;
+  c = (t - sum) - y;
+  return t;
+ }
+
+ long double risingFactorialLongDouble(long double a, int n) {
+  long double r = 1.0L;
+  for (int i = 0; i < n; ++i) {
+   r *= (a + static_cast<long double>(i));
+  }
+  return r;
+ }
+
+ // Dirichlet eta(s) = sum_{n>=1} (-1)^(n-1) / n^s , s > 0
+ static long double etaDirichletLongDouble(double s, size_t pos) {
+  if (!(s > 0.0) || s == 1.0) throwDomain(pos, "zeta: s must be > 0 and != 1");
+
+  // Euler transform for alternating series:
+  // eta(s) = sum_{k>=0} Δ^k a1 / 2^(k+1), where a_n = 1 / n^s
+
+  constexpr int K = 128; // 正確性優先
+  std::vector<long double> diff;
+  diff.reserve(K + 1);
+
+  long double ss = static_cast<long double>(s);
+
+  for (int n = 1; n <= K + 1; ++n) {
+   diff.push_back(1.0L / std::powl(static_cast<long double>(n), ss));
+  }
+
+  long double sum = 0.0L;
+  long double c = 0.0L;
+  long double weight = 0.5L; // 1 / 2^(k+1)
+
+  for (int k = 0; k < K; ++k) {
+   long double term = diff[0] * weight;
+   sum = kahanAddLongDouble(sum, term, c);
+
+   if (std::fabsl(term) < 1e-19L * std::max(1.0L, std::fabsl(sum))) { break; }
+
+   // forward difference: diff[i] <- diff[i] - diff[i+1]
+   for (int i = 0; i < K - k; ++i) {
+    diff[i] = diff[i] - diff[i + 1];
+   }
+
+   weight *= 0.5L;
+  }
+
+  return sum;
+ }
+
+ // 強化 Euler–Maclaurin, s > 1
+ long double zetaEulerMaclaurinLongDouble(double s, size_t pos) {
+  if (!(s > 0.0) || s == 1.0) throwDomain(pos, "zeta: s must be > 0 and != 1");
+
+  static const long double B[] = {1.0L / 6.0L, -1.0L / 30.0L, 1.0L / 42.0L, -1.0L / 30.0L, 5.0L / 66.0L, -691.0L / 2730.0L, 7.0L / 6.0L, -3617.0L / 510.0L};
+
+  constexpr int M = 8;
+
+  long double ss = static_cast<long double>(s);
+  long double prev = std::numeric_limits<long double>::infinity();
+  int N = 16;
+
+  for (;;) {
+   long double sum = 0.0L;
+   long double c = 0.0L;
+
+   for (int n = 1; n < N; ++n) {
+    long double term = 1.0L / std::powl(static_cast<long double>(n), ss);
+    sum = kahanAddLongDouble(sum, term, c);
+   }
+
+   long double Nld = static_cast<long double>(N);
+   long double corr = 0.0L;
+
+   corr += std::powl(Nld, 1.0L - ss) / (ss - 1.0L);
+   corr += 0.5L * std::powl(Nld, -ss);
+
+   for (int k = 1; k <= M; ++k) {
+    long double coeff = B[k - 1] / std::tgammal(static_cast<long double>(2 * k + 1));
+    long double rf = risingFactorialLongDouble(ss, 2 * k - 1);
+    long double tail = std::powl(Nld, -(ss + static_cast<long double>(2 * k - 1)));
+    corr += coeff * rf * tail;
+   }
+
+   long double val = sum + corr;
+
+   if (std::fabsl(val - prev) <= 1e-18L * std::max(1.0L, std::fabsl(val))) { return val; }
+
+   prev = val;
+   N *= 2;
+
+   if (N > (1 << 20)) { return val; }
+  }
+ }
+
+ long double zetaViaEtaLongDouble(double s, size_t pos) {
+  if (!(s > 0.0) || s == 1.0) throwDomain(pos, "zeta: s must be > 0 and != 1");
+
+  long double ss = static_cast<long double>(s);
+  long double denom = 1.0L - std::powl(2.0L, 1.0L - ss);
+
+  if (std::fabsl(denom) < 1e-20L) throwOverflow(pos);
+
+  long double eta = etaDirichletLongDouble(s, pos);
+  return eta / denom;
+ }
+
+ long double zetaLongDouble(double s, size_t pos) {
+  if (!(s > 0.0) || s == 1.0) throwDomain(pos, "zeta: s must be > 0 and != 1");
+
+  if (s < 2.0) return zetaViaEtaLongDouble(s, pos);
+
+  return zetaEulerMaclaurinLongDouble(s, pos);
  }
 
 } // namespace mm::cal

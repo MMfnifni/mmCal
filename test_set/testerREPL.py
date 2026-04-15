@@ -9,11 +9,23 @@ import datetime
 RED = "\033[31m"
 ORANGE = "\033[38;5;208m"   # 256色モード
 RESET = "\033[0m"
-EPS = 1e-10
+
+ABS_EPS = 1e-10
+REL_EPS_STRICT = 1e-10   # =>
+REL_EPS_LOOSE  = 1e-6    # =>>
+
 EXE = r"..\build\x64\Release\mmCal_x64.exe"
 TESTS = sys.argv[1:] or glob.glob("test*.txt")
 
 # ================= Floating Point Helpers =================
+def error_metrics(a, b):
+    if math.isinf(a) or math.isinf(b):
+        return 0.0, 0.0
+
+    diff = abs(a - b)
+    scale = max(1.0, abs(a), abs(b))
+    rel = diff / scale
+    return diff, rel
 
 def is_quoted_string(s: str) -> bool:
     s = s.strip()
@@ -23,45 +35,29 @@ def unquote_string(s: str) -> str:
     s = s.strip()
     return s[1:-1]
 
-def normalize_float(x, eps=EPS):
+def normalize_float(x, abs_eps=ABS_EPS):
     if math.isinf(x):
         return x
-    return 0.0 if abs(x) < eps else x
+    return 0.0 if abs(x) < abs_eps else x
 
-def almost_equal(a, b, abs_eps=EPS, rel_eps=1e-4):
+def almost_equal(a, b, abs_eps=ABS_EPS, rel_eps=REL_EPS_STRICT, return_metrics=False):
     a, b = normalize_float(a, abs_eps), normalize_float(b, abs_eps)
 
     if math.isinf(a) or math.isinf(b):
-        return a == b
+        ok = (a == b)
+        if return_metrics:
+            return ok, 0.0, 0.0, 0.0
+        return ok
 
     diff = abs(a - b)
     scale = max(1.0, abs(a), abs(b))
-    return diff <= max(abs_eps, rel_eps * scale)
+    rel = diff / scale
+    tol = abs_eps + rel_eps * scale
+    ok = diff <= tol
 
-def almost_equal_absrel(a, b, abs_eps=EPS, rel_eps=1e-4):
-    a, b = normalize_float(a, abs_eps), normalize_float(b, abs_eps)
-
-    if math.isinf(a) or math.isinf(b):
-        return a == b
-
-    diff = abs(a - b)
-    scale = max(1.0, abs(a), abs(b))
-    return diff <= max(abs_eps, rel_eps * scale)
-
-
-def almost_equal_rel(a, b, rel_eps=1e-4):
-    if a == 0 and b == 0:
-        return True
-
-    if math.isinf(a) or math.isinf(b):
-        return a == b
-
-    diff = abs(a - b)
-    scale = max(abs(a), abs(b))
-    if scale == 0:
-        return diff == 0
-
-    return diff <= rel_eps * scale
+    if return_metrics:
+        return ok, diff, rel, tol
+    return ok
 
 def parse_atom(s: str):
     s = s.strip()
@@ -73,7 +69,6 @@ def parse_atom(s: str):
 
     try:
         re_part, im_part = parse_complex(s)
-        # complex表記らしいものだけ complex として採用
         if looks_complex(s):
             return ("complex", (re_part, im_part))
     except Exception:
@@ -83,8 +78,10 @@ def parse_atom(s: str):
 
 def parse_float(s):
     s = s.strip().lower()
-    if s in ("inf", "+inf"): return float("inf")
-    if s == "-inf": return float("-inf")
+    if s in ("inf", "+inf"):
+        return float("inf")
+    if s == "-inf":
+        return float("-inf")
     return float(s)
 
 # ================= Complex Helpers =================
@@ -125,13 +122,10 @@ def parse_complex(s: str):
     imag = float(m.group("imag")) if m.group("imag") else 1.0
     return real, sign * imag
 
-def complex_equal(a, b, mode):
+def complex_equal(a, b, rel_eps):
     ar, ai = parse_complex(a)
     br, bi = parse_complex(b)
-
-    cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-
-    return cmp(ar, br) and cmp(ai, bi)
+    return almost_equal(ar, br, ABS_EPS, rel_eps) and almost_equal(ai, bi, ABS_EPS, rel_eps)
 
 def looks_complex(s):
     return "i" in s.lower()
@@ -172,40 +166,32 @@ def parse_structure(s: str):
 
     return elems
 
-def structure_equal(a, b, mode):
+def structure_equal(a, b, rel_eps):
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return False
-        return all(structure_equal(x, y, mode) for x, y in zip(a, b))
+        return all(structure_equal(x, y, rel_eps) for x, y in zip(a, b))
 
     if isinstance(a, tuple) and isinstance(b, tuple):
         ka, va = a
         kb, vb = b
 
-        # real-real
         if ka == "real" and kb == "real":
-            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-            return cmp(float(va), float(vb))
+            return almost_equal(float(va), float(vb), ABS_EPS, rel_eps)
 
-        # complex-complex
         if ka == "complex" and kb == "complex":
             ar, ai = va
             br, bi = vb
-            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-            return cmp(ar, br) and cmp(ai, bi)
+            return almost_equal(ar, br, ABS_EPS, rel_eps) and almost_equal(ai, bi, ABS_EPS, rel_eps)
 
-        # real-complex / complex-real は虚部ゼロなら同値扱い
         if ka == "real" and kb == "complex":
             br, bi = vb
-            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-            return cmp(float(va), br) and cmp(0.0, bi)
+            return almost_equal(float(va), br, ABS_EPS, rel_eps) and almost_equal(0.0, bi, ABS_EPS, rel_eps)
 
         if ka == "complex" and kb == "real":
             ar, ai = va
-            cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-            return cmp(ar, float(vb)) and cmp(ai, 0.0)
+            return almost_equal(ar, float(vb), ABS_EPS, rel_eps) and almost_equal(ai, 0.0, ABS_EPS, rel_eps)
 
-        # text-text
         if ka == "text" and kb == "text":
             return va == vb
 
@@ -246,17 +232,22 @@ def evaluate_expr(p, expr):
 def run_test_batch(p, expr, expect, mode):
     out, ret = evaluate_expr(p, expr)
 
+    rel_eps = REL_EPS_LOOSE if mode == "rel" else REL_EPS_STRICT
+
     if expect == "Error":
-        return ("pass", out) if ret != 0 else ("fail", out or "(empty)")
+        if ret != 0:
+            return ("pass", out, None)
+        return ("fail", out or "(empty)", None)
 
     if ret != 0:
-        return "fail", out
+        return ("fail", out, None)
 
-    # 明示的な文字列期待値: "..."
     if is_quoted_string(expect):
         expected_text = unquote_string(expect).strip()
         got_text = out.strip()
-        return ("pass", out) if got_text == expected_text else ("fail", out or "(empty)")
+        if got_text == expected_text:
+            return ("pass", out, None)
+        return ("fail", out or "(empty)", None)
 
     try:
         norm_out = normalize_structure(out)
@@ -265,26 +256,52 @@ def run_test_batch(p, expr, expect, mode):
         if norm_out.startswith("{") and norm_expect.startswith("{"):
             parsed_out = parse_structure(norm_out)
             parsed_expect = parse_structure(norm_expect)
-            return ("pass", out) if structure_equal(parsed_out, parsed_expect, mode) else ("fail", out)
+            ok = structure_equal(parsed_out, parsed_expect, rel_eps)
+            if ok:
+                return ("pass", out, None)
+            return ("fail", out, None)
 
         if looks_complex(norm_out) or looks_complex(norm_expect):
-            return ("pass", out) if complex_equal(norm_out, norm_expect, mode) else ("fail", out)
+            ok = complex_equal(norm_out, norm_expect, rel_eps)
+            if ok:
+                return ("pass", out, None)
+            return ("fail", out, None)
 
-        cmp = almost_equal_absrel if mode == "absrel" else almost_equal_rel
-        return ("pass", out) if cmp(parse_float(norm_out), parse_float(norm_expect)) else ("fail", out)
+        got_val = parse_float(norm_out)
+        exp_val = parse_float(norm_expect)
+        ok, diff, rel, tol = almost_equal(
+            got_val, exp_val,
+            ABS_EPS, rel_eps,
+            return_metrics=True
+        )
+
+        info = {
+            "diff": diff,
+            "rel": rel,
+            "tol": tol,
+            "abs_eps": ABS_EPS,
+            "rel_eps": rel_eps,
+        }
+
+        if ok:
+            if mode == "rel" and rel > rel_eps * 0.1:
+                return ("pass_relaxed", out, info)
+            return ("pass", out, info)
+
+        return ("fail", out, info)
 
     except Exception:
-        # 最後の保険: 生文字列比較
-        return ("pass", out) if out.strip() == expect.strip() else ("fail", out or "(empty)")
-
+        ok = (out.strip() == expect.strip())
+        if ok:
+            return ("pass", out, None)
+        return ("fail", out or "(empty)", None)
 # ================= Main =================
 
 PASS = FAIL = TOTAL = 0
-now = datetime.datetime.now() 
-today = now.strftime("'%y/%m/%d/%H:%M:%S") 
-print(today+" start\nRunning tests...\n")
+now = datetime.datetime.now()
+today = now.strftime("'%y/%m/%d/%H:%M:%S")
+print(today + " start\nRunning tests...\n")
 start = time.perf_counter()
-
 
 p = start_batch()
 
@@ -311,19 +328,34 @@ for testfile in TESTS:
                 print(f"{ORANGE}[SKIP]{RESET} {expr}")
                 continue
 
-            result, got = run_test_batch(p, expr, expect, mode)
+            result, got, info = run_test_batch(p, expr, expect, mode)
 
             if result == "pass":
                 print(f"[PASS] {expr} => {got}" if got else f"[PASS] {expr}")
                 PASS += 1
+
+            elif result == "pass_relaxed":
+                print(f"{ORANGE}[PASS~]{RESET} {expr} => {got}")
+                if info is not None:
+                    print(f"        diff   : {info['diff']:.3e}")
+                    print(f"        rel    : {info['rel']:.3e}")
+                    print(f"        tol    : {info['tol']:.3e}")
+                    print(f"        eps    : abs={info['abs_eps']:.1e}, rel={info['rel_eps']:.1e}")
+                PASS += 1
+
             else:
                 print(f"{RED}[FAIL]{RESET} {expr}")
                 print(f"  expected: {expect}")
                 print(f"  got     : {got}")
+                if info is not None:
+                    print(f"  diff    : {info['diff']:.3e}")
+                    print(f"  rel     : {info['rel']:.3e}")
+                    print(f"  tol     : {info['tol']:.3e}")
+                    print(f"  eps     : abs={info['abs_eps']:.1e}, rel={info['rel_eps']:.1e}")
                 FAIL += 1
 
 end = time.perf_counter()
-elapsed = (end - start)* 1000
+elapsed = (end - start) * 1000
 print("\n=====================")
 print(f"TOTAL: {TOTAL}")
 print(f"PASS : {PASS}")

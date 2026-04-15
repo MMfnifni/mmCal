@@ -261,21 +261,23 @@ Below is a complete list of all currently implemented functions. For each functi
 
 ### Special Functions
 
-| Function Name   | Description                          | Example Inputs/Outputs        |
-| --------------- | ------------------------------------ | ----------------------------- |
-| `gamma(x)`      | Gamma function                       | `gamma(5)=24`                 |
-| `lgamma(x)`     | Log-gamma function                   | `lgamma(5)=3.178053830348...` |
-| `erf(x)`        | Error function                       | `erf(1)=0.842700792949...`    |
-| `erfc(x)`       | Complementary error fn               | `erfc(1)=0.157299207050...`   |
-| `digamma(x)`    | Digamma function                     | `digamma(1)=-0.57721...`      |
-| `trigamma(x)`   | Trigamma function                    | `trigamma(1)=1.64493...`      |
-| `zeta(s)`       | Riemann zeta function (`s>1`)        | `zeta(2)=1.64493...`          |
-| `beta(x,y)`     | Beta function                        | `beta(2,3)=0.0833333...`      |
-| `ibeta(a,b,x)`  | Regularized incomplete beta function | `ibeta(2,3,0.5)=0.6875`       |
-| `betaln(x,y)`   | Beta-log function                    | `betaln(2,3)=-2.48490...`     |
-| `binom(x,y)`    | Generalized binomial coefficient     | `binom(1/2,2)=-0.125`         |
-| `fallfact(x,n)` | Falling factorial                    | `fallfact(5,3)=60`            |
-| `risefact(x,n)` | Rising factorial                     | `risefact(5,3)=210`           |
+| Function Name      | Description                          | Example Inputs/Outputs        |
+| ------------------ | ------------------------------------ | ----------------------------- |
+| `gamma(x)`         | Gamma function                       | `gamma(5)=24`                 |
+| `lgamma(x)`        | Log-gamma function                   | `lgamma(5)=3.178053830348...` |
+| `erf(x)`           | Error function                       | `erf(1)=0.842700792949...`    |
+| `erfc(x)`          | Complementary error fn               | `erfc(1)=0.157299207050...`   |
+| `digamma(x)`       | Digamma function                     | `digamma(1)=-0.57721...`      |
+| `trigamma(x)`      | Trigamma function                    | `trigamma(1)=1.64493...`      |
+| `zeta(s)`          | Riemann zeta function (`s>1`)        | `zeta(2)=1.64493...`          |
+| `beta(x,y)`        | Beta function                        | `beta(2,3)=0.0833333...`      |
+| `ibeta(a,b,x)`     | Regularized incomplete beta function | `ibeta(2,3,0.5)=0.6875`       |
+| `betaln(x,y)`      | Beta-log function                    | `betaln(2,3)=-2.48490...`     |
+| `binom(x,y)`       | Generalized binomial coefficient     | `binom(1/2,2)=-0.125`         |
+| `fallingfact(x,n)` | Falling factorial                    | `fallingfact(5,3)=60`         |
+| `risingfact(x,n)`  | Rising factorial                     | `risingfact(5,3)=210`         |
+
+`zeta` becomes `eta` in the neighborhood of 1 in the Euler–Maclaurin series (regarding the rate of convergence).
 
 #### Angle Conversion
 
@@ -332,7 +334,6 @@ Below is a complete list of all currently implemented functions. For each functi
 | `tanhc(x)`     | `tanh(x)/x`                    | `tanhc(30)=0.03333...`                     |
 | `expc(x)`      | `(exp(x)-1)/x`                 | `expc(1)=1.7182818...`                     |
 
-- Since sin/cos/tan assume degree input, these also take degree input.
 - When `x` is extremely small, loss-of-significance countermeasures are applied.
 - When `fft` and `ifft` are not `N^2`, they are processed as `dft`.
 
@@ -635,6 +636,9 @@ Additionally, functions related to the calculator system are provided by a set o
 | `:unset`      | Delete user-defined variables                          | `:unset x`    | `<unset: x>`                                                                                           |
 | `:undef`      | Delete user-defined functions                          | `:undef f`    | `<undefined: f>`                                                                                       |
 | `:help`       | Function help                                          | `:help ibeta` | `ibeta[a, b, x]: regularized incomplete beta function I_x[a, b], where a > 0, b > 0, and 0 <= x <= 1.` |
+| `:angle`      | Specifies the angle mode                               | `:angle deg`  | `[angle set: deg]`                                                                                     |
+
+You can use `:angle` on its own to check the current angle mode. The default is `deg`, but you can also select `rad` or `grad`.
 
 ## Operator Precedence Table
 
@@ -704,8 +708,44 @@ The following conditions are explicitly treated as **Errors**:
 
 - Evaluation stops immediately upon error
 - Errors do not propagate as values
-- IEEE754 results (`inf`, `-inf`) are distinguished from errors
 - Distinction between returning `inf` and `result is infinite` is currently ambiguous (needs improvement)
+- IEEE754 results (`inf`, `-inf`) are distinguished from errors
+
+```text
+atan(0.57735026919) = 30.000000000016
+5.9722e24 =  5972200000000000224395264
+```
+
+However, since values are displayed rounded to 12 decimal places but stored and used in calculations with 15 decimal places, instances like the one described above are rare.
+
+```text
+0.1 + 0.2 - 0.3
+Pure double: 0.00000000000000006
+this calc : 0
+```
+
+If you need to see very small values or want to know the exact internal values, you can use the `explain` command.
+
+```text
+In [1] := explain(sin(1e-20))
+
+[Data Explain]
+
+Type = Real Number
+Displayed = 0
+Canonical form = 0
+Raw value = 1.74532925199432956e-22
+Raw value (bits) = 0x3b6a5fea5ec6fd1d
+Raw absolute value = 1.74532925199432956e-22
+Zero-normalized absolute value = 0
+Zero-normalization threshold = 0.000000000001
+Shape = R
+Legend = R:Real, C:Complex, S:String, N:None
+
+[Data Explain END]
+
+Out[1] := 0
+```
 
 #### Singularities and Exceptions
 
@@ -722,16 +762,6 @@ The following conditions are explicitly treated as **Errors**:
 - Works anywhere!
 
 # Design Notes
-
-### Angle System
-
-- All trigonometric functions use **degrees** by default
-
-You can specify radians when explicitly stated as follows.
-
-```text
-sin(Pi/2 rad) = 1
-```
 
 ### Numerical Precision
 
@@ -956,7 +986,6 @@ Please submit them via Github.I love to hear any suggestions for implementation,
 ### Future Plans
 
 - Support for different bases (_N_ notation, 0x, 0b, add(), shift(), >>)
-- AngleMode support (setAngle = RADIAN)
 - Arbitrary precision (setFix=5)
 - `eval` now supports `expect`
 - Basic calculus stuff -> Placeholder implementation

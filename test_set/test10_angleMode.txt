@@ -1,0 +1,44 @@
+# :angle command and angle-sensitive functions
+:clear=>"[cleared]"
+:angle=>"[angle: deg]"
+:angle rad=>"[angle set: rad]"
+sin(Pi)=>0
+sin(Pi/2)=>1
+sin(Pi/6)=>0.5
+atan(1)=>0.7853981633974
+atan2(1,0)=>1.5707963267949
+arg(I)=>1.5707963267949
+polar(1,Pi/2)=>I
+cis(Pi)=>-1
+sinc(Pi)=>0
+sinc(Pi/2)=>0.6366197723676
+vangle({1,0},{0,1})=>1.5707963267949
+
+:angle deg=>"[angle set: deg]"
+:angle=>"[angle: deg]"
+sin(30)=>0.5
+sin(90)=>1
+sin(Pi/6)=>0.0091383953972
+atan(1)=>45
+atan2(1,0)=>90
+arg(I)=>90
+polar(1,90)=>I
+cis(180)=>-1
+sinc(180)=>0
+sinc(90)=>0.6366197723676
+vangle({1,0},{0,1})=>90
+
+:angle grad=>"[angle set: grad]"
+:angle=>"[angle: grad]"
+sin(100)=>1
+atan(1)=>50
+atan2(1,0)=>100
+arg(I)=>100
+polar(1,100)=>I
+cis(200)=>-1
+sinc(200)=>0
+sinc(100)=>0.6366197723676
+vangle({1,0},{0,1})=>100
+
+# restore default
+:angle deg=>"[angle set: deg]"

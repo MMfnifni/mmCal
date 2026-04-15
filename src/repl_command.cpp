@@ -155,6 +155,52 @@ namespace mm::cal {
    throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :help [function]", 0);
   }
 
+  // -----------------------
+  // :angle
+  // -----------------------
+  if (cmd == ":angle") {
+   // 表示
+   if (words.size() == 1) {
+    std::string mode;
+    switch (cfg.angleMode) {
+     case AngleMode::Deg: mode = "deg"; break;
+     case AngleMode::Rad: mode = "rad"; break;
+     case AngleMode::Grad: mode = "grad"; break;
+    }
+
+    res.displayOverride = "[angle: " + mode + "]";
+    return res;
+   }
+
+   // 設定
+   if (words.size() == 2) {
+    std::string arg = words[1];
+    std::transform(arg.begin(), arg.end(), arg.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    if (arg == "deg" || arg == "degree") {
+     cfg.angleMode = AngleMode::Deg;
+    } else if (arg == "rad" || arg == "radian") {
+     cfg.angleMode = AngleMode::Rad;
+    } else if (arg == "grad" || arg == "gon") {
+     cfg.angleMode = AngleMode::Grad;
+    } else {
+     throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :angle [deg|rad|grad]", 0);
+    }
+
+    std::string mode;
+    switch (cfg.angleMode) {
+     case AngleMode::Deg: mode = "deg"; break;
+     case AngleMode::Rad: mode = "rad"; break;
+     case AngleMode::Grad: mode = "grad"; break;
+    }
+
+    res.displayOverride = "[angle set: " + mode + "]";
+    return res;
+   }
+
+   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: Usage: :angle [deg|rad|grad]", 0);
+  }
+
   throw CalcError(CalcErrorType::SyntaxError, "SyntaxError: unknown command: " + cmd, 0);
  }
 

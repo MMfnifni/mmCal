@@ -177,49 +177,92 @@ namespace mm::cal {
   // 反射対応
   cfg.functions["digamma"] = {1, 1, [&](auto &v, auto &ctx) -> Value {
                                double x = v[0].asScalar(ctx.pos);
-                               if (x <= 0.0 && std::floor(x) == x) throwDomain(ctx.pos, "digamma: pole");
 
-                               // reflection formula
+                               if (x <= 0.0 && std::floor(x) == x) { throwDomain(ctx.pos, "digamma: pole"); }
+
+                               // reflection: digamma(1 - x) - digamma(x) = pi * cot(pi x)
                                if (x < 0.0) {
-                                double rec = evaluateFunction("digamma", {Value(1.0 - x)}, ctx).asScalar(ctx.pos);
-                                return rec - PI / std::tan(PI * x);
+                                double s = std::sin(PI * x);
+                                if (std::abs(s) < 1e-18) throwDomain(ctx.pos, "digamma: pole");
+
+                                double c = std::cos(PI * x);
+                                double cot = c / s;
+
+                                Value rec = evaluateFunction("digamma", {Value(1.0 - x)}, ctx);
+                                return Value(rec.asScalar(ctx.pos) - PI * cot);
                                }
-                               double result = 0.0;
-                               while (x < 6.0) {
-                                result -= 1.0 / x;
-                                x += 1.0;
+
+                               long double xx = static_cast<long double>(x);
+                               long double result = 0.0L;
+
+                               // recurrence: digamma(x) = digamma(x+1) - 1/x
+                               while (xx < 10.0L) {
+                                result -= 1.0L / xx;
+                                xx += 1.0L;
                                }
-                               double f = 1.0 / (x * x);
-                               result += std::log(x) - 0.5 / x - f * (1.0 / 12 - f * (1.0 / 120 - f / 252));
-                               return result;
+
+                               long double inv = 1.0L / xx;
+                               long double inv2 = inv * inv;
+                               long double inv4 = inv2 * inv2;
+                               long double inv6 = inv4 * inv2;
+                               long double inv8 = inv4 * inv4;
+                               long double inv10 = inv8 * inv2;
+
+                               result += std::log(xx) - 0.5L * inv - (1.0L / 12.0L) * inv2 + (1.0L / 120.0L) * inv4 - (1.0L / 252.0L) * inv6 + (1.0L / 240.0L) * inv8 - (5.0L / 660.0L) * inv10;
+
+                               double out = static_cast<double>(result);
+                               if (!std::isfinite(out)) throwOverflow(ctx.pos);
+                               return Value(out);
                               }};
 
   cfg.functions["zeta"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             double s = v[0].asScalar(ctx.pos);
-                            if (s <= 1.0) throwDomain(ctx.pos, "zeta: s must be > 1");
-                            double r = zetaEulerMaclaurin(s);
-                            if (!std::isfinite(r)) throwOverflow(ctx.pos);
-                            return r;
+                            if (!(s > 0.0) || s == 1.0) { throwDomain(ctx.pos, "zeta: s must be > 0 and != 1"); }
+
+                            long double r = zetaLongDouble(s, ctx.pos);
+                            double out = static_cast<double>(r);
+
+                            if (!std::isfinite(out)) throwOverflow(ctx.pos);
+                            return Value(out);
                            }};
 
   cfg.functions["trigamma"] = {1, 1, [&](auto &v, auto &ctx) -> Value {
                                 double x = v[0].asScalar(ctx.pos);
-                                if (x <= 0.0 && std::floor(x) == x) throwDomain(ctx.pos, "trigamma: pole");
-                                // reflection formula
+
+                                if (x <= 0.0 && std::floor(x) == x) { throwDomain(ctx.pos, "trigamma: pole"); }
+
+                                // reflection: trigamma(1 - x) + trigamma(x) = pi^2 / sin^2(pi x)
                                 if (x < 0.0) {
-                                 Value rec = evaluateFunction("trigamma", {Value(1.0 - x)}, ctx);
                                  double s = std::sin(PI * x);
+                                 if (std::abs(s) < 1e-18) throwDomain(ctx.pos, "trigamma: pole");
+
+                                 Value rec = evaluateFunction("trigamma", {Value(1.0 - x)}, ctx);
                                  double term = (PI * PI) / (s * s);
-                                 return Value(rec.asScalar(ctx.pos) + term);
+                                 return Value(term - rec.asScalar(ctx.pos));
                                 }
-                                double result = 0.0;
-                                // asymptotic reduction
-                                while (x < 6.0) {
-                                 result += 1.0 / (x * x);
-                                 x += 1.0;
+
+                                long double xx = static_cast<long double>(x);
+                                long double result = 0.0L;
+
+                                // recurrence: trigamma(x) = trigamma(x+1) + 1/x^2
+                                while (xx < 10.0L) {
+                                 result += 1.0L / (xx * xx);
+                                 xx += 1.0L;
                                 }
-                                result += 1.0 / (2.0 * x * x) + (1.0 + (1.0 / (6.0 * x * x)) * (1.0 - 1.0 / (30.0 * x * x))) / x;
-                                return result;
+
+                                long double x2 = xx * xx;
+                                long double x3 = x2 * xx;
+                                long double x5 = x3 * x2;
+                                long double x7 = x5 * x2;
+                                long double x9 = x7 * x2;
+                                long double x11 = x9 * x2;
+                                long double x13 = x11 * x2;
+
+                                result += 1.0L / xx + 1.0L / (2.0L * x2) + 1.0L / (6.0L * x3) - 1.0L / (30.0L * x5) + 1.0L / (42.0L * x7) - 1.0L / (30.0L * x9) + 5.0L / (66.0L * x11) - 691.0L / (2730.0L * x13);
+
+                                double out = static_cast<double>(result);
+                                if (!std::isfinite(out)) throwOverflow(ctx.pos);
+                                return Value(out);
                                }};
 
   // std::tgamma(x) * std::tgamma(y) / std::tgamma(x + y)だとすぐ漏れちゃうから対策

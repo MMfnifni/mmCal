@@ -360,10 +360,9 @@ namespace mm::cal {
 
                                   if (A.empty()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix is empty", ctx.pos); }
                                   if (A.size() != A[0].size()) { throw CalcError(CalcErrorType::DomainError, "DomainError: matrix must be square", ctx.pos); }
+                                  if (!isSymmetricMatrix(A, 1e-10)) { throw CalcError(CalcErrorType::DomainError, "DomainError: meigenvals requires a symmetric real matrix", ctx.pos); }
 
                                   if (A.size() == 1 && A[0].size() == 1) { return fromVector({A[0][0]}); }
-
-                                  if (!isSymmetricMatrix(A, 1e-10)) { calcWarn(ctx, "meigenvals currently returns only real eigenvalue approximations; non-symmetric matrices may be unreliable"); }
 
                                   auto eig = eigenvalues(A);
                                   std::sort(eig.begin(), eig.end(), std::greater<double>());
@@ -645,12 +644,13 @@ namespace mm::cal {
   // 行列のフロベニウスノルム（別名）
   cfg.functions["mnorm"] = cfg.functions["mnormf"];
 
-  // 行列の最小固有値
+  // 行列の最大固有値（対称実行列専用, 冪乗法）
   cfg.functions["mmaxeigen_power"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                                        std::vector<std::vector<double>> A = toMatrix(v[0], ctx);
 
                                        size_t m = A.size();
                                        if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix must be square", ctx.pos);
+                                       if (!isSymmetricMatrix(A, 1e-10)) { throw CalcError(CalcErrorType::DomainError, "DomainError: mmaxeigen_power requires a symmetric real matrix", ctx.pos); }
 
                                        // 1×1 特殊ケース
                                        if (m == 1) {
@@ -668,6 +668,7 @@ namespace mm::cal {
 
                                  size_t m = A.size();
                                  if (m == 0 || m != A[0].size()) throw CalcError(CalcErrorType::DomainError, "DomainError: matrix must be square", ctx.pos);
+                                 if (!isSymmetricMatrix(A, 1e-10)) { throw CalcError(CalcErrorType::DomainError, "DomainError: mmaxeigen requires a symmetric real matrix", ctx.pos); }
 
                                  // 1×1 特殊ケース
                                  if (m == 1) {

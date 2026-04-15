@@ -588,6 +588,7 @@ namespace mm::cal {
  // 全区間スキャン(短区間探索)
  std::pair<double, double> fullScanBracket(std::function<double(double)> f, double start, double end, double step, FunctionContext &ctx);
  double zetaEulerMaclaurin(double s);
+ long double zeta_euler_maclaurin_ld(long double s);
  inline double betacf(double a, double b, double x) {
   const int MAXIT = 200;
   const double cnst_precision_inv = 3.0e-14;
@@ -657,6 +658,14 @@ namespace mm::cal {
  double binomGeneral(double x, double y, size_t pos);
  double fallfactGeneral(double x, double n, size_t pos);
  double risefactGeneral(double x, double n, size_t pos);
+ std::vector<double> requireRealVectorArg(const Value &val, size_t pos);
+ Value makeRowMajorMatrixValue(const std::vector<std::vector<double>> &a);
+ long double kahanAddLongDouble(long double sum, long double x, long double &c);
+ long double risingFactorialLongDouble(long double a, int n);
+ long double etaDirichletLongDouble(double s, size_t pos);
+ long double zetaEulerMaclaurinLongDouble(double s, size_t pos);
+ long double zetaViaEtaLongDouble(double s, size_t pos);
+ long double zetaLongDouble(double s, size_t pos);
  size_t nrows(const std::vector<std::vector<double>> &A);
  size_t ncols(const std::vector<std::vector<double>> &A);
  std::vector<std::vector<double>> identity(size_t n);

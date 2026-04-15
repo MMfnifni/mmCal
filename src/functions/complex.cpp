@@ -13,19 +13,21 @@ namespace mm::cal {
   cfg.functions["imag"] = cfg.functions["im"];
   cfg.functions["arg"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            auto z = v[0].toComplex(ctx.pos);
-                           if (std::abs(z) == 0) throwDomain(ctx.pos);
-                           return std::arg(z * 180.0 / PI) * rad2deg;
+                           if (std::abs(z) == 0.0) throwDomain(ctx.pos);
+                           return angleOut(std::arg(z), ctx.session.cfg);
                           }};
   cfg.functions["conj"] = {1, 1, [](auto &v, auto &ctx) -> Value { return std::conj(requireComplex(v[0], ctx.pos)); }};
   cfg.functions["polar"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                              double r = v[0].asScalar(ctx.pos);
-                             double th = v[1].asScalar(ctx.pos);
-                             return Complex(r * std::cos(toRad(th)), r * std::sin(toRad(th)));
+                             double th = angleIn(v[1].asScalar(ctx.pos), ctx.session.cfg);
+                             return Complex(r * std::cos(th), r * std::sin(th));
                             }};
+
   cfg.functions["rect"] = cfg.functions["polar"];
+
   cfg.functions["cis"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                           double th = v[0].asScalar(ctx.pos);
-                           return Complex(std::cos(toRad(th)), std::sin(toRad(th)));
+                           double th = angleIn(v[0].asScalar(ctx.pos), ctx.session.cfg);
+                           return Complex(std::cos(th), std::sin(th));
                           }};
   cfg.functions["proj"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                             Complex z = v[0].isComplex() ? v[0].asComplex(ctx.pos) : Complex(v[0].asScalar(ctx.pos), 0.0);

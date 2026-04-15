@@ -8,7 +8,7 @@ f(x):=x^2 => "[defined: f(x)]"
 diff(f,3) => 6
 diff(f,3,1e-4) => 6
 diff2(f,3) => 2
-diff2(f,3,1e-4) => 2
+diff2(f,3,1e-4) =>> 2
 :undef f => "[undefined: f]"
 
 f(x):=x^3 => "[defined: f(x)]"
@@ -23,15 +23,15 @@ diff(f,30) => 0.015114994702
 
 f(x):=cos(x) => "[defined: f(x)]"
 diff(f,0) => 0
-diff2(f,0) => -0.00030461742
+diff2(f,0) =>> -0.0003046318889
 :undef f => "[undefined: f]"
 
 # numeric integration (degree-based trig)
 f(x):=sin(x) => "[defined: f(x)]"
-integrate(f,0,180) => 114.591559646363
-simpson(f,0,180,200) => 114.591559064924
-trapz(f,0,180,1000) => 114.59146477837
-integrate(f,180,0) => -114.591559646363
+integrate(f,0,180) =>> 114.5915596463631
+simpson(f,0,180,200) =>> 114.5915596463631
+trapz(f,0,180,1000) =>> 114.5915596463631
+integrate(f,180,0) =>> -114.5915596463631
 integrate(f,30,30) => 0
 :undef f => "[undefined: f]"
 
@@ -78,10 +78,6 @@ diff2(f,2) => 12
 
 f(x):=sin(x)  => "[defined: f(x)]"
 diff(f,0) => 0.01745329252
-
-integrate(f,0,180) => 114.591559
-simpson(f,0,180,200) => 114.591559
-trapz(f,0,180,1000) => 114.591464
 
 :undef f => "[undefined: f]"
 

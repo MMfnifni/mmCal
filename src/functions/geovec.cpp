@@ -243,7 +243,7 @@ namespace mm::cal {
                               cos_angle = std::max(-1.0, std::min(1.0, cos_angle));
 
                               double angle_rad = std::acos(cos_angle);
-                              return Value(angle_rad * 180.0 / PI);
+                              return angleOut(angle_rad, ctx.session.cfg);
                              }};
 
   // ベクトルの反射
@@ -389,58 +389,89 @@ namespace mm::cal {
                                return (double)phi;
                               }};
   cfg.functions["covmatrix"] = {1, -1, [](auto &v, auto &ctx) -> Value {
-                                 auto x = collectReals(v, ctx);
-                                 if (x.size() < 2) throwDomain(ctx.pos, "need at least 2 samples");
+                                 if (v.empty()) throwDomain(ctx.pos, "need at least 1 vector");
 
-                                 double mean = 0.0;
-                                 for (double d : x)
-                                  mean += d;
-                                 mean /= x.size();
+                                 std::vector<std::vector<double>> vars;
+                                 vars.reserve(v.size());
 
-                                 double cov = 0.0;
-                                 for (double d : x)
-                                  cov += (d - mean) * (d - mean);
+                                 size_t n = 0;
+                                 for (const auto &arg : v) {
+                                  vars.push_back(requireRealVectorArg(arg, ctx.pos));
+                                  if (vars.back().size() < 2) throwDomain(ctx.pos, "each vector must have at least 2 samples");
+                                  if (n == 0) n = vars.back().size();
+                                  else if (vars.back().size() != n) throwDomain(ctx.pos, "sample length mismatch");
+                                 }
 
-                                 return cov / (x.size() - 1);
+                                 const size_t p = vars.size();
+                                 std::vector<double> mean(p, 0.0);
+                                 for (size_t i = 0; i < p; ++i) {
+                                  long double acc = 0.0;
+                                  for (double x : vars[i])
+                                   acc += x;
+                                  mean[i] = static_cast<double>(acc / n);
+                                 }
+
+                                 std::vector<std::vector<double>> C(p, std::vector<double>(p, 0.0));
+                                 for (size_t i = 0; i < p; ++i) {
+                                  for (size_t j = i; j < p; ++j) {
+                                   long double acc = 0.0;
+                                   for (size_t k = 0; k < n; ++k) {
+                                    acc += (long double)(vars[i][k] - mean[i]) * (vars[j][k] - mean[j]);
+                                   }
+                                   double cij = static_cast<double>(acc / (n - 1));
+                                   C[i][j] = cij;
+                                   C[j][i] = cij;
+                                  }
+                                 }
+
+                                 return makeRowMajorMatrixValue(C);
                                 }};
-  cfg.functions["corrmatrix"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                  if (v.size() % 2 != 0) throwDomain(ctx.pos, "dimension mismatch");
+  cfg.functions["corrmatrix"] = {1, -1, [](auto &v, auto &ctx) -> Value {
+                                  if (v.empty()) throwDomain(ctx.pos, "need at least 1 vector");
 
-                                  size_t n = v.size() / 2;
-                                  if (n < 2) throwDomain(ctx.pos, "need at least 2 samples");
+                                  std::vector<std::vector<double>> vars;
+                                  vars.reserve(v.size());
 
-                                  std::vector<double> x, y;
-                                  x.reserve(n);
-                                  y.reserve(n);
-
-                                  for (size_t i = 0; i < n; ++i)
-                                   x.push_back(requireReal(v[i], ctx.pos));
-
-                                  for (size_t i = 0; i < n; ++i)
-                                   y.push_back(requireReal(v[i + n], ctx.pos));
-
-                                  double mx = 0, my = 0;
-                                  for (double d : x)
-                                   mx += d;
-                                  for (double d : y)
-                                   my += d;
-
-                                  mx /= n;
-                                  my /= n;
-
-                                  double num = 0, dx = 0, dy = 0;
-
-                                  for (size_t i = 0; i < n; ++i) {
-                                   double dxi = x[i] - mx;
-                                   double dyi = y[i] - my;
-                                   num += dxi * dyi;
-                                   dx += dxi * dxi;
-                                   dy += dyi * dyi;
+                                  size_t n = 0;
+                                  for (const auto &arg : v) {
+                                   vars.push_back(requireRealVectorArg(arg, ctx.pos));
+                                   if (vars.back().size() < 2) throwDomain(ctx.pos, "each vector must have at least 2 samples");
+                                   if (n == 0) n = vars.back().size();
+                                   else if (vars.back().size() != n) throwDomain(ctx.pos, "sample length mismatch");
                                   }
 
-                                  if (dx == 0.0 || dy == 0.0) throwDomain(ctx.pos, "zero variance");
+                                  const size_t p = vars.size();
+                                  std::vector<double> mean(p, 0.0), sd(p, 0.0);
+                                  for (size_t i = 0; i < p; ++i) {
+                                   long double acc = 0.0;
+                                   for (double x : vars[i])
+                                    acc += x;
+                                   mean[i] = static_cast<double>(acc / n);
 
-                                  return num / std::sqrt(dx * dy);
+                                   long double ss = 0.0;
+                                   for (double x : vars[i]) {
+                                    long double d = x - mean[i];
+                                    ss += d * d;
+                                   }
+                                   sd[i] = std::sqrt(static_cast<double>(ss / (n - 1)));
+                                   if (sd[i] == 0.0) throwDomain(ctx.pos, "zero variance");
+                                  }
+
+                                  std::vector<std::vector<double>> R(p, std::vector<double>(p, 0.0));
+                                  for (size_t i = 0; i < p; ++i) {
+                                   R[i][i] = 1.0;
+                                   for (size_t j = i + 1; j < p; ++j) {
+                                    long double acc = 0.0;
+                                    for (size_t k = 0; k < n; ++k) {
+                                     acc += (long double)(vars[i][k] - mean[i]) * (vars[j][k] - mean[j]);
+                                    }
+                                    double rij = static_cast<double>(acc / ((n - 1) * sd[i] * sd[j]));
+                                    R[i][j] = rij;
+                                    R[j][i] = rij;
+                                   }
+                                  }
+
+                                  return makeRowMajorMatrixValue(R);
                                  }};
   cfg.functions["percentrank"] = {2, -1, [](auto &v, auto &ctx) -> Value {
                                    if (v.size() < 2) throwDomain(ctx.pos);
@@ -486,29 +517,23 @@ namespace mm::cal {
                                return (double)(sum / x.size());
                               }};
 
-  cfg.functions["convolve"] = {2, -1, [](auto &v, auto &ctx) -> Value {
-                                if (v.size() < 2) throwDomain(ctx.pos);
+  cfg.functions["convolve"] = {2, 2, [](auto &v, auto &ctx) -> Value {
+                                auto x = requireRealVectorArg(v[0], ctx.pos);
+                                auto y = requireRealVectorArg(v[1], ctx.pos);
+                                if (x.empty() || y.empty()) throwDomain(ctx.pos, "empty vector");
 
-                                size_t n = v.size() / 2;
-                                if (n == 0 || v.size() % 2 != 0) throwDomain(ctx.pos, "dimension mismatch");
+                                std::vector<long double> acc(x.size() + y.size() - 1, 0.0L);
+                                for (size_t i = 0; i < x.size(); ++i) {
+                                 for (size_t j = 0; j < y.size(); ++j) {
+                                  acc[i + j] += (long double)x[i] * y[j];
+                                 }
+                                }
 
-                                std::vector<double> x, y;
-                                x.reserve(n);
-                                y.reserve(n);
-
-                                for (size_t i = 0; i < n; ++i)
-                                 x.push_back(requireReal(v[i], ctx.pos));
-
-                                for (size_t i = 0; i < n; ++i)
-                                 y.push_back(requireReal(v[i + n], ctx.pos));
-
-                                long double sum = 0;
-
-                                for (size_t i = 0; i < n; ++i)
-                                 for (size_t j = 0; j <= i; ++j)
-                                  sum += (long double)x[j] * y[i - j];
-
-                                return (double)sum;
+                                auto out = std::make_shared<MultiValue>();
+                                out->elems_.reserve(acc.size());
+                                for (auto z : acc)
+                                 out->elems_.push_back(Value((double)z));
+                                return Value(out);
                                }};
  }
 

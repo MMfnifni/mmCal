@@ -3,60 +3,59 @@
 namespace mm::cal {
 
  void registerTrig(SystemConfig &cfg) {
-  cfg.functions["sin"] = {1, 1, [=](auto &v, auto &ctx) -> Value { return realIfPossible(std::sin(toComplex(v[0], ctx.pos) * deg2rad)); }};
-  cfg.functions["cos"] = {1, 1, [=](auto &v, auto &ctx) -> Value { return realIfPossible(std::cos(toComplex(v[0], ctx.pos) * deg2rad)); }};
-  // cfg.functions["tan"] = {1, 1, [=](auto &v, auto &) -> Value { return std::tan(asComplex(v[0]) * deg2rad); }};
-  cfg.functions["tan"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
-                           if (v[0].isComplex()) return realIfPossible(std::tan(toComplex(v[0], ctx.pos) * deg2rad));
-                           double r = requireReal(v[0], ctx.pos) * deg2rad;
+  cfg.functions["sin"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::sin(angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg))); }};
+  cfg.functions["cos"] = {1, 1, [](auto &v, auto &ctx) -> Value { return realIfPossible(std::cos(angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg))); }};
+  cfg.functions["tan"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                           if (v[0].isComplex()) { return realIfPossible(std::tan(angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg))); }
+                           double r = angleIn(requireReal(v[0], ctx.pos), ctx.session.cfg);
                            double c = std::cos(r);
                            return (std::abs(c) < cnst_precision_inv) ? signedInfBy(std::sin(r)) : std::tan(r);
                           }};
-  cfg.functions["cot"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
+  cfg.functions["cot"] = {1, 1, [](auto &v, auto &ctx) -> Value {
                            if (v[0].isComplex()) {
-                            auto z = toComplex(v[0], ctx.pos) * deg2rad;
+                            auto z = angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg);
                             return realIfPossible(std::cos(z) / std::sin(z));
                            }
-                           double r = requireReal(v[0], ctx.pos) * deg2rad;
+                           double r = angleIn(requireReal(v[0], ctx.pos), ctx.session.cfg);
                            double s = std::sin(r);
                            return (std::abs(s) < cnst_precision_inv) ? signedInfBy(std::cos(r)) : std::cos(r) / s;
                           }};
-  cfg.functions["sec"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
-                           if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::cos(toComplex(v[0], ctx.pos) * deg2rad));
-                           double r = requireReal(v[0], ctx.pos) * deg2rad;
+  cfg.functions["sec"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                           if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::cos(angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg)));
+                           double r = angleIn(requireReal(v[0], ctx.pos), ctx.session.cfg);
                            double c = std::cos(r);
                            return (std::abs(c) < cnst_precision_inv) ? signedInfBy(std::sin(r)) : 1.0 / c;
                           }};
-  cfg.functions["csc"] = {1, 1, [=](auto &v, auto &ctx) -> Value {
-                           if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::sin(toComplex(v[0], ctx.pos) * deg2rad));
-                           double r = requireReal(v[0], ctx.pos) * deg2rad;
+  cfg.functions["csc"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                           if (v[0].isComplex()) return realIfPossible(Complex(1, 0) / std::sin(angleIn(toComplex(v[0], ctx.pos), ctx.session.cfg)));
+                           double r = angleIn(requireReal(v[0], ctx.pos), ctx.session.cfg);
                            double s = std::sin(r);
                            return (std::abs(s) < cnst_precision_inv) ? signedInfBy(std::cos(r)) : 1.0 / s;
                           }};
   cfg.functions["asin"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            if (v[0].isComplex()) return realIfPossible(std::asin(toComplex(v[0], ctx.pos)) * rad2deg);
+                            if (v[0].isComplex()) { return realIfPossible(angleOut(std::asin(toComplex(v[0], ctx.pos)), ctx.session.cfg)); }
                             double x = requireReal(v[0], ctx.pos);
-                            if (std::abs(x) <= 1.0) return std::asin(x) * rad2deg;
+                            if (std::abs(x) <= 1.0) { return angleOut(std::asin(x), ctx.session.cfg); }
                             calcWarn(ctx.session.cfg, ctx.pos, "asin(|x|>1): complex principal value only");
-                            return realIfPossible(std::asin(Complex(x, 0)) * rad2deg);
+                            return realIfPossible(angleOut(std::asin(Complex(x, 0)), ctx.session.cfg));
                            }};
   cfg.functions["acos"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            if (v[0].isComplex()) return realIfPossible(std::acos(toComplex(v[0], ctx.pos)) * rad2deg);
+                            if (v[0].isComplex()) { return realIfPossible(angleOut(std::acos(toComplex(v[0], ctx.pos)), ctx.session.cfg)); }
                             double x = requireReal(v[0], ctx.pos);
-                            if (std::abs(x) <= 1.0) return std::acos(x) * rad2deg;
+                            if (std::abs(x) <= 1.0) { return angleOut(std::acos(x), ctx.session.cfg); }
                             calcWarn(ctx.session.cfg, ctx.pos, "acos(|x|>1): complex principal value only");
-                            return realIfPossible(std::acos(Complex(x, 0)) * rad2deg);
+                            return realIfPossible(angleOut(std::acos(Complex(x, 0)), ctx.session.cfg));
                            }};
   cfg.functions["atan"] = {1, 1, [](auto &v, auto &ctx) -> Value {
-                            if (v[0].isComplex()) return realIfPossible(std::atan(toComplex(v[0], ctx.pos)) * rad2deg);
-                            return std::atan(requireReal(v[0], ctx.pos)) * rad2deg;
+                            if (v[0].isComplex()) return realIfPossible(angleOut(std::atan(toComplex(v[0], ctx.pos)), ctx.session.cfg));
+                            return angleOut(std::atan(requireReal(v[0], ctx.pos)), ctx.session.cfg);
                            }};
 
   cfg.functions["atan2"] = {2, 2, [](auto &v, auto &ctx) -> Value {
                              double y = requireReal(v[0], ctx.pos);
                              double x = requireReal(v[1], ctx.pos);
                              if (x == 0.0 && y == 0.0) throwDomain(ctx.pos);
-                             return std::atan2(y, x) * rad2deg;
+                             return angleOut(std::atan2(y, x), ctx.session.cfg);
                             }};
  }
 

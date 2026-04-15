@@ -510,6 +510,28 @@ namespace mm::cal {
  void serializeValueImpl(const Value &v, std::ostream &os, const SystemConfig &cfg, int depth);
  inline void serializeValue(const Value &v, std::ostream &os, const SystemConfig &cfg) { serializeValueImpl(v, os, cfg, 0); }
  void applySideEffects(EvaluationContext &ectx, EvalResult &result);
+ inline double angleUnitToRad(AngleMode mode) noexcept {
+  switch (mode) {
+   case AngleMode::Deg: return PI / 180.0;
+   case AngleMode::Rad: return 1.0;
+   case AngleMode::Grad: return PI / 200.0;
+  }
+  return 1.0;
+ }
+
+ inline double angleUnitFromRad(AngleMode mode) noexcept {
+  switch (mode) {
+   case AngleMode::Deg: return 180.0 / PI;
+   case AngleMode::Rad: return 1.0;
+   case AngleMode::Grad: return 200.0 / PI;
+  }
+  return 1.0;
+ }
+
+ inline double angleIn(double x, const SystemConfig &cfg) noexcept { return x * angleUnitToRad(cfg.angleMode); }
+ inline Complex angleIn(Complex z, const SystemConfig &cfg) noexcept { return z * angleUnitToRad(cfg.angleMode); }
+ inline double angleOut(double x, const SystemConfig &cfg) noexcept { return x * angleUnitFromRad(cfg.angleMode); }
+ inline Complex angleOut(Complex z, const SystemConfig &cfg) noexcept { return z * angleUnitFromRad(cfg.angleMode); }
  // 内部的にイコールとする
  inline constexpr double numeric_epsilon() noexcept { return cnst_precision_inv; }
  inline bool nearly_equal(double a, double b, double eps = cnst_precision_inv) noexcept { return std::abs(a - b) <= eps * std::max({1.0, std::abs(a), std::abs(b)}); }

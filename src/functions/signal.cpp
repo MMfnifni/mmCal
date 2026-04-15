@@ -3,9 +3,25 @@
 namespace mm::cal {
  void registerSignal(SystemConfig &cfg) {
 
-  cfg.functions["sinc"] = {1, 1, makeSincLike(deg2rad)};
-  cfg.functions["cosc"] = {1, 1, makeCoscLike(deg2rad)};
-  cfg.functions["tanc"] = {1, 1, makeTancLike(deg2rad)};
+  cfg.functions["sinc"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            double x = requireReal(v[0], ctx.pos);
+                            double r = angleIn(x, ctx.session.cfg);
+                            if (std::abs(r) < cnst_precision_inv) return 1.0;
+                            return std::sin(r) / r;
+                           }};
+  cfg.functions["cosc"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            double x = requireReal(v[0], ctx.pos);
+                            double r = angleIn(x, ctx.session.cfg);
+                            if (std::abs(r) < cnst_precision_inv) return 0.0;
+                            return (1.0 - std::cos(r)) / r;
+                           }};
+  cfg.functions["tanc"] = {1, 1, [](auto &v, auto &ctx) -> Value {
+                            double x = requireReal(v[0], ctx.pos);
+                            double r = angleIn(x, ctx.session.cfg);
+                            if (std::abs(r) < cnst_precision_inv) return 1.0;
+                            double c = std::cos(r);
+                            return (std::abs(c) < cnst_precision_inv) ? signedInfBy(std::sin(r)) : std::tan(r) / r;
+                           }};
   cfg.functions["sinhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::sinh(x); }, [](double x) { return std::sinh(x); }, 1.0)};
   cfg.functions["tanhc"] = {1, 1, makeDivXCmplxReal([](Complex x) { return std::tanh(x); }, [](double x) { return std::tanh(x); }, 1.0)};
   cfg.functions["expc"] = {1, 1, makeExpc()};
