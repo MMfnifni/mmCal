@@ -1,0 +1,345 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <ItemGroup>
+    <Filter Include="tests">
+      <UniqueIdentifier>{9A711967-713F-4E3E-B972-804FC50F037B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\expression">
+      <UniqueIdentifier>{B8B955E0-342F-4620-8D61-71C3BDF0AD73}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\numeric">
+      <UniqueIdentifier>{2227BB90-9B6B-44B8-A63A-EAA680294069}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\evaluation">
+      <UniqueIdentifier>{6851D2A5-FC57-4C4E-9E84-B06C1AB1BBAA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\error">
+      <UniqueIdentifier>{6D6487E7-AB4E-45D1-98FE-D18B67C2E59A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\syntax">
+      <UniqueIdentifier>{B04FDE1F-337C-4B59-ABF8-C9C4F560E796}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\kernel">
+      <UniqueIdentifier>{F8E44D24-43ED-49D4-9BA9-D90E2B60F497}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\symbols">
+      <UniqueIdentifier>{1D48F63B-7652-41BB-98F6-40648E54CE45}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\approximation">
+      <UniqueIdentifier>{B969446D-E7D2-4A5D-8957-20E059E4F4D4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\mathematics">
+      <UniqueIdentifier>{5C8D4504-4238-47E7-8DA7-2C605EA3E40D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\solver">
+      <UniqueIdentifier>{7FC0E856-AD93-4515-BEA8-7AD2BC8225F6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\simplification">
+      <UniqueIdentifier>{7C959B34-CC56-4B47-BB01-9624C8E701AF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\symbolic">
+      <UniqueIdentifier>{E13ADCC9-AEF8-4C85-A3F4-D4489F55F1F4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="tests\builtins">
+      <UniqueIdentifier>{33BB186A-C5EC-4261-A557-F035D00DF936}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\tests\test_framework.hpp">
+      <Filter>tests</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\big_uint_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\big_int_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\decimal_approximation_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\integer_algorithms_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\rational_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\real_number_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\number_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\expression\expr_tests.hpp">
+      <Filter>tests\expression</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\evaluation\builtin_registry_tests.hpp">
+      <Filter>tests\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\evaluation\environment_tests.hpp">
+      <Filter>tests\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\evaluation\user_function_registry_tests.hpp">
+      <Filter>tests\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\evaluation\evaluator_tests.hpp">
+      <Filter>tests\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\error\error_message_tests.hpp">
+      <Filter>tests\error</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\syntax\lexer_tests.hpp">
+      <Filter>tests\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\syntax\parser_tests.hpp">
+      <Filter>tests\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\syntax\lowerer_tests.hpp">
+      <Filter>tests\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\kernel\kernel_session_tests.hpp">
+      <Filter>tests\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\symbols\symbol_table_tests.hpp">
+      <Filter>tests\symbols</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\symbols\symbol_registry_tests.hpp">
+      <Filter>tests\symbols</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\approximation_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\real_interval_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\certified_constants_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\math_registry_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\definedness_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\exact_trigonometry_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\exact_algebra_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\numeric\big_float_tests.hpp">
+      <Filter>tests\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\value_facts_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\certified_sqrt_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\knowledge_context_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\solver\solution_set_tests.hpp">
+      <Filter>tests\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\mathematics\exact_transcendental_tests.hpp">
+      <Filter>tests\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\certified_transcendental_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\approximation\certified_complex_transcendental_tests.hpp">
+      <Filter>tests\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\simplification\simplifier_tests.hpp">
+      <Filter>tests\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\symbolic\differentiation_tests.hpp">
+      <Filter>tests\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\linear_algebra_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\numerical_calculus_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\aggregate_array_elementary_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\statistics_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\combinatorics_signal_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\special_function_extension_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\random_function_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\history_diagnostic_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\session_approximation_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\integration_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\advanced_integration_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\builtins\calculus_knowledge_tests.hpp">
+      <Filter>tests\builtins</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\tests\test_main.cpp">
+      <Filter>tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\big_uint_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\big_int_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\decimal_approximation_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\integer_algorithms_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\rational_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\real_number_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\number_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\expression\expr_tests.cpp">
+      <Filter>tests\expression</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\evaluation\builtin_registry_tests.cpp">
+      <Filter>tests\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\evaluation\environment_tests.cpp">
+      <Filter>tests\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\evaluation\user_function_registry_tests.cpp">
+      <Filter>tests\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\evaluation\evaluator_tests.cpp">
+      <Filter>tests\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\error\error_message_tests.cpp">
+      <Filter>tests\error</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\syntax\lexer_tests.cpp">
+      <Filter>tests\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\syntax\parser_tests.cpp">
+      <Filter>tests\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\syntax\lowerer_tests.cpp">
+      <Filter>tests\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\kernel\kernel_session_tests.cpp">
+      <Filter>tests\kernel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\symbols\symbol_table_tests.cpp">
+      <Filter>tests\symbols</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\symbols\symbol_registry_tests.cpp">
+      <Filter>tests\symbols</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\approximation_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\real_interval_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\certified_constants_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\math_registry_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\definedness_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\exact_trigonometry_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\exact_algebra_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\numeric\big_float_tests.cpp">
+      <Filter>tests\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\value_facts_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\certified_sqrt_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\knowledge_context_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\solver\solution_set_tests.cpp">
+      <Filter>tests\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\mathematics\exact_transcendental_tests.cpp">
+      <Filter>tests\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\certified_transcendental_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\approximation\certified_complex_transcendental_tests.cpp">
+      <Filter>tests\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\simplification\simplifier_tests.cpp">
+      <Filter>tests\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\symbolic\differentiation_tests.cpp">
+      <Filter>tests\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\linear_algebra_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\numerical_calculus_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\aggregate_array_elementary_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\statistics_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\combinatorics_signal_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\special_function_extension_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\random_function_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\history_diagnostic_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\session_approximation_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\integration_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\advanced_integration_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\builtins\calculus_knowledge_tests.cpp">
+      <Filter>tests\builtins</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

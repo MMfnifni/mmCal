@@ -1,0 +1,69 @@
+#pragma once
+
+namespace mmcal::mathematics {
+
+// 数学上の同一性を表すID。
+// SymbolIdはセッション内の名前identity、こちらは数学概念のidentityであり役割が異なる。
+enum class ConstantId {
+    Pi,
+    E,
+    Phi
+};
+
+enum class FunctionId {
+    Cbrt,
+    Hypot,
+    Cis,
+    Polar,
+    DegreeToRadian,
+    DegreeToGradian,
+    RadianToDegree,
+    RadianToGradian,
+    GradianToDegree,
+    GradianToRadian,
+    Expm1,
+    Log1p,
+    Sinc,
+    Cosc,
+    Tanc,
+    Sinhc,
+    Tanhc,
+    Expc,
+    Gamma,
+    LogGamma,
+    Erf,
+    Erfc,
+    Beta,
+    BetaLog,
+    Sqrt,
+    Abs,
+    Sign,
+    Re,
+    Im,
+    Conj,
+    Sin,
+    Cos,
+    Tan,
+    Cot,
+    Sec,
+    Csc,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    Csch,
+    Sech,
+    Coth,
+    Arg,
+    Log,
+    Exp,
+    Power
+};
+
+} // namespace mmcal::mathematics

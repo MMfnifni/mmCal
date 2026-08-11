@@ -1,0 +1,148 @@
+// 比較演算
+#include "comparison.hpp"
+
+#include "error/error_message.hpp"
+#include "names.hpp"
+#include "mathematics/assumption_set.hpp"
+#include "mathematics/knowledge_context.hpp"
+#include "mathematics/predicate.hpp"
+
+#include <compare>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace mmcal::builtins {
+namespace {
+
+using expression::Expr;
+using expression::Symbol;
+
+void requireBinary(std::span<const Expr> arguments, std::string_view name) {
+    if (arguments.size() != 2)
+        error::throwCalcError(
+            error::CalcErrorType::Type,
+            std::string{name} + " expects 2 arguments");
+}
+
+[[nodiscard]] Expr unresolved(
+    const Symbol& head,
+    const Expr& lhs,
+    const Expr& rhs) {
+    return Expr::call(head, {lhs, rhs});
+}
+
+} // namespace
+
+Expr evaluateComparison(
+    const Symbol& head,
+    std::span<const Expr> arguments) {
+    requireBinary(arguments, head.view());
+
+    const Expr& lhs = arguments[0];
+    const Expr& rhs = arguments[1];
+
+    if (head.view() == names::equal || head.view() == names::notEqual) {
+        bool determined = false;
+        bool equal = false;
+
+        if (lhs == rhs) {
+            determined = true;
+            equal = true;
+        }
+        else if (lhs.isNumber() && rhs.isNumber()) {
+            determined = true;
+            equal = lhs.asNumber() == rhs.asNumber();
+        }
+        else if (lhs.isBoolean() && rhs.isBoolean()) {
+            determined = true;
+            equal = lhs.asBoolean() == rhs.asBoolean();
+        }
+        else if (lhs.isString() && rhs.isString()) {
+            determined = true;
+            equal = lhs.asString() == rhs.asString();
+        }
+
+        // 証明できない記号式の不一致を、誤ってfalseとは断定しない。
+        if (!determined)
+            return unresolved(head, lhs, rhs);
+
+        return Expr{head.view() == names::equal ? equal : !equal};
+    }
+
+    if (!lhs.isNumber() || !rhs.isNumber()
+        || !lhs.asNumber().isReal() || !rhs.asNumber().isReal())
+        return unresolved(head, lhs, rhs);
+
+    const auto order = lhs.asNumber().asReal() <=> rhs.asNumber().asReal();
+    if (head.view() == names::less)
+        return Expr{order == std::strong_ordering::less};
+    if (head.view() == names::lessEqual)
+        return Expr{order != std::strong_ordering::greater};
+    if (head.view() == names::greater)
+        return Expr{order == std::strong_ordering::greater};
+    if (head.view() == names::greaterEqual)
+        return Expr{order != std::strong_ordering::less};
+
+    error::throwCalcError(
+        error::CalcErrorType::Internal,
+        "Unknown comparison operator");
+}
+
+Expr evaluateLogicalAnd(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    std::vector<Expr> unresolvedArguments;
+
+    for (const Expr& argument : arguments) {
+        if (!argument.isBoolean()) {
+            unresolvedArguments.push_back(argument);
+            continue;
+        }
+
+        if (!argument.asBoolean())
+            return Expr{false};
+    }
+
+    if (unresolvedArguments.empty())
+        return Expr{true};
+    if (unresolvedArguments.size() == 1)
+        return unresolvedArguments.front();
+
+    return Expr::call(registry.symbol(evaluation::BuiltinId::LogicalAnd), std::move(unresolvedArguments));
+}
+
+Expr evaluateElement(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
+    requireBinary(arguments, names::element);
+    if (!arguments[1].isSymbol())
+        error::throwCalcError(
+            error::CalcErrorType::Type,
+            "element domain must be Integer, Rational, Real, or Complex");
+
+    mathematics::NumericDomain domain = mathematics::NumericDomain::Unknown;
+    const std::string_view name = arguments[1].asSymbol().view();
+    if (name == "Integer") domain = mathematics::NumericDomain::Integer;
+    else if (name == "Rational") domain = mathematics::NumericDomain::Rational;
+    else if (name == "Real") domain = mathematics::NumericDomain::Real;
+    else if (name == "Complex") domain = mathematics::NumericDomain::Complex;
+    else
+        error::throwCalcError(
+            error::CalcErrorType::Type,
+            "element domain must be Integer, Rational, Real, or Complex");
+
+    const mathematics::AssumptionSet assumptions;
+    const mathematics::KnowledgeContext knowledge{registry, mathematics, assumptions};
+    const mathematics::TruthValue truth = knowledge.prove(
+        mathematics::elementOf(arguments[0], domain));
+    if (truth == mathematics::TruthValue::True)
+        return Expr{true};
+    if (truth == mathematics::TruthValue::False)
+        return Expr{false};
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Element),
+        {arguments[0], arguments[1]});
+}
+
+} // namespace mmcal::builtins

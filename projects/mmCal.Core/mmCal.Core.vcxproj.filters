@@ -1,0 +1,654 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{A5EE47AF-017F-4A55-AB26-359F1A64D6E6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\numeric">
+      <UniqueIdentifier>{35D1973E-188A-4693-A8BD-872D1B59255D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\numeric\detail">
+      <UniqueIdentifier>{78B5D6BA-C0F8-47B7-B64A-C65D37B32156}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\expression">
+      <UniqueIdentifier>{FD1D5913-86D4-4187-B68E-67B1CD8854A5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\formatting">
+      <UniqueIdentifier>{208E5690-4FDF-4B7A-93C1-E723A2EE6A2A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\builtins">
+      <UniqueIdentifier>{E06EC624-9891-46A4-A502-281EB4DB9348}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\evaluation">
+      <UniqueIdentifier>{D0DDC115-91D5-44F6-8E89-8A462EB3AC9C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\source">
+      <UniqueIdentifier>{FDE2FE77-FF62-4D54-AC26-B2B94F6F2382}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\error">
+      <UniqueIdentifier>{D72FA875-3791-45B4-974C-5F67ADFFA267}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\syntax">
+      <UniqueIdentifier>{7AFF2158-EEB0-4DDC-9CD3-C57758A4CCCA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\kernel">
+      <UniqueIdentifier>{7E984DA7-60A9-4CC2-AFCA-B4B49B66D7E1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\symbols">
+      <UniqueIdentifier>{6F49D880-95EA-4F0C-9C29-68AC4A36EA51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\approximation">
+      <UniqueIdentifier>{A6F3D4D5-8C4B-47D5-9A31-2F0A1D209D81}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\mathematics">
+      <UniqueIdentifier>{37D2F879-5D43-4CFB-9186-6F42551F2475}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\solver">
+      <UniqueIdentifier>{447663D1-51AE-4775-AF7E-CFD4922E09F5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\simplification">
+      <UniqueIdentifier>{ADE14B8B-A431-4F71-B94D-BC0F9232BD70}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\symbolic">
+      <UniqueIdentifier>{6BC6643D-1731-44FB-89CF-2E39D14ADB1C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\random">
+      <UniqueIdentifier>{86F86618-9541-47CA-879F-1125CB840F58}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\src\numeric\big_int.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\integer_algorithms.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\rational.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\real_number.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\decimal_approximation.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\complex_decimal_approximation.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\number.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\expression\symbol.hpp">
+      <Filter>src\expression</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\expression\expr.hpp">
+      <Filter>src\expression</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\expression\origin_map.hpp">
+      <Filter>src\expression</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\formatting\expr_formatter.hpp">
+      <Filter>src\formatting</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\detail\big_uint.hpp">
+      <Filter>src\numeric\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\names.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\arithmetic.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\comparison.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\complex_functions.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\trigonometric.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\hyperbolic.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\builtin_registry.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\environment.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\iterator_spec.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\user_function_registry.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\evaluator.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\diagnostic.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\source\source_span.hpp">
+      <Filter>src\source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\source\source_document.hpp">
+      <Filter>src\source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\error\error_message.hpp">
+      <Filter>src\error</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\token.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\lexer.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\syntax_node.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\syntax_tree.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\parser.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\syntax\lowerer.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\kernel\kernel_session.hpp">
+      <Filter>src\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbols\symbol_id.hpp">
+      <Filter>src\symbols</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbols\symbol_table.hpp">
+      <Filter>src\symbols</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbols\symbol_registry.hpp">
+      <Filter>src\symbols</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\approximation_context.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_trigonometry.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_constants.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\real_interval.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\complex_interval.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_evaluator.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\angle.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\math_registry.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\definedness.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\math_ids.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\exact_trigonometry.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\exact_hyperbolic.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\trigonometric_reduction.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\exact_algebra.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\rounding_mode.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\big_float.hpp">
+      <Filter>src\numeric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\precision.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\numeric\detail\binary_scale.hpp">
+      <Filter>src\numeric\detail</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\value_facts.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_sqrt.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_complex_sqrt.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\exact_roots.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\numeric_domain.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\truth_value.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\predicate.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\assumption_set.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\assumption_parser.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\knowledge_context.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\solver\solution_set.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\transcendental.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\exact_transcendental.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_exponential.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_logarithm.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_special_functions.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_atan.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_elementary_functions.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certified_complex_transcendental.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\certification_error.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\approximation\interval_math.hpp">
+      <Filter>src\approximation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\simplification\rewrite.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\simplification\simplification_context.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\simplification\expression_cost.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\simplification\simplifier.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\symbolic_operation.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\polynomial.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\algebra_transforms.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\solver\polynomial_solver.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\solver\solve_constraints.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\solver\transcendental_solver.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\discrete_math.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\elementary_utilities.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\differentiation.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\integration.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\limit.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\substitution.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\simplification\full_simplifier.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\linear_algebra.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\numerical_calculus.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\aggregate.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\statistics.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\combinatorics.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\signal_processing.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\array_vector.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\stable_elementary.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\special_functions.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\random_functions.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\approximation_utilities.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\random\random_engine.hpp">
+      <Filter>src\random</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\exact_operations.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\builtins\array_helpers.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
+  <ClInclude Include="..\..\src\approximation\elementary_function.hpp"><Filter>src\approximation</Filter></ClInclude><ClInclude Include="..\..\src\approximation\machine_math.hpp"><Filter>src\approximation</Filter></ClInclude></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\numeric\big_int.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\integer_algorithms.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\rational.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\real_number.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\decimal_approximation.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\complex_decimal_approximation.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\number.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\expression\symbol.cpp">
+      <Filter>src\expression</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\expression\expr.cpp">
+      <Filter>src\expression</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\formatting\expr_formatter.cpp">
+      <Filter>src\formatting</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\detail\big_uint.cpp">
+      <Filter>src\numeric\detail</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\arithmetic.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\comparison.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\complex_functions.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\trigonometric.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\hyperbolic.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\evaluation\builtin_registry.cpp">
+      <Filter>src\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\evaluation\environment.cpp">
+      <Filter>src\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\evaluation\user_function_registry.cpp">
+      <Filter>src\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\evaluation\evaluator.cpp">
+      <Filter>src\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\source\source_document.cpp">
+      <Filter>src\source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\error\error_message.cpp">
+      <Filter>src\error</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\token.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\lexer.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\syntax_node.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\syntax_tree.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\parser.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\syntax\lowerer.cpp">
+      <Filter>src\syntax</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\kernel\kernel_session.cpp">
+      <Filter>src\kernel</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbols\symbol_table.cpp">
+      <Filter>src\symbols</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbols\symbol_registry.cpp">
+      <Filter>src\symbols</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\approximation_context.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_trigonometry.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_constants.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\real_interval.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\complex_interval.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_evaluator.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\angle.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\math_registry.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\definedness.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\exact_trigonometry.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\exact_hyperbolic.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\trigonometric_reduction.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\exact_algebra.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\big_float.cpp">
+      <Filter>src\numeric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\precision.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\numeric\detail\binary_scale.cpp">
+      <Filter>src\numeric\detail</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\value_facts.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_sqrt.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_complex_sqrt.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\exact_roots.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\assumption_set.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\assumption_parser.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\knowledge_context.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\solver\solution_set.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\transcendental.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\exact_transcendental.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_exponential.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_logarithm.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_special_functions.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_atan.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_elementary_functions.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\certified_complex_transcendental.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\approximation\interval_math.cpp">
+      <Filter>src\approximation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\simplification\expression_cost.cpp">
+      <Filter>src\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\simplification\simplifier.cpp">
+      <Filter>src\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\polynomial.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\algebra_transforms.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\solver\polynomial_solver.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\solver\transcendental_solver.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\solver\solve_constraints.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\discrete_math.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\elementary_utilities.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\differentiation.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\integration.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\limit.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\substitution.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\simplification\full_simplifier.cpp">
+      <Filter>src\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\linear_algebra.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\numerical_calculus.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\aggregate.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\statistics.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\combinatorics.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\signal_processing.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\array_vector.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\stable_elementary.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\special_functions.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\random_functions.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\random\random_engine.cpp">
+      <Filter>src\random</Filter>
+    </ClCompile>
+  <ClCompile Include="..\..\src\approximation\machine_math.cpp"><Filter>src\approximation</Filter></ClCompile></ItemGroup>
+</Project>

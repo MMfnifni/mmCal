@@ -1,0 +1,38 @@
+# Numeric lexer boundary regression.
+# Particularly guards the 2exp[x] / scientific-notation ambiguity.
+
+0b0==>0
+0b1==>1
+0b101010==>42
+0o0==>0
+0o17==>15
+0x0==>0
+0xFF==>255
+0xff==>255
+2#1010==>10
+16#FF==>255
+16#ff==>255
+36#Z==>35
+36#10==>36
+
+# e/E is an exponent marker only if a valid exponent really follows.
+2e3==>2000
+2e-3==>1/500
+2exp[x]==>2*exp[x]
+2E^x==>2*exp[x]
+1e==>e
+1E==>E
+1e+==>SyntaxError: Exponent requires at least one digit
+1e-==>SyntaxError: Exponent requires at least one digit
+
+# Malformed literals must fail deterministically.
+1..2==>SyntaxError: Malformed number literal
+0x==>SyntaxError: Prefixed integer requires at least one digit
+0b==>SyntaxError: Prefixed integer requires at least one digit
+0o==>SyntaxError: Prefixed integer requires at least one digit
+0xG==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+0b2==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+0o8==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+2#102==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+1#0==>SyntaxError: Radix must be an integer from 2 through 36
+37#10==>SyntaxError: Radix must be an integer from 2 through 36

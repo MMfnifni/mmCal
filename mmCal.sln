@@ -3,71 +3,53 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.2.11415.280
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal", "cal.vcxproj", "{375BB1CB-CC49-4E94-B11C-A651E1724736}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal", "mmCal.vcxproj", "{375BB1CB-CC49-4E94-B11C-A651E1724736}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ca2", "ca2", "{DDB4EF12-CC4E-5E88-E6FC-71A802F4DE97}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal.Core", "projects\mmCal.Core\mmCal.Core.vcxproj", "{1235F143-3617-4AE1-A986-4B6BC83DEFDB}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal.Tests", "projects\mmCal.Tests\mmCal.Tests.vcxproj", "{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C7983E80-1DFC-4CBD-BAAB-C840C0F7EA02}"
 	ProjectSection(SolutionItems) = preProject
-		cal2.cpp = cal2.cpp
-		ver3.cpp = ver3.cpp
-		ver4.cpp = ver4.cpp
-	EndProjectSection
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "mmCal_UI", "cs\mmCal_UI\mmCal_UI.csproj", "{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ソリューション項目", "ソリューション項目", "{C7983E80-1DFC-4CBD-BAAB-C840C0F7EA02}"
-	ProjectSection(SolutionItems) = preProject
-		version.h = version.h
+		.gitignore = .gitignore
+		CMakeLists.txt = CMakeLists.txt
+		LICENSE = LICENSE
+		mmCal_reference.jp.md = mmCal_reference.jp.md
+		README.md = README.md
 	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
 		Debug|x64 = Debug|x64
 		Debug|x86 = Debug|x86
-		dll|Any CPU = dll|Any CPU
-		dll|x64 = dll|x64
-		dll|x86 = dll|x86
-		Release|Any CPU = Release|Any CPU
 		Release|x64 = Release|x64
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|Any CPU.ActiveCfg = Debug|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|Any CPU.Build.0 = Debug|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x64.ActiveCfg = Debug|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x64.Build.0 = Debug|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x86.ActiveCfg = Debug|Win32
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Debug|x86.Build.0 = Debug|Win32
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|Any CPU.ActiveCfg = dll|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|Any CPU.Build.0 = dll|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|x64.ActiveCfg = dll|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|x64.Build.0 = dll|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|x86.ActiveCfg = dll|Win32
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.dll|x86.Build.0 = dll|Win32
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|Any CPU.ActiveCfg = Release|x64
-		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|Any CPU.Build.0 = Release|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x64.ActiveCfg = Release|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x64.Build.0 = Release|x64
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x86.ActiveCfg = Release|Win32
 		{375BB1CB-CC49-4E94-B11C-A651E1724736}.Release|x86.Build.0 = Release|Win32
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|x64.Build.0 = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Debug|x86.Build.0 = Debug|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|Any CPU.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|Any CPU.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|x64.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|x64.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|x86.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.dll|x86.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.ActiveCfg = Release|x64
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x64.Build.0 = Release|x64
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.ActiveCfg = Release|x86
-		{9F6297C9-E8E7-4491-8F0C-A7EF22B3BDF9}.Release|x86.Build.0 = Release|x86
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Debug|x64.ActiveCfg = Debug|x64
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Debug|x64.Build.0 = Debug|x64
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Debug|x86.ActiveCfg = Debug|Win32
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Debug|x86.Build.0 = Debug|Win32
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Release|x64.ActiveCfg = Release|x64
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Release|x64.Build.0 = Release|x64
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Release|x86.ActiveCfg = Release|Win32
+		{1235F143-3617-4AE1-A986-4B6BC83DEFDB}.Release|x86.Build.0 = Release|Win32
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Debug|x64.ActiveCfg = Debug|x64
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Debug|x64.Build.0 = Debug|x64
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Debug|x86.ActiveCfg = Debug|Win32
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Debug|x86.Build.0 = Debug|Win32
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x64.ActiveCfg = Release|x64
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x64.Build.0 = Release|x64
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x86.ActiveCfg = Release|Win32
+		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

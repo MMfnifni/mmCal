@@ -1,0 +1,73 @@
+(* mmCal 1.5.0 現行構文。意味判定と名前解決はLowerer / Evaluatorへ分離する。 *)
+
+digit          ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+letter         ::= "A" | ... | "Z" | "a" | ... | "z" ;
+identifier     ::= ( letter | "_" ) , { letter | digit | "_" } ;
+
+integer        ::= digit , { digit } ;
+decimal        ::= digit , { digit } , [ "." , { digit } ]
+                 | "." , digit , { digit } ;
+exponent       ::= ( "e" | "E" ) , [ "+" | "-" ] , digit , { digit } ;
+number         ::= decimal , [ exponent ]
+                 | ( "0b" | "0B" ) , binary_digit , { binary_digit }
+                 | ( "0o" | "0O" ) , octal_digit , { octal_digit }
+                 | ( "0x" | "0X" ) , hex_digit , { hex_digit }
+                 | integer , "#" , radix_digit , { radix_digit } ,
+                   [ "." , radix_digit , { radix_digit } ] ;
+
+binary_digit   ::= "0" | "1" ;
+octal_digit    ::= "0" | ... | "7" ;
+hex_digit      ::= digit | "A" | ... | "F" | "a" | ... | "f" ;
+radix_digit    ::= digit | letter ;
+
+string         ::= '"' , { ? escapeを含む文字 ? } , '"' ;
+assign         ::= ":=" ;
+
+Input          ::= Assignment ;
+Assignment     ::= Compare , [ assign , Assignment ] ;
+Compare        ::= Expression , { CompareOp , Expression } ;
+CompareOp      ::= "<" | "<=" | ">" | ">=" | "==" | "!=" ;
+Expression     ::= Term , { ( "+" | "-" ) , Term } ;
+Term           ::= Unary , { ( "*" | "/" | ImplicitMul ) , Unary } ;
+Unary          ::= { "+" | "-" } , Power ;
+Power          ::= Postfix , [ "^" , Unary ] ;
+Postfix        ::= Primary , { "!" } ;
+
+Primary        ::= number
+                 | string
+                 | HistoryRef
+                 | ArrayLiteral
+                 | IdentifierExpr
+                 | Group ;
+
+HistoryRef     ::= "%" , { "%" } ;
+ArrayLiteral   ::= "{" , [ Assignment , { "," , Assignment } ] , "}" ;
+IdentifierExpr ::= identifier , [ CallSuffix ] ;
+CallSuffix     ::= "(" , [ Assignment , { "," , Assignment } ] , ")"
+                 | "[" , [ Assignment , { "," , Assignment } ] , "]" ;
+Group          ::= "(" , Assignment , ")" ;
+ImplicitMul    ::= (* 隣接規則によりParserが生成する。 *) ;
+
+(* 入力では函数呼び出しに () と [] の双方を許可する。 *)
+(* Formatterはすべての函数呼び出しを name[...] 形式で表示する。 *)
+(* 角括弧は函数呼び出し専用であり、グループ化には使わない。 *)
+(* 波括弧は配列専用とする。 *)
+(* Iだけを虚数単位として扱い、iは通常の識別子とする。 *)
+(* True / False はLowererでBooleanへ変換する。 *)
+(* 未定義identifierと未登録函数はEvaluatorでNameErrorとする。 *)
+(* 0x / 0b / 0oを読み始めた後は識別子や暗黙乗算へ後戻りしない。 *)
+(* decimal直後のe/Eは、後続に符号付き/符号なしの数字がある場合だけ指数部とする。 *)
+(* したがって2exp[x]や2E^xはNumberとIdentifierに分離され、暗黙乗算として扱う。 *)
+
+(* 優先順位例：-5! は -(5!) と解釈する。 *)
+(* 負整数そのものの階乗は (-5)! と書かれ、DomainErrorとなる。 *)
+
+(* ユーザー定義函数の意味規則 *)
+
+(* 函数定義は遅延代入を使用する。 *)
+(*   f[x] := x + 1 *)
+(* 仮引数は重複しないidentifierでなければならず、定数名は使用できない。 *)
+(* 定義は函数名と引数個数の組で区別する。 *)
+(* 呼出し時は実引数を先に評価し、局所スコープへ仮引数として束縛した後、 *)
+(* 保存済みの函数本体を評価する。 *)
+(* ifは選択した枝だけを評価するため、停止条件を持つ再帰函数を記述できる。 *)

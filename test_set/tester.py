@@ -1,201 +1,485 @@
+# mmCal V1.5 black-box test runner.
+# Python 3.7+ / Windows and POSIX compatible.
+
+from __future__ import print_function
+
+import argparse
+import datetime
+from fractions import Fraction
+import glob
+import math
+import os
+from pathlib import Path
+import re
+import shlex
 import subprocess
 import sys
-import re
-import math
-import glob
+import time
 
-EPS = 1e-10
-EXE = r"..\build\x64\Release\mmCal_x64.exe"
-TESTS = sys.argv[1:] or glob.glob("test*.txt")
+ABS_EPS = 1e-10
+REL_EPS_STRICT = 1e-10
+REL_EPS_LOOSE = 1e-6
 
-# ---------------- Floating Point Helpers ----------------
-def normalize_float(x, eps=EPS):
-    if math.isinf(x):
-        return x
-    return 0.0 if abs(x) < eps else x
-
-def almost_equal(a, b, eps=EPS):
-    a, b = normalize_float(a, eps), normalize_float(b, eps)
-    return a == b if math.isinf(a) or math.isinf(b) else abs(a - b) < eps
-
-def parse_float(s):
-    s = s.strip().lower()
-    if s in ("inf", "+inf"): return float("inf")
-    if s == "-inf": return float("-inf")
-    return float(s)
-
-# ---------------- Complex Helpers ----------------
-_complex_re = re.compile(r"""
-^\s*
-(?:
-  (?P<real>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
-  (?:
-    (?P<imag_sign>[+-])?
-    (?P<imag>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
-    [iI]
-  )?
-|
-  (?P<pure_sign>[+-])?
-  (?P<pure_imag>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)?
-  [iI]
+ERROR_TYPES = (
+    "SyntaxError", "DomainError", "TypeError", "NameError",
+    "OverflowError", "EvaluationError", "InternalError"
 )
-\s*$
-""", re.VERBOSE)
+PUBLIC_ERROR_TYPES = tuple(name for name in ERROR_TYPES if name != "InternalError")
 
-def parse_complex(s: str):
-    s = re.sub(r"\s+", "", s)
-    m = _complex_re.match(s)
-    if not m:
-        return float(s), 0.0
 
-    if m.group("pure_imag") or m.group("pure_sign"):
-        sign = -1.0 if m.group("pure_sign") == "-" else 1.0
-        mag = m.group("pure_imag")
-        return 0.0, sign * (float(mag) if mag else 1.0)
+class RunnerProtocolError(RuntimeError):
+    pass
 
-    real = float(m.group("real")) if m.group("real") else 0.0
-    if not m.group("imag") and not m.group("imag_sign"):
-        return real, 0.0
+# V1.5 final is ``In[n]>`` / ``Out[n]>``.  Older black-box targets used
+# ``In [n]>`` in some builds, so accept optional whitespace around the index.
+# This keeps the runner useful across the historical test targets as requested.
+PROMPT_RE = re.compile(r"(?:^|\n)In\s*\[\s*\d+\s*\]>[ \t]*")
+OUT_RE = re.compile(r"(?:^|\n)Out\s*\[\s*\d+\s*\]>[ \t]*([^\n]*)")
 
-    sign = -1.0 if m.group("imag_sign") == "-" else 1.0
-    imag = float(m.group("imag")) if m.group("imag") else 1.0
-    return real, sign * imag
 
-def complex_equal(a, b):
-    ar, ai = map(normalize_float, parse_complex(a))
-    br, bi = map(normalize_float, parse_complex(b))
-    return almost_equal(ar, br) and almost_equal(ai, bi)
+def script_dir():
+    return Path(__file__).resolve().parent
 
-def looks_complex(s):
-    return "i" in s.lower()
 
-# ---------------- Structure Parser ({ } support) ----------------
-def parse_structure(s: str):
-    s = s.strip()
+def find_executable(explicit=None):
+    if explicit:
+        path = Path(explicit).expanduser().resolve()
+        if path.is_file():
+            return str(path)
+        raise RuntimeError("mmCal executable not found: {}".format(path))
 
-    if not s.startswith("{"):
-        try:
-            return float(s)
-        except:
-            return s
+    env = os.environ.get("MMCAL_EXE")
+    if env:
+        path = Path(env).expanduser().resolve()
+        if path.is_file():
+            return str(path)
+        raise RuntimeError("MMCAL_EXE does not exist: {}".format(path))
 
-    if s == "{}":
-        return []
+    base = script_dir()
 
-    inner = s[1:-1].strip()
-    if not inner:
-        return []
+    # test/_set や test_set 配下からでもプロジェクト本体の最新buildを先に探す。
+    # cwdのmmCal.exeは古いコピーである可能性があるため最後に回す。
+    search_roots = []
+    current = base
+    for _ in range(5):
+        if current not in search_roots:
+            search_roots.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
 
-    elems = []
-    depth = 0
-    token = ""
+    candidates = []
+    for root in search_roots:
+        candidates.extend([
+            root / "x64" / "Release" / "mmCal.exe",
+            root / "build" / "x64" / "Release" / "mmCal.exe",
+            root / "build" / "Release" / "mmCal.exe",
+            root / "build" / "mmCal.exe",
+            root / "x64" / "Release" / "mmCal",
+            root / "build" / "x64" / "Release" / "mmCal",
+            root / "build" / "Release" / "mmCal",
+            root / "build" / "mmCal",
+        ])
+    candidates.extend([Path.cwd() / "mmCal.exe", Path.cwd() / "mmCal"])
 
-    for ch in inner:
-        if ch == "," and depth == 0:
-            elems.append(parse_structure(token))
-            token = ""
+    seen = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.is_file():
+            return str(path.resolve())
+
+    raise RuntimeError(
+        "mmCal executable was not found. Use --exe PATH or set MMCAL_EXE."
+    )
+
+
+def parse_test_text(path, text):
+    startup_args = []
+    cases = []
+
+    for line_number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("# @args "):
+            startup_args = shlex.split(line[len("# @args "):], posix=(os.name != "nt"))
+            continue
+        if line.startswith("#"):
+            continue
+
+        if "==>" in line:
+            expr, expected = map(str.strip, line.split("==>", 1))
+            mode = "exact"
+        elif "=>>" in line:
+            expr, expected = map(str.strip, line.split("=>>", 1))
+            mode = "loose"
+        elif "=>" in line:
+            expr, expected = map(str.strip, line.split("=>", 1))
+            mode = "strict"
         else:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            token += ch
+            raise RuntimeError(
+                "{}:{}: expected '==>', '=>' or '=>>'".format(path, line_number)
+            )
 
-    if token:
-        elems.append(parse_structure(token))
+        cases.append((line_number, expr, expected, mode))
 
-    return elems
+    return startup_args, cases
 
-def structure_equal(a, b):
-    # both list
-    if isinstance(a, list) and isinstance(b, list):
-        if len(a) != len(b):
-            return False
-        return all(structure_equal(x, y) for x, y in zip(a, b))
 
-    # numeric comparison (intも吸収)
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return almost_equal(float(a), float(b))
+def preload_test_files(test_files):
+    loaded = []
+    for path in test_files:
+        text = path.read_text(encoding="utf-8")
+        startup_args, cases = parse_test_text(path, text)
+        loaded.append((path, startup_args, cases))
+    return loaded
 
-    return False
 
-# ---------------- Normalize structure formatting ----------------
-def normalize_structure(s):
-    return re.sub(r'\s*([{},])\s*', r'\1', s.strip())
+def run_session(executable, startup_args, cases, timeout):
+    payload = "\n".join(case[1] for case in cases)
+    if payload:
+        payload += "\n"
 
-# ---------------- Test Runner ----------------
-def run_test(expr, expect):
+    process = subprocess.run(
+        [executable] + startup_args,
+        input=payload,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        timeout=timeout,
+    )
+
+    stdout = process.stdout.replace("\r\n", "\n").replace("\r", "\n")
+    stderr = process.stderr.replace("\r\n", "\n").replace("\r", "\n")
+    parts = PROMPT_RE.split(stdout)
+
+    # banner is parts[0]. For N inputs the REPL normally emits N+1 prompts,
+    # because it prints the next prompt before observing EOF.
+    if len(parts) < len(cases) + 1:
+        preview = stdout[:1200]
+        if len(stdout) > len(preview):
+            preview += "\n... (stdout truncated)"
+        err_preview = stderr[:600]
+        if len(stderr) > len(err_preview):
+            err_preview += "\n... (stderr truncated)"
+        raise RunnerProtocolError(
+            "REPL output could not be segmented: {} cases, {} prompts\n"
+            "Check the selected executable and prompt format.\nstdout preview:\n{}\nstderr preview:\n{}"
+            .format(len(cases), max(0, len(parts) - 1), preview, err_preview)
+        )
+
+    responses = []
+    for index in range(len(cases)):
+        chunk = parts[index + 1].strip()
+        match = OUT_RE.search(chunk)
+        if match:
+            responses.append((match.group(1).strip(), chunk))
+        else:
+            responses.append((chunk, chunk))
+
+    return responses, process.returncode, stderr
+
+
+def unquote(text):
+    text = text.strip()
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        body = text[1:-1]
+        return bytes(body, "utf-8").decode("unicode_escape")
+    return None
+
+
+def first_error_line(text):
+    return text.strip().split("\n", 1)[0].strip()
+
+
+def first_error_type(text):
+    first = first_error_line(text)
+    for name in ERROR_TYPES:
+        if first.startswith(name + ":"):
+            return name
+    return None
+
+
+def parse_real(text):
+    text = text.strip()
+    low = text.lower()
+    if low in ("inf", "+inf"):
+        return float("inf")
+    if low == "-inf":
+        return float("-inf")
+    if re.match(r"^[+-]?\d+/\d+$", text):
+        return float(Fraction(text))
+    return float(text)
+
+
+_COMPLEX_RE = re.compile(
+    r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[+-]?\d+/\d+)?"
+    r"([+-])?"
+    r"((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|\d+/\d+)?I$"
+)
+
+
+def parse_complex(text):
+    s = re.sub(r"\s+", "", text)
+    if s in ("I", "+I"):
+        return 0.0, 1.0
+    if s == "-I":
+        return 0.0, -1.0
+
+    # Pure imaginary with explicit magnitude.
+    m = re.match(r"^([+-]?)(\d+(?:\.\d*)?|\.\d+|\d+/\d+)(?:[eE]([+-]?\d+))?I$", s)
+    if m:
+        sign = -1.0 if m.group(1) == "-" else 1.0
+        mag_text = m.group(2)
+        if m.group(3) is not None:
+            mag_text += "e" + m.group(3)
+        return 0.0, sign * parse_real(mag_text)
+
+    # Split real and imaginary at the last sign not belonging to an exponent.
+    split_at = None
+    for index in range(1, len(s) - 1):
+        if s[index] in "+-" and s[index - 1] not in "eE":
+            split_at = index
+    if split_at is not None and s.endswith("I"):
+        real_text = s[:split_at]
+        imag_text = s[split_at:-1]
+        if imag_text in ("+", "-"):
+            imag_text += "1"
+        return parse_real(real_text), parse_real(imag_text)
+
+    raise ValueError("not a complex literal")
+
+
+def numeric_equal(a, b, rel_eps):
+    if math.isinf(a) or math.isinf(b):
+        return a == b
+    diff = abs(a - b)
+    scale = max(1.0, abs(a), abs(b))
+    return diff <= ABS_EPS + rel_eps * scale
+
+
+def split_top_level(inner):
+    result = []
+    depth = 0
+    token = []
+    in_string = False
+    escape = False
+    for ch in inner:
+        if in_string:
+            token.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            token.append(ch)
+        elif ch == "{":
+            depth += 1
+            token.append(ch)
+        elif ch == "}":
+            depth -= 1
+            token.append(ch)
+        elif ch == "," and depth == 0:
+            result.append("".join(token).strip())
+            token = []
+        else:
+            token.append(ch)
+    result.append("".join(token).strip())
+    return result
+
+
+def compare_structure(got, expected, rel_eps):
+    got = got.strip()
+    expected = expected.strip()
+    if not (got.startswith("{") and got.endswith("}") and
+            expected.startswith("{") and expected.endswith("}")):
+        return False
+    gi = got[1:-1].strip()
+    ei = expected[1:-1].strip()
+    if not gi or not ei:
+        return gi == ei
+    gs = split_top_level(gi)
+    es = split_top_level(ei)
+    if len(gs) != len(es):
+        return False
+    return all(compare_value(a, b, rel_eps) for a, b in zip(gs, es))
+
+
+def normalize_symbolic(text):
+    return re.sub(r"\s+", "", text.strip())
+
+
+def compare_value(got, expected, rel_eps):
+    got = got.strip()
+    expected = expected.strip()
+
+    quoted = unquote(expected)
+    if quoted is not None:
+        return got == quoted
+
+    if got.startswith("{") or expected.startswith("{"):
+        return compare_structure(got, expected, rel_eps)
+
     try:
-        p = subprocess.run([EXE, expr], capture_output=True, text=True, timeout=2)
+        return numeric_equal(parse_real(got), parse_real(expected), rel_eps)
     except Exception:
-        return "runner_error", None
+        pass
 
-    out, ret = p.stdout.strip(), p.returncode
+    if "I" in got or "I" in expected:
+        try:
+            try:
+                ar, ai = parse_complex(got)
+            except Exception:
+                ar, ai = parse_real(got), 0.0
+            try:
+                br, bi = parse_complex(expected)
+            except Exception:
+                br, bi = parse_real(expected), 0.0
+            return numeric_equal(ar, br, rel_eps) and numeric_equal(ai, bi, rel_eps)
+        except Exception:
+            pass
 
-    if expect == "Error":
-        return ("pass", out) if ret != 0 else ("fail", out or "(empty)")
+    return normalize_symbolic(got) == normalize_symbolic(expected)
 
-    if ret != 0:
-        return "fail", "Error"
 
+def compare_response(got, full_chunk, expected, mode):
+    expected = expected.strip()
+    error_line = first_error_line(full_chunk)
+    error_type = first_error_type(full_chunk)
+
+    if expected == "Error":
+        ok = error_type in PUBLIC_ERROR_TYPES
+        return ok, error_line if error_type is not None else "no error"
+    if expected in ERROR_TYPES:
+        return error_type == expected, error_line if error_type is not None else "no error"
+
+    # ErrorType: exact message 形式では、分類だけでなく先頭のエラー文も固定する。
+    for name in ERROR_TYPES:
+        if expected.startswith(name + ":"):
+            return error_line == expected, error_line if error_type is not None else "no error"
+
+    if error_type is not None:
+        return False, error_line
+
+    if mode == "exact":
+        quoted = unquote(expected)
+        if quoted is not None:
+            return got == quoted, None
+        return normalize_symbolic(got) == normalize_symbolic(expected), None
+
+    rel_eps = REL_EPS_LOOSE if mode == "loose" else REL_EPS_STRICT
+    return compare_value(got, expected, rel_eps), None
+
+
+def collect_test_files(arguments):
+    if arguments:
+        files = []
+        for item in arguments:
+            matched = glob.glob(item)
+            files.extend(matched if matched else [item])
+        return [Path(path) for path in files]
+    return sorted(script_dir().glob("test*.txt"))
+
+
+RUNNER_VERSION = "V1.5 exact black-box r3"
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="mmCal V1.5 black-box tests")
+    parser.add_argument("tests", nargs="*", help="test files or glob patterns")
+    parser.add_argument("--exe", help="path to mmCal executable")
+    parser.add_argument("--timeout", type=float, default=120.0, help="timeout per test file")
+    args = parser.parse_args(argv)
+
+    executable = find_executable(args.exe)
+    test_files = collect_test_files(args.tests)
+    if not test_files:
+        print("No test files found.", file=sys.stderr)
+        return 2
+
+    # ファイルI/Oとtest記述のparseは計測前に完了させる。
+    # Elapsed timeはmmCalの起動・評価・結果比較だけを概ね反映する。
     try:
-        norm_out = normalize_structure(out)
-        norm_expect = normalize_structure(expect)
+        loaded_files = preload_test_files(test_files)
+    except Exception as exc:
+        print("Test preload failed: {}".format(exc), file=sys.stderr)
+        return 2
 
-        # vector / structure
-        if norm_out.startswith("{") or norm_expect.startswith("{"):
-            parsed_out = parse_structure(norm_out)
-            parsed_expect = parse_structure(norm_expect)
-            return ("pass", out) if structure_equal(parsed_out, parsed_expect) else ("fail", out)
+    total = passed = failed = skipped = 0
+    active_total = 0
+    for _path, _startup_args, cases in loaded_files:
+        active_total += sum(1 for case in cases if case[2].lower() != "skip")
+        skipped += sum(1 for case in cases if case[2].lower() == "skip")
 
-        # complex
-        if looks_complex(norm_out) or looks_complex(norm_expect):
-            return ("pass", out) if complex_equal(norm_out, norm_expect) else ("fail", out)
+    print("mmCal {}".format(RUNNER_VERSION))
+    print("Executable: {}".format(executable))
+    print("Preloaded {} files / {} tests.".format(len(loaded_files), active_total))
+    print("Test-file I/O and parsing are excluded from Elapsed time.")
+    print(datetime.datetime.now().strftime("'%y/%m/%d/%H:%M:%S") + " start")
+    print("Running tests...\n")
+    started = time.perf_counter()
 
-        # scalar
-        return ("pass", out) if almost_equal(parse_float(norm_out), parse_float(norm_expect)) else ("fail", out)
+    for test_file, startup_args, cases in loaded_files:
+        active = [case for case in cases if case[2].lower() != "skip"]
+        total += len(active)
+        if not active:
+            continue
 
-    except Exception:
-        return "fail", out or "(empty)"
+        try:
+            responses, returncode, stderr = run_session(
+                executable, startup_args, active, args.timeout
+            )
+        except RunnerProtocolError as exc:
+            print("[RUNNER ERROR] {}: {}".format(test_file.name, exc))
+            print("Aborted: this is a runner/REPL protocol error, not {} test failures.".format(len(active)))
+            return 2
+        except Exception as exc:
+            print("[RUNNER ERROR] {}: {}".format(test_file.name, exc))
+            print("Aborted before assigning PASS/FAIL to this file.")
+            return 2
 
-# ---------------- Main ----------------
-PASS = FAIL = TOTAL = 0
-print("Running tests...\n")
-
-for testfile in TESTS:
-    with open(testfile, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-
-            TOTAL += 1
-
-            if ":=" not in line:
-                print(f"[SKIP] {line}")
-                continue
-
-            expr, expect = map(str.strip, line.split(":=", 1))
-
-            if expect.lower() == "skip":
-                print(f"[SKIP] {expr}")
-                continue
-
-            result, got = run_test(expr, expect)
-
-            if result == "pass":
-                print(f"[PASS] {expr} = {got}" if got else f"[PASS] {expr}")
-                PASS += 1
+        for case, response in zip(active, responses):
+            line_number, expr, expected, mode = case
+            got, chunk = response
+            ok, info = compare_response(got, chunk, expected, mode)
+            if ok:
+                passed += 1
+                shown = first_error_line(chunk) if first_error_type(chunk) else got
+                print("[PASS] {} => {}".format(expr, shown) if shown else "[PASS] {}".format(expr))
             else:
-                print(f"[FAIL] {expr}")
-                print(f"  expected: {expect}")
-                print(f"  got     : {got}")
-                FAIL += 1
+                failed += 1
+                print("[FAIL] {}".format(expr))
+                print("  file    : {}:{}".format(test_file.name, line_number))
+                print("  expected: {}".format(expected))
+                if first_error_type(chunk):
+                    print("  got     : {}".format(first_error_line(chunk)))
+                else:
+                    print("  got     : {}".format(got or "(empty)"))
+                if info and info != first_error_line(chunk):
+                    print("  error   : {}".format(info))
 
-print("\n=====================")
-print(f"TOTAL: {TOTAL}")
-print(f"PASS : {PASS}")
-print(f"FAIL : {FAIL}")
-print("=====================")
+        if returncode != 0:
+            print("[WARN] mmCal exited with code {} ({})".format(returncode, test_file.name))
+        if stderr.strip():
+            print("[WARN] stderr ({}):\n{}".format(test_file.name, stderr.strip()))
 
-sys.exit(FAIL != 0)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    print("\n=====================")
+    print("TOTAL: {}".format(total))
+    print("PASS : {}".format(passed))
+    print("FAIL : {}".format(failed))
+    if skipped:
+        print("SKIP : {}".format(skipped))
+    print("\nElapsed time: {:.3f} [ms]".format(elapsed_ms))
+    print("=====================")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

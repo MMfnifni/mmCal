@@ -1,0 +1,29 @@
+
+# area / volume
+area_circle(2)=>3.141592653589793
+area_triangle(3,4)=>6
+area_triangle(3,4,5)=>6
+area_trapezoid(3,5,2)=>8
+area_polygon(0,0,1,0,1,1,0,1)=>1
+vol_cylinder(2,3)=>9.42477796076938
+vol_cone(2,3)=>3.141592653589793
+vol_sphere(2)=>4.1887902047863905
+vol_prism(0,0,1,0,1,1,0,1,2)=>2
+vol_prism(0,0,1,0,1,1,2)=>1
+vol_prism(0,0,1,0,1,1,0)=>0
+
+# mold
+mold_clamp(10,20)=>200
+mold_clamp_safe(1.5,10,20)=>300
+mold_Pinj(10,2,3,4)=>19
+mold_flowrate(12,3)=>4
+mold_gate_velocity(12,3)=>4
+mold_shear_gate(12,3,2)=>6
+mold_shear_runner(2,4)=>0.3183098861838
+mold_pressure_loss_runner(2,3,4,5)=>1.564556752570568
+mold_eject_friction(0.2,100)=>20
+mold_eject_contact(5,6)=>30
+mold_eject_total(0.2,5,6)=>6
+mold_mu_tex(3,0.2)=>0.6
+mold_pin_stress(100,4,5)=>5
+mold_plate_deflection(1,2,3,4,5)=>0.324

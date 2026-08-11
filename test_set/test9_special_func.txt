@@ -1,29 +1,26 @@
+# mmCal V1.5 special functions
 
-# area / volume
-area_circle(2)=>3.141592653589793
-area_triangle(3,4)=>6
-area_triangle(3,4,5)=>6
-area_trapezoid(3,5,2)=>8
-area_polygon(0,0,1,0,1,1,0,1)=>1
-vol_cylinder(2,3)=>9.42477796076938
-vol_cone(2,3)=>3.141592653589793
-vol_sphere(2)=>4.1887902047863905
-vol_prism(0,0,1,0,1,1,0,1,2)=>2
-vol_prism(0,0,1,0,1,1,2)=>1
-vol_prism(0,0,1,0,1,1,0)=>0
+gamma[1]=>1
+gamma[5]=>24
+gamma[1/2]=>sqrt[Pi]
+gamma[-1/2]=>-2sqrt[Pi]
+N[gamma[1/3],20]=>2.67893853470774763366
 
-# mold
-mold_clamp(10,20)=>200
-mold_clamp_safe(1.5,10,20)=>300
-mold_Pinj(10,2,3,4)=>19
-mold_flowrate(12,3)=>4
-mold_gate_velocity(12,3)=>4
-mold_shear_gate(12,3,2)=>6
-mold_shear_runner(2,4)=>0.3183098861838
-mold_pressure_loss_runner(2,3,4,5)=>1.564556752570568
-mold_eject_friction(0.2,100)=>20
-mold_eject_contact(5,6)=>30
-mold_eject_total(0.2,5,6)=>6
-mold_mu_tex(3,0.2)=>0.6
-mold_pin_stress(100,4,5)=>5
-mold_plate_deflection(1,2,3,4,5)=>0.324
+lgamma[1]=>0
+N[lgamma[5],20]=>3.17805383034794561965
+
+erf[0]=>0
+erfc[0]=>1
+N[erf[1],20]=>0.84270079294971486934
+
+beta[2,3]=>1/12
+beta[1/2,1/2]=>Pi
+betaln[1/2,1/2]=>log[Pi]
+
+binom[5,2]=>10
+binom[1/2,2]=>-1/8
+fallingfact[5,3]=>60
+risingfact[5,3]=>210
+
+gamma[0]=>DomainError
+beta[-1,2]=>DomainError

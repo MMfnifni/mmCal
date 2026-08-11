@@ -1,64 +1,39 @@
-:clear => "[cleared]"
-x:=2 => "[defined: x := 2]"
-x => 2
-x:=3 => "[redefined: x := 3 (was 2)]"
-x => 3
-x^x => 27
+# mmCal V1.5 variables / user functions
 
-f(x):=2*x => "[defined: f(x)]"
-f(3) => 6
-f(x) => 6
+Clear[]=>"Cleared"
+x:=2=>2
+x=>2
+x:=3=>3
+x=>3
 
-g(y):=x+y => "[defined: g(y)]"
-g(4) => 7
+f(x):=2*x=>f[x]:=2x
+f(3)=>6
+f(x)=>6
 
-:unset x => "[unset: x]"
+g(y):=x+y=>g[y]:=x+y
+g(4)=>7
 
-x => Error
-g(4) => Error
+UnDef[x]=>1
+x=>x
+g(4)=>4+x
 
-:undef f => "[undefined: f]"
-f(3) => Error
+UnDef[f]=>1
+f(3)=>NameError
+Defs()=>{g[y]:=x+y}
 
-:clear => "[cleared]"
+Clear[]=>"Cleared"
+Defs()=>{}
 
-x => Error
-g(1) => Error
+# Own value and function definition may coexist on the same symbol.
+x:=1=>1
+x(y):=y+1=>x[y]:=y+1
+x=>1
+x(4)=>5
 
-x:=2 => "[defined: x := 2]"
-h(x):=x+1 => "[defined: h(x)]"
-h(10) => 11
+f(x):=x+1=>f[x]:=x+1
+f:=2=>2
+f=>2
+f(3)=>4
 
-:clear => "[cleared]"
-
-x:=2 => "[defined: x := 2]"
-f(y):=x+y => "[defined: f(y)]"
-f(3) => 5
-
-:clear => "[cleared]"
-
-x:=2 => "[defined: x := 2]"
-f(x):=x+1 => "[defined: f(x)]"
-f(10) => 11
-
-:clear => "[cleared]"
-
-x:=1 => "[defined: x := 1]"
-x(y):=y+1 => Error
-
-f(x):=x+1 => "[defined: f(x)]"
-f:=2 => Error
-
-:unset no_such_var => Error
-:undef no_such_func => Error
-
-:clear => "[cleared]"
-
-x:=2 => "[defined: x := 2]"
-f(y):=x+y => "[defined: f(y)]"
-:clear => "[cleared]"
-x => Error
-f(1) => Error
-
-x=2 => Error
-f(x)=x+1 => Error
+UnDef[x,f]=>2
+Defs()=>{}

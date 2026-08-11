@@ -1,0 +1,314 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{1235F143-3617-4AE1-A986-4B6BC83DEFDB}</ProjectGuid>
+    <RootNamespace>mmCalCore</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>mmCal.Core</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)build\internal\lib\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\internal\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>mmCal.Core</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Lib>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Lib>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\src\numeric\big_int.hpp" />
+    <ClInclude Include="..\..\src\numeric\integer_algorithms.hpp" />
+    <ClInclude Include="..\..\src\numeric\rational.hpp" />
+    <ClInclude Include="..\..\src\numeric\real_number.hpp" />
+    <ClInclude Include="..\..\src\numeric\decimal_approximation.hpp" />
+    <ClInclude Include="..\..\src\numeric\complex_decimal_approximation.hpp" />
+    <ClInclude Include="..\..\src\numeric\number.hpp" />
+    <ClInclude Include="..\..\src\expression\symbol.hpp" />
+    <ClInclude Include="..\..\src\expression\expr.hpp" />
+    <ClInclude Include="..\..\src\expression\origin_map.hpp" />
+    <ClInclude Include="..\..\src\formatting\expr_formatter.hpp" />
+    <ClInclude Include="..\..\src\numeric\detail\big_uint.hpp" />
+    <ClInclude Include="..\..\src\builtins\names.hpp" />
+    <ClInclude Include="..\..\src\builtins\arithmetic.hpp" />
+    <ClInclude Include="..\..\src\builtins\comparison.hpp" />
+    <ClInclude Include="..\..\src\builtins\complex_functions.hpp" />
+    <ClInclude Include="..\..\src\builtins\trigonometric.hpp" />
+    <ClInclude Include="..\..\src\builtins\hyperbolic.hpp" />
+    <ClInclude Include="..\..\src\evaluation\builtin_registry.hpp" />
+    <ClInclude Include="..\..\src\evaluation\environment.hpp" />
+    <ClInclude Include="..\..\src\evaluation\iterator_spec.hpp" />
+    <ClInclude Include="..\..\src\evaluation\user_function_registry.hpp" />
+    <ClInclude Include="..\..\src\evaluation\evaluator.hpp" />
+    <ClInclude Include="..\..\src\evaluation\diagnostic.hpp" />
+    <ClInclude Include="..\..\src\source\source_span.hpp" />
+    <ClInclude Include="..\..\src\source\source_document.hpp" />
+    <ClInclude Include="..\..\src\error\error_message.hpp" />
+    <ClInclude Include="..\..\src\syntax\token.hpp" />
+    <ClInclude Include="..\..\src\syntax\lexer.hpp" />
+    <ClInclude Include="..\..\src\syntax\syntax_node.hpp" />
+    <ClInclude Include="..\..\src\syntax\syntax_tree.hpp" />
+    <ClInclude Include="..\..\src\syntax\parser.hpp" />
+    <ClInclude Include="..\..\src\syntax\lowerer.hpp" />
+    <ClInclude Include="..\..\src\kernel\kernel_session.hpp" />
+    <ClInclude Include="..\..\src\symbols\symbol_id.hpp" />
+    <ClInclude Include="..\..\src\symbols\symbol_table.hpp" />
+    <ClInclude Include="..\..\src\symbols\symbol_registry.hpp" />
+    <ClInclude Include="..\..\src\approximation\approximation_context.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_trigonometry.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_constants.hpp" />
+    <ClInclude Include="..\..\src\approximation\real_interval.hpp" />
+    <ClInclude Include="..\..\src\approximation\complex_interval.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_evaluator.hpp" />
+    <ClInclude Include="..\..\src\mathematics\angle.hpp" />
+    <ClInclude Include="..\..\src\mathematics\math_registry.hpp" />
+    <ClInclude Include="..\..\src\mathematics\definedness.hpp" />
+    <ClInclude Include="..\..\src\mathematics\math_ids.hpp" />
+    <ClInclude Include="..\..\src\mathematics\exact_trigonometry.hpp" />
+    <ClInclude Include="..\..\src\mathematics\exact_hyperbolic.hpp" />
+    <ClInclude Include="..\..\src\mathematics\trigonometric_reduction.hpp" />
+    <ClInclude Include="..\..\src\mathematics\exact_algebra.hpp" />
+    <ClInclude Include="..\..\src\numeric\rounding_mode.hpp" />
+    <ClInclude Include="..\..\src\numeric\big_float.hpp" />
+    <ClInclude Include="..\..\src\approximation\precision.hpp" />
+    <ClInclude Include="..\..\src\numeric\detail\binary_scale.hpp" />
+    <ClInclude Include="..\..\src\mathematics\value_facts.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_sqrt.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_complex_sqrt.hpp" />
+    <ClInclude Include="..\..\src\mathematics\exact_roots.hpp" />
+    <ClInclude Include="..\..\src\mathematics\numeric_domain.hpp" />
+    <ClInclude Include="..\..\src\mathematics\truth_value.hpp" />
+    <ClInclude Include="..\..\src\mathematics\predicate.hpp" />
+    <ClInclude Include="..\..\src\mathematics\assumption_set.hpp" />
+    <ClInclude Include="..\..\src\mathematics\assumption_parser.hpp" />
+    <ClInclude Include="..\..\src\mathematics\knowledge_context.hpp" />
+    <ClInclude Include="..\..\src\solver\solution_set.hpp" />
+    <ClInclude Include="..\..\src\builtins\transcendental.hpp" />
+    <ClInclude Include="..\..\src\mathematics\exact_transcendental.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_exponential.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_logarithm.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_special_functions.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_atan.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_elementary_functions.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_complex_transcendental.hpp" />
+    <ClInclude Include="..\..\src\approximation\certification_error.hpp" />
+    <ClInclude Include="..\..\src\approximation\interval_math.hpp" />
+    <ClInclude Include="..\..\src\simplification\rewrite.hpp" />
+    <ClInclude Include="..\..\src\simplification\simplification_context.hpp" />
+    <ClInclude Include="..\..\src\simplification\expression_cost.hpp" />
+    <ClInclude Include="..\..\src\simplification\simplifier.hpp" />
+    <ClInclude Include="..\..\src\symbolic\symbolic_operation.hpp" />
+    <ClInclude Include="..\..\src\symbolic\polynomial.hpp" />
+    <ClInclude Include="..\..\src\symbolic\algebra_transforms.hpp" />
+    <ClInclude Include="..\..\src\solver\polynomial_solver.hpp" />
+    <ClInclude Include="..\..\src\solver\solve_constraints.hpp" />
+    <ClInclude Include="..\..\src\solver\transcendental_solver.hpp" />
+    <ClInclude Include="..\..\src\builtins\discrete_math.hpp" />
+    <ClInclude Include="..\..\src\builtins\elementary_utilities.hpp" />
+    <ClInclude Include="..\..\src\symbolic\differentiation.hpp" />
+    <ClInclude Include="..\..\src\symbolic\integration.hpp" />
+    <ClInclude Include="..\..\src\symbolic\limit.hpp" />
+    <ClInclude Include="..\..\src\symbolic\substitution.hpp" />
+    <ClInclude Include="..\..\src\simplification\full_simplifier.hpp" />
+    <ClInclude Include="..\..\src\builtins\linear_algebra.hpp" />
+    <ClInclude Include="..\..\src\builtins\numerical_calculus.hpp" />
+    <ClInclude Include="..\..\src\builtins\aggregate.hpp" />
+    <ClInclude Include="..\..\src\builtins\statistics.hpp" />
+    <ClInclude Include="..\..\src\builtins\combinatorics.hpp" />
+    <ClInclude Include="..\..\src\builtins\signal_processing.hpp" />
+    <ClInclude Include="..\..\src\builtins\array_vector.hpp" />
+    <ClInclude Include="..\..\src\builtins\stable_elementary.hpp" />
+    <ClInclude Include="..\..\src\builtins\special_functions.hpp" />
+    <ClInclude Include="..\..\src\builtins\random_functions.hpp" />
+    <ClInclude Include="..\..\src\builtins\approximation_utilities.hpp" />
+    <ClInclude Include="..\..\src\random\random_engine.hpp" />
+    <ClInclude Include="..\..\src\builtins\exact_operations.hpp" />
+    <ClInclude Include="..\..\src\builtins\array_helpers.hpp" />
+  <ClInclude Include="..\..\src\approximation\elementary_function.hpp" /><ClInclude Include="..\..\src\approximation\machine_math.hpp" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\numeric\big_int.cpp" />
+    <ClCompile Include="..\..\src\numeric\integer_algorithms.cpp" />
+    <ClCompile Include="..\..\src\numeric\rational.cpp" />
+    <ClCompile Include="..\..\src\numeric\real_number.cpp" />
+    <ClCompile Include="..\..\src\numeric\decimal_approximation.cpp" />
+    <ClCompile Include="..\..\src\numeric\complex_decimal_approximation.cpp" />
+    <ClCompile Include="..\..\src\numeric\number.cpp" />
+    <ClCompile Include="..\..\src\expression\symbol.cpp" />
+    <ClCompile Include="..\..\src\expression\expr.cpp" />
+    <ClCompile Include="..\..\src\formatting\expr_formatter.cpp" />
+    <ClCompile Include="..\..\src\numeric\detail\big_uint.cpp" />
+    <ClCompile Include="..\..\src\builtins\arithmetic.cpp" />
+    <ClCompile Include="..\..\src\builtins\comparison.cpp" />
+    <ClCompile Include="..\..\src\builtins\complex_functions.cpp" />
+    <ClCompile Include="..\..\src\builtins\trigonometric.cpp" />
+    <ClCompile Include="..\..\src\builtins\hyperbolic.cpp" />
+    <ClCompile Include="..\..\src\evaluation\builtin_registry.cpp" />
+    <ClCompile Include="..\..\src\evaluation\environment.cpp" />
+    <ClCompile Include="..\..\src\evaluation\user_function_registry.cpp" />
+    <ClCompile Include="..\..\src\evaluation\evaluator.cpp" />
+    <ClCompile Include="..\..\src\source\source_document.cpp" />
+    <ClCompile Include="..\..\src\error\error_message.cpp" />
+    <ClCompile Include="..\..\src\syntax\token.cpp" />
+    <ClCompile Include="..\..\src\syntax\lexer.cpp" />
+    <ClCompile Include="..\..\src\syntax\syntax_node.cpp" />
+    <ClCompile Include="..\..\src\syntax\syntax_tree.cpp" />
+    <ClCompile Include="..\..\src\syntax\parser.cpp" />
+    <ClCompile Include="..\..\src\syntax\lowerer.cpp" />
+    <ClCompile Include="..\..\src\kernel\kernel_session.cpp" />
+    <ClCompile Include="..\..\src\symbols\symbol_table.cpp" />
+    <ClCompile Include="..\..\src\symbols\symbol_registry.cpp" />
+    <ClCompile Include="..\..\src\approximation\approximation_context.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_trigonometry.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_constants.cpp" />
+    <ClCompile Include="..\..\src\approximation\real_interval.cpp" />
+    <ClCompile Include="..\..\src\approximation\complex_interval.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_evaluator.cpp" />
+    <ClCompile Include="..\..\src\mathematics\angle.cpp" />
+    <ClCompile Include="..\..\src\mathematics\math_registry.cpp" />
+    <ClCompile Include="..\..\src\mathematics\definedness.cpp" />
+    <ClCompile Include="..\..\src\mathematics\exact_trigonometry.cpp" />
+    <ClCompile Include="..\..\src\mathematics\exact_hyperbolic.cpp" />
+    <ClCompile Include="..\..\src\mathematics\trigonometric_reduction.cpp" />
+    <ClCompile Include="..\..\src\mathematics\exact_algebra.cpp" />
+    <ClCompile Include="..\..\src\numeric\big_float.cpp" />
+    <ClCompile Include="..\..\src\approximation\precision.cpp" />
+    <ClCompile Include="..\..\src\numeric\detail\binary_scale.cpp" />
+    <ClCompile Include="..\..\src\mathematics\value_facts.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_sqrt.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_complex_sqrt.cpp" />
+    <ClCompile Include="..\..\src\mathematics\exact_roots.cpp" />
+    <ClCompile Include="..\..\src\mathematics\assumption_set.cpp" />
+    <ClCompile Include="..\..\src\mathematics\assumption_parser.cpp" />
+    <ClCompile Include="..\..\src\mathematics\knowledge_context.cpp" />
+    <ClCompile Include="..\..\src\solver\solution_set.cpp" />
+    <ClCompile Include="..\..\src\builtins\transcendental.cpp" />
+    <ClCompile Include="..\..\src\mathematics\exact_transcendental.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_exponential.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_logarithm.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_special_functions.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_atan.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_elementary_functions.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_complex_transcendental.cpp" />
+    <ClCompile Include="..\..\src\approximation\interval_math.cpp" />
+    <ClCompile Include="..\..\src\simplification\expression_cost.cpp" />
+    <ClCompile Include="..\..\src\simplification\simplifier.cpp" />
+    <ClCompile Include="..\..\src\symbolic\polynomial.cpp" />
+    <ClCompile Include="..\..\src\symbolic\algebra_transforms.cpp" />
+    <ClCompile Include="..\..\src\solver\polynomial_solver.cpp" />
+    <ClCompile Include="..\..\src\solver\transcendental_solver.cpp" />
+    <ClCompile Include="..\..\src\solver\solve_constraints.cpp" />
+    <ClCompile Include="..\..\src\builtins\discrete_math.cpp" />
+    <ClCompile Include="..\..\src\builtins\elementary_utilities.cpp" />
+    <ClCompile Include="..\..\src\symbolic\differentiation.cpp" />
+    <ClCompile Include="..\..\src\symbolic\integration.cpp" />
+    <ClCompile Include="..\..\src\symbolic\limit.cpp" />
+    <ClCompile Include="..\..\src\symbolic\substitution.cpp" />
+    <ClCompile Include="..\..\src\simplification\full_simplifier.cpp" />
+    <ClCompile Include="..\..\src\builtins\linear_algebra.cpp" />
+    <ClCompile Include="..\..\src\builtins\numerical_calculus.cpp" />
+    <ClCompile Include="..\..\src\builtins\aggregate.cpp" />
+    <ClCompile Include="..\..\src\builtins\statistics.cpp" />
+    <ClCompile Include="..\..\src\builtins\combinatorics.cpp" />
+    <ClCompile Include="..\..\src\builtins\signal_processing.cpp" />
+    <ClCompile Include="..\..\src\builtins\array_vector.cpp" />
+    <ClCompile Include="..\..\src\builtins\stable_elementary.cpp" />
+    <ClCompile Include="..\..\src\builtins\special_functions.cpp" />
+    <ClCompile Include="..\..\src\builtins\random_functions.cpp" />
+    <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp" />
+    <ClCompile Include="..\..\src\random\random_engine.cpp" />
+  <ClCompile Include="..\..\src\approximation\machine_math.cpp" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

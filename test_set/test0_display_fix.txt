@@ -1,0 +1,8 @@
+# mmCal V1.5 fixed-display regression
+# @args --fix 5
+
+31/10=>3.1
+3=>3
+1/3=>0.33333
+arg[-1]=>"3.14159 Rad"
+0^I=>0^(I)

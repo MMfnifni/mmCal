@@ -1,0 +1,227 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}</ProjectGuid>
+    <RootNamespace>mmCalTests</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>mmCal.Tests</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)build\internal\tests\bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\internal\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>mmCal.Tests</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(SolutionDir)tests;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(SolutionDir)tests;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Speed</FavorSizeOrSpeed>
+      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Speed</FavorSizeOrSpeed>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\tests\test_framework.hpp" />
+    <ClInclude Include="..\..\tests\numeric\big_uint_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\big_int_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\decimal_approximation_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\integer_algorithms_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\rational_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\real_number_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\number_tests.hpp" />
+    <ClInclude Include="..\..\tests\expression\expr_tests.hpp" />
+    <ClInclude Include="..\..\tests\evaluation\builtin_registry_tests.hpp" />
+    <ClInclude Include="..\..\tests\evaluation\environment_tests.hpp" />
+    <ClInclude Include="..\..\tests\evaluation\user_function_registry_tests.hpp" />
+    <ClInclude Include="..\..\tests\evaluation\evaluator_tests.hpp" />
+    <ClInclude Include="..\..\tests\error\error_message_tests.hpp" />
+    <ClInclude Include="..\..\tests\syntax\lexer_tests.hpp" />
+    <ClInclude Include="..\..\tests\syntax\parser_tests.hpp" />
+    <ClInclude Include="..\..\tests\syntax\lowerer_tests.hpp" />
+    <ClInclude Include="..\..\tests\kernel\kernel_session_tests.hpp" />
+    <ClInclude Include="..\..\tests\symbols\symbol_table_tests.hpp" />
+    <ClInclude Include="..\..\tests\symbols\symbol_registry_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\approximation_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\real_interval_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\certified_constants_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\math_registry_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\definedness_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\exact_trigonometry_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\exact_algebra_tests.hpp" />
+    <ClInclude Include="..\..\tests\numeric\big_float_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\value_facts_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\certified_sqrt_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\knowledge_context_tests.hpp" />
+    <ClInclude Include="..\..\tests\solver\solution_set_tests.hpp" />
+    <ClInclude Include="..\..\tests\mathematics\exact_transcendental_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\certified_transcendental_tests.hpp" />
+    <ClInclude Include="..\..\tests\approximation\certified_complex_transcendental_tests.hpp" />
+    <ClInclude Include="..\..\tests\simplification\simplifier_tests.hpp" />
+    <ClInclude Include="..\..\tests\symbolic\differentiation_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\linear_algebra_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\numerical_calculus_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\aggregate_array_elementary_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\statistics_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\combinatorics_signal_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\special_function_extension_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\random_function_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\history_diagnostic_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\session_approximation_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\integration_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\advanced_integration_tests.hpp" />
+    <ClInclude Include="..\..\tests\builtins\calculus_knowledge_tests.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\tests\test_main.cpp" />
+    <ClCompile Include="..\..\tests\numeric\big_uint_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\big_int_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\decimal_approximation_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\integer_algorithms_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\rational_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\real_number_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\number_tests.cpp" />
+    <ClCompile Include="..\..\tests\expression\expr_tests.cpp" />
+    <ClCompile Include="..\..\tests\evaluation\builtin_registry_tests.cpp" />
+    <ClCompile Include="..\..\tests\evaluation\environment_tests.cpp" />
+    <ClCompile Include="..\..\tests\evaluation\user_function_registry_tests.cpp" />
+    <ClCompile Include="..\..\tests\evaluation\evaluator_tests.cpp" />
+    <ClCompile Include="..\..\tests\error\error_message_tests.cpp" />
+    <ClCompile Include="..\..\tests\syntax\lexer_tests.cpp" />
+    <ClCompile Include="..\..\tests\syntax\parser_tests.cpp" />
+    <ClCompile Include="..\..\tests\syntax\lowerer_tests.cpp" />
+    <ClCompile Include="..\..\tests\kernel\kernel_session_tests.cpp" />
+    <ClCompile Include="..\..\tests\symbols\symbol_table_tests.cpp" />
+    <ClCompile Include="..\..\tests\symbols\symbol_registry_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\approximation_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\real_interval_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\certified_constants_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\math_registry_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\definedness_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\exact_trigonometry_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\exact_algebra_tests.cpp" />
+    <ClCompile Include="..\..\tests\numeric\big_float_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\value_facts_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\certified_sqrt_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\knowledge_context_tests.cpp" />
+    <ClCompile Include="..\..\tests\solver\solution_set_tests.cpp" />
+    <ClCompile Include="..\..\tests\mathematics\exact_transcendental_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\certified_transcendental_tests.cpp" />
+    <ClCompile Include="..\..\tests\approximation\certified_complex_transcendental_tests.cpp" />
+    <ClCompile Include="..\..\tests\simplification\simplifier_tests.cpp" />
+    <ClCompile Include="..\..\tests\symbolic\differentiation_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\linear_algebra_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\numerical_calculus_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\aggregate_array_elementary_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\statistics_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\combinatorics_signal_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\special_function_extension_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\random_function_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\history_diagnostic_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\session_approximation_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\integration_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\advanced_integration_tests.cpp" />
+    <ClCompile Include="..\..\tests\builtins\calculus_knowledge_tests.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\mmCal.Core\mmCal.Core.vcxproj">
+      <Project>{1235F143-3617-4AE1-A986-4B6BC83DEFDB}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

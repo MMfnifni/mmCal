@@ -1,11 +1,37 @@
-.vs
-.git
-Win32
-x64
-res
-build
-cs/mmCal_UI/bin
-cs/mmCal_UI/obj
+# Build outputs
+/build/
+/out/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/CTestTestfile.cmake
+
+# Visual Studio
+/.vs/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.ipch
+*.ipdb
+*.iobj
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exe
+
+# CMake generators
+Makefile
+*.ninja
+.ninja_*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# hidden
+/docs/roadmap.md
+/res/
 tools/*.txt
 tools/FFT_tool/*.txt
-himitsu.md

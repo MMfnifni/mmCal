@@ -1,0 +1,99 @@
+# Detailed boundary/error contract tests.
+# Unlike older ErrorType-only cases, these pin both category and first-line message.
+
+# Arithmetic domain boundaries.
+1/0==>DomainError: Division by zero
+0/0==>DomainError: Division by zero
+0^0==>DomainError: Zero to the zero power is indeterminate
+0^-1==>DomainError: Zero cannot be raised to a negative power
+log[0]==>DomainError: Log is undefined at zero
+log[1,10]==>DomainError: Logarithm base cannot be one
+log[2,0]==>DomainError: Log is undefined at zero
+mod[1,0]==>DomainError: mod modulus must be nonzero
+quotient[1,0]==>DomainError: quotient divisor must be nonzero
+rem[1,0]==>DomainError: rem divisor must be nonzero
+arg[0]==>DomainError: Arg is undefined at zero
+atan2[0,0]==>DomainError: atan2 is undefined at (0, 0)
+atanh[1]==>DomainError: atanh is undefined at +/-1
+atanh[-1]==>DomainError: atanh is undefined at +/-1
+
+# Exact integer/combinatoric type and domain boundaries.
+fact[-1]==>DomainError: Factorial is undefined for negative integers
+fact[1/2]==>TypeError: Factorial requires a non-negative integer
+999999999999999999999999999999999999999999!==>OverflowError: Factorial argument is too large for exact evaluation
+comb[-1,2]==>DomainError: comb requires non-negative n
+comb[5,-1]==>DomainError: comb requires non-negative r
+perm[-1,2]==>DomainError: perm requires non-negative n
+perm[5,-1]==>DomainError: perm requires non-negative r
+comb[1/2,1]==>TypeError: comb requires integer arguments
+perm[1/2,1]==>TypeError: perm requires integer arguments
+fib[1/2]==>TypeError: fib requires an integer argument
+fib[-1]==>DomainError: fib requires non-negative n
+
+# Arity/type contracts.
+sqrt[]==>TypeError: sqrt expects 1 argument(s)
+sqrt[1,2]==>TypeError: sqrt expects 1 argument(s)
+round[]==>TypeError: round expects 1 argument(s)
+round[1,2]==>TypeError: round expects 1 argument(s)
+floor[I]==>TypeError: floor requires a real argument
+accuracy[]==>TypeError: accuracy expects 1 argument(s)
+precision[]==>TypeError: precision expects 1 argument(s)
+N[Pi,0]==>TypeError: N precision must be a positive integer
+N[Pi,-1]==>TypeError: N precision must be a positive integer
+N[Pi,1/2]==>TypeError: N precision must be a positive integer
+rationalize[N[Pi,10],-1]==>TypeError: rationalize tolerance must be a nonnegative exact real number
+
+# Parser/lexer errors.
+1+==>SyntaxError: Expected a value
+(==>SyntaxError: Expected a value
+)==>SyntaxError: Expected a value
+{1,2==>SyntaxError: Expected '}' after array elements; found end of input
+1<==>SyntaxError: Expected a value
+1===2==>SyntaxError: Assignment uses ':='; equality uses '=='
+
+# Name errors are distinct from free symbols.
+unknown[1]==>NameError: Unknown function: unknown
+foo==>foo
+
+# Protected/session symbols must not be silently overwritten or undefined.
+Pi:=3==>SyntaxError: Protected names cannot be assignment targets
+E:=3==>SyntaxError: Protected names cannot be assignment targets
+I:=3==>SyntaxError: Protected names cannot be assignment targets
+UnDef[Pi]==>NameError: Cannot undefine protected symbol: Pi
+UnDef[E]==>NameError: Cannot undefine protected symbol: E
+UnDef[I]==>NameError: Cannot undefine protected symbol: I
+
+# Exact trigonometric singularities.
+tan[Pi/2]==>DomainError: tan is undefined where cos is zero
+cot[0]==>DomainError: cot is undefined where sin is zero
+sec[Pi/2]==>DomainError: sec is undefined where cos is zero
+csc[0]==>DomainError: csc is undefined where sin is zero
+
+# Aggregate / array / matrix boundaries.
+mean[]==>TypeError: mean expects at least 1 argument(s)
+vars[1]==>DomainError: vars requires more observations
+stddevs[1]==>DomainError: stddevs requires more observations
+identity[-1]==>TypeError: identity requires a nonnegative machine-size integer
+zeros[-1,2]==>TypeError: zeros requires a nonnegative machine-size integer
+mget[{{1,2},{3,4}},2,2]==>DomainError: mget index is out of range
+madd[{{1,2}},{{3,4},{5,6}}]==>DomainError: madd requires identical array shapes
+mmul[{{1,2},{3,4}},{{5,6}}]==>DomainError: matmul inner dimensions do not agree
+mdet[{{1,2,3},{4,5,6}}]==>DomainError: det requires a square matrix
+minverse[{{1,2},{2,4}}]==>DomainError: Matrix is singular
+vnormalize[{0,0}]==>DomainError: vnormalize requires a nonzero vector
+vangle[{0,0},{1,0}]==>DomainError: vangle is undefined for the zero vector
+
+# Session / calculus / solver contract boundaries.
+angleMode[foo]==>DomainError: angleMode expects one of Rad, Deg, Grad
+angleMode[1]==>TypeError: angleMode expects no argument or one of Rad, Deg, Grad
+D[x,x,-1]==>TypeError: D derivative specification must be a symbol or {symbol, nonnegative integer}
+D[x,{x,-1}]==>TypeError: D derivative specification must be a symbol or {symbol, nonnegative integer}
+integrate[x,{x,0}]==>TypeError: integrate expects a symbol or {variable, lower, upper} as the second argument
+integrate[x,{x,0,1,2}]==>TypeError: integrate expects a symbol or {variable, lower, upper} as the second argument
+limit[x,x,0,0]==>DomainError: limit direction must be -1 for left or 1 for right
+limit[x,x,0,2]==>DomainError: limit direction must be -1 for left or 1 for right
+solve[x==1,1]==>TypeError: solve expects a symbol or symbol array as its second argument
+solve[x==1,x,foo]==>TypeError: solve constraint symbol must be Integer, Rational, Real, or Complex
+nintegrate[x,{x,0},8]==>TypeError: nintegrate iterator must be {variable, lower, upper}
+diff[x^2,x]==>TypeError: diff expects between 3 and 4 arguments
+diff[x^2,x,0,0]==>TypeError: diff precision must be a positive integer
