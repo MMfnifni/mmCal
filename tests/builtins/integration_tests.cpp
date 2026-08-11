@@ -57,10 +57,10 @@ void runIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[x*exp[x],x]"), std::string{"x exp[x]-exp[x]"},
         "integration by parts handles polynomial times exp");
     tests.expectEqual(eval(session, "integrate[erf[x],x]"),
-        std::string{"x erf[x]+exp[-x^2]/sqrt[Pi]"},
+        std::string{"exp[-x^2]/sqrt[Pi]+x erf[x]"},
         "integrates erf using shared special-function derivative knowledge");
     tests.expectEqual(eval(session, "integrate[sqrt[x],x]"),
-        std::string{"2/3x sqrt[x]"},
+        std::string{"2x sqrt[x]/3"},
         "integrates principal square root when D verifies the result");
 
     tests.expectEqual(eval(session, "integrate[(2*x+3)^5,x]"),
@@ -82,13 +82,13 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"-atanh[x]"},
         "polynomial proportionality proves a reverse atanh chain");
     tests.expectEqual(eval(session, "integrate[x*log[x],x]"),
-        std::string{"x^2/2log[x]-x^2/4"},
+        std::string{"x^2log[x]/2-x^2/4"},
         "monomial times Log uses the exact integration-by-parts formula");
     tests.expectEqual(eval(session, "integrate[acosh[x],x]"),
         std::string{"x acosh[x]-sqrt[1+x]sqrt[x-1]"},
         "principal acosh primitive uses the same branch convention as D");
     tests.expectEqual(eval(session, "integrate[sin[x Deg],x]"),
-        std::string{"-(180/Pi cos[x Deg])"},
+        std::string{"-180cos[x Deg]/Pi"},
         "explicit Degree suffix is integrated with the correct radian scale");
 
     tests.expectEqual(eval(session, "integrate[sin[x]^2,x]"),
@@ -126,13 +126,13 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"x-log[2+x]"},
         "rational function with a linear denominator uses exact polynomial division");
     tests.expectEqual(eval(session, "integrate[(x+1)/(x^2+4),x]"),
-        std::string{"log[4+x^2]/2+atan[x/2]/2"},
+        std::string{"atan[x/2]/2+log[4+x^2]/2"},
         "rational function over a quadratic splits into log and reciprocal parts");
 
     kernel::KernelSession degreeIntegrals;
     degreeIntegrals.setDefaultAngleUnit(mathematics::AngleUnit::Degree);
     tests.expectEqual(eval(degreeIntegrals, "integrate[1/(1+x^2),x]"),
-        std::string{"Pi/180atan[x]"},
+        std::string{"Pi atan[x]/180"},
         "inverse-trig primitives respect a Degree session without changing the integrand");
 
     tests.expectEqual(eval(session, "integrate[x^2,{x,0,1}]"), std::string{"1/3"},
@@ -143,7 +143,7 @@ void runIntegrationTests(TestRunner& tests) {
         "definite integral with a certified nonzero denominator");
 
     tests.expectEqual(eval(session, "integrate[log[x],{x,1,Pi}]"),
-        std::string{"1+Pi log[Pi]-Pi"},
+        std::string{"1-Pi+Pi log[Pi]"},
         "certified transcendental bounds permit safe exact definite evaluation");
 
     const std::string pole = eval(session, "integrate[tan[x],{x,0,2}]");
@@ -159,7 +159,7 @@ void runIntegrationTests(TestRunner& tests) {
         "unresolved definite integral emits a warning");
 
     tests.expectEqual(eval(session, "integrate[1/sqrt[x^2-1],x]"),
-        std::string{"log[sqrt[x^2-1]+x]"},
+        std::string{"log[x+sqrt[x^2-1]]"},
         "branch-sensitive quadratic root uses a verified local primitive without a global sqrt identity");
 
     const std::string unsupported = eval(session, "integrate[gamma[x],x]");

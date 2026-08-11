@@ -247,63 +247,77 @@ struct IntegerLikeRational final {
     return complex.imaginary.toRational();
 }
 
-// expression = I * q * Pi の形だけを厳密に認識する。
-// ExpのEuler特殊値に使うが、一般の複素式を無理に極形式へ変換しない。
+struct ImaginaryPiParts final {
+    Rational coefficient{BigInt{1}};
+    bool foundImaginary = false;
+    bool foundPi = false;
+};
+
+[[nodiscard]] bool collectImaginaryPiParts(
+    const Expr& expression,
+    ImaginaryPiParts& parts,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics) {
+    if (isHead(expression, builtins, BuiltinId::Negate)
+        && expression.asCall().arguments.size() == 1) {
+        parts.coefficient = -parts.coefficient;
+        return collectImaginaryPiParts(
+            expression.asCall().arguments.front(), parts, builtins, mathematics);
+    }
+
+    if (isHead(expression, builtins, BuiltinId::Multiply)) {
+        for (const Expr& factor : expression.asCall().arguments)
+            if (!collectImaginaryPiParts(factor, parts, builtins, mathematics))
+                return false;
+        return true;
+    }
+
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2) {
+        const auto& arguments = expression.asCall().arguments;
+        if (!arguments[1].isNumber() || !arguments[1].asNumber().isReal())
+            return false;
+        const Rational denominator = arguments[1].asNumber().asReal().toRational();
+        if (denominator.isZero())
+            return false;
+        parts.coefficient /= denominator;
+        return collectImaginaryPiParts(arguments[0], parts, builtins, mathematics);
+    }
+
+    if (const auto imaginary = pureImaginaryCoefficient(expression)) {
+        if (parts.foundImaginary)
+            return false;
+        parts.coefficient *= *imaginary;
+        parts.foundImaginary = true;
+        return true;
+    }
+
+    if (expression.isNumber() && expression.asNumber().isReal()) {
+        parts.coefficient *= expression.asNumber().asReal().toRational();
+        return true;
+    }
+
+    if (isConstant(expression, mathematics, ConstantId::Pi)) {
+        if (parts.foundPi)
+            return false;
+        parts.foundPi = true;
+        return true;
+    }
+
+    return false;
+}
+
+// expression = I * q * Pi を結合順序によらず厳密に認識する。
+// product normal formがn-ary/入れ子のどちらでもEuler特殊値を失わない。
 [[nodiscard]] std::optional<Rational> extractImaginaryPiMultiple(
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     const MathRegistry& mathematics) {
-    if (isHead(expression, builtins, BuiltinId::Negate)) {
-        const auto& arguments = expression.asCall().arguments;
-        if (arguments.size() != 1)
-            return std::nullopt;
-        auto coefficient = extractImaginaryPiMultiple(arguments[0], builtins, mathematics);
-        return coefficient ? std::optional<Rational>{-*coefficient} : std::nullopt;
-    }
-
-    if (isHead(expression, builtins, BuiltinId::Divide)) {
-        const auto& arguments = expression.asCall().arguments;
-        if (arguments.size() != 2 || !arguments[1].isNumber()
-            || !arguments[1].asNumber().isReal())
-            return std::nullopt;
-        const Rational divisor = arguments[1].asNumber().asReal().toRational();
-        if (divisor.isZero())
-            return std::nullopt;
-        auto numerator = extractImaginaryPiMultiple(arguments[0], builtins, mathematics);
-        return numerator ? std::optional<Rational>{*numerator / divisor} : std::nullopt;
-    }
-
-    if (!isHead(expression, builtins, BuiltinId::Multiply))
+    ImaginaryPiParts parts;
+    if (!collectImaginaryPiParts(expression, parts, builtins, mathematics)
+        || !parts.foundImaginary || !parts.foundPi)
         return std::nullopt;
-
-    Rational imaginaryScale = rational(1);
-    bool foundImaginary = false;
-    bool foundPi = false;
-
-    for (const Expr& factor : expression.asCall().arguments) {
-        if (const auto imaginary = pureImaginaryCoefficient(factor)) {
-            if (foundImaginary)
-                return std::nullopt;
-            imaginaryScale *= *imaginary;
-            foundImaginary = true;
-            continue;
-        }
-
-        if (factor.isNumber() && factor.asNumber().isReal()) {
-            imaginaryScale *= factor.asNumber().asReal().toRational();
-            continue;
-        }
-
-        const auto pi = extractRationalPiMultiple(factor, builtins, mathematics);
-        if (!pi || foundPi)
-            return std::nullopt;
-        imaginaryScale *= *pi;
-        foundPi = true;
-    }
-
-    return foundImaginary && foundPi
-        ? std::optional<Rational>{std::move(imaginaryScale)}
-        : std::nullopt;
+    return parts.coefficient;
 }
 
 [[nodiscard]] Expr explicitRadianAngle(

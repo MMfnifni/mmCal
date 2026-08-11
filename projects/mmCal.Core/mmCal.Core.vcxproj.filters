@@ -294,6 +294,9 @@
     <ClInclude Include="..\..\src\simplification\expression_cost.hpp">
       <Filter>src\simplification</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\simplification\expression_ordering.hpp">
+      <Filter>src\simplification</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\simplification\simplifier.hpp">
       <Filter>src\simplification</Filter>
     </ClInclude>
@@ -573,6 +576,9 @@
       <Filter>src\approximation</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\simplification\expression_cost.cpp">
+      <Filter>src\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\simplification\expression_ordering.cpp">
       <Filter>src\simplification</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\simplification\simplifier.cpp">

@@ -1,12 +1,19 @@
 // combinatorics・signalの回帰テスト
 #include "combinatorics_signal_tests.hpp"
 
+#include "builtins/signal_processing.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "evaluation/builtin_registry.hpp"
 #include "mathematics/angle.hpp"
+#include "mathematics/math_registry.hpp"
+#include "numeric/big_int.hpp"
+#include "numeric/number.hpp"
+#include "symbols/symbol_table.hpp"
 #include "test_framework.hpp"
 
+#include <array>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -79,6 +86,41 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
 
     tests.expect(evalError(session, "dft[{{1,2},{3,4}}]").type() == error::CalcErrorType::Type,
         "DFT requires a rank-1 array");
+
+
+    symbols::SymbolTable cacheSymbols;
+    const auto cacheRegistry = evaluation::BuiltinRegistry::defaults(cacheSymbols);
+    const auto cacheMath = mathematics::MathRegistry::defaults(cacheSymbols, cacheRegistry);
+    const auto cacheAngles = mathematics::defaultAngleSemantics();
+    builtins::FourierTransformCache cache;
+    const auto integerExpr = [](std::int64_t value) {
+        return expression::Expr{numeric::Number{numeric::BigInt{value}}};
+    };
+    const expression::Expr four = expression::Expr::array(
+        {4}, {integerExpr(1), integerExpr(2), integerExpr(3), integerExpr(4)});
+    const std::array<expression::Expr, 1> fftArguments{four};
+    const expression::Expr firstTransform = builtins::evaluateFft(
+        fftArguments, cacheRegistry, cacheMath, cacheAngles, cache);
+    tests.expectEqual(cache.planCount(), std::size_t{1},
+        "FFT cache: first radix-2 transform creates one plan");
+
+    const std::array<expression::Expr, 1> ifftArguments{firstTransform};
+    static_cast<void>(builtins::evaluateIfft(
+        ifftArguments, cacheRegistry, cacheMath, cacheAngles, cache));
+    tests.expectEqual(cache.planCount(), std::size_t{1},
+        "FFT cache: IFFT reuses the same-size transform plan");
+
+    const expression::Expr eight = expression::Expr::array(
+        {8}, {integerExpr(1), integerExpr(2), integerExpr(3), integerExpr(4),
+            integerExpr(5), integerExpr(6), integerExpr(7), integerExpr(8)});
+    const std::array<expression::Expr, 1> fftEightArguments{eight};
+    static_cast<void>(builtins::evaluateFft(
+        fftEightArguments, cacheRegistry, cacheMath, cacheAngles, cache));
+    tests.expectEqual(cache.planCount(), std::size_t{2},
+        "FFT cache: a different radix-2 size creates a separate plan");
+    cache.clear();
+    tests.expectEqual(cache.planCount(), std::size_t{0},
+        "FFT cache: plans can be cleared with evaluator lifetime semantics");
 }
 
 } // namespace mmcal::tests

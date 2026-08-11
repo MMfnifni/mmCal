@@ -523,10 +523,15 @@ void appendMultiplyCall(
             const bool currentDigit = std::isdigit(currentFirst) != 0;
             const bool exponentMarkerCollision = previousDigit && currentIdentifier
                 && (currentText.front() == 'e' || currentText.front() == 'E');
+            const bool radixPrefixCollision = previousText.back() == '0' && currentIdentifier
+                && (currentText.front() == 'b' || currentText.front() == 'B'
+                    || currentText.front() == 'o' || currentText.front() == 'O'
+                    || currentText.front() == 'x' || currentText.front() == 'X');
+            const bool arrayBoundary = previousText.back() == '}' || currentText.front() == '{';
 
-            // 2exp[x] のような連結は数値の指数部と衝突するため '*' を明示する。
+            // 数値literalとの字句衝突と、配列に隣接する積は '*' を明示する。
             // その他は再parseに必要な最小限の区切りだけを出力する。
-            if (exponentMarkerCollision)
+            if (exponentMarkerCollision || radixPrefixCollision || arrayBoundary)
                 output.push_back('*');
             else if (previousIdentifier && currentIdentifier)
                 output.push_back(' ');
@@ -634,7 +639,17 @@ void appendCall(
             output.push_back('(');
 
         output.push_back('-');
-        appendExpr(output, call.arguments.front(), radix, precedenceUnary);
+        const Expr& magnitude = call.arguments.front();
+        const bool multiplicativeCall = magnitude.isCall()
+            && (magnitude.asCall().head.view() == builtins::names::multiply
+                || magnitude.asCall().head.view() == builtins::names::divide);
+        const bool rationalNumber = magnitude.isNumber()
+            && magnitude.asNumber().isReal()
+            && !magnitude.asNumber().asReal().isInteger();
+        appendExpr(output, magnitude, radix,
+            multiplicativeCall || rationalNumber
+                ? precedenceMultiplicative
+                : precedenceUnary);
 
         if (parenthesize)
             output.push_back(')');

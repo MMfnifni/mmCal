@@ -1,6 +1,7 @@
 // 局所仮定を含む数学知識コンテキスト
 #include "knowledge_context.hpp"
 
+#include "definedness.hpp"
 #include "numeric/number.hpp"
 
 #include <optional>
@@ -118,6 +119,19 @@ using numeric::Number;
     return TruthValue::Unknown;
 }
 
+
+[[nodiscard]] RelationKind reversedRelation(RelationKind relation) noexcept {
+    switch (relation) {
+    case RelationKind::Less: return RelationKind::Greater;
+    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
+    case RelationKind::Greater: return RelationKind::Less;
+    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
+    case RelationKind::Equal: return RelationKind::Equal;
+    case RelationKind::NotEqual: return RelationKind::NotEqual;
+    }
+    return relation;
+}
+
 } // namespace
 
 KnowledgeContext::KnowledgeContext(
@@ -175,6 +189,36 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
             return numeric;
     }
 
+    // MathRegistryに「定義域内では決して0にならない」と登録された函数は、
+    // exp[z]!=0 のような非零性を局所実装へ重複記述せず証明できる。
+    if ((relationPredicate.relation == RelationKind::Equal
+            || relationPredicate.relation == RelationKind::NotEqual)
+        && (isZero(relationPredicate.lhs) || isZero(relationPredicate.rhs))) {
+        const Expr& candidate = isZero(relationPredicate.lhs)
+            ? relationPredicate.rhs : relationPredicate.lhs;
+        if (candidate.isCall()) {
+            const auto* function = mathematics_.findFunction(candidate.asCall().head);
+            if (function && function->zeroRule == FunctionZeroRule::NeverZero) {
+                // zeroRuleは「定義される点では非零」であってdefinednessそのものではない。
+                // gamma[x]/gamma[x]のpole等を消さないため、現在の仮定から候補式の
+                // 定義条件をすべて証明できる場合に限って非零性を利用する。
+                const auto conditions = expressionDomainConditions(candidate, builtins_, mathematics_);
+                if (conditions) {
+                    bool defined = true;
+                    for (const Predicate& condition : conditions->predicates()) {
+                        if (prove(condition) != TruthValue::True) {
+                            defined = false;
+                            break;
+                        }
+                    }
+                    if (defined)
+                        return relationPredicate.relation == RelationKind::NotEqual
+                            ? TruthValue::True : TruthValue::False;
+                }
+            }
+        }
+    }
+
     // Realと「非実であることが証明済み」のComplexは同値になり得ない。
     // これにより x in Real の下で x != I をTrueと証明できる。
     // 近似的な虚部判定ではなくValueFactsのexact domain知識だけを使う。
@@ -193,6 +237,10 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
 
     // 数値・構造だけで確定できない命題に限って、明示Assumptionを採用する。
     if (assumptions_.contains(predicate))
+        return TruthValue::True;
+    if (assumptions_.contains(relation(
+            reversedRelation(relationPredicate.relation),
+            relationPredicate.rhs, relationPredicate.lhs)))
         return TruthValue::True;
 
     // a-b == 0 / != 0 は a == b / != b と完全に同値。
@@ -233,7 +281,9 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
     case RelationKind::GreaterEqual: complement = RelationKind::Less; break;
     }
     if (assumptions_.contains(relation(
-            complement, relationPredicate.lhs, relationPredicate.rhs)))
+            complement, relationPredicate.lhs, relationPredicate.rhs))
+        || assumptions_.contains(relation(
+            reversedRelation(complement), relationPredicate.rhs, relationPredicate.lhs)))
         return TruthValue::False;
 
     if (isZero(relationPredicate.rhs))

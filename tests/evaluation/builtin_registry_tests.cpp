@@ -6,9 +6,118 @@
 #include "test_framework.hpp"
 #include "symbols/symbol_table.hpp"
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <set>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace mmcal::tests {
+namespace {
+
+[[nodiscard]] std::filesystem::path projectRoot() {
+    std::filesystem::path current = std::filesystem::current_path();
+    for (int depth = 0; depth < 10; ++depth) {
+        if (std::filesystem::exists(current / "docs/reference.ja.md")
+            && std::filesystem::exists(current / "src"))
+            return current;
+        if (!current.has_parent_path() || current.parent_path() == current)
+            break;
+        current = current.parent_path();
+    }
+
+    const std::filesystem::path sourcePath = std::filesystem::path{__FILE__};
+    current = sourcePath.is_absolute()
+        ? sourcePath.parent_path()
+        : std::filesystem::absolute(sourcePath).parent_path();
+    for (int depth = 0; depth < 10; ++depth) {
+        if (std::filesystem::exists(current / "docs/reference.ja.md"))
+            return current;
+        if (!current.has_parent_path() || current.parent_path() == current)
+            break;
+        current = current.parent_path();
+    }
+    throw std::runtime_error("Cannot locate mmCal project root for Reference registry test");
+}
+
+[[nodiscard]] std::string trim(std::string value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return {};
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+[[nodiscard]] std::vector<std::string> referenceSourceFunctions(
+    const std::filesystem::path& path,
+    std::string_view headingMarker) {
+    std::ifstream stream{path};
+    if (!stream)
+        throw std::runtime_error("Cannot open Reference file: " + path.string());
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    const std::string text = buffer.str();
+
+    const std::size_t heading = text.find(headingMarker);
+    if (heading == std::string::npos)
+        throw std::runtime_error("Source-callable Reference heading was not found");
+    const std::size_t fence = text.find("```text", heading);
+    if (fence == std::string::npos)
+        throw std::runtime_error("Source-callable Reference code block was not found");
+    const std::size_t contentBegin = text.find('\n', fence);
+    const std::size_t contentEnd = text.find("```", contentBegin);
+    if (contentBegin == std::string::npos || contentEnd == std::string::npos)
+        throw std::runtime_error("Source-callable Reference code block is incomplete");
+
+    std::vector<std::string> names;
+    std::stringstream list{text.substr(contentBegin + 1, contentEnd - contentBegin - 1)};
+    std::string item;
+    while (std::getline(list, item, ',')) {
+        item = trim(std::move(item));
+        if (!item.empty())
+            names.push_back(std::move(item));
+    }
+    return names;
+}
+
+[[nodiscard]] std::string setDifferenceReport(
+    const std::unordered_set<std::string>& registry,
+    const std::vector<std::string>& reference) {
+    const std::set<std::string> documented(reference.begin(), reference.end());
+    std::vector<std::string> registryOnly;
+    std::vector<std::string> referenceOnly;
+    for (const std::string& name : registry)
+        if (!documented.contains(name))
+            registryOnly.push_back(name);
+    for (const std::string& name : documented)
+        if (!registry.contains(name))
+            referenceOnly.push_back(name);
+    std::sort(registryOnly.begin(), registryOnly.end());
+    std::sort(referenceOnly.begin(), referenceOnly.end());
+
+    std::string report;
+    const auto append = [&](std::string_view label, const std::vector<std::string>& names) {
+        if (names.empty())
+            return;
+        if (!report.empty())
+            report += "; ";
+        report += label;
+        report += ": ";
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i != 0)
+                report += ", ";
+            report += names[i];
+        }
+    };
+    append("registry-only", registryOnly);
+    append("reference-only", referenceOnly);
+    return report;
+}
+
+} // namespace
 
 void runBuiltinRegistryTests(TestRunner& tests) {
     using evaluation::ArgumentEvaluation;
@@ -167,6 +276,29 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: alias registration preserves the canonical symbol");
     tests.expect(!sourceFunctions.contains("Add"),
         "BuiltinRegistry: hides internal heads from source calls");
+
+
+    const std::filesystem::path root = projectRoot();
+    const std::vector<std::string> japaneseReference = referenceSourceFunctions(
+        root / "docs/reference.ja.md", "現在のsource-callable函数一覧");
+    const std::vector<std::string> englishReference = referenceSourceFunctions(
+        root / "docs/reference.md", "Current source-callable function list");
+    tests.expectEqual(
+        std::set<std::string>(japaneseReference.begin(), japaneseReference.end()).size(),
+        japaneseReference.size(),
+        "BuiltinRegistry: Japanese Reference source-callable list has no duplicates");
+    tests.expectEqual(
+        std::set<std::string>(englishReference.begin(), englishReference.end()).size(),
+        englishReference.size(),
+        "BuiltinRegistry: English Reference source-callable list has no duplicates");
+    tests.expectEqual(setDifferenceReport(sourceFunctions, japaneseReference), std::string{},
+        "BuiltinRegistry: Japanese Reference source-callable list matches registry");
+    tests.expectEqual(setDifferenceReport(sourceFunctions, englishReference), std::string{},
+        "BuiltinRegistry: English Reference source-callable list matches registry");
+    tests.expect(
+        std::set<std::string>(japaneseReference.begin(), japaneseReference.end())
+            == std::set<std::string>(englishReference.begin(), englishReference.end()),
+        "BuiltinRegistry: Japanese and English Reference source-callable lists match");
 
     tests.expectThrows<std::invalid_argument>([&] {
         registry.addAlias("ln", BuiltinId::Log);

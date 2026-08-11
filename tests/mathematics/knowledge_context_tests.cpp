@@ -111,6 +111,23 @@ void runKnowledgeContextTests(TestRunner& tests) {
         complexNonZeroKnowledge.prove(mathematics::relation(RelationKind::Equal, x, integer(0)))
             == TruthValue::False,
         "KnowledgeContext: explicit != assumptions refute the complementary equality");
+
+    tests.expect(
+        assumedKnowledge.prove(mathematics::relation(RelationKind::Less, integer(0), x))
+            == TruthValue::True,
+        "KnowledgeContext: relation assumptions are recognized in reversed form");
+
+    const Expr expX = Expr::call(builtins.symbol(evaluation::BuiltinId::Exp), {x});
+    tests.expect(
+        baseKnowledge.prove(mathematics::relation(RelationKind::NotEqual, expX, integer(0)))
+            == TruthValue::True,
+        "KnowledgeContext: globally defined zero-free functions prove nonzero");
+
+    const Expr gammaX = Expr::call(builtins.symbol(evaluation::BuiltinId::Gamma), {x});
+    tests.expect(
+        baseKnowledge.prove(mathematics::relation(RelationKind::NotEqual, gammaX, integer(0)))
+            == TruthValue::Unknown,
+        "KnowledgeContext: zero-free knowledge does not erase unresolved function poles");
 }
 
 } // namespace mmcal::tests

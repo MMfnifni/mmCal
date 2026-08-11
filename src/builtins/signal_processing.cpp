@@ -168,35 +168,68 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return value != 0 && (value & (value - 1)) == 0;
 }
 
+[[nodiscard]] FourierTransformCache::Plan& transformPlan(
+    std::size_t n,
+    FourierTransformCache& cache,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    auto& plan = cache.plan(n);
+    if (!plan.bitReversed.empty())
+        return plan;
+
+    plan.bitReversed.resize(n);
+    for (std::size_t i = 0, j = 0; i < n; ++i) {
+        plan.bitReversed[i] = j;
+        if (i + 1 == n)
+            break;
+        std::size_t bit = n >> 1;
+        while ((j & bit) != 0) {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+    }
+
+    for (std::size_t length = 2; length <= n; length <<= 1) {
+        const std::size_t half = length >> 1;
+        FourierTransformCache::Stage stage;
+        stage.length = length;
+        stage.forwardRoots.reserve(half);
+        stage.inverseRoots.reserve(half);
+        for (std::size_t j = 0; j < half; ++j) {
+            stage.forwardRoots.push_back(twiddle(
+                j, length, false, registry, mathematics, angles));
+            stage.inverseRoots.push_back(twiddle(
+                j, length, true, registry, mathematics, angles));
+        }
+        plan.stages.push_back(std::move(stage));
+        if (length == n)
+            break;
+    }
+    return plan;
+}
+
 [[nodiscard]] std::vector<Expr> radix2Transform(
     const std::vector<Expr>& input,
     bool inverse,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
+    const mathematics::AngleSemantics& angles,
+    FourierTransformCache& cache) {
     const std::size_t n = input.size();
     if (!isPowerOfTwo(n))
         return directTransform(input, inverse, registry, mathematics, angles);
 
-    std::vector<Expr> data = input;
+    auto& plan = transformPlan(n, cache, registry, mathematics, angles);
+    std::vector<Expr> data(n, zero());
+    for (std::size_t i = 0; i < n; ++i)
+        data[plan.bitReversed[i]] = input[i];
 
-    // in-place bit reversal permutation.
-    for (std::size_t i = 1, j = 0; i < n; ++i) {
-        std::size_t bit = n >> 1;
-        for (; (j & bit) != 0; bit >>= 1)
-            j ^= bit;
-        j ^= bit;
-        if (i < j)
-            std::swap(data[i], data[j]);
-    }
-
-    for (std::size_t length = 2; length <= n; length <<= 1) {
+    for (const auto& stage : plan.stages) {
+        const std::size_t length = stage.length;
         const std::size_t half = length >> 1;
-        std::vector<Expr> roots;
-        roots.reserve(half);
-        for (std::size_t j = 0; j < half; ++j)
-            roots.push_back(twiddle(j, length, inverse, registry, mathematics, angles));
-
+        const auto& roots = inverse ? stage.inverseRoots : stage.forwardRoots;
         for (std::size_t block = 0; block < n; block += length) {
             for (std::size_t j = 0; j < half; ++j) {
                 Expr even = data[block + j];
@@ -207,9 +240,6 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
                     registry, mathematics, angles);
             }
         }
-
-        if (length == n)
-            break; // size_t overflow guard for the next shift.
     }
 
     if (inverse)
@@ -225,6 +255,18 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 
 } // namespace
 
+void FourierTransformCache::clear() noexcept {
+    plans_.clear();
+}
+
+std::size_t FourierTransformCache::planCount() const noexcept {
+    return plans_.size();
+}
+
+FourierTransformCache::Plan& FourierTransformCache::plan(std::size_t size) {
+    return plans_[size];
+}
+
 Expr evaluateDft(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -239,20 +281,24 @@ Expr evaluateFft(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
+    const mathematics::AngleSemantics& angles,
+    FourierTransformCache& cache) {
     requireArity(arguments, 1, names::fft);
     return vectorExpr(radix2Transform(
-        vectorArgument(arguments.front(), names::fft), false, registry, mathematics, angles));
+        vectorArgument(arguments.front(), names::fft), false,
+        registry, mathematics, angles, cache));
 }
 
 Expr evaluateIfft(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
+    const mathematics::AngleSemantics& angles,
+    FourierTransformCache& cache) {
     requireArity(arguments, 1, names::ifft);
     return vectorExpr(radix2Transform(
-        vectorArgument(arguments.front(), names::ifft), true, registry, mathematics, angles));
+        vectorArgument(arguments.front(), names::ifft), true,
+        registry, mathematics, angles, cache));
 }
 
 Expr evaluateConvolution(

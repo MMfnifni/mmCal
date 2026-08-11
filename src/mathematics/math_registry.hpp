@@ -57,6 +57,13 @@ enum class RealRangeRule {
     OneToInfinity
 };
 
+// 定義域内で函数値が0を取り得るかという知識。
+// definednessとは別であり、NeverZeroは「値が存在する点では0にならない」ことだけを表す。
+enum class FunctionZeroRule {
+    Unknown,
+    NeverZero
+};
+
 // 函数が実数/複素数domainをどう写すかという数学的性質。
 // branchの選び方とは独立にする。sin/cosは複素全体で定義され実数入力を実数へ写す一方、sqrtは複素全体へ延長できるが負実数入力を非実数へ写し得る。
 enum class FunctionDomainRule {
@@ -127,6 +134,7 @@ struct FunctionDefinition final {
     bool realGloballyInjective = false;
     RealMonotonicity realMonotonicity = RealMonotonicity::Unknown;
     RealRangeRule realRangeRule = RealRangeRule::Unknown;
+    FunctionZeroRule zeroRule = FunctionZeroRule::Unknown;
 
     [[nodiscard]] bool acceptsArity(std::size_t count) const noexcept {
         return count >= arity && count <= maximumArity;
@@ -186,6 +194,7 @@ private:
         bool globallyInjective,
         RealMonotonicity monotonicity,
         RealRangeRule rangeRule);
+    void setZeroKnowledge(FunctionId id, FunctionZeroRule zeroRule);
 };
 
 [[nodiscard]] const MathRegistry& defaultMathRegistry();

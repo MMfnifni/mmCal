@@ -12,10 +12,15 @@
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
 #include "simplification/expression_cost.hpp"
+#include "simplification/expression_ordering.hpp"
 #include "simplification/simplification_context.hpp"
 #include "simplification/simplifier.hpp"
+#include "solver/solution_set.hpp"
 #include "symbols/symbol_table.hpp"
 #include "test_framework.hpp"
+
+#include <algorithm>
+#include <vector>
 
 namespace mmcal::tests {
 namespace {
@@ -59,6 +64,71 @@ void runSimplifierTests(TestRunner& tests) {
 
     const Expr x{symbols.intern("x")};
     const Expr y{symbols.intern("y")};
+    const Expr z{symbols.intern("z")};
+
+    // Addのcanonical orderは入力順やhash/pointer値に依存しないstrict total orderを使う。
+    const simplification::ExpressionLess less;
+    std::vector<Expr> orderedSamples{
+        integer(-2), integer(0), integer(3), Expr{false}, Expr{true},
+        Expr{std::string{"a"}}, x, y,
+        Expr::array({2}, {x, integer(1)}),
+        call(builtins, BuiltinId::Sin, {x}),
+        call(builtins, BuiltinId::Add, {x, y}),
+        Expr::solutionSet(solver::SolutionSet::unresolved({
+            solver::SolverVariable{symbols.intern("q"), mathematics::NumericDomain::Real}}))
+    };
+    bool totalOrder = true;
+    for (std::size_t i = 0; i < orderedSamples.size(); ++i) {
+        if (less(orderedSamples[i], orderedSamples[i]))
+            totalOrder = false;
+        for (std::size_t j = i + 1; j < orderedSamples.size(); ++j) {
+            if (orderedSamples[i] == orderedSamples[j]
+                || less(orderedSamples[i], orderedSamples[j]) == less(orderedSamples[j], orderedSamples[i]))
+                totalOrder = false;
+        }
+    }
+    for (const Expr& a : orderedSamples)
+        for (const Expr& b : orderedSamples)
+            for (const Expr& c : orderedSamples)
+                if (less(a, b) && less(b, c) && !less(a, c))
+                    totalOrder = false;
+    tests.expect(totalOrder,
+        "Simplifier: expression ordering is a strict total order across Expr kinds");
+
+    const auto addPermutation = [&](std::vector<Expr> terms) {
+        return formatting::formatExpr(simplifier.simplify(
+            Expr::call(builtins.symbol(BuiltinId::Add), std::move(terms)),
+            context(builtins, math)));
+    };
+    const std::string canonicalAddOrder = addPermutation({z, x, integer(2), y});
+    tests.expectEqual(addPermutation({y, integer(2), z, x}), canonicalAddOrder,
+        "Simplifier: Add canonical order is independent of input permutation");
+    tests.expectEqual(addPermutation({x, z, y, integer(2)}), canonicalAddOrder,
+        "Simplifier: Add canonical order is deterministic across permutations");
+
+    const Expr productA = simplifier.simplify(
+        call(builtins, BuiltinId::Multiply, {
+            call(builtins, BuiltinId::Divide, {x, y}), z}),
+        context(builtins, math));
+    const Expr productB = simplifier.simplify(
+        call(builtins, BuiltinId::Divide, {
+            call(builtins, BuiltinId::Multiply, {z, x}), y}),
+        context(builtins, math));
+    tests.expect(productA == productB,
+        "Simplifier: product/division normal form removes tree-shape differences");
+
+    const Expr productC = simplifier.simplify(
+        call(builtins, BuiltinId::Multiply, {
+            call(builtins, BuiltinId::Divide, {x, y}),
+            call(builtins, BuiltinId::Divide, {integer(2), z})}),
+        context(builtins, math));
+    const Expr productD = simplifier.simplify(
+        call(builtins, BuiltinId::Divide, {
+            call(builtins, BuiltinId::Multiply, {integer(2), x}),
+            call(builtins, BuiltinId::Multiply, {y, z})}),
+        context(builtins, math));
+    tests.expect(productC == productD,
+        "Simplifier: nested symbolic products and divisions share one normal form");
 
     const Expr collected = simplifier.simplify(
         call(builtins, BuiltinId::Add, {
@@ -98,6 +168,22 @@ void runSimplifierTests(TestRunner& tests) {
         formatting::formatExpr(knownQuotient),
         std::string{"1"},
         "Simplifier: x/x -> 1 only when x != 0 is proven");
+
+    const Expr expX = call(builtins, BuiltinId::Exp, {x});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Divide, {expX, expX}),
+            context(builtins, math))),
+        std::string{"1"},
+        "Simplifier: zero-free MathKnowledge permits exp[x]/exp[x] cancellation");
+
+    const Expr gammaX = call(builtins, BuiltinId::Gamma, {x});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Divide, {gammaX, gammaX}),
+            context(builtins, math))),
+        std::string{"gamma[x]/gamma[x]"},
+        "Simplifier: zero-free knowledge does not erase unresolved gamma poles");
 
     const Expr powerZero = call(builtins, BuiltinId::Power, {x, integer(0)});
     tests.expectEqual(

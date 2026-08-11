@@ -28,7 +28,7 @@ void runDifferentiationTests(TestRunner& tests) {
         mathematics::AngleSemantics{mathematics::AngleUnit::Degree});
     tests.expectEqual(
         formatting::formatExpr(degreeDerivative),
-        std::string{"Pi/180cos[x]"},
+        std::string{"Pi cos[x]/180"},
         "Differentiation: bare trig uses Degree scale in Degree mode");
 
     const expression::Expr radianDerivative = symbolic::differentiateExpression(

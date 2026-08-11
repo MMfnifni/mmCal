@@ -259,7 +259,7 @@ void runKernelSessionTests(TestRunner& tests) {
 
     tests.expectEqual(
         evaluateAndFormat(session, "collect[(sin[y]+1)*x^2 + (log[y]+E)*x + Phi, x]"),
-        std::string{"(1+sin[y])x^2+(log[y]+E)x+Phi"},
+        std::string{"(1+sin[y])x^2+(E+log[y])x+Phi"},
         "KernelSession: collect treats arbitrary x-free exact expressions as coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "collect[sin[z]*x*y + log[z]*x + E, {x,y}]"),
@@ -296,7 +296,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: solver preserves tangent pole conditions for symbolic coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[sec[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/sec[y]} if sec[y]!=0; {} if sec[y]==0] if cos[y]!=0"},
+        std::string{"{x==-1/sec[y]} if cos[y]!=0"},
         "KernelSession: solver preserves secant pole conditions for symbolic coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[coth[y]*x + 1 == 0, x]"),
@@ -556,7 +556,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"(sqrt[6]-sqrt[2])/2"},
         "KernelSession: rational scaling reduces exact symbolic denominators");
     tests.expectEqual(evaluateAndFormat(numericalSession, "sin[75 Deg] + cos[15 Deg]"),
-        std::string{"(sqrt[6]+sqrt[2])/2"},
+        std::string{"(sqrt[2]+sqrt[6])/2"},
         "KernelSession: exact trig values combine without numerical approximation");
 
     // 既定はRadian。明示Deg/GradだけがPiを介した角度変換を行う。
@@ -613,13 +613,13 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: asin recognizes an exact radical special value");
     tests.expectEqual(evaluateAndFormat(numericalSession, "acos[-1/2]"), std::string{"2Pi/3"},
         "KernelSession: acos uses its principal range from zero through 180 degrees");
-    tests.expectEqual(evaluateAndFormat(numericalSession, "atan[-sqrt[3]]"), std::string{"-(Pi/3)"},
+    tests.expectEqual(evaluateAndFormat(numericalSession, "atan[-sqrt[3]]"), std::string{"-Pi/3"},
         "KernelSession: atan preserves principal odd symmetry for exact radicals");
     tests.expectEqual(evaluateAndFormat(numericalSession, "atan2[1,1]"), std::string{"Pi/4"},
         "KernelSession: atan2 first quadrant is exact");
     tests.expectEqual(evaluateAndFormat(numericalSession, "atan2[1,-1]"), std::string{"3Pi/4"},
         "KernelSession: atan2 distinguishes the second quadrant");
-    tests.expectEqual(evaluateAndFormat(numericalSession, "atan2[-1,-1]"), std::string{"-(3Pi/4)"},
+    tests.expectEqual(evaluateAndFormat(numericalSession, "atan2[-1,-1]"), std::string{"-3Pi/4"},
         "KernelSession: atan2 distinguishes the third quadrant");
     tests.expectEqual(evaluateAndFormat(numericalSession, "atan2[0,-1]"), std::string{"Pi"},
         "KernelSession: atan2 uses the Arg-compatible negative-axis endpoint");

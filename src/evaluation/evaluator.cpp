@@ -923,9 +923,9 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::DiscreteFourierTransform:
         return builtins::evaluateDft(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::FastFourierTransform:
-        return builtins::evaluateFft(arguments, registry_, mathematics_, angleSemantics_);
+        return builtins::evaluateFft(arguments, registry_, mathematics_, angleSemantics_, fourierTransformCache_);
     case BuiltinId::InverseFourierTransform:
-        return builtins::evaluateIfft(arguments, registry_, mathematics_, angleSemantics_);
+        return builtins::evaluateIfft(arguments, registry_, mathematics_, angleSemantics_, fourierTransformCache_);
     case BuiltinId::Convolution:
         return builtins::evaluateConvolution(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Transpose:

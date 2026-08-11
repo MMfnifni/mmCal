@@ -1,6 +1,7 @@
 #pragma once
 
 #include "builtin_registry.hpp"
+#include "builtins/signal_processing.hpp"
 #include "environment.hpp"
 #include "diagnostic.hpp"
 #include "expression/origin_map.hpp"
@@ -76,6 +77,7 @@ private:
     const mathematics::MathRegistry& mathematics_;
     const mathematics::AngleSemantics& angleSemantics_;
     random::RandomEngine randomEngine_;
+    builtins::FourierTransformCache fourierTransformCache_;
     const expression::OriginMap* origins_ = nullptr;
     const EvaluationContext* context_ = nullptr;
     std::size_t depthLimit_ = 1024;

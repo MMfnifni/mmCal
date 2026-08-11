@@ -398,6 +398,16 @@ MathRegistry MathRegistry::defaults(
     registry.setRealInverseKnowledge(FunctionId::Tan, FunctionId::Atan, false,
         RealMonotonicity::Unknown, RealRangeRule::AllReal);
 
+    // 定義される全点で0を取らない函数。definednessとは独立に保持し、
+    // Simplifier/Solver/積分検証が同じ非零知識を利用する。
+    registry.setZeroKnowledge(FunctionId::Exp, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Cis, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Gamma, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Csc, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Sec, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Csch, FunctionZeroRule::NeverZero);
+    registry.setZeroKnowledge(FunctionId::Sech, FunctionZeroRule::NeverZero);
+
     return registry;
 }
 
@@ -471,6 +481,16 @@ void MathRegistry::setRealInverseKnowledge(
     iterator->second.realGloballyInjective = globallyInjective;
     iterator->second.realMonotonicity = monotonicity;
     iterator->second.realRangeRule = rangeRule;
+}
+
+void MathRegistry::setZeroKnowledge(FunctionId id, FunctionZeroRule zeroRule) {
+    const auto symbolIterator = functionSymbols_.find(id);
+    if (symbolIterator == functionSymbols_.end())
+        throw std::invalid_argument("Mathematical function ID is not registered");
+    auto iterator = functions_.find(symbolIterator->second.id());
+    if (iterator == functions_.end())
+        throw std::invalid_argument("Mathematical function symbol is not registered");
+    iterator->second.zeroRule = zeroRule;
 }
 
 const ConstantDefinition* MathRegistry::findConstant(

@@ -4,7 +4,7 @@ Clear[]=>"Cleared"
 
 D[x^3+2x,x]=>2+3x^2
 D[sin[x],x]=>cos[x]
-D[sin[x Deg],x]=>Pi/180cos[x Deg]
+D[sin[x Deg],x]=>Pi cos[x Deg]/180
 
 diff[x^2,x,3]=>6.0000000000000000
 diff[sin[x],x,0,20]=>1.00000000000000000000
@@ -17,7 +17,7 @@ nintegrate[x^2,{x,1,1}]=>0
 
 integrate[x^2,x]=>x^3/3
 integrate[x^2,{x,0,1}]=>1/3
-integrate[E^x cos[x],x]=>(cos[x]+sin[x])/2*exp[x]
+integrate[E^x cos[x],x]=>(cos[x]+sin[x])exp[x]/2
 D[integrate[f[x],x],x]=>f[x]
 
 diff[3,1]=>TypeError

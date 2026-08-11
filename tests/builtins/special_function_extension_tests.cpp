@@ -64,10 +64,10 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"0.15729920705028513066"},
         "erfc certified evaluation is accurate");
     tests.expectEqual(eval(session, "D[erf[x],x]"),
-        std::string{"2/sqrt[Pi]exp[-x^2]"},
+        std::string{"2*exp[-x^2]/sqrt[Pi]"},
         "erf derivative is symbolic and exact");
     tests.expectEqual(eval(session, "D[erfc[x],x]"),
-        std::string{"-(2/sqrt[Pi]exp[-x^2])"},
+        std::string{"-2*exp[-x^2]/sqrt[Pi]"},
         "erfc derivative is symbolic and exact");
 
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},

@@ -2381,10 +2381,14 @@ Expr integrateExpression(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions) {
-    const Expr prepared = simplification::Simplifier{}.simplify(
-        expression,
-        simplification::SimplificationContext{builtins, mathematics, angles, assumptions});
-    return integrateCore(prepared, variable, builtins, mathematics, angles, 0);
+    const simplification::SimplificationContext context{
+        builtins, mathematics, angles, assumptions};
+    const Expr prepared = simplification::Simplifier{}.simplify(expression, context);
+    Expr primitive = integrateCore(prepared, variable, builtins, mathematics, angles, 0);
+
+    // rule採用後のprimitiveだけをcanonical化する。derivative-backをruntime gateへ
+    // 昇格させず、積分能力を維持したままformat/reparse時のAST順序を安定させる。
+    return simplification::Simplifier{}.simplify(primitive, context);
 }
 
 Expr integrateExpression(
@@ -2397,10 +2401,11 @@ Expr integrateExpression(
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinitySymbol,
     const mathematics::AssumptionSet& assumptions) {
-    const Expr prepared = simplification::Simplifier{}.simplify(
-        expression,
-        simplification::SimplificationContext{builtins, mathematics, angles, assumptions});
+    const simplification::SimplificationContext context{
+        builtins, mathematics, angles, assumptions};
+    const Expr prepared = simplification::Simplifier{}.simplify(expression, context);
     Expr primitive = integrateCore(prepared, variable, builtins, mathematics, angles, 0);
+    primitive = simplification::Simplifier{}.simplify(primitive, context);
     if (isHead(primitive, builtins, BuiltinId::SymbolicIntegral)) {
         return call(builtins, BuiltinId::SymbolicIntegral, {
             expression,

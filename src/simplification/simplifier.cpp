@@ -1,6 +1,8 @@
 // 安全な標準式簡約
 #include "simplifier.hpp"
 
+#include "expression_ordering.hpp"
+
 #include "error/error_message.hpp"
 #include "mathematics/exact_algebra.hpp"
 #include "mathematics/exact_hyperbolic.hpp"
@@ -67,72 +69,46 @@ using numeric::RealNumber;
     return definition && expression.asSymbol().sameIdentity(definition->symbol);
 }
 
-// Canonical ordering用の構造キー。数学的同値性の判定には使わない。
-// 同じ式構造には同じキーが付くため、可換演算の表示・内部順序を安定化できる。
-[[nodiscard]] std::string structuralKey(const Expr& expression) {
-    switch (expression.kind()) {
-    case expression::ExprKind::Number:
-        return "0:" + expression.asNumber().toString();
-    case expression::ExprKind::DecimalApproximation:
-        return "1:" + std::string{expression.asDecimalApproximation().text()};
-    case expression::ExprKind::ComplexDecimalApproximation:
-        return "2:" + std::string{expression.asComplexDecimalApproximation().text()};
-    case expression::ExprKind::Boolean:
-        return expression.asBoolean() ? "3:1" : "3:0";
-    case expression::ExprKind::String:
-        return "4:" + expression.asString();
-    case expression::ExprKind::Symbol:
-        return "5:" + expression.asSymbol().name();
-    case expression::ExprKind::Array: {
-        std::string key{"6:"};
-        for (const auto size : expression.asArray().shape)
-            key += std::to_string(size) + ',';
-        key += ':';
-        for (const Expr& element : expression.asArray().elements)
-            key += structuralKey(element) + ';';
-        return key;
-    }
-    case expression::ExprKind::Call: {
-        std::string key = "7:" + expression.asCall().head.name() + '[';
-        for (const Expr& argument : expression.asCall().arguments)
-            key += structuralKey(argument) + ';';
-        key += ']';
-        return key;
-    }
-    case expression::ExprKind::SolutionSet:
-        return "8:SolutionSet";
-    }
-    return {};
-}
-
 void sortCanonical(std::vector<Expr>& expressions) {
-    // comparator内でstructuralKeyを毎回再帰生成すると、n log n回の比較ごとに文字列確保が発生する。
-    // keyは式ごとに一度だけ生成し、Expr(shared_ptr)と共に並べ替える。
+    // total-order keyは式ごとに一度だけ生成し、n log n回の再帰serializeを避ける。
     std::vector<std::pair<std::string, Expr>> keyed;
     keyed.reserve(expressions.size());
     for (Expr& expression : expressions)
-        keyed.emplace_back(structuralKey(expression), std::move(expression));
+        keyed.emplace_back(expressionOrderKey(expression), std::move(expression));
 
-    std::sort(
-        keyed.begin(), keyed.end(),
-        [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-
+    std::sort(keyed.begin(), keyed.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
     for (std::size_t i = 0; i < keyed.size(); ++i)
         expressions[i] = std::move(keyed[i].second);
 }
 
 template <typename Visitor>
-void visitFlattened(
+void visitSignedAddTerms(
     const Expr& expression,
+    bool negative,
     const evaluation::BuiltinRegistry& builtins,
-    BuiltinId id,
     Visitor&& visitor) {
-    if (!isHead(expression, builtins, id)) {
-        visitor(expression);
+    if (isHead(expression, builtins, BuiltinId::Add)) {
+        for (const Expr& nested : expression.asCall().arguments)
+            visitSignedAddTerms(nested, negative, builtins, visitor);
         return;
     }
-    for (const Expr& nested : expression.asCall().arguments)
-        visitor(nested);
+
+    if (isHead(expression, builtins, BuiltinId::Subtract)
+        && expression.asCall().arguments.size() == 2) {
+        visitSignedAddTerms(expression.asCall().arguments[0], negative, builtins, visitor);
+        visitSignedAddTerms(expression.asCall().arguments[1], !negative, builtins, visitor);
+        return;
+    }
+
+    if (isHead(expression, builtins, BuiltinId::Negate)
+        && expression.asCall().arguments.size() == 1) {
+        visitSignedAddTerms(expression.asCall().arguments.front(), !negative, builtins, visitor);
+        return;
+    }
+
+    visitor(expression, negative);
 }
 
 [[nodiscard]] Expr buildProduct(
@@ -223,9 +199,13 @@ struct TrigSquare final {
     std::vector<Expr> terms;
     terms.reserve(arguments.size());
     for (const Expr& argument : arguments) {
-        visitFlattened(argument, builtins, BuiltinId::Add, [&](const Expr& term) {
-            if (term.isNumber())
-                numericSum += term.asNumber();
+        visitSignedAddTerms(argument, false, builtins, [&](const Expr& term, bool negative) {
+            if (term.isNumber()) {
+                numericSum += negative ? -term.asNumber() : term.asNumber();
+                return;
+            }
+            if (negative)
+                terms.push_back(Expr::call(builtins.symbol(BuiltinId::Negate), {term}));
             else
                 terms.push_back(term);
         });
@@ -242,14 +222,14 @@ struct TrigSquare final {
 
     for (const Expr& term : terms) {
         LinearTerm linear = extractLinearTerm(term, builtins);
-        const std::string key = structuralKey(linear.atom);
+        const std::string key = expressionOrderKey(linear.atom);
         auto found = groupByKey.find(key);
         if (found != groupByKey.end() && groups[found->second].atom == linear.atom) {
             groups[found->second].coefficient += linear.coefficient;
             continue;
         }
 
-        // structuralKeyはcanonical ordering用で数学的identityそのものではないため、万一文字列keyが衝突した場合はExpr equalityで安全にfallbackする。
+        // expressionOrderKeyはcanonical ordering用で数学的identityそのものではないため、万一文字列keyが衝突した場合はExpr equalityで安全にfallbackする。
         if (found != groupByKey.end()) {
             const auto iterator = std::find_if(
                 groups.begin(), groups.end(),
@@ -287,10 +267,13 @@ struct TrigSquare final {
         }
     }
 
+    // 加法の項順は係数ではなくatomで決める。1/3*x^3のように係数を
+    // quotient normal formへ移してもx, x^2, x^3の順序が揺れない。
+    std::sort(groups.begin(), groups.end(), [](const Group& lhs, const Group& rhs) {
+        return ExpressionLess{}(lhs.atom, rhs.atom);
+    });
+
     std::vector<Expr> result;
-    // 既存のAdd正規形と互換を保ち、数値定数は先頭、記号項は最初に現れた順を保つ。
-    // 全Exprに対する数学的なtotal orderはまだ仕様化していないため、Addでは無理に名前順へ並べない。
-    // FullSimplify用のcost/order戦略とは別問題として扱う。
     if (!numericSum.isZero())
         result.emplace_back(std::move(numericSum));
 
@@ -314,85 +297,167 @@ struct TrigSquare final {
     return Expr::call(builtins.symbol(BuiltinId::Add), std::move(result));
 }
 
-[[nodiscard]] Expr canonicalMultiply(
-    const std::vector<Expr>& arguments,
+[[nodiscard]] std::vector<Expr> groupRepeatedFactors(
+    std::vector<Expr> factors,
     const evaluation::BuiltinRegistry& builtins) {
-    Number numericProduct{BigInt{1}};
-    bool hasNumeric = false;
-    std::vector<Expr> factors;
-
-    factors.reserve(arguments.size());
-    bool foundZero = false;
-    for (const Expr& argument : arguments) {
-        visitFlattened(argument, builtins, BuiltinId::Multiply, [&](const Expr& factor) {
-            if (foundZero)
-                return;
-            if (isHead(factor, builtins, BuiltinId::Negate)
-                && factor.asCall().arguments.size() == 1) {
-                numericProduct *= Number{BigInt{-1}};
-                hasNumeric = true;
-                factors.push_back(factor.asCall().arguments.front());
-                return;
-            }
-            if (!factor.isNumber()) {
-                factors.push_back(factor);
-                return;
-            }
-            if (factor.asNumber().isZero()) {
-                foundZero = true;
-                return;
-            }
-            numericProduct *= factor.asNumber();
-            hasNumeric = true;
-        });
-        if (foundZero)
-            return integerExpr(0);
-    }
-
-    if (hasNumeric && numericProduct.isReal() && factors.size() == 1)
-        return mathematics::scaleExactExpression(
-            numericProduct.asReal().toRational(), factors.front(), builtins);
-
     sortCanonical(factors);
-
-    // 完全に同じ因子の反復積は正の整数冪へまとめてよい。
-    // x*x -> x^2 は実数/複素数やbranchに依存しない安全な構造正規化である。
-    std::vector<Expr> groupedFactors;
+    std::vector<Expr> grouped;
+    grouped.reserve(factors.size());
     for (std::size_t i = 0; i < factors.size();) {
         std::size_t j = i + 1;
         while (j < factors.size() && factors[j] == factors[i])
             ++j;
         const std::size_t count = j - i;
-        if (count == 1) {
-            groupedFactors.push_back(factors[i]);
-        }
-        else {
-            groupedFactors.push_back(Expr::call(
+        if (count == 1)
+            grouped.push_back(factors[i]);
+        else
+            grouped.push_back(Expr::call(
                 builtins.symbol(BuiltinId::Power),
                 {factors[i], Expr{Number{BigInt::parse(std::to_string(count))}}}));
-        }
         i = j;
     }
-    factors = std::move(groupedFactors);
+    return grouped;
+}
 
-    bool negative = false;
-    if (!factors.empty() && hasNumeric && numericProduct.isReal()
-        && numericProduct.asReal().isNegative()) {
-        negative = true;
-        numericProduct = -numericProduct;
+struct ProductParts final {
+    Number coefficient{BigInt{1}};
+    std::vector<Expr> numerator;
+    std::vector<Expr> denominator;
+};
+
+void collectProductParts(
+    const Expr& expression,
+    bool reciprocal,
+    ProductParts& parts,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (isHead(expression, builtins, BuiltinId::Negate)
+        && expression.asCall().arguments.size() == 1) {
+        parts.coefficient *= Number{BigInt{-1}};
+        collectProductParts(
+            expression.asCall().arguments.front(), reciprocal, parts, builtins);
+        return;
     }
 
-    if (hasNumeric && !(numericProduct == Number{BigInt{1}}))
-        factors.insert(factors.begin(), Expr{std::move(numericProduct)});
+    if (isHead(expression, builtins, BuiltinId::Multiply)) {
+        for (const Expr& factor : expression.asCall().arguments)
+            collectProductParts(factor, reciprocal, parts, builtins);
+        return;
+    }
 
-    Expr result = factors.empty()
-        ? (hasNumeric ? Expr{std::move(numericProduct)} : integerExpr(1))
-        : (factors.size() == 1
-            ? factors.front()
-            : Expr::call(builtins.symbol(BuiltinId::Multiply), std::move(factors)));
-    if (negative)
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2) {
+        // (a/b)*c は安全に ac/b へ平坦化できるが、a/(b/c) を ac/b へすると
+        // c=0 という元式のholeを失う。逆数側で遭遇したDivideはatomic denominator
+        // として保持し、definednessを変えない範囲だけをnormal form化する。
+        if (reciprocal) {
+            parts.denominator.push_back(expression);
+            return;
+        }
+        const auto& arguments = expression.asCall().arguments;
+        collectProductParts(arguments[0], false, parts, builtins);
+        collectProductParts(arguments[1], true, parts, builtins);
+        return;
+    }
+
+    if (expression.isNumber()) {
+        if (reciprocal) {
+            if (expression.asNumber().isZero())
+                error::throwCalcError(error::CalcErrorType::Domain, "Division by zero");
+            parts.coefficient /= expression.asNumber();
+        }
+        else
+            parts.coefficient *= expression.asNumber();
+        return;
+    }
+
+    (reciprocal ? parts.denominator : parts.numerator).push_back(expression);
+}
+
+[[nodiscard]] Expr productFromFactors(
+    std::vector<Expr> factors,
+    const evaluation::BuiltinRegistry& builtins) {
+    factors = groupRepeatedFactors(std::move(factors), builtins);
+    if (factors.empty())
+        return integerExpr(1);
+    if (factors.size() == 1)
+        return factors.front();
+    return Expr::call(builtins.symbol(BuiltinId::Multiply), std::move(factors));
+}
+
+[[nodiscard]] Expr buildProductNormalForm(
+    ProductParts parts,
+    const evaluation::BuiltinRegistry& builtins) {
+    // denominatorを含まない0積は従来どおり0へ畳み込む。
+    // 0*(1/x) のように明示的な分母を含む場合だけholeを失わない形を保持する。
+    if (parts.coefficient.isZero() && parts.denominator.empty())
+        return integerExpr(0);
+
+    // exact real係数は整数の分子・分母へ分解し、記号分母と同じDivideへ集約する。
+    // これにより (a/2)*b と a*b/2 が同一構造になる。
+    bool negative = false;
+    if (parts.coefficient.isReal()) {
+        Rational coefficient = parts.coefficient.asReal().toRational();
+        negative = coefficient.numerator().isNegative();
+        const BigInt numerator = coefficient.numerator().abs();
+        const BigInt denominator = coefficient.denominator();
+        if (!(numerator == BigInt{1}) || parts.numerator.empty())
+            parts.numerator.emplace_back(Number{numerator});
+        if (!(denominator == BigInt{1}))
+            parts.denominator.emplace_back(Number{denominator});
+    }
+    else if (parts.coefficient.realPart().isZero()) {
+        // 純虚数の有理係数 qI は q と I に分離し、real係数と同じ分母へ集約する。
+        // これにより (I/2)*Pi と I*Pi/2 が同一構造になる。
+        Rational coefficient = parts.coefficient.imaginaryPart().toRational();
+        negative = coefficient.numerator().isNegative();
+        const BigInt numerator = coefficient.numerator().abs();
+        const BigInt denominator = coefficient.denominator();
+        if (!(numerator == BigInt{1}))
+            parts.numerator.emplace_back(Number{numerator});
+        parts.numerator.emplace_back(Number::complex(RealNumber{}, RealNumber{BigInt{1}}));
+        if (!(denominator == BigInt{1}))
+            parts.denominator.emplace_back(Number{denominator});
+    }
+    else if (!(parts.coefficient == Number{BigInt{1}})) {
+        parts.numerator.emplace_back(std::move(parts.coefficient));
+    }
+
+    Expr numerator = productFromFactors(std::move(parts.numerator), builtins);
+    Expr result = std::move(numerator);
+    if (!parts.denominator.empty()) {
+        Expr denominator = productFromFactors(std::move(parts.denominator), builtins);
+        result = Expr::call(
+            builtins.symbol(BuiltinId::Divide),
+            {std::move(result), std::move(denominator)});
+    }
+
+    // 符号はquotient全体の外へ出す。Addの線形項抽出が
+    // -F + F を構造的に相殺でき、分子内Negateという別形を作らない。
+    if (negative) {
+        if (result.isNumber())
+            return Expr{-result.asNumber()};
         return Expr::call(builtins.symbol(BuiltinId::Negate), {std::move(result)});
+    }
     return result;
+}
+
+[[nodiscard]] Expr canonicalMultiply(
+    const std::vector<Expr>& arguments,
+    const evaluation::BuiltinRegistry& builtins) {
+    ProductParts parts;
+    for (const Expr& argument : arguments)
+        collectProductParts(argument, false, parts, builtins);
+    return buildProductNormalForm(std::move(parts), builtins);
+}
+
+[[nodiscard]] Expr canonicalDivide(
+    const Expr& numerator,
+    const Expr& denominator,
+    const evaluation::BuiltinRegistry& builtins) {
+    ProductParts parts;
+    collectProductParts(numerator, false, parts, builtins);
+    collectProductParts(denominator, true, parts, builtins);
+    return buildProductNormalForm(std::move(parts), builtins);
 }
 
 [[nodiscard]] TruthValue proveNonZero(
@@ -485,7 +550,7 @@ struct TrigSquare final {
                     context.builtins);
             }
         }
-        return expression;
+        return canonicalDivide(arguments[0], arguments[1], context.builtins);
 
     case BuiltinId::Negate:
         if (arguments.size() != 1)
