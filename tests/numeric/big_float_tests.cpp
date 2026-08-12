@@ -222,6 +222,47 @@ void testDirectedArithmeticProperties(TestRunner& tests) {
         "BigFloat: directed division encloses exact dyadic quotients across a grid");
 }
 
+void testExtremeExponentGapAddition(TestRunner& tests) {
+    constexpr std::size_t precision = 53;
+    const BigFloat one = BigFloat::fromDyadic(
+        BigInt{1}, 0, precision, RoundingMode::TowardZero);
+    const BigFloat tinyPositive = BigFloat::fromDyadic(
+        BigInt{1}, -1'000'000, precision, RoundingMode::TowardZero);
+    const BigFloat tinyNegative = -tinyPositive;
+
+    BigInt denominatorUp{1};
+    denominatorUp <<= 52;
+    const Rational nextAboveOne{
+        denominatorUp + BigInt{1}, denominatorUp};
+
+    BigInt denominatorDown{1};
+    denominatorDown <<= 53;
+    const Rational nextBelowOne{
+        denominatorDown - BigInt{1}, denominatorDown};
+
+    expectRational(tests,
+        add(one, tinyPositive, precision, RoundingMode::TowardPositive),
+        nextAboveOne,
+        "BigFloat: huge positive exponent gap rounds upward by one representable step");
+    expectRational(tests,
+        add(one, tinyPositive, precision, RoundingMode::TowardNegative),
+        rational(1),
+        "BigFloat: huge positive exponent gap keeps exact lower endpoint");
+    expectRational(tests,
+        add(one, tinyPositive, precision, RoundingMode::NearestEven),
+        rational(1),
+        "BigFloat: huge exponent gap nearest rounding ignores sub-half-ulp tail");
+
+    expectRational(tests,
+        add(one, tinyNegative, precision, RoundingMode::TowardNegative),
+        nextBelowOne,
+        "BigFloat: huge negative tail rounds downward by one representable step");
+    expectRational(tests,
+        add(one, tinyNegative, precision, RoundingMode::TowardPositive),
+        rational(1),
+        "BigFloat: huge negative tail keeps exact upper endpoint");
+}
+
 void testIntegerRounding(TestRunner& tests) {
     // 13 = 1101b。3bitへ丸めると12と14の中点で、110bが偶数なので12。
     expectRational(tests,
@@ -247,6 +288,7 @@ void runBigFloatTests(TestRunner& tests) {
     testComparison(tests);
     testDirectedRoundingProperties(tests);
     testDirectedArithmeticProperties(tests);
+    testExtremeExponentGapAddition(tests);
     testIntegerRounding(tests);
 }
 

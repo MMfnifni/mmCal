@@ -3,6 +3,7 @@
 #include "detail/binary_scale.hpp"
 
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -170,6 +171,138 @@ BigFloat fromPositiveRatio(
         outputExponent,
         precisionBits,
         RoundingMode::TowardZero);
+}
+
+[[nodiscard]] std::optional<BigFloat::exponent_type> magnitudeTopExponent(
+    const BigFloat& value) noexcept {
+    if (value.isZero())
+        return BigFloat::exponent_type{0};
+
+    const std::size_t bitLength = value.significand().abs().bitLength();
+    const std::size_t shift = bitLength - 1;
+    constexpr auto max = std::numeric_limits<BigFloat::exponent_type>::max();
+    if (shift > static_cast<std::size_t>(max))
+        return std::nullopt;
+    if (value.exponent() > max - static_cast<BigFloat::exponent_type>(shift))
+        return std::nullopt;
+    return value.exponent() + static_cast<BigFloat::exponent_type>(shift);
+}
+
+[[nodiscard]] BigFloat exactAtPrecision(
+    const BigFloat& value,
+    std::size_t precisionBits) {
+    return BigFloat::fromDyadic(
+        value.significand(), value.exponent(), precisionBits, RoundingMode::TowardZero);
+}
+
+[[nodiscard]] BigFloat nextPositiveAbove(
+    const BigFloat& value,
+    std::size_t precisionBits) {
+    BigInt significand = value.significand().abs();
+    const std::size_t bitLength = significand.bitLength();
+    const std::size_t extension = precisionBits - bitLength;
+    significand <<= extension;
+    significand += BigInt{1};
+    return BigFloat::fromDyadic(
+        std::move(significand),
+        checkedSubtractShift(value.exponent(), extension),
+        precisionBits,
+        RoundingMode::TowardZero);
+}
+
+[[nodiscard]] BigFloat nextPositiveBelow(
+    const BigFloat& value,
+    std::size_t precisionBits) {
+    BigInt significand = value.significand().abs();
+    const std::size_t bitLength = significand.bitLength();
+
+    // 正の2冪の直下だけbinadeが一段下がるため、下側spacingは上側の半分になる。
+    // normalize後の2冪はsignificand==1なので、この境界だけ1bit余分に展開する。
+    const bool powerOfTwo = significand == BigInt{1};
+    const std::size_t extension = powerOfTwo
+        ? precisionBits
+        : precisionBits - bitLength;
+    significand <<= extension;
+    significand -= BigInt{1};
+    return BigFloat::fromDyadic(
+        std::move(significand),
+        checkedSubtractShift(value.exponent(), extension),
+        precisionBits,
+        RoundingMode::TowardZero);
+}
+
+[[nodiscard]] BigFloat nextAbove(
+    const BigFloat& value,
+    std::size_t precisionBits) {
+    if (value.isPositive())
+        return nextPositiveAbove(value, precisionBits);
+    return -nextPositiveBelow(-value, precisionBits);
+}
+
+[[nodiscard]] BigFloat nextBelow(
+    const BigFloat& value,
+    std::size_t precisionBits) {
+    if (value.isPositive())
+        return nextPositiveBelow(value, precisionBits);
+    return -nextPositiveAbove(-value, precisionBits);
+}
+
+[[nodiscard]] std::optional<BigFloat> tryAddWithExtremeExponentGap(
+    const BigFloat& lhs,
+    const BigFloat& rhs,
+    std::size_t precisionBits,
+    RoundingMode roundingMode) {
+    // このfast pathは「大きい側が要求precisionでexactに表現でき、もう片方が
+    // その最近傍丸め境界の半分より確実に小さい」場合だけ使う。
+    // したがってNearestEvenでは大きい側そのもの、directed roundingでは
+    // 必要な場合だけ隣接する1個の表現可能値を返せる。
+    if (lhs.significand().abs().bitLength() > precisionBits
+        || rhs.significand().abs().bitLength() > precisionBits)
+        return std::nullopt;
+
+    const auto lhsTop = magnitudeTopExponent(lhs);
+    const auto rhsTop = magnitudeTopExponent(rhs);
+    if (!lhsTop || !rhsTop || *lhsTop == *rhsTop)
+        return std::nullopt;
+
+    const BigFloat* dominant = &lhs;
+    const BigFloat* tiny = &rhs;
+    auto dominantTop = *lhsTop;
+    auto tinyTop = *rhsTop;
+    if (dominantTop < tinyTop) {
+        std::swap(dominant, tiny);
+        std::swap(dominantTop, tinyTop);
+    }
+
+    // tinyの絶対値が常に 2^(T-p-1) 未満になるよう、top exponentにさらに1bit余裕を取る。
+    // これは2冪境界で下側ULPが半分になるケースも安全に包含する保守条件。
+    const std::uint64_t gap = exponentDistance(dominantTop, tinyTop);
+    if (precisionBits > std::numeric_limits<std::uint64_t>::max() - 2
+        || gap < static_cast<std::uint64_t>(precisionBits) + 2)
+        return std::nullopt;
+
+    const BigFloat exactDominant = exactAtPrecision(*dominant, precisionBits);
+    if (roundingMode == RoundingMode::NearestEven)
+        return exactDominant;
+
+    if (roundingMode == RoundingMode::TowardPositive)
+        return tiny->isPositive()
+            ? nextAbove(exactDominant, precisionBits)
+            : exactDominant;
+
+    if (roundingMode == RoundingMode::TowardNegative)
+        return tiny->isNegative()
+            ? nextBelow(exactDominant, precisionBits)
+            : exactDominant;
+
+    // TowardZeroは結果の符号（gap条件によりdominantと同符号）が決める。
+    if (dominant->isPositive())
+        return tiny->isNegative()
+            ? nextBelow(exactDominant, precisionBits)
+            : exactDominant;
+    return tiny->isPositive()
+        ? nextAbove(exactDominant, precisionBits)
+        : exactDominant;
 }
 
 std::strong_ordering compareMagnitude(
@@ -386,6 +519,22 @@ BigFloat add(
         return rhs.rounded(precisionBits, roundingMode);
     if (rhs.isZero())
         return lhs.rounded(precisionBits, roundingMode);
+
+    /*
+    旧実装:
+        const auto commonExponent = min(lhs.exponent(), rhs.exponent());
+        lhsSignificand <<= lhs.exponent() - commonExponent;
+        rhsSignificand <<= rhs.exponent() - commonExponent;
+        return BigFloat::fromDyadic(lhsSignificand + rhsSignificand, ...);
+
+    exactではあるが、1 + 2^-5000000 のように指数差が極端だと、丸め結果へ影響しない
+    500万bit分まで実際にshiftして巨大BigIntを一時生成していた。
+    まず安全条件を満たす場合だけ隣接表現値からdirected roundingを確定し、
+    通常・近接・cancel可能なケースは従来のexact alignmentへそのまま戻す。
+    */
+    if (const auto fast = tryAddWithExtremeExponentGap(
+            lhs, rhs, precisionBits, roundingMode))
+        return *fast;
 
     const auto commonExponent = lhs.exponent() < rhs.exponent()
         ? lhs.exponent()

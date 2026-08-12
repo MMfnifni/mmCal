@@ -965,31 +965,46 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
         const Expr& argument = call.arguments.front();
         const auto evaluateRealTrig = [&](const RealInterval& radians) -> CertifiedValue {
-            const CertifiedTrigEnclosure sine = encloseSinRadianInterval(radians, precisionBits);
-            const CertifiedTrigEnclosure cosine = encloseCosRadianInterval(radians, precisionBits);
+            /*
+            旧実装ではsinだけを求める場合でもsin/cosを両方certified評価していた。
+            巨大radian reductionではPi評価まで二重になるため、必要な函数だけ遅延生成する。
+            tan/cotだけは分子・分母の双方が必要なので従来どおり両方を使う。
+            */
             switch (definition->id) {
             case BuiltinId::Sin:
-                return CertifiedValue{sine.interval};
+                return CertifiedValue{
+                    encloseSinRadianInterval(radians, precisionBits).interval};
             case BuiltinId::Cos:
-                return CertifiedValue{cosine.interval};
-            case BuiltinId::Tan:
+                return CertifiedValue{
+                    encloseCosRadianInterval(radians, precisionBits).interval};
+            case BuiltinId::Tan: {
+                const CertifiedTrigEnclosure sine = encloseSinRadianInterval(radians, precisionBits);
+                const CertifiedTrigEnclosure cosine = encloseCosRadianInterval(radians, precisionBits);
                 if (cosine.interval.containsZero())
                     throw PrecisionInsufficient{"Tangent denominator cannot yet be proven nonzero"};
                 return CertifiedValue{approximation::divide(
                     sine.interval, cosine.interval, precisionBits)};
-            case BuiltinId::Cot:
+            }
+            case BuiltinId::Cot: {
+                const CertifiedTrigEnclosure sine = encloseSinRadianInterval(radians, precisionBits);
+                const CertifiedTrigEnclosure cosine = encloseCosRadianInterval(radians, precisionBits);
                 if (sine.interval.containsZero())
                     throw PrecisionInsufficient{"Cotangent denominator cannot yet be proven nonzero"};
                 return CertifiedValue{approximation::divide(
                     cosine.interval, sine.interval, precisionBits)};
-            case BuiltinId::Sec:
+            }
+            case BuiltinId::Sec: {
+                const CertifiedTrigEnclosure cosine = encloseCosRadianInterval(radians, precisionBits);
                 return reciprocalValue(
                     CertifiedValue{cosine.interval}, precisionBits,
                     "Secant denominator cannot yet be proven nonzero");
-            case BuiltinId::Csc:
+            }
+            case BuiltinId::Csc: {
+                const CertifiedTrigEnclosure sine = encloseSinRadianInterval(radians, precisionBits);
                 return reciprocalValue(
                     CertifiedValue{sine.interval}, precisionBits,
                     "Cosecant denominator cannot yet be proven nonzero");
+            }
             default:
                 throw std::logic_error("Unexpected trigonometric builtin");
             }

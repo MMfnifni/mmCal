@@ -503,6 +503,26 @@ void testDivision(TestRunner& tests) {
     tests.expect(
         referenceCasesPass,
         "normalized division matches the binary reference implementation");
+
+
+    // 128-limb divisor / 96-limb quotientでBurnikel-Zieglerの既定thresholdを確実に跨ぐ。
+    // quotient/remainder既知の再構成形を使い、再帰block境界でもexactに復元できることを固定する。
+    const BigUInt bzDivisor =
+        (BigUInt{1} << (128 * 32 - 1))
+        + (BigUInt{1} << (73 * 32 + 5))
+        + BigUInt{0x89ABCDEF};
+    const BigUInt bzQuotient =
+        (BigUInt{1} << (96 * 32 - 1))
+        + (BigUInt{1} << (41 * 32 + 11))
+        + BigUInt{0x13579BDF};
+    const BigUInt bzRemainder =
+        (BigUInt{1} << (47 * 32 + 3)) + BigUInt{0x2468ACE};
+    const BigUInt bzDividend = bzDivisor * bzQuotient + bzRemainder;
+    const auto bz = divmod(bzDividend, bzDivisor);
+    tests.expect(bz.quotient == bzQuotient,
+        "Burnikel-Ziegler division returns the exact large quotient");
+    tests.expect(bz.remainder == bzRemainder,
+        "Burnikel-Ziegler division returns the exact large remainder");
 }
 
 void testErrors(TestRunner& tests) {

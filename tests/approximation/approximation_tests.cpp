@@ -111,6 +111,19 @@ void runApproximationTests(TestRunner& tests) {
         std::string{"0.01745240643728351281941897851631619247225272030714"},
         "CertifiedTrig: turn reduction removes complete periods exactly");
 
+
+    const auto hugeRadianSin = approximation::approximateSin(
+        RealNumber{BigInt{1'000'000}}, 20);
+    tests.expectEqual(std::string{hugeRadianSin.value.text()},
+        std::string{"-0.34999350217129295212"},
+        "CertifiedTrig: huge raw radian uses certified Pi/2 argument reduction");
+
+    const auto hugeRadianCos = approximation::approximateCos(
+        RealNumber{BigInt{1'000'000}}, 20);
+    tests.expectEqual(std::string{hugeRadianCos.value.text()},
+        std::string{"0.93675212753314478694"},
+        "CertifiedTrig: huge raw radian preserves quadrant mapping");
+
     // ComplexIntervalはRealIntervalを直交座標へ拡張したcertified complex domain。
     // 実部・虚部それぞれが真値を含むことを、exact Rationalで直接検査する。
     const auto realOne = approximation::RealInterval::fromRational(

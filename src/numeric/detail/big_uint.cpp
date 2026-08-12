@@ -37,6 +37,20 @@ constexpr std::size_t squareKaratsubaThresholdLimbs = MMCAL_SQUARE_KARATSUBA_THR
 constexpr std::size_t squareKaratsubaThresholdLimbs = 48;
 #endif
 
+// 巨大除算はKnuth長除算の商桁ごとの走査が支配的になるため、
+// divisor/quotientの両方が十分大きい場合だけBurnikel-Zieglerへ切り替える。
+// 小さい商ではKnuthの固定費が低いためoffset条件も別に持つ。
+#ifdef MMCAL_BZ_DIV_THRESHOLD_LIMBS
+constexpr std::size_t burnikelZieglerThresholdLimbs = MMCAL_BZ_DIV_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t burnikelZieglerThresholdLimbs = 32;
+#endif
+#ifdef MMCAL_BZ_DIV_OFFSET_LIMBS
+constexpr std::size_t burnikelZieglerOffsetLimbs = MMCAL_BZ_DIV_OFFSET_LIMBS;
+#else
+constexpr std::size_t burnikelZieglerOffsetLimbs = 32;
+#endif
+
 static_assert(karatsubaThresholdLimbs >= 1, "Karatsuba threshold must be at least one limb");
 static_assert(squareKaratsubaThresholdLimbs >= 1, "Square Karatsuba threshold must be at least one limb");
 static_assert(toom3ThresholdLimbs > karatsubaThresholdLimbs,
@@ -1163,45 +1177,55 @@ char BigUInt::digitCharacter(unsigned value) noexcept {
     return static_cast<char>('A' + (value - 10));
 }
 
-BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor) {
+BigUInt BigUInt::limbSlice(
+    const BigUInt& value,
+    std::size_t start,
+    std::size_t count) {
+    BigUInt result;
+    if (count == 0 || start >= value.limbs_.size())
+        return result;
+
+    const std::size_t end = std::min(value.limbs_.size(), start + count);
+    result.limbs_.assign(
+        value.limbs_.begin() + static_cast<std::ptrdiff_t>(start),
+        value.limbs_.begin() + static_cast<std::ptrdiff_t>(end));
+    result.normalize();
+    return result;
+}
+
+BigUInt BigUInt::concatenateLimbs(
+    const BigUInt& high,
+    const BigUInt& low,
+    std::size_t lowWidth) {
+    if (low.limbs_.size() > lowWidth)
+        throw std::logic_error("BigUInt block concatenation width is too small");
+
+    BigUInt result;
+    result.limbs_.assign(lowWidth + high.limbs_.size(), 0);
+    std::copy(low.limbs_.begin(), low.limbs_.end(), result.limbs_.begin());
+    std::copy(
+        high.limbs_.begin(), high.limbs_.end(),
+        result.limbs_.begin() + static_cast<std::ptrdiff_t>(lowWidth));
+    result.normalize();
+    return result;
+}
+
+BigUInt BigUInt::allOnes(std::size_t limbCount) {
+    BigUInt result;
+    result.limbs_.assign(limbCount, std::numeric_limits<limb_type>::max());
+    result.normalize();
+    return result;
+}
+
+BigUIntDivModResult BigUInt::divideKnuth(
+    const BigUInt& dividend,
+    const BigUInt& divisor) {
     if (divisor.isZero())
         throw std::domain_error("BigUInt division by zero");
-
     if (dividend < divisor)
         return {BigUInt{}, dividend};
-
     if (dividend == divisor)
         return {BigUInt{1}, BigUInt{}};
-
-    /*
-    旧実装では巨大な2^k divisorも、この下のKnuth長除算へそのまま流していた。
-    2^kでの商は右shift、余りは下位k bitだけなので、長除算を使う必要がない。
-    O(n)のbit操作へ落とすことで、巨大なpower-of-two除算と整数算法の補助経路を軽くする。
-
-    // 旧経路: 特別扱いせず divisor.limbs_.size()==1 またはKnuth長除算へ続行
-    */
-    const std::size_t divisorBitLength = divisor.bitLength();
-    const std::size_t divisorTrailingZeros = divisor.trailingZeroBits();
-    if (divisorBitLength == divisorTrailingZeros + 1) {
-        BigUInt quotient = dividend >> divisorTrailingZeros;
-        BigUInt remainder = dividend;
-        const std::size_t wholeLimbs = divisorTrailingZeros / limbBits;
-        const unsigned remainingBits = static_cast<unsigned>(divisorTrailingZeros % limbBits);
-
-        if (remainingBits == 0) {
-            remainder.limbs_.resize(std::min(wholeLimbs, remainder.limbs_.size()));
-        }
-        else {
-            const std::size_t keep = std::min(wholeLimbs + 1, remainder.limbs_.size());
-            remainder.limbs_.resize(keep);
-            if (wholeLimbs < remainder.limbs_.size()) {
-                const BigUInt::limb_type mask = static_cast<BigUInt::limb_type>((std::uint64_t{1} << remainingBits) - 1);
-                remainder.limbs_[wholeLimbs] &= mask;
-            }
-        }
-        remainder.normalize();
-        return {std::move(quotient), std::move(remainder)};
-    }
 
     if (divisor.limbs_.size() == 1) {
         BigUInt quotient = dividend;
@@ -1209,7 +1233,7 @@ BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor) {
         return {std::move(quotient), BigUInt{remainder}};
     }
 
-    // Knuth式の長除算。正規化により、商の推定補正を原則1回以内に収める。
+    // Knuth式の長除算。Burnikel-Zieglerのbase caseとして旧実装をそのまま残す。
     const unsigned normalizationShift = static_cast<unsigned>(
         std::countl_zero(divisor.limbs_.back()));
 
@@ -1269,6 +1293,187 @@ BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor) {
     quotient.normalize();
     remainder.normalize();
     return {std::move(quotient), std::move(remainder)};
+}
+
+BigUIntDivModResult BigUInt::divide3n2n(
+    const BigUInt& dividend,
+    const BigUInt& divisor) {
+    if (dividend < divisor)
+        return {BigUInt{}, dividend};
+
+    const std::size_t half = divisor.limbs_.size() / 2;
+    if (half == 0 || divisor.limbs_.size() != half * 2)
+        return divideKnuth(dividend, divisor);
+
+    // A=[a1,a2,a3], B=[b1,b2] とみなし、上位2blockから商を推定する。
+    const BigUInt a12 = dividend >> (half * limbBits);
+    const BigUInt a3 = limbSlice(dividend, 0, half);
+    const BigUInt b1 = divisor >> (half * limbBits);
+    const BigUInt b2 = limbSlice(divisor, 0, half);
+
+    BigUInt quotient;
+    BigUInt remainderUpper;
+    BigUInt productLow;
+
+    if (dividend < (divisor << (half * limbBits))) {
+        auto upper = divide2n1n(a12, b1);
+        quotient = std::move(upper.quotient);
+        remainderUpper = std::move(upper.remainder);
+        productLow = quotient * b2;
+    }
+    else {
+        quotient = allOnes(half);
+        remainderUpper = a12 + b1;
+        const BigUInt shiftedB1 = b1 << (half * limbBits);
+        if (remainderUpper < shiftedB1)
+            throw std::logic_error("BigUInt Burnikel-Ziegler remainder underflow");
+        remainderUpper -= shiftedB1;
+
+        const BigUInt shiftedB2 = b2 << (half * limbBits);
+        productLow = shiftedB2 - b2;
+    }
+
+    BigUInt remainder = concatenateLimbs(remainderUpper, a3, half);
+    while (remainder < productLow) {
+        remainder += divisor;
+        if (quotient.isZero())
+            throw std::logic_error("BigUInt Burnikel-Ziegler quotient correction underflow");
+        quotient -= BigUInt{1};
+    }
+    remainder -= productLow;
+    return {std::move(quotient), std::move(remainder)};
+}
+
+BigUIntDivModResult BigUInt::divide2n1n(
+    const BigUInt& dividend,
+    const BigUInt& divisor) {
+    if (dividend < divisor)
+        return {BigUInt{}, dividend};
+    if (dividend == divisor)
+        return {BigUInt{1}, BigUInt{}};
+
+    const std::size_t n = divisor.limbs_.size();
+    if (n < burnikelZieglerThresholdLimbs || n % 2 != 0)
+        return divideKnuth(dividend, divisor);
+
+    const std::size_t half = n / 2;
+    const BigUInt upper = dividend >> (half * limbBits);
+    const BigUInt lower = limbSlice(dividend, 0, half);
+
+    auto first = divide3n2n(upper, divisor);
+    const BigUInt secondDividend = concatenateLimbs(first.remainder, lower, half);
+    auto second = divide3n2n(secondDividend, divisor);
+
+    BigUInt quotient = concatenateLimbs(first.quotient, second.quotient, half);
+    return {std::move(quotient), std::move(second.remainder)};
+}
+
+BigUIntDivModResult BigUInt::divideBurnikelZiegler(
+    const BigUInt& dividend,
+    const BigUInt& divisor) {
+    const std::size_t divisorSize = divisor.limbs_.size();
+
+    // OpenJDK同様、再帰単位mを2冪にしつつ、n=j*mをdivisor長へ近づける。
+    // nを単純なnext-power-of-twoにすると最大ほぼ2倍paddingされるため避ける。
+    std::size_t blockQuantum = 1;
+    const std::size_t ratio = divisorSize / burnikelZieglerThresholdLimbs;
+    while (blockQuantum <= ratio) {
+        if (blockQuantum > std::numeric_limits<std::size_t>::max() / 2)
+            throw std::length_error("BigUInt Burnikel-Ziegler block size is too large");
+        blockQuantum *= 2;
+    }
+
+    const std::size_t blockCountForDivisor =
+        (divisorSize + blockQuantum - 1) / blockQuantum;
+    const std::size_t blockWidth = blockCountForDivisor * blockQuantum;
+    if (blockWidth > std::numeric_limits<std::size_t>::max() / limbBits)
+        throw std::length_error("BigUInt Burnikel-Ziegler shift is too large");
+
+    const std::size_t targetBits = blockWidth * limbBits;
+    const std::size_t sigma = targetBits - divisor.bitLength();
+    const BigUInt shiftedDivisor = divisor << sigma;
+    const BigUInt shiftedDividend = dividend << sigma;
+
+    const std::size_t dividendBlocks = std::max<std::size_t>(
+        1, (shiftedDividend.limbs_.size() + blockWidth - 1) / blockWidth);
+
+    BigUInt quotient;
+    BigUInt remainder;
+    for (std::size_t block = dividendBlocks; block-- > 0;) {
+        const BigUInt low = limbSlice(
+            shiftedDividend, block * blockWidth, blockWidth);
+        const BigUInt partialDividend = concatenateLimbs(remainder, low, blockWidth);
+        auto partial = divide2n1n(partialDividend, shiftedDivisor);
+        quotient = concatenateLimbs(quotient, partial.quotient, blockWidth);
+        remainder = std::move(partial.remainder);
+    }
+
+    if (sigma != 0)
+        remainder >>= sigma;
+    quotient.normalize();
+    remainder.normalize();
+    return {std::move(quotient), std::move(remainder)};
+}
+
+BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor) {
+    if (divisor.isZero())
+        throw std::domain_error("BigUInt division by zero");
+
+    if (dividend < divisor)
+        return {BigUInt{}, dividend};
+
+    if (dividend == divisor)
+        return {BigUInt{1}, BigUInt{}};
+
+    /*
+    旧実装では巨大な2^k divisorも、この下のKnuth長除算へそのまま流していた。
+    2^kでの商は右shift、余りは下位k bitだけなので、長除算を使う必要がない。
+    O(n)のbit操作へ落とすことで、巨大なpower-of-two除算と整数算法の補助経路を軽くする。
+
+    // 旧経路: 特別扱いせず divisor.limbs_.size()==1 またはKnuth長除算へ続行
+    */
+    const std::size_t divisorBitLength = divisor.bitLength();
+    const std::size_t divisorTrailingZeros = divisor.trailingZeroBits();
+    if (divisorBitLength == divisorTrailingZeros + 1) {
+        BigUInt quotient = dividend >> divisorTrailingZeros;
+        BigUInt remainder = dividend;
+        const std::size_t wholeLimbs = divisorTrailingZeros / limbBits;
+        const unsigned remainingBits = static_cast<unsigned>(divisorTrailingZeros % limbBits);
+
+        if (remainingBits == 0) {
+            remainder.limbs_.resize(std::min(wholeLimbs, remainder.limbs_.size()));
+        }
+        else {
+            const std::size_t keep = std::min(wholeLimbs + 1, remainder.limbs_.size());
+            remainder.limbs_.resize(keep);
+            if (wholeLimbs < remainder.limbs_.size()) {
+                const BigUInt::limb_type mask = static_cast<BigUInt::limb_type>(
+                    (std::uint64_t{1} << remainingBits) - 1);
+                remainder.limbs_[wholeLimbs] &= mask;
+            }
+        }
+        remainder.normalize();
+        return {std::move(quotient), std::move(remainder)};
+    }
+
+    /*
+    旧実装:
+        // power-of-twoと1-limb以外は常にKnuth長除算へ入っていた。
+        // divisorSize=n, quotientSize≈n の巨大除算では商limbごとにn-limb積減算を行うため
+        // ほぼO(n^2)となり、乗算をKaratsuba/Toom化した後の主要ボトルネックになった。
+        return BigUInt::divideKnuth(dividend, divisor);
+
+    新実装では巨大なdivisorかつ商も十分大きい場合だけBurnikel-Zieglerへ渡す。
+    再帰のbase caseは上の旧Knuth実装そのものなので、小さいサイズの性能と意味論は維持する。
+    */
+    const std::size_t divisorSize = divisor.limbs_.size();
+    const std::size_t dividendSize = dividend.limbs_.size();
+    if (divisorSize >= burnikelZieglerThresholdLimbs
+        && dividendSize >= divisorSize
+        && dividendSize - divisorSize >= burnikelZieglerOffsetLimbs)
+        return BigUInt::divideBurnikelZiegler(dividend, divisor);
+
+    return BigUInt::divideKnuth(dividend, divisor);
 }
 
 BigUInt operator+(BigUInt lhs, const BigUInt& rhs) {

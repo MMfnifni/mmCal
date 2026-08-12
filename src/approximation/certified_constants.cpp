@@ -131,7 +131,96 @@ struct AtanEnclosure final {
 
 } // namespace
 
-CertifiedConstantResult enclosePi(std::size_t precisionBits) {
+struct ChudnovskySplit final {
+    BigInt p{1};
+    BigInt q{1};
+    BigInt t{};
+};
+
+[[nodiscard]] ChudnovskySplit chudnovskySplit(
+    std::uint64_t begin,
+    std::uint64_t end) {
+    constexpr std::uint64_t a = 13'591'409ULL;
+    constexpr std::uint64_t b = 545'140'134ULL;
+    constexpr std::uint64_t c3Over24 = 10'939'058'860'032'000ULL;
+
+    if (end != begin + 1) {
+        const std::uint64_t middle = begin + (end - begin) / 2;
+        ChudnovskySplit left = chudnovskySplit(begin, middle);
+        ChudnovskySplit right = chudnovskySplit(middle, end);
+
+        ChudnovskySplit result;
+        result.p = left.p * right.p;
+        result.q = left.q * right.q;
+        result.t = left.t * right.q + left.p * right.t;
+        return result;
+    }
+
+    if (begin == 0)
+        return ChudnovskySplit{BigInt{1}, BigInt{1}, BigInt{static_cast<std::int64_t>(a)}};
+
+    if (begin > std::numeric_limits<std::uint64_t>::max() / 6)
+        throw std::overflow_error("Certified Pi Chudnovsky index is too large");
+
+    const std::uint64_t sixK = 6 * begin;
+    const BigInt k = BigInt::fromUnsigned(begin);
+    ChudnovskySplit result;
+    result.p = BigInt::fromUnsigned(sixK - 5)
+        * BigInt::fromUnsigned(2 * begin - 1)
+        * BigInt::fromUnsigned(sixK - 1);
+    result.q = k * k * k * BigInt::fromUnsigned(c3Over24);
+
+    // 旧実装では a + b * begin をuint64_tで先に計算していた。
+    // 実用的な桁数では問題にならないが、極端なprecision指定では乗算がwrapし得る。
+    // Chudnovsky係数もBigInt上で組み立て、任意精度という層の契約をここだけ64bitへ狭めない。
+    const BigInt linear = BigInt::fromUnsigned(a) + BigInt::fromUnsigned(b) * k;
+    result.t = result.p * linear;
+    if ((begin & 1U) != 0)
+        result.t = -result.t;
+    return result;
+}
+
+[[nodiscard]] CertifiedConstantResult enclosePiChudnovsky(
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Certified Pi precision must be at least one bit");
+
+    // Chudnovsky級数は1項あたり約47bit増える。46bit/項として保守的に多めに取り、
+    // 正しさ自体は項数見積りへ依存させず、最初の未採用項による交代級数の上下界で保証する。
+    const std::size_t estimatedTerms = precisionBits / 46 + 2;
+    if (estimatedTerms >= std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Certified Pi term count is too large");
+    const std::uint64_t terms = static_cast<std::uint64_t>(
+        std::max<std::size_t>(2, estimatedTerms));
+
+    const ChudnovskySplit split = chudnovskySplit(0, terms);
+    const ChudnovskySplit nextLeaf = chudnovskySplit(terms, terms + 1);
+
+    const Rational partial{split.t, split.q};
+    const Rational nextTerm{
+        split.p * nextLeaf.t,
+        split.q * nextLeaf.q};
+    const Rational nextPartial = partial + nextTerm;
+    const Rational lowerSum = nextPartial < partial ? nextPartial : partial;
+    const Rational upperSum = nextPartial < partial ? partial : nextPartial;
+
+    const std::size_t workBits = checkedAddSize(
+        precisionBits, 32, "Certified Pi precision is too large");
+    const RealInterval sum = RealInterval::fromRationalBounds(
+        lowerSum, upperSum, workBits);
+    const RealInterval root10005 = encloseSqrt(
+        Rational{BigInt{10005}}, workBits).interval;
+    const RealInterval scale = RealInterval::fromRational(
+        Rational{BigInt{426880}}, workBits);
+    const RealInterval numerator = multiply(root10005, scale, workBits);
+
+    return CertifiedConstantResult{
+        divide(numerator, sum, workBits).roundedOutward(precisionBits),
+        static_cast<std::size_t>(terms),
+        precisionBits};
+}
+
+[[maybe_unused]] CertifiedConstantResult enclosePiMachin(std::size_t precisionBits) {
     if (precisionBits == 0)
         throw std::invalid_argument("Certified Pi precision must be at least one bit");
 
@@ -159,6 +248,24 @@ CertifiedConstantResult enclosePi(std::size_t precisionBits) {
         precisionBits
     };
 }
+
+CertifiedConstantResult enclosePi(std::size_t precisionBits) {
+    /*
+    旧実装:
+        Pi = 16 atan(1/5) - 4 atan(1/239)
+        をRealIntervalの交代Taylor級数で直接評価していた。
+
+    証明が短くreferenceとして有用だが、数千～1万桁では各項の多倍長除算が支配的になる。
+    既定経路はbinary-splitting Chudnovskyへ変更し、旧Machin実装は
+    MMCAL_USE_MACHIN_PI指定時の比較/referenceとしてこのファイル内に残す。
+    */
+#ifdef MMCAL_USE_MACHIN_PI
+    return enclosePiMachin(precisionBits);
+#else
+    return enclosePiChudnovsky(precisionBits);
+#endif
+}
+
 
 std::optional<CertifiedConstantResult> encloseConstant(
     ConstantId id,

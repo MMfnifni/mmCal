@@ -146,8 +146,17 @@ CertifiedExponentialResult encloseExp(
     //   exp([a,b]) = [exp(a), exp(b)]
     // の包含を端点別のcertified計算だけで構成できる。
     const PointExpResult lower = encloseExpPoint(input.lower().toRational(), precisionBits);
-    const PointExpResult upper = encloseExpPoint(input.upper().toRational(), precisionBits);
 
+    /*
+    旧実装ではpoint intervalでもlower/upperを同じ値から二度Taylor評価していた。
+    N[E,n]やN[exp[1],n]はexact pointなので完全な重複計算になる。
+    pointなら一度のcertified enclosureをそのまま返し、区間入力だけ上端を別評価する。
+    */
+    if (input.isPoint())
+        return CertifiedExponentialResult{
+            lower.interval, lower.termsUsed, lower.squarings};
+
+    const PointExpResult upper = encloseExpPoint(input.upper().toRational(), precisionBits);
     return CertifiedExponentialResult{
         RealInterval{lower.interval.lower(), upper.interval.upper()},
         lower.termsUsed + upper.termsUsed,

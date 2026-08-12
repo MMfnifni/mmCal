@@ -54,6 +54,22 @@ private:
     [[nodiscard]] static unsigned digitValue(char ch) noexcept;
     [[nodiscard]] static char digitCharacter(unsigned value) noexcept;
 
+    // 巨大除算の内部block操作。公開APIへlimb表現を漏らさず、
+    // Burnikel-Ziegler再帰だけがlittle-endian limb列を直接扱う。
+    [[nodiscard]] static BigUInt limbSlice(
+        const BigUInt& value, std::size_t start, std::size_t count);
+    [[nodiscard]] static BigUInt concatenateLimbs(
+        const BigUInt& high, const BigUInt& low, std::size_t lowWidth);
+    [[nodiscard]] static BigUInt allOnes(std::size_t limbCount);
+    [[nodiscard]] static BigUIntDivModResult divideKnuth(
+        const BigUInt& dividend, const BigUInt& divisor);
+    [[nodiscard]] static BigUIntDivModResult divide2n1n(
+        const BigUInt& dividend, const BigUInt& divisor);
+    [[nodiscard]] static BigUIntDivModResult divide3n2n(
+        const BigUInt& dividend, const BigUInt& divisor);
+    [[nodiscard]] static BigUIntDivModResult divideBurnikelZiegler(
+        const BigUInt& dividend, const BigUInt& divisor);
+
     friend BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor);
 };
 
