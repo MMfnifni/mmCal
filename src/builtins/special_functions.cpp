@@ -201,6 +201,32 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return hold(id, arguments, registry);
 }
 
+
+[[nodiscard]] Expr evaluateFresnel(
+    BuiltinId id,
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const std::string_view name = id == BuiltinId::FresnelC ? names::fresnelC : names::fresnelS;
+    requireArity(arguments, 1, name);
+
+    Rational value;
+    if (!exactRealRational(arguments.front(), value))
+        return hold(id, arguments, registry);
+    if (value.isZero())
+        return integer(0);
+
+    // C(-x)=-C(x), S(-x)=-S(x)。entireな奇函数なのでbranch条件なしで安全に使える。
+    if (value.numerator().isNegative()) {
+        Expr positive = rationalExpr(-value);
+        return exact::negate(
+            Expr::call(registry.symbol(id), {std::move(positive)}),
+            registry, mathematics, angles);
+    }
+    return hold(id, arguments, registry);
+}
+
 [[nodiscard]] Expr evaluateBeta(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -357,6 +383,9 @@ Expr evaluateSpecialFunction(
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
         return evaluateErfLike(id, arguments, registry, mathematics, angles);
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS:
+        return evaluateFresnel(id, arguments, registry, mathematics, angles);
     case BuiltinId::Beta:
         return evaluateBeta(arguments, registry, mathematics, angles);
     case BuiltinId::BetaLog:

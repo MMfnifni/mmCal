@@ -128,6 +128,8 @@ enum class BuiltinId {
     LogGamma,
     Erf,
     Erfc,
+    FresnelC,
+    FresnelS,
     Beta,
     BetaLog,
     GeneralizedBinomial,

@@ -9,6 +9,7 @@
 #include "certified_trigonometry.hpp"
 #include "interval_math.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/rational.hpp"
 
 #include <algorithm>
@@ -217,6 +218,206 @@ struct StirlingPlan final {
     return divide(exactInterval(2, bits), rootPi, bits);
 }
 
+
+[[nodiscard]] Rational unsignedRational(std::size_t value) {
+    if (value > static_cast<std::size_t>(std::numeric_limits<std::uint64_t>::max()))
+        throw std::overflow_error("Fresnel series index is too large");
+    return Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(value))};
+}
+
+[[nodiscard]] RealInterval symmetricError(
+    const Rational& bound,
+    std::size_t precisionBits) {
+    return RealInterval::fromRationalBounds(-bound, bound, precisionBits);
+}
+
+[[nodiscard]] Rational intervalAbsUpper(
+    const RealInterval& interval,
+    std::size_t precisionBits) {
+    return absoluteInterval(interval, precisionBits).upper().toRational();
+}
+
+[[nodiscard]] RealInterval pointFresnelSeriesPositive(
+    const Rational& x,
+    bool cosineIntegral,
+    std::size_t precisionBits) {
+    // FresnelのMaclaurin級数は大きいxでは巨大な中間項が相殺する。
+    // 旧+48bit固定guardではx=4程度でも高精度時に包含幅が縮まらないため、
+    // x^2に比例したguardを追加して相殺分を明示的に吸収する。
+    const Rational x2ForGuard = x * x;
+    const BigInt guardQuotient = x2ForGuard.numerator() / x2ForGuard.denominator();
+    const auto guardMagnitude = numeric::tryToUint64(guardQuotient);
+    const std::size_t cancellationGuard = guardMagnitude
+        ? static_cast<std::size_t>(std::min<std::uint64_t>(*guardMagnitude, 100'000ULL)) * 4U
+        : 400'000U;
+    const std::size_t workBits = checkedAdd(
+        precisionBits,
+        checkedAdd(64, cancellationGuard, "Fresnel cancellation guard is too large"),
+        "Fresnel working precision is too large");
+    const RealInterval pi = enclosePi(workBits).interval;
+    const Rational piUpper = pi.upper().toRational();
+    const Rational x2 = x * x;
+    const Rational x4 = x2 * x2;
+    const Rational commonUpper = piUpper * piUpper * x4 / rational(4);
+    const RealInterval common = divide(
+        multiply(multiply(pi, pi, workBits), exactInterval(x4, workBits), workBits),
+        exactInterval(4, workBits), workBits);
+
+    RealInterval term = cosineIntegral
+        ? exactInterval(x, workBits)
+        : divide(
+            multiply(pi, exactInterval(x * x2, workBits), workBits),
+            exactInterval(6, workBits), workBits);
+    RealInterval sum = term;
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 12, "Fresnel target precision is too large"));
+
+    constexpr std::size_t maximumTerms = 1'000'000;
+    for (std::size_t n = 0; n < maximumTerms; ++n) {
+        const std::size_t numeratorIndex = cosineIntegral ? 4 * n + 1 : 4 * n + 3;
+        const std::size_t d0 = cosineIntegral ? 2 * n + 1 : 2 * n + 2;
+        const std::size_t d1 = cosineIntegral ? 2 * n + 2 : 2 * n + 3;
+        const std::size_t d2 = cosineIntegral ? 4 * n + 5 : 4 * n + 7;
+        const Rational ratioUpper = commonUpper * unsignedRational(numeratorIndex)
+            / (unsignedRational(d0) * unsignedRational(d1) * unsignedRational(d2));
+
+        // 現項より後の比が1未満に入れば以後は単調減少する。
+        // 最初の未加算項を等比級数で上から押さえ、Taylor剰余を明示的に区間へ足す。
+        if (ratioUpper < rational(1)) {
+            const Rational nextBound = intervalAbsUpper(term, workBits) * ratioUpper;
+            const Rational tailBound = nextBound / (rational(1) - ratioUpper);
+            if (tailBound <= target) {
+                sum = add(sum, symmetricError(tailBound, workBits), workBits);
+                return sum.roundedOutward(precisionBits);
+            }
+        }
+
+        const RealInterval ratio = divide(
+            multiply(common, exactInterval(unsignedRational(numeratorIndex), workBits), workBits),
+            exactInterval(unsignedRational(d0) * unsignedRational(d1) * unsignedRational(d2), workBits),
+            workBits);
+        term = negate(multiply(term, ratio, workBits));
+        sum = add(sum, term, workBits);
+    }
+    throw std::overflow_error("Fresnel series requires too many terms");
+}
+
+struct FresnelPair final {
+    RealInterval c;
+    RealInterval s;
+};
+
+[[nodiscard]] FresnelPair pointFresnelAsymptoticPositive(
+    const Rational& x,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 64, "Fresnel asymptotic precision is too large");
+    const RealInterval pi = enclosePi(workBits).interval;
+    const RealInterval xInterval = exactInterval(x, workBits);
+    const RealInterval x2 = exactInterval(x * x, workBits);
+    const RealInterval phase = divide(
+        multiply(pi, x2, workBits), exactInterval(2, workBits), workBits);
+    const RealInterval sine = encloseSinRadianInterval(phase, workBits).interval;
+    const RealInterval cosine = encloseCosRadianInterval(phase, workBits).interval;
+
+    RealInterval amplitude = divide(
+        exactInterval(1, workBits),
+        multiply(pi, xInterval, workBits), workBits);
+    RealInterval tailReal = exactInterval(0, workBits);
+    RealInterval tailImag = exactInterval(0, workBits);
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 14, "Fresnel asymptotic target precision is too large"));
+
+    constexpr std::size_t maximumTerms = 4096;
+    Rational remainderBound;
+    for (std::size_t m = 0; m < maximumTerms; ++m) {
+        RealInterval realPart = exactInterval(0, workBits);
+        RealInterval imagPart = exactInterval(0, workBits);
+        switch (m & 3U) {
+        case 0: // i A_m
+            realPart = negate(multiply(sine, amplitude, workBits));
+            imagPart = multiply(cosine, amplitude, workBits);
+            break;
+        case 1: // +A_m
+            realPart = multiply(cosine, amplitude, workBits);
+            imagPart = multiply(sine, amplitude, workBits);
+            break;
+        case 2: // -i A_m
+            realPart = multiply(sine, amplitude, workBits);
+            imagPart = negate(multiply(cosine, amplitude, workBits));
+            break;
+        case 3: // -A_m
+            realPart = negate(multiply(cosine, amplitude, workBits));
+            imagPart = negate(multiply(sine, amplitude, workBits));
+            break;
+        }
+        tailReal = add(tailReal, realPart, workBits);
+        tailImag = add(tailImag, imagPart, workBits);
+
+        // m+1項まで展開した部分積分公式の剰余は、最後に加えたA_m以下。
+        // x>=4ではA_mが必要精度まで減少する範囲で打ち切るため、発散域へ進まない。
+        remainderBound = intervalAbsUpper(amplitude, workBits);
+        if (remainderBound <= target) {
+            const RealInterval error = symmetricError(remainderBound, workBits);
+            const RealInterval half = exactInterval(rational(1, 2), workBits);
+            return FresnelPair{
+                add(subtract(half, tailReal, workBits), error, workBits).roundedOutward(precisionBits),
+                add(subtract(half, tailImag, workBits), error, workBits).roundedOutward(precisionBits)};
+        }
+
+        const Rational odd = unsignedRational(2 * m + 1);
+        const RealInterval scale = divide(
+            exactInterval(odd, workBits),
+            multiply(pi, x2, workBits), workBits);
+        const RealInterval nextAmplitude = multiply(amplitude, scale, workBits);
+        if (intervalAbsUpper(nextAmplitude, workBits) >= remainderBound)
+            break;
+        amplitude = nextAmplitude;
+    }
+    throw PrecisionInsufficient{"Fresnel asymptotic expansion did not reach the requested precision"};
+}
+
+[[nodiscard]] RealInterval pointFresnel(
+    Rational x,
+    bool cosineIntegral,
+    std::size_t precisionBits) {
+    if (x.isZero())
+        return exactInterval(0, precisionBits);
+    if (x.numerator().isNegative())
+        return negate(pointFresnel(-x, cosineIntegral, precisionBits));
+
+    if (x < rational(8))
+        return pointFresnelSeriesPositive(x, cosineIntegral, precisionBits);
+
+    // 漸近級数は固定xで任意精度まで収束する級数ではない。
+    // 要求精度に届かない場合は正則なMaclaurin級数へ戻し、速度のために保証を捨てない。
+    try {
+        const FresnelPair pair = pointFresnelAsymptoticPositive(x, precisionBits);
+        return cosineIntegral ? pair.c : pair.s;
+    }
+    catch (const PrecisionInsufficient&) {
+        return pointFresnelSeriesPositive(x, cosineIntegral, precisionBits);
+    }
+}
+
+[[nodiscard]] RealInterval encloseFresnelRealImpl(
+    const RealInterval& input,
+    bool cosineIntegral,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "Fresnel interval precision is too large");
+    const Rational lower = input.lower().toRational();
+    const Rational upper = input.upper().toRational();
+    RealInterval value = pointFresnel(lower, cosineIntegral, workBits);
+
+    // |C'(x)|=|cos(pi x^2/2)|<=1, |S'(x)|<=1。
+    // 入力が丸め区間でもlower endpointからの距離だけ膨らませれば真値を必ず包含できる。
+    const Rational width = upper - lower;
+    if (!width.isZero())
+        value = add(value, symmetricError(width, workBits), workBits);
+    return value.roundedOutward(precisionBits);
+}
+
 [[nodiscard]] RealInterval pointErfSeriesPositive(
     const Rational& x,
     std::size_t precisionBits) {
@@ -401,6 +602,23 @@ RealInterval encloseBetaLogPositive(
         add(encloseLogGammaPositive(a, workBits), encloseLogGammaPositive(b, workBits), workBits),
         encloseLogGammaPositive(sum, workBits), workBits)
         .roundedOutward(precisionBits);
+}
+
+
+RealInterval encloseFresnelCReal(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Fresnel precision must be at least one bit");
+    return encloseFresnelRealImpl(input, true, precisionBits);
+}
+
+RealInterval encloseFresnelSReal(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Fresnel precision must be at least one bit");
+    return encloseFresnelRealImpl(input, false, precisionBits);
 }
 
 RealInterval encloseBetaPositive(

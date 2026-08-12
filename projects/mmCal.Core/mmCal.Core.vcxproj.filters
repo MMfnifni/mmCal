@@ -207,6 +207,9 @@
     <ClInclude Include="..\..\src\mathematics\trigonometric_reduction.hpp">
       <Filter>src\mathematics</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\mathematics\trigonometric_polynomial.hpp">
+      <Filter>src\mathematics</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\mathematics\exact_algebra.hpp">
       <Filter>src\mathematics</Filter>
     </ClInclude>
@@ -510,6 +513,9 @@
       <Filter>src\mathematics</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\mathematics\trigonometric_reduction.cpp">
+      <Filter>src\mathematics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\mathematics\trigonometric_polynomial.cpp">
       <Filter>src\mathematics</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\mathematics\exact_algebra.cpp">

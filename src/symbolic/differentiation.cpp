@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -573,6 +574,24 @@ using numeric::Rational;
             return chain(
                 multiply(builtins, {std::move(scale), std::move(exponential)}),
                 a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS:
+        if (a.size() == 1) {
+            // Fresnel C/S の定義に現れる角度は常にRadian。
+            // sessionの既定角度単位へ依存させないため、内部sin/cosには明示Radを付ける。
+            Expr phase = divide(
+                builtins,
+                multiply(builtins, {pi(mathematics), power(builtins, a[0], integer(2))}),
+                integer(2));
+            Expr radianPhase = call(builtins, BuiltinId::UnitApplied, {
+                std::move(phase), Expr{std::string{"Rad"}}});
+            Expr kernel = call(
+                builtins,
+                definition->id == BuiltinId::FresnelC ? BuiltinId::Cos : BuiltinId::Sin,
+                {std::move(radianPhase)});
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
         }
         break;
     case BuiltinId::Exp:

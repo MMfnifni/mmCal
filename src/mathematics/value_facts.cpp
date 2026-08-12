@@ -666,6 +666,13 @@ using numeric::Number;
         if (argument(0).isProvablyReal())
             return ValueFacts{NumericDomain::Real, RealSign::Unknown, argument(0).exact, false};
         return ValueFacts{NumericDomain::Complex, RealSign::Unknown, argument(0).exact, false};
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS:
+        if (call.arguments.size() != 1 || !argument(0).isNumeric())
+            return {};
+        if (argument(0).isProvablyReal())
+            return ValueFacts{NumericDomain::Real, RealSign::Unknown, argument(0).exact, false};
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown, argument(0).exact, false};
 
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:

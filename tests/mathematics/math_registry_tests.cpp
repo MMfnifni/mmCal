@@ -181,6 +181,8 @@ void runMathRegistryTests(TestRunner& tests) {
     const auto* logGamma = mathematics.findFunction(mathematics::FunctionId::LogGamma);
     const auto* erf = mathematics.findFunction(mathematics::FunctionId::Erf);
     const auto* erfc = mathematics.findFunction(mathematics::FunctionId::Erfc);
+    const auto* fresnelC = mathematics.findFunction(mathematics::FunctionId::FresnelC);
+    const auto* fresnelS = mathematics.findFunction(mathematics::FunctionId::FresnelS);
     const auto* beta = mathematics.findFunction(mathematics::FunctionId::Beta);
     const auto* betaLog = mathematics.findFunction(mathematics::FunctionId::BetaLog);
     tests.expect(gamma
@@ -195,6 +197,12 @@ void runMathRegistryTests(TestRunner& tests) {
         && erf->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving
         && erfc && erfc->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving,
         "MathRegistry: erf/erfc are entire complex functions with real-axis preservation");
+    tests.expect(fresnelC && fresnelS
+        && fresnelC->parity == mathematics::FunctionParity::Odd
+        && fresnelS->parity == mathematics::FunctionParity::Odd
+        && fresnelC->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving
+        && fresnelS->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving,
+        "MathRegistry: Fresnel C/S are entire odd functions with real-axis preservation");
     tests.expect(beta && beta->arity == 2 && beta->maximumArity == 2
         && beta->domainRule == mathematics::FunctionDomainRule::RealPairToReal
         && beta->definednessRule == mathematics::FunctionDefinednessRule::ArgumentsPositiveReal

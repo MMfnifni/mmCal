@@ -24,6 +24,16 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+// Fresnel C(x)=integral_0^x cos(Pi t^2/2)dt, S(x)=integral_0^x sin(Pi t^2/2)dt。
+// 実軸ではTaylor/部分積分漸近展開を切り替え、剰余を明示的に包含する。
+[[nodiscard]] RealInterval encloseFresnelCReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
+[[nodiscard]] RealInterval encloseFresnelSReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
 // a,b>0 に対するBetaとlog Beta。Gammaの比ではなくlog-domainで評価する。
 [[nodiscard]] RealInterval encloseBetaPositive(
     const RealInterval& a,

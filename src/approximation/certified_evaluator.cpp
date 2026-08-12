@@ -701,7 +701,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
     case BuiltinId::Erf:
-    case BuiltinId::Erfc: {
+    case BuiltinId::Erfc:
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS: {
         if (call.arguments.size() != 1)
             return std::nullopt;
         const auto value = encloseArgument(0);
@@ -718,6 +720,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return CertifiedValue{encloseErfReal(value->asReal(), precisionBits)};
         case BuiltinId::Erfc:
             return CertifiedValue{encloseErfcReal(value->asReal(), precisionBits)};
+        case BuiltinId::FresnelC:
+            return CertifiedValue{encloseFresnelCReal(value->asReal(), precisionBits)};
+        case BuiltinId::FresnelS:
+            return CertifiedValue{encloseFresnelSReal(value->asReal(), precisionBits)};
         default:
             return std::nullopt;
         }

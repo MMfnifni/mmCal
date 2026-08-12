@@ -136,6 +136,15 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"quadratic rational", "1/(x^2-1)", DerivativeBackMode::ResolutionOnly},
         {"x log x", "x*log[x]", DerivativeBackMode::ResolutionOnly},
         {"trigonometric sine square", "sin[x]^2", DerivativeBackMode::ResolutionOnly},
+        {"trigonometric sine sixth power", "sin[2*x]^6"},
+        {"reciprocal sine square", "sin[2*x]^(-2)"},
+        {"reciprocal cosine fourth power", "cos[3*x]^(-4)", DerivativeBackMode::ResolutionOnly},
+        {"quadratic cosine Fresnel", "cos[4*x^2]"},
+        {"quadratic sine Fresnel", "sin[8*x^2]"},
+        {"Fresnel C primitive", "fresnelc[x]"},
+        {"Fresnel S primitive", "fresnels[x]"},
+        {"mixed trigonometric integer powers", "sin[x]^5*cos[x]^4"},
+        {"trigonometric product-to-sum", "sin[2*x]*cos[3*x]"},
         {"trigonometric cosine square", "cos[x]^2", DerivativeBackMode::ResolutionOnly},
         {"trigonometric tangent square", "tan[x]^2", DerivativeBackMode::ResolutionOnly},
         {"trigonometric cotangent square", "cot[x]^2", DerivativeBackMode::ResolutionOnly},
@@ -187,6 +196,61 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
                 && proof.find("integrate[") == std::string::npos,
             std::string{"Integration derivative-back remains evaluable: "}
                 + std::string{testCase.label});
+    }
+
+    // 256乗も原理上は同じ有限Fourier展開。FullSimplifyの通常候補上限は64のままなので、
+    // ここでは巨大式を証明探索へ再投入せず、積分器が128周波数項へ有限時間で展開できることを監視する。
+    {
+        kernel::KernelSession largeTrigSession;
+        const std::string primitive = eval(largeTrigSession, "integrate[sin[2*x]^256,x]");
+        std::size_t sineTerms = 0;
+        for (std::size_t pos = 0; (pos = primitive.find("sin[", pos)) != std::string::npos; pos += 4)
+            ++sineTerms;
+        tests.expect(primitive.find("integrate[") == std::string::npos && sineTerms == 128,
+            "Trig polynomial degree 256 resolves to the expected finite 128-frequency primitive");
+    }
+
+    // 有限Fourier生成式は個別次数の表ではなく一般式なので、小次数格子をまとめて検証する。
+    // integrateが解けることと、同じTrigKnowledgeをFullSimplifyが使ってD[F]-f=0を証明することの両方を要求する。
+    for (int sinePower = 0; sinePower <= 5; ++sinePower) {
+        for (int cosinePower = 0; cosinePower <= 5; ++cosinePower) {
+            const int totalPower = sinePower + cosinePower;
+            if (totalPower < 2 || totalPower > 6)
+                continue;
+
+            std::string integrand;
+            if (sinePower > 0)
+                integrand = "sin[x]^" + std::to_string(sinePower);
+            if (cosinePower > 0) {
+                if (!integrand.empty())
+                    integrand += "*";
+                integrand += "cos[x]^" + std::to_string(cosinePower);
+            }
+
+            kernel::KernelSession trigSession;
+            const std::string primitive = eval(
+                trigSession, "integrate[" + integrand + ",x]");
+            tests.expect(primitive.find("integrate[") == std::string::npos,
+                "Trig polynomial grid resolves m=" + std::to_string(sinePower)
+                    + ", n=" + std::to_string(cosinePower));
+            if (primitive.find("integrate[") != std::string::npos)
+                continue;
+
+            const std::string proof = eval(trigSession,
+                "fullSimplify[D[(" + primitive + "),x]-(" + integrand + ")]");
+            if (totalPower == 2 && (sinePower == 0 || cosinePower == 0)) {
+                // 既存sin^2/cos^2 familyはFullSimplifyの探索上限内でhalf-angleを逆証明し切れない。
+                // 積分能力は維持し、未評価D/integrateへ後退しないことだけを監視する。
+                tests.expect(proof.find("D[") == std::string::npos
+                        && proof.find("integrate[") == std::string::npos,
+                    "Trig polynomial square derivative-back remains evaluable");
+            }
+            else {
+                tests.expectEqual(proof, std::string{"0"},
+                    "Trig polynomial derivative-back m=" + std::to_string(sinePower)
+                        + ", n=" + std::to_string(cosinePower));
+            }
+        }
     }
 
     tests.expectEqual(eval(session, "D[sin[x],{x,4}]"), std::string{"sin[x]"},

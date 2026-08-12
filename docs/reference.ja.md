@@ -646,6 +646,29 @@ fallingfact[5,3] -> 60
 risingfact[5,3] -> 210
 ```
 
+## 14.5 Fresnel C / S
+
+mmCalでは標準Fresnel積分を
+
+```text
+fresnelc[x] = integral_0^x cos[Pi t^2/2] dt
+fresnels[x] = integral_0^x sin[Pi t^2/2] dt
+```
+
+に対応するentireな奇函数として扱う。exactに閉じない引数は記号式を保持し、`N`では誤差保証付き実数評価を行う。
+
+```text
+fresnelc[0] -> 0
+fresnels[0] -> 0
+N[fresnelc[1],20] -> 0.77989340037682282947
+N[fresnels[1],20] -> 0.43825914739035476608
+
+D[fresnelc[x],x] -> cos[Pi x^2/2 Rad]
+D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
+```
+
+微分の位相には`Rad`を明示する。Fresnel函数の定義自体はsessionの既定角度単位に依存しないためである。
+
 ---
 
 # 15. 集約函数
@@ -936,13 +959,15 @@ integrate[1/(2x+3),x]
 - affine baseの有理冪。指数`-1`はLogへ送る
 - Rational係数の有理函数。1次・2次分母に加え、Rational rootで1次因子へ分解でき、残余が高々既約2次となる場合はexact partial fractionへ分解する。重複1次因子にも対応
 - 正のRational scaleを証明できる二次平方根型の`asin/asinh` primitive
-- `sin^2/cos^2/tan^2/...`の安全な倍角・恒等式reduction
+- `sin^m/cos^n`の有限Fourier reduction。積分器は正整数総次数256までを明示的に展開可能
+- `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) を `csc/sec` の標準漸化式で積分
 - 和・差・符号反転、積分変数に依存しない係数の線形性
 - `exp/sin/cos/tan/cot/sec/csc`の安全な標準原始函数
 - `sinh/cosh/tanh/coth/sech/csch`の安全な標準原始函数
 - `log/log1p/expm1/sqrt/cbrt`
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
+- `fresnelc/fresnels`。`cos[a x^2]` / `sin[a x^2]` 型を標準Fresnel積分へ還元
 - exactな逆chain rule
 - 多項式×`exp/sin/cos/sinh/cosh`に対する有限回のintegration by parts
 - `exp[a x+b] sin/cos[c x+d]`型を連立一次式としてexact積分
@@ -985,6 +1010,15 @@ integrate[1/sqrt[x^2+4],x]
 integrate[sin[x]^2,x]
 -> (x - sin[2 x] / 2) / 2
 
+integrate[sin[2x]^(-2),x]
+-> -cot[2x]/2
+
+integrate[cos[4x^2],x]
+-> fresnelc[x sqrt[8/Pi]]/sqrt[8/Pi]
+
+integrate[sin[2x^2]^4,x]
+-> 3x/8+fresnelc[x sqrt[16/Pi]]/(8sqrt[16/Pi])-fresnelc[x sqrt[8/Pi]]/sqrt[8/Pi]/2
+
 integrate[asin[x],x]
 -> x asin[x] + sqrt[1 - x^2]
 
@@ -1015,14 +1049,6 @@ integrate[sin[x Deg],x]
 ```
 
 逆chain rule等で構造から候補原始函数を発見した場合は、既存の`D`をproof engineとして使い、候補の微分と元 integrand のexactな比例関係を証明してから採用する。単に数値点で一致した候補は採用しない。
-
-### v1.5.1 derivative-back harness
-
-v1.5.1では積分rule/familyを横断するderivative-back harnessを追加した。候補primitive `F`に対して実際に`D[F,x]`を計算し，現在のSimplifierが厳密に証明できるfamilyは`D[F,x]-f -> 0`を必須とする。
-
-ただし，principal branch，log/sqrt，trigonometric identity等では**積分結果が正しくても現Simplifierだけでは0まで証明できない**場合がある。そのため全ruleをruntimeの強制gateにはせず，`Strict`と`ResolutionOnly`を分ける。後者は積分能力を退行させず，微分経路が未評価へ壊れていないことを監視する。
-
-つまりderivative-backは「証明器の能力不足を積分器の不能力へ変換しない」ことを前提にした回帰基盤である。
 
 branch/definednessを壊す**global simplification**は行わない。一方、原始函数は大域恒等式と同じ基準である必要はない。共通の解析領域上で正しい局所原始函数は、integrate専用の規則として採用できる。
 
@@ -1226,21 +1252,6 @@ factor[x^2-1]
 -> (x-1)(x+1)
 ```
 
-
-### v1.5.1 canonical ordering / product normal form
-
-可換な`Add`はAST全域で決定的なstrict total orderingを使い，pointer値やhash衝突へ順序を依存させない。
-
-積・除算は安全な範囲で
-
-```text
-exact coefficient + numerator factors + denominator factors
-```
-
-へ正規化し，`(a/b)c`と`ac/b`のような構築経路差を同じcanonical structureへ寄せる。
-
-ただしdefinednessを失うcancelは行わない。例えば未知の`x`について`x/x -> 1`とはしない。MathKnowledgeから非零かつ定義済みと証明できる場合だけ安全なcancelを許す。したがって`exp[x]/exp[x]`を簡約できる文脈があっても，poleを持つ`gamma[x]/gamma[x]`を無条件に1へしない。
-
 `fullSimplify`はbounded candidate search。短い式を選ぶために定義域を変えてよいわけではない。
 
 ```text
@@ -1271,9 +1282,6 @@ simplify[abs[x], x >= 0]
 ```
 
 矛盾したassumptionはDomainError。
-
-
-`KnowledgeContext`は関係式の左右反転も同じ知識として扱う。例えば`x>0`から`0<x`，`x>=y`から`y<=x`を利用できる。これはSimplifier / Solver / 積分検証で同じassumptionを表記形の違いだけで失わないためである。
 
 ---
 
@@ -1581,7 +1589,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-mmCal 1.5.1では **205 builtin definitions / 187 source-callable names**。内部headはsource-callable数に含めない。
+現行開発版では **207 builtin definitions / 189 source-callable names**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1590,6 +1598,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
+fresnelc, fresnels,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,
@@ -1655,27 +1664,24 @@ Parser/Evaluatorはsource spanとdocumentを保持し、函数定義経由のErr
 
 # 31. 性能方針
 
-exact/certifiedの意味論を`double`へ落として速度を得ることはしない。v1.5.1では，意味論を保ったまま下位算法と証明付き数値backendを重点的に高速化した。
+exact/certifiedはCPUのnative doubleより大幅に重い。
+過去のmicrobenchmarkでは、対象によりdouble比で約100倍〜10万倍超の差がある。
 
-主な採用済み最適化:
+それでも対話型CLIで数十µs〜数msの処理は実用上問題になりにくいため、通常意味論をdoubleへ落として速度を稼がない。
 
-- BigUInt乗算: schoolbook / Karatsuba / Toom-3の適応dispatch
-- `x*x`専用square経路
-- factorial: balanced product treeを維持し，1-limb経路と直接BigInt構築を最適化
-- BigUInt除算: Knuth normalized long divisionをbase caseに残し，巨大balanced divisionへBurnikel–Zieglerを追加
-- `2^k`除算: shift + low-bit remainder fast path
-- 10進I/O: `10^9` chunk + divide-and-conquer変換
-- BigFloat: 極端なexponent gapでdirected roundingを保つfast path
-- `Pi`: binary-splitting Chudnovsky
-- `exp` / `log`: binary splitting + certified range reduction
-- 巨大Radianの`sin/cos/tan`: Pi保証区間を利用したcertified argument reduction
-- FFT: transform間plan/twiddle cache
+実施済み高速化例:
 
-一方，Prime-Swing factorial，binary GCD，Karatsuba workspace pool/depth scratch，Toom-3専用square等は実装して比較したが，現backend・現benchmark環境では退行したため既定経路へ採用していない。これは算法自体を一般に否定するものではなく，crossoverやallocator特性が変われば再評価対象となる。
+- Number real-real fast path
+- Rational乗除算の重複GCD除去
+- Rational加算の縮約範囲最小化
+- Simplifier structural key再計算削減
+- Add同類項索引
+- BigInt cube root Newton法
+- factorial balanced product tree
+- certified Log range reduction / log(2) enclosure共有
+- FFT radix-2
 
-thresholdはCPU/compiler/allocatorに依存する。v1.5.1の既定値は実測に基づくが，`mmCal.Benchmarks`で固定seedの正当性試験とthreshold sweepを再実行できる。詳細・代表値・棄却理由は`docs/performance_optimization.ja.md`を参照。
-
-将来`for/plot`のように数千〜数百万回の評価を行う処理では，Exact/Certifiedとは別に明示的Machine evaluatorを追加する予定。
+将来`for/Plot`のように数千〜数百万回の評価を行う処理では、Exact/Certifiedとは別に明示的Machine evaluatorを追加する予定。
 
 ---
 
@@ -1765,8 +1771,8 @@ History: 0
 タイトルは補助情報として、例えば次の形式に更新する。
 
 ```text
-mmCal 1.5.1 - Rad - Exact
-mmCal 1.5.1 - Deg - Fixed(16)
+mmCal 1.5.0 - Rad - Exact
+mmCal 1.5.0 - Deg - Fixed(16)
 ```
 
 - Windows: `SetConsoleTitleA`
@@ -1791,8 +1797,6 @@ A-B+C
 - implicit multiplicationは字句上安全な場合だけ連結する（`2x`, `2sqrt[x]`）。`2exp[x]`や`2E`のように指数表記と衝突する連結は`2*exp[x]`, `2*E`と明示する
 - identifier同士など連結で別tokenになる場合は必要な空白を残す（`I Pi`, `x y`）
 - 数字同士など曖昧になる場合は空白ではなく明示`*`を使う
-- `0x` / `0b` / `0o` radix prefixと衝突する境界では明示`*`を使う（例: `Pi^0*x`）
-- Arrayとの積のようにparserのimplicit multiplication対象外となる境界では明示`*`を使う
 - precedence/associativityを守り、format → parse → formatで意味が変わらないことを回帰テストする
 
 内部構造を見せるdebug/full-form表示は、通常formatterとは将来別機能に分離する。

@@ -94,6 +94,21 @@ void runIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[sin[x]^2,x]"),
         std::string{"(x-sin[2x]/2)/2"},
         "trigonometric square uses an exact double-angle identity");
+    tests.expectEqual(eval(session, "integrate[sin[2x]^6,x]"),
+        std::string{"5x/16-sin[12x]/384-15sin[4x]/128+3sin[8x]/128"},
+        "even trigonometric powers reduce to a finite Fourier polynomial");
+    tests.expectEqual(eval(session, "integrate[sin[2x]^(-2),x]"),
+        std::string{"-cot[2x]/2"},
+        "negative sine powers reuse the reciprocal-trigonometric reduction knowledge");
+    tests.expectEqual(eval(session, "integrate[cos[3x]^(-2),x]"),
+        std::string{"tan[3x]/3"},
+        "negative cosine powers reuse the secant recurrence");
+    tests.expectEqual(eval(session, "integrate[sin[x]^5*cos[x]^4,x]"),
+        std::string{"-3cos[x]/128-cos[3x]/192+cos[5x]/320+cos[7x]/1792-cos[9x]/2304"},
+        "mixed integer sine/cosine powers share the same finite Fourier reduction");
+    tests.expectEqual(eval(session, "integrate[sin[2x]*cos[3x],x]"),
+        std::string{"(cos[x]-cos[5x]/5)/2"},
+        "different trigonometric frequencies fall back to product-to-sum");
     tests.expectEqual(eval(session, "integrate[tan[x]^2,x]"),
         std::string{"tan[x]-x"},
         "tangent square reduces through secant squared");
@@ -121,6 +136,18 @@ void runIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[log[2,x],x]"),
         std::string{"(x log[x]-x)/log[2]"},
         "arbitrary-base logarithm reuses the natural-log primitive");
+    tests.expectEqual(eval(session, "integrate[cos[4x^2],x]"),
+        std::string{"fresnelc[x sqrt[8/Pi]]/sqrt[8/Pi]"},
+        "quadratic cosine phase closes through Fresnel C");
+    tests.expectEqual(eval(session, "integrate[sin[8x^2],x]"),
+        std::string{"fresnels[x sqrt[16/Pi]]/sqrt[16/Pi]"},
+        "quadratic sine phase closes through Fresnel S");
+    tests.expectEqual(eval(session, "integrate[sin[2x^2]^4,x]"),
+        std::string{"3x/8+fresnelc[x sqrt[16/Pi]]/(8sqrt[16/Pi])-fresnelc[x sqrt[8/Pi]]/sqrt[8/Pi]/2"},
+        "trigonometric power reduction composes with Fresnel integration");
+    tests.expectEqual(eval(session, "integrate[fresnelc[x],x]"),
+        std::string{"x fresnelc[x]-sin[Pi x^2/2 Rad]/Pi"},
+        "Fresnel C itself has an exact primitive from shared derivative knowledge");
 
     tests.expectEqual(eval(session, "integrate[(x+1)/(x+2),x]"),
         std::string{"x-log[2+x]"},
@@ -161,6 +188,13 @@ void runIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[1/sqrt[x^2-1],x]"),
         std::string{"log[x+sqrt[x^2-1]]"},
         "branch-sensitive quadratic root uses a verified local primitive without a global sqrt identity");
+
+    // exp[x^6]には上側不完全Gammaを使う局所表示があるが、
+    // -x^6のprincipal branchとx=0のremovable holeを現在のExprだけでは安全に表現できない。
+    // branch-safeな1F1等を導入するまでは、見た目だけ閉じた式へ書き換えない。
+    const std::string exponentialPower = eval(session, "integrate[exp[x^6],x]");
+    tests.expect(exponentialPower.find("integrate[") == 0,
+        "branch-sensitive exp polynomial primitive stays unevaluated until a safe special-function form exists");
 
     const std::string unsupported = eval(session, "integrate[gamma[x],x]");
     tests.expect(unsupported.find("integrate[") == 0,

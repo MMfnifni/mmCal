@@ -70,6 +70,28 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"-2*exp[-x^2]/sqrt[Pi]"},
         "erfc derivative is symbolic and exact");
 
+    tests.expectEqual(eval(session, "fresnelc[0]"), std::string{"0"},
+        "Fresnel C is exact at zero");
+    tests.expectEqual(eval(session, "fresnels[0]"), std::string{"0"},
+        "Fresnel S is exact at zero");
+    tests.expectEqual(eval(session, "fresnelc[-1]"), std::string{"-fresnelc[1]"},
+        "Fresnel C uses exact odd parity");
+    tests.expectEqual(eval(session, "N[fresnelc[1],20]"),
+        std::string{"0.77989340037682282947"},
+        "Fresnel C has a certified real numerical backend");
+    tests.expectEqual(eval(session, "N[fresnels[1],20]"),
+        std::string{"0.43825914739035476608"},
+        "Fresnel S has a certified real numerical backend");
+    tests.expectEqual(eval(session, "N[fresnelc[10],20]"),
+        std::string{"0.49989869420551572361"},
+        "Fresnel C switches safely to the large-argument backend");
+    tests.expectEqual(eval(session, "D[fresnelc[x],x]"),
+        std::string{"cos[Pi x^2/2 Rad]"},
+        "Fresnel C derivative is angle-mode independent and explicitly radian");
+    tests.expectEqual(eval(session, "D[fresnels[x],x]"),
+        std::string{"sin[Pi x^2/2 Rad]"},
+        "Fresnel S derivative is angle-mode independent and explicitly radian");
+
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},
         "Beta at positive integers is exact");
     tests.expectEqual(eval(session, "beta[1/2,1/2]"), std::string{"Pi"},

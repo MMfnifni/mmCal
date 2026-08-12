@@ -24,3 +24,11 @@ risingfact[5,3]=>210
 
 gamma[0]=>DomainError
 beta[-1,2]=>DomainError
+
+# Fresnel integrals
+fresnelc[0]==>0
+fresnels[0]==>0
+D[fresnelc[x],x]==>cos[Pi x^2/2 Rad]
+D[fresnels[x],x]==>sin[Pi x^2/2 Rad]
+N[fresnelc[1],20]=>0.77989340037682282947
+N[fresnels[1],20]=>0.43825914739035476608

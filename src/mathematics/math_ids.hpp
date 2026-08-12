@@ -33,6 +33,8 @@ enum class FunctionId {
     LogGamma,
     Erf,
     Erfc,
+    FresnelC,
+    FresnelS,
     Beta,
     BetaLog,
     Sqrt,

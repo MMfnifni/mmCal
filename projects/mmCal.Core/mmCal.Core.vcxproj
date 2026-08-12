@@ -159,6 +159,7 @@
     <ClInclude Include="..\..\src\mathematics\exact_trigonometry.hpp" />
     <ClInclude Include="..\..\src\mathematics\exact_hyperbolic.hpp" />
     <ClInclude Include="..\..\src\mathematics\trigonometric_reduction.hpp" />
+    <ClInclude Include="..\..\src\mathematics\trigonometric_polynomial.hpp" />
     <ClInclude Include="..\..\src\mathematics\exact_algebra.hpp" />
     <ClInclude Include="..\..\src\numeric\rounding_mode.hpp" />
     <ClInclude Include="..\..\src\numeric\big_float.hpp" />
@@ -262,6 +263,7 @@
     <ClCompile Include="..\..\src\mathematics\exact_trigonometry.cpp" />
     <ClCompile Include="..\..\src\mathematics\exact_hyperbolic.cpp" />
     <ClCompile Include="..\..\src\mathematics\trigonometric_reduction.cpp" />
+    <ClCompile Include="..\..\src\mathematics\trigonometric_polynomial.cpp" />
     <ClCompile Include="..\..\src\mathematics\exact_algebra.cpp" />
     <ClCompile Include="..\..\src\numeric\big_float.cpp" />
     <ClCompile Include="..\..\src\approximation\precision.cpp" />

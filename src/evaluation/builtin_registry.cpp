@@ -191,6 +191,8 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::logGamma, BuiltinId::LogGamma, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::erf, BuiltinId::Erf, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::erfc, BuiltinId::Erfc, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::fresnelC, BuiltinId::FresnelC, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::fresnelS, BuiltinId::FresnelS, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::beta, BuiltinId::Beta, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::betaLog, BuiltinId::BetaLog, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::generalizedBinomial, BuiltinId::GeneralizedBinomial, 2, ArgumentEvaluation::All, true),

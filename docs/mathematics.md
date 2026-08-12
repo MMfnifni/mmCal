@@ -35,8 +35,6 @@ log[-1]  -> I Pi
 
 `:fix`はこれとは別であり、正確値を画面上だけ指定桁数以下の小数へ丸めて表示する。末尾の不要な0は表示時に省略する。
 
-性能最適化でもこの原則を崩さない。例えば巨大Radianの`sin/cos/tan`はmachine `fmod`へ落とさず，Piの保証区間から象限を一意に証明してargument reductionする。`Pi`，`exp`，`log`も高速化のために非保証のmachine近似へ置き換えず，binary splittingやrange reductionをRealIntervalの包含保証と組み合わせる。
-
 ## 定義域と未解決
 
 数学的に未定義なものをNaNへ流して継続しない。原則としてDomainErrorを返す。
@@ -48,6 +46,8 @@ algorithmが完全な結果を証明できない場合は、誤った簡約・�
 `D`は記号微分規則を実装する。`integrate`は既知規則、部分分数、置換候補、部分積分等を利用し、一部の候補を`D`で検証する。不定積分は積分定数を表示せず原始函数の代表元を返す。
 
 局所的には正しい原始函数を、global simplificationの恒等式とは分離して扱う。例えば`1/sqrt[x^2-1]`の原始函数を返すために、危険な平方根因数分解をSimplifierへ一般規則として追加しない。
+
+整数冪の`sin[u]^m cos[u]^n`は、個別の積分表ではなく大域的に成立する有限Fourier恒等式へ厳密変換する。通常のSimplifierでは式膨張を避け、`integrate`のfallbackと`fullSimplify`のbounded candidateから共有する。これにより`integrate[sin[2x]^6,x]`のような高次三角冪を扱いながら、derivative-backでは必要な場合だけ同じ恒等式を展開して0を証明できる。
 
 `limit`は片側仮定、既知極限、必要に応じたl'Hopitalを利用する。improper integralは端点極限へ接続するが、内部poleがないことを確認できない場合は推測しない。
 

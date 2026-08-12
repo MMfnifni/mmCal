@@ -129,6 +129,14 @@ MathRegistry MathRegistry::defaults(
     registry.addFunction(evaluation::BuiltinId::Erfc, FunctionId::Erfc,
         FunctionParity::Neither, FunctionDomainRule::ComplexToComplexRealPreserving,
         FunctionBranchRule::SingleValued, std::nullopt);
+    // Fresnel C/S は entire で、実軸上では実数値を取り、どちらも奇函数。
+    // 積分器と微分器が同じ函数identityを共有できるようMathRegistryへ登録する。
+    registry.addFunction(evaluation::BuiltinId::FresnelC, FunctionId::FresnelC,
+        FunctionParity::Odd, FunctionDomainRule::ComplexToComplexRealPreserving,
+        FunctionBranchRule::SingleValued, std::nullopt);
+    registry.addFunction(evaluation::BuiltinId::FresnelS, FunctionId::FresnelS,
+        FunctionParity::Odd, FunctionDomainRule::ComplexToComplexRealPreserving,
+        FunctionBranchRule::SingleValued, std::nullopt);
     registry.addFunction(evaluation::BuiltinId::Beta, FunctionId::Beta,
         FunctionParity::Neither, FunctionDomainRule::RealPairToReal,
         FunctionBranchRule::SingleValued, std::nullopt,

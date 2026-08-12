@@ -524,6 +524,23 @@ void collectProductParts(
             && proveNonZero(arguments[1], knowledge) == TruthValue::True)
             return arguments[0] == arguments[1] ? integerExpr(1) : integerExpr(0);
 
+        // 分子積に分母そのものが含まれ、その因子が非零と証明できる場合だけ約分する。
+        // 旧canonicalDivideはdomain hole保持のためsymbolic因子を一切cancelしなかったが、
+        // Pi*x/PiのようにKnowledgeが非零を証明できるケースまで残していた。
+        if (isHead(arguments[0], context.builtins, BuiltinId::Multiply)
+            && proveNonZero(arguments[1], knowledge) == TruthValue::True) {
+            std::vector<Expr> factors = arguments[0].asCall().arguments;
+            const auto match = std::find(factors.begin(), factors.end(), arguments[1]);
+            if (match != factors.end()) {
+                factors.erase(match);
+                if (factors.empty())
+                    return integerExpr(1);
+                if (factors.size() == 1)
+                    return factors.front();
+                return Expr::call(context.builtins.symbol(BuiltinId::Multiply), std::move(factors));
+            }
+        }
+
         // 正のexact Rationalの平方根を分母に持つ場合だけ共役化する。
         // c/sqrt[r] = c sqrt[r]/r (r>0) はprincipal branchでも安全で、atan[1/sqrt[3]] 等を既存のexact inverse-trig知識へ正規化できる。
         if (const auto numerator = exactRealRational(arguments[0]); numerator
@@ -1081,6 +1098,16 @@ void collectProductParts(
             return Expr::call(context.builtins.symbol(BuiltinId::Subtract), {
                 integerExpr(2),
                 Expr::call(context.builtins.symbol(BuiltinId::Erfc),
+                    {arguments[0].asCall().arguments.front()})});
+        return expression;
+
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS:
+        if (arguments.size() == 1
+            && isHead(arguments[0], context.builtins, BuiltinId::Negate)
+            && arguments[0].asCall().arguments.size() == 1)
+            return Expr::call(context.builtins.symbol(BuiltinId::Negate), {
+                Expr::call(context.builtins.symbol(definition->id),
                     {arguments[0].asCall().arguments.front()})});
         return expression;
 

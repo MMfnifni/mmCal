@@ -1076,6 +1076,8 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::LogGamma:
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
+    case BuiltinId::FresnelC:
+    case BuiltinId::FresnelS:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:
