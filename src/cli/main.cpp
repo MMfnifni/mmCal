@@ -387,7 +387,7 @@ int main(int argc, char* argv[]) {
                               << formatting::formatExpr(*diagnostic.previousExpression) << ')';
                 std::cout << '\n';
             }
-            std::cout << "\nOut[" << inputNumber << "]> "
+            std::cout << "Out[" << inputNumber << "]> "
                       << formatForDisplay(result, session, displaySettings) << '\n';
             updateConsoleTitle(session, displaySettings);
         }

@@ -1015,6 +1015,12 @@ integrate[sin[x Deg],x]
 
 When a candidate antiderivative is discovered structurally, for example through an inverse-chain rule, the existing `D` implementation is used as a proof engine. The candidate is accepted only after proving an exact proportional relationship between its derivative and the original integrand. Agreement at a finite set of numerical sample points is not sufficient.
 
+### v1.5.1 derivative-back harness
+
+v1.5.1 adds a derivative-back harness across integration rule families. For a primitive candidate `F`, it actually evaluates `D[F,x]`; families that the current Simplifier can prove exactly are required to satisfy `D[F,x]-f -> 0`.
+
+This is deliberately not a universal runtime rejection gate. Principal branches, logarithms/square roots, and trigonometric identities can produce correct primitives that the current Simplifier cannot reduce all the way to zero. Such cases are tracked separately as `ResolutionOnly`, so stronger verification does not reduce integration capability merely because the proof engine is incomplete.
+
 **Global simplifications** that would violate branch or definedness semantics are not performed. An antiderivative, however, need not obey the same standard as a global algebraic identity. A locally valid primitive on a common analytic region may be accepted as an integration-specific rule.
 
 For example, the principal-square-root integral
@@ -1217,6 +1223,14 @@ factor[x^2-1]
 -> (x-1)(x+1)
 ```
 
+### v1.5.1 canonical ordering / product normal form
+
+Commutative `Add` uses a deterministic strict total order over the full AST rather than relying on pointer values or incomplete structural keys.
+
+Products and divisions are normalized, where safe, into an exact coefficient plus numerator and denominator factor lists. This makes construction-path variants such as `(a/b)c` and `ac/b` converge to the same canonical structure.
+
+Definedness is preserved: unknown `x` is not simplified from `x/x` to `1`. Cancellation is allowed only when nonzero and definedness facts are proven. Thus contexts may reduce `exp[x]/exp[x]`, while `gamma[x]/gamma[x]` is not blindly reduced across Gamma poles.
+
 `fullSimplify` performs bounded candidate search. A shorter expression is not preferred if obtaining it changes the domain.
 
 ```text
@@ -1247,6 +1261,8 @@ simplify[abs[x], x >= 0]
 ```
 
 Contradictory assumptions produce DomainError.
+
+`KnowledgeContext` also recognizes reversed relation forms as the same fact: for example `x>0` can answer `0<x`, and `x>=y` can answer `y<=x`. This prevents Simplifier, Solver, and integration verification from losing an available assumption merely because the operands were reversed.
 
 ---
 
@@ -1554,7 +1570,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-mmCal 1.5.0 contains **205 built-in definitions / 187 source-callable names**. Internal heads are not included in the source-callable count.
+mmCal 1.5.1 contains **205 built-in definitions / 187 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1628,24 +1644,27 @@ The Parser/Evaluator retains source spans and documents, allowing Errors that pr
 
 # 31. Performance policy
 
-Exact and certified computation is substantially more expensive than native `double`.
-Historical microbenchmarks have shown costs ranging from roughly 100× to more than 100,000× that of `double`, depending on the operation.
+mmCal does not gain speed by silently lowering Exact/Certified semantics to native `double`. v1.5.1 instead concentrates optimization in lower arithmetic algorithms and certified numerical backends while preserving the same mathematical contracts.
 
-Even so, operations taking tens of microseconds to a few milliseconds remain practical in an interactive CLI, so ordinary semantics are not lowered to `double` merely for speed.
+Major adopted optimizations include:
 
-Implemented optimizations include:
+- Adaptive BigUInt multiplication using schoolbook / Karatsuba / Toom-3
+- A dedicated `x*x` squaring path
+- Balanced-product-tree factorial retained, with optimized one-limb and direct-BigInt leaf construction
+- Burnikel–Ziegler for large balanced division, with Knuth normalized long division retained as the base case
+- Shift + low-bit remainder fast paths for division by `2^k`
+- `10^9` chunks plus divide-and-conquer decimal conversion
+- A directed-rounding-safe BigFloat fast path for extreme exponent gaps
+- Binary-splitting Chudnovsky for `Pi`
+- Binary splitting plus certified range reduction for `exp` / `log`
+- Certified argument reduction for very large radian `sin/cos/tan` inputs
+- FFT plan/twiddle caching across transforms
 
-- Number real-real fast path
-- Removal of redundant GCD operations in Rational multiplication/division
-- Minimization of reduction ranges in Rational addition
-- Elimination of repeated Simplifier structural-key computation
-- Indexing of like terms in Add
-- Newton method for BigInt cube root
-- Balanced product tree for factorial
-- Certified Log range reduction / shared log(2) enclosure
-- Radix-2 FFT
+Prime-Swing factorial, binary GCD, Karatsuba workspace pools/depth scratch buffers, and a dedicated Toom-3 square were also implemented and benchmarked, but were not selected as default paths because they regressed on the current backend and benchmark environment. This is an implementation-specific result, not a general rejection of those algorithms.
 
-Future features such as `for/Plot`, which may evaluate expressions thousands or millions of times, are expected to use an explicit Machine evaluator separate from Exact/Certified semantics.
+Thresholds depend on CPU, compiler, and allocator behavior. v1.5.1 defaults are benchmark-derived, and `mmCal.Benchmarks` can rerun fixed-seed correctness checks and threshold sweeps. See `docs/performance_optimization.md` for representative measurements and the reasons behind each adoption or rejection.
+
+Future features such as `for/plot`, which may evaluate expressions thousands or millions of times, are expected to use an explicit Machine evaluator separate from Exact/Certified semantics.
 
 ---
 
@@ -1735,8 +1754,8 @@ History: 0
 As auxiliary information, the title is updated to forms such as:
 
 ```text
-mmCal 1.5.0 - Rad - Exact
-mmCal 1.5.0 - Deg - Fixed(16)
+mmCal 1.5.1 - Rad - Exact
+mmCal 1.5.1 - Deg - Fixed(16)
 ```
 
 - Windows: `SetConsoleTitleA`
@@ -1761,6 +1780,8 @@ A-B+C
 - Implicit multiplication is concatenated only when lexically safe (`2x`, `2sqrt[x]`). Forms that would collide with exponent notation, such as `2exp[x]` or `2E`, are rendered explicitly as `2*exp[x]`, `2*E`
 - Preserve necessary spacing when adjacent identifiers would merge into another token (`I Pi`, `x y`)
 - When juxtaposition would be ambiguous, such as adjacent numeric tokens, use explicit `*` rather than whitespace
+- Explicit `*` is also used at boundaries that would collide with `0x` / `0b` / `0o` radix prefixes (for example `Pi^0*x`)
+- Multiplication adjacent to an Array or another parser boundary that does not support implicit multiplication is made explicit
 - Preserve precedence and associativity, and regression-test that format → parse → format does not change meaning
 
 Debug/full-form display of internal structure is intended to remain separate from the normal formatter as a future feature.

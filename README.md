@@ -5,6 +5,8 @@ An exact-first CLI calculator and compact CAS for engineering, research, and man
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
+**Current release: v1.5.1**
+
 [English](README.md) | [日本語](README.ja.md)
 
 ## Overview
@@ -45,7 +47,7 @@ Out[4]> 1/2
 In [5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In [6]> sIn [Pi/6]
+In [6]> sin[Pi/6]
 Out[6]> 1/2
 
 In [7]> expand[(x+1)^3]
@@ -63,10 +65,10 @@ Out[10]> abs[x]
 In [11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In [12]> integrate[x^2+sIn [x],x]
+In [12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In [13]> integrate[sIn [x],{x,0,Pi}]
+In [13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
 In [14]> limit[(1-cos[x])/x^2,x,0]
@@ -198,7 +200,7 @@ The basic approach is to compute an interval containing the true value and confi
 Square brackets are the standard notation for function calls. Parentheses can also be used for calls.
 
 ```text
-sIn [Pi/6]
+sin[Pi/6]
 sqrt[2]
 log[10,1000]
 ```
@@ -232,7 +234,7 @@ Arrays use braces.
 The default angle unit is radians.
 
 ```text
-sIn [Pi/6]
+sin[Pi/6]
 -> 1/2
 ```
 
@@ -245,15 +247,15 @@ angleMode[]
 angleMode[Deg]
 -> Deg
 
-sIn [30]
+sin[30]
 -> 1/2
 ```
 
 An angle unit can also be specified explicitly for part of an expression.
 
 ```text
-sIn [30 Deg]
-sIn [Pi/6 Rad]
+sin[30 Deg]
+sin[Pi/6 Rad]
 ```
 
 Explicit `Deg` / `Rad` / `Grad` units take precedence over the session default.
@@ -351,7 +353,7 @@ Implemented functions include `sin`, `cos`, `tan`, `cot`, `sec`, `csc`, `asin`, 
 ### Symbolic differentiation
 
 ```text
-D[x^3+sIn [x],x]
+D[x^3+sin[x],x]
 -> 3x^2+cos[x]
 
 D[x^5,{x,3}]
@@ -363,11 +365,11 @@ D[x^5,{x,3}]
 Indefinite integrals do not display `+C`; one representative antiderivative is returned.
 
 ```text
-integrate[x^2+sIn [x],x]
+integrate[x^2+sin[x],x]
 -> x^3/3-cos[x]
 
 integrate[x cos[x],x]
--> x sIn [x]+cos[x]
+-> x sin[x]+cos[x]
 
 integrate[1/(1+x^2),{x,0,1}]
 -> Pi/4
@@ -379,7 +381,7 @@ integrate[exp[-x],{x,0,Infinity}]
 ### Limits
 
 ```text
-limit[sIn [x]/x,x,0]       -> 1
+limit[sin[x]/x,x,0]       -> 1
 limit[1/x,x,0,1]          -> Infinity
 limit[1/x,x,0,-1]         -> -Infinity
 ```
@@ -512,6 +514,9 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — Internal architecture for developers
 - `docs/roadmap.md` — Major currently unsupported features and future candidates
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
+- `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1, with benchmark rationale
+- `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
+- `CHANGELOG.md` — Major changes by release
 
 ## 14. License
 
@@ -530,8 +535,8 @@ Embedding mmCal as part of another software system is very welcome.
 
 ## 15. Tests and development environment
 
-This project contains more than 1,500 internal regression tests and more than 1,000 black-box tests.
-They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures.
+As of v1.5.1, this project contains 1,691 internal regression tests and 1,337 black-box tests.
+They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures. A separate `mmCal.Benchmarks` project provides fixed-seed randomized correctness checks, algorithm-threshold sweeps, and performance comparisons without mixing benchmark workloads into the ordinary test suite.
 
 Primary Windows development environment:
 

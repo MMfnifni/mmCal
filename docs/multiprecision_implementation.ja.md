@@ -99,7 +99,7 @@ lower <= true value <= upper
 
 | 層 | ファイル | 主な責務 |
 |---|---|---|
-| unsigned integer | `src/numeric/detail/big_uint.hpp/.cpp` | 32bit limb，四則，shift，Knuth型除算，基数変換 |
+| unsigned integer | `src/numeric/detail/big_uint.hpp/.cpp` | 32bit limb，適応乗算・専用square，Knuth/Burnikel–Ziegler除算，基数変換 |
 | signed integer | `src/numeric/big_int.hpp/.cpp` | 符号付きBigInt，符号付き除算 |
 | integer algorithms | `src/numeric/integer_algorithms.hpp/.cpp` | gcd/lcm/pow/factorial/integer sqrt/cuberoot |
 | rational | `src/numeric/rational.hpp/.cpp` | 既約有理数，演算前約分 |
@@ -115,7 +115,7 @@ lower <= true value <= upper
 | decimal result | `src/numeric/decimal_approximation.hpp/.cpp` | 10進丸めと保証区間metadata |
 | certified evaluation | `src/approximation/certified_evaluator.hpp/.cpp` | Expr全体の区間評価 |
 
-この周辺だけで約3,400物理行ある。
+この周辺はv1.5.1で高速算法・benchmark基盤が増えているため，行数そのものは仕様値として固定しない。
 
 ---
 
@@ -316,13 +316,25 @@ O(n)
 
 ---
 
-# 6. `BigUInt` の乗算
+# 6. `BigUInt` の乗算とsquare
 
-現在は**schoolbook multiplication**である。
+v1.5.1では単一算法ではなく，operand sizeと形状に応じてbackendを切り替える。
 
-Karatsuba，Toom-Cook，FFT multiplication等は実装していない。
+```text
+small / unbalanced
+    ↓
+schoolbook
+    ↓ 48 limbs前後
+Karatsuba
+    ↓ 1280 limbs前後（top-level）
+Toom-3
+```
 
-概念的には
+1 limbは32bit。thresholdは数学的定数ではなく，GCC環境でのmicrobenchmarkから選んだ既定値であり，CPU/compiler/allocatorが変われば`mmCal.Benchmarks`で再測定する。
+
+## 6.1 schoolbook
+
+小さいoperandでは従来の二重loopが最速である。
 
 ```text
 for i in lhs limbs:
@@ -334,37 +346,61 @@ for i in lhs limbs:
         carry = high32(t)
 ```
 
-である。
-
-32bit limb × 32bit limbを64bit accumulatorで受ける。
-
-最悪値でも
+32bit limb × 32bit limbを64bit accumulatorで受けるため，
 
 ```text
-(B-1)^2 + (B-1) + (B-1)
-= B^2 - 1
-= 2^64 - 1
+(B-1)^2 + (B-1) + (B-1) = 2^64-1
 ```
 
-なので `uint64_t` にちょうど収まる。
+まで`uint64_t`に収まる。
 
-limb数を `n,m` とすると計算量は
+## 6.2 Karatsuba
+
+十分大きく，かつ左右のサイズ差が極端でない場合に3回の再帰乗算へ分解する。
 
 ```text
-O(nm)
+x = x1 B^m + x0
+y = y1 B^m + y0
+
+z0 = x0 y0
+z2 = x1 y1
+z1 = (x0+x1)(y0+y1)-z0-z2
+
+xy = z2 B^(2m) + z1 B^m + z0
 ```
 
-同程度の長さなら
+実測では8～16 limbsから早期にKaratsubaへ入れるとoverheadで遅く，利益が安定するのはおおむね32～48 limbs以降だった。そのためv1.5.1の既定crossoverは48 limbs付近とした。
 
-```text
-O(n^2)
-```
+極端にunbalancedな積は分割効率が悪いためschoolbookへ戻す。
 
-である。
+## 6.3 Toom-3
 
-これは現在のBigIntで巨大数乗算が重くなる主要因の一つである。
+さらに巨大なbalanced operandは3分割し，`0, 1, -1, 2, infinity`の5点評価・補間で5回の再帰乗算へ落とす。
 
----
+Top-levelでは小サイズでevaluation/interpolation overheadが勝つため，v1.5.1の既定thresholdは約1280 limbs。Toom再帰内部では既に分割overheadを払っているため，より低い約448 limbsを再帰thresholdとして使う。
+
+代表測定ではKaratsuba-only比で4096 limbs級が約1.17倍，6144 limbs級が約1.3倍高速だった。
+
+## 6.4 専用square
+
+`x*x`は一般乗算へ流さない。
+
+小サイズでは対称性を使い，対角項と上三角cross termだけを計算する。大サイズでは専用Karatsuba squareへ進む。
+
+一般乗算と比較して512 limbsで約1.7倍，1024 limbsで約1.7倍程度の改善が得られ，`pow`のrepeated squaringにもそのまま波及する。
+
+Toom-3専用squareも実装・比較したが，現在のthreshold域では通常のKaratsuba squareより遅かったため既定経路には採用していない。
+
+## 6.5 採用しなかったworkspace化
+
+Karatsuba再帰のtemporary `vector` allocation削減を狙い，
+
+- pool型workspace
+- 再帰depthごとのscratch型workspace
+
+を比較した。しかしGCC環境では512～1024 limbs付近で最大約5～10%退行した。管理・resize・cache localityのcostがallocator削減を上回ったため，v1.5.1では採用しない。
+
+これは将来MSVCやallocator特性が変わった場合の再測定候補である。
 
 # 7. `BigUInt` のbit shift
 
@@ -409,11 +445,11 @@ high << (32-bitShift)
 
 # 8. `BigUInt` の除算
 
-多倍長基盤の中でも重要な部分である。
+v1.5.1では**特殊case → Knuth base case → Burnikel–Ziegler**の段階dispatchを使う。
 
 ## 8.1 fast path
 
-次のケースを先に処理する。
+先に次を処理する。
 
 ```text
 divisor == 0        → domain_error
@@ -421,159 +457,108 @@ dividend < divisor  → quotient=0, remainder=dividend
 dividend == divisor → quotient=1, remainder=0
 ```
 
-除数が1 limbなら `divideSmall()` を使う。
+除数が1 limbなら`divideSmall()`。
 
-`divideSmall()` は上位limbから
-
-```text
-current = remainder * B + limb[i]
-quotient[i] = current / divisor
-remainder = current % divisor
-```
-
-と進む通常のlong divisionである。
-
-## 8.2 multi-limb division
-
-2 limb以上では**Knuth型のnormalized long division**を使う。
-
-内部基数を
+さらに除数がexactな`2^k`なら一般長除算へ入れず，
 
 ```text
-B = 2^32
+quotient  = dividend >> k
+remainder = dividend の下位 k bit
 ```
 
-とする。
+で処理する。4096 limbs級では旧一般除算のms級から数µs級まで短縮された。
 
-### Step 1: divisorの正規化
+## 8.2 Knuth normalized long division
 
-除数最上位limbのleading zero数
+小～中サイズ，商が小さい場合，Burnikel–Ziegler再帰のbase caseには従来のKnuth型normalized long divisionを残す。
 
-```cpp
-normalizationShift = std::countl_zero(divisor.highestLimb)
-```
+内部基数は`B=2^32`。
 
-だけ，被除数・除数の双方を左shiftする。
+1. 除数最上位limbをleading-zero shiftで正規化
+2. 上位2 limbから商digit `qhat` を推定
+3. 次limbで過大推定を補正
+4. `qhat * divisor` を減算し，必要なら1回add-back
+5. remainderをde-normalize
 
-これにより除数最上位limbの最上位bitが1になり，商digit推定の条件を良くする。
+この旧実装を捨てなかった理由は，小さいoperandでは再帰分割より定数costが小さく，Burnikel–Zieglerの良いbase caseになるためである。
 
-### Step 2: 商1 limbの推定
+## 8.3 Burnikel–Ziegler
 
-除数長を `m`，対象位置を `j` とすると，被除数の上位2 limbから
+巨大でbalancedなdivisionでは被除数・除数をblockへ分割し，2n/1n・3n/2n型の再帰divisionへ落とす。
+
+v1.5.1のGCC benchmarkでは32 limbs前後から利益が安定したため，巨大balanced divisionへ適用する。商が小さいcaseはKnuthへ残す。
+
+代表測定:
 
 ```text
-numerator = u[j+m] * B + u[j+m-1]
+1024-limb divisor/quotient: 約1.18 ms → 約0.12 ms
+2048-limb divisor/quotient: 約5.0  ms → 約0.35 ms
 ```
 
-を作り，
+これにより`%`, GCD, Rational正規化, `integerSqrt`, `integerCubeRoot`, divide-and-conquer decimal conversionにも波及する。
+
+## 8.4 不変条件
+
+どのbackendでも返す結果は必ず
 
 ```text
-qhat = numerator / v[m-1]
-rhat = numerator % v[m-1]
+q*d + r == dividend
+0 <= r < divisor
 ```
 
-と推定する。
+を満たす。
 
-### Step 3: 次limbを使った補正
-
-```text
-qhat >= B
-```
-
-または
-
-```text
-qhat * v[m-2]
-> B*rhat + u[j+m-2]
-```
-
-なら `qhat` を1減らして補正する。
-
-### Step 4: `qhat * divisor` を減算
-
-`subtractProduct()` で対象limb区間から
-
-```text
-qhat * divisor
-```
-
-を引く。
-
-推定が1大きすぎてborrowが最上位まで抜けた場合は，
-
-```text
-qhat--
-addBack(divisor)
-```
-
-で1回戻す。
-
-### Step 5: remainderのde-normalize
-
-最後にremainderを `normalizationShift` だけ右shiftして元のscaleへ戻す。
-
-## 8.3 計算量
-
-被除数 `n` limbs，除数 `m` limbsなら，現在のlong divisionは概ね
-
-```text
-O((n-m+1)m)
-```
-
-で，同程度の桁数なら `O(n^2)`。
-
-Burnikel-Ziegler等の高速除算は現在ない。
-
-## 8.4 テスト
-
-現行テストでは，
-
-- limb境界を跨ぐ除算
-- 257bit / 129bitの2冪除算
-- `q*d+r == dividend`
-- `r < divisor`
-- divisor最上位bit位置を0..31まで変えた正規化ケース
-- 128件のrandom multi-limb input
-
-を検証している。
-
-random testでは別実装のbinary long divisionをreferenceとして比較している。
-
----
+random testでは境界・不均衡サイズを含む巨大caseを固定seedで生成し，再構築不変条件を確認する。
 
 # 9. `BigUInt` の文字列変換
 
 ## 9.1 parse
 
-基数2..36に対応。
-
-各digitについて
+基数2..36に対応する。通常基数では
 
 ```text
 value = value * radix + digit
 ```
 
-を繰り返す。
+をBigUInt上で進める。
 
-つまり decimal parse もmachine integerへ一旦収めず，最初から多倍長として構築する。
+10進についてはv1.5.1で`10^9` chunkを使い，9桁をまとめて取り込む。巨大10進文字列を1桁ずつ処理する旧経路より走査回数を大きく減らす。
 
-## 9.2 toString
+`tryToUint64`も，明らかに64bitを超えるBigIntを一度10進文字列化して`from_chars`へ渡す旧経路を廃止し，bit lengthで即時棄却するfast pathを持つ。
 
-逆に
+## 9.2 toString(10)
+
+v1.5.0初期の1桁ずつ`/10`する方式から，まず`10^9` chunkへ変更した。さらにv1.5.1では巨大値に**divide-and-conquer base conversion**を使う。
+
+概念的には大きな
 
 ```text
-while value != 0:
-    remainder = value % radix
-    value /= radix
-    output remainder
-reverse(output)
+10^(9 * 2^k)
 ```
 
-とする。
+をsquareで構築し，
 
-実装は簡潔で正しいが，10進変換を `10^9` 等のchunkで処理する方式ではないため，非常に巨大な整数の文字列化については高速化余地がある。
+```text
+value = high * P + low
+```
 
----
+となるよう`divmod(value,P)`でほぼ半分へ分けて再帰変換する。小さい葉では`10^9` chunk変換へ戻る。
+
+`40000!`（約166,714 decimal digits）の代表測定では，
+
+```text
+旧 /10 digit-wise          約6.0 s
+10^9 chunk                 約0.53 s
+divide-and-conquer         約0.19 s
+```
+
+まで短縮された。
+
+formatterへBigIntを包む追加costはこの規模でもごく小さく，巨大整数表示の主costはほぼbinary-limb→decimal変換そのものだった。
+
+## 9.3 他基数
+
+2進・16進等はradixの性質に応じた既存経路を維持する。10進D&Cは表示上最も頻繁で，かつ旧実装のbottleneckが顕著だったため専用最適化としている。
 
 # 10. `BigInt`: 符号付き任意精度整数
 
@@ -744,27 +729,35 @@ while exponent != 0:
 
 ## 11.4 factorial
 
-単純に
+既定実装は**balanced product tree**。
+
+単純な
 
 ```text
 1*2*3*...*n
 ```
 
-と左から掛け続けない。
+という左結合にはせず，`productRange(first,last)`を中央で二分して同程度の大きさ同士を掛ける。
 
-`productRange(first,last)` でbalanced product treeを作る。
+小区間はstraight loopとし，葉ではmachine整数を文字列化して再parseする旧経路を避け，`BigInt::fromUnsigned()`で直接構築する。また1-limb operandは一般multi-limb multiplicationより`multiplySmall()`を優先する。
 
-小区間，現在は
+Karatsuba/Toom-3と専用squareの導入後，product treeは巨大factorialでも大きく改善した。
+
+### Prime-Swingを採用しなかった理由
+
+Prime-Swing factorialも実装し，sieve，odd factorial，2の冪分離，balanced productまで比較した。しかし現在のBigInt backendでは既存product treeの方が速かった。
+
+代表例:
 
 ```text
-last - first <= 15
+320000!:
+product tree  約0.59 s
+Prime-Swing   約1.5 s
 ```
 
-だけstraight loopとし，それ以上は中央で二分する。
+初版Prime-Swingにはprime exponentの重複計算等の無駄があったためそこも最適化したが，最終的にも逆転しなかった。したがってv1.5.1では「高度そうだから」という理由だけで置換せず，実測で勝つproduct treeを既定とした。
 
-目的は，極端にサイズの違う巨大BigIntを順次掛け続ける形を避けること。
-
-ただし基礎乗算自体はschoolbookなので，factorial全体が高度なprime-swing算法等になっているわけではない。
+Prime-Swing自体を一般に否定するものではなく，乗算backendやprime処理が変われば再評価可能である。
 
 ## 11.5 integer square root
 
@@ -1351,35 +1344,35 @@ newExponent = e + discardedBits
 
 # 23. BigFloat加算
 
-加算では指数を揃える。
+通常caseでは指数を揃え，exact dyadic和を作ってから指定precisionへ丸める。
 
 ```text
 commonExponent = min(lhs.exponent, rhs.exponent)
-```
-
-上位指数側significandを左shiftして，双方をcommon exponentのexact整数へ揃える。
-
-```text
-lhs = L * 2^e1
-rhs = R * 2^e2
-
-common = min(e1,e2)
 L' = L << (e1-common)
 R' = R << (e2-common)
 resultExactSignificand = L' + R'
 ```
 
-そのexact和を `fromDyadic()` で指定precisionへ丸める。
+この旧経路は近接値・cancellation・丸め境界を確実に扱えるため現在もbase pathとして残す。
 
-### 現行実装上の注意
+## 23.1 extreme exponent-gap fast path
 
-指数差が非常に大きい場合，加算は大きなleft shiftを作る。
+v1.5.1では，一方が要求precisionに比べ極端に小さく，かつ符号・距離からcancellationや丸め境界への影響を安全に判定できる場合だけ，巨大left shiftを作らず結果を直接決める。
 
-つまり「小さい項はprecision上影響しない」と先に判定してsticky bitだけ処理する形式ではない。
+重要なのは「小さいから捨てる」のではなく，丸めmodeごとに
 
-これは正確で単純だが，極端なexponent gapではmemory/performance上の改善余地がある。
+```text
+NearestEven
+TowardPositive
+TowardNegative
+TowardZero
+```
 
----
+でdominant値そのもの，または直上/直下のrepresentable valueのどれになるかを証明して返すことである。
+
+曖昧なcaseは必ず従来exact alignmentへfallbackする。
+
+代表測定では53bit precisionの`1 + 2^-5,000,000`級が約1.4 msからsub-µs級へ短縮され，全4 rounding modeを旧実装と差分照合している。
 
 # 24. BigFloat乗算
 
@@ -1397,7 +1390,7 @@ exponent = lhs.exponent + rhs.exponent
 
 をexactに作り，最後に `fromDyadic()` で指定precisionへ丸める。
 
-仮数乗算の速度は基礎 `BigInt`，すなわち現在はschoolbook `O(n^2)` の影響を直接受ける。
+仮数乗算の速度は基礎`BigInt`の適応schoolbook/Karatsuba/Toom-3 backendの影響を直接受ける。
 
 ---
 
@@ -1814,51 +1807,77 @@ upper: TowardPositive
 
 ---
 
-# 37. 高精度定数への接続例: Pi
+# 37. 高精度超越計算への接続
 
-Piの現行certified実装ではMachin公式
+## 37.1 Pi: binary-splitting Chudnovsky
+
+v1.5.0のMachin公式
 
 ```text
 Pi = 16 atan(1/5) - 4 atan(1/239)
 ```
 
-を使う。
+は保証構造が明快だったが，高桁で逐次Rational級数のcostが急増し，`N[Pi,10000]`が約12秒級になった。
 
-`atan(1/q)` の交代級数各項はexact `Rational` として構築され，それを `RealInterval::fromRational()` でBigFloat上下界へ変換する。
+v1.5.1では旧Machin実装をreferenceとして残し，既定を**binary-splitting Chudnovsky**へ変更した。巨大整数演算はKaratsuba/Toom/Burnikel–Ziegler等の下位backendを再利用し，最終的な区間化・丸め保証はRealInterval側の契約を維持する。
 
-つまり，級数項自体をmachine doubleで生成しない。
+代表値:
 
-交代級数の隣接部分和による数学的な包含と，BigFloat演算の外向き丸めの双方をRealIntervalへ吸収する。
+```text
+N[Pi,10000]: 約12.3 s → 約0.4 s
+```
 
-Pi計算法として最速を目指す実装ではないが，BigInt/Rational/BigFloat/RealIntervalが一体として動くreference例になっている。
+Chudnovsky内部の係数もterm indexが大きい場合にmachine 64bit overflowへ依存しないようBigIntで構築する。
 
----
+## 37.2 exp / E
+
+逐次RealInterval Taylorは高桁でinterval objectとRational中間値のcostが大きかったため，v1.5.1では**binary splitting + certified range reduction**へ移行した。
+
+小さいexact Rationalではexact binary splitting，大きい分子・分母では固定precision interval binary splittingを使い，中間exact integerの異常膨張を避ける。
+
+代表測定では`N[E,5000]`が数秒級から約0.1秒級まで改善した。
+
+## 37.3 log
+
+`log`も逐次atanh型級数からbinary splittingへ変更した。高bit mantissaではそのままexact splitすると中間整数が膨張するため，certified sqrtを複数回使って1近傍へ縮約し，interval binary splitting後にscaleを復元する。
+
+`log[2]`のような小係数caseはexact binary splittingを維持する。
+
+代表測定では`N[log[2],3000]`が約6～7秒から約0.1秒級へ改善した。
+
+## 37.4 巨大Radianの三角函数
+
+巨大なexact Rational radianをTaylorへ直接投入するとargument magnitudeに比例して実用不能になる。v1.5.1ではPiの保証区間を使い，`x/(Pi/2)`の象限integerが一意に確定するまでprecisionを確保してから，小区間へargument reductionする。
+
+machine `fmod`や`double` Piへ落とさないため，certified semanticsを保つ。
+
+point Rationalだけでなく，`sqrt[2]`を含むような保証区間全体にも縮約を拡張している。
 
 # 38. 現行実装の計算量上の特徴
 
-大まかには次の通り。
+大まかには次の通り。threshold以下ではより単純な算法へ戻るため，表は巨大operand側の性格を示す。
 
-| 演算 | 現行算法 | limb計算量の目安 |
-|---|---|---:|
+| 演算 | v1.5.1の主要算法 | 備考 |
+|---|---|---|
 | BigUInt add/sub | linear carry/borrow | `O(n)` |
 | BigUInt compare | 上位から比較 | `O(n)` worst |
 | BigUInt shift | limb移動 + bit shift | `O(n)` |
-| BigUInt multiply | schoolbook | `O(nm)` |
-| BigUInt divide | normalized long division | `O((n-m+1)m)` |
-| BigInt | BigUInt + sign処理 | 基礎演算に準ずる |
-| gcd | Euclidean `%` | 除算コスト依存 |
-| pow | exponentiation by squaring | `O(log exponent)`回の乗算 |
-| factorial | balanced product tree | 乗算backend依存 |
-| integer sqrt | Newton | 反復ごとに巨大除算・乗算 |
-| integer cbrt | Newton + correction | 同上 |
-| Rational add | GCD縮小付き | GCD/乗算依存 |
-| Rational mul/div | 交差約分 | GCD/乗算依存 |
-| BigFloat mul | BigInt積 + rounding | BigInt乗算依存 |
-| BigFloat div | BigInt divmod + rounding | BigInt除算依存 |
+| BigUInt multiply | schoolbook → Karatsuba → Toom-3 | size/shapeでdispatch |
+| BigUInt square | symmetric schoolbook → Karatsuba square | `x*x`専用 |
+| BigUInt divide | special path → Knuth → Burnikel–Ziegler | balanced huge divisionでBZ |
+| decimal conversion | `10^9` chunk + divide-and-conquer | 巨大10進表示向け |
+| gcd | Euclidean `%` | BZ除算の改善を間接利用 |
+| pow | exponentiation by squaring | 専用squareを利用 |
+| factorial | balanced product tree | adaptive multiplicationを利用 |
+| integer sqrt/cbrt | Newton | BZ division / square改善が波及 |
+| BigFloat add | exact alignment + safe exponent-gap fast path | directed rounding保持 |
+| BigFloat mul | BigInt adaptive multiplication + rounding | exact significand積 |
+| BigFloat div | BigInt divmod + rounding | BZが波及 |
+| Pi | binary-splitting Chudnovsky | certified enclosureへ接続 |
+| exp/log | binary splitting + range reduction | certified interval |
+| trig huge radian | certified argument reduction | Pi enclosureを利用 |
 
-現在，BigInt乗算にKaratsuba等がないため，数千～数万bitを大規模に扱う処理ではここが将来的なボトルネック候補になる。
-
----
+v1.5.1で乗算・除算・10進I/O・主要超越函数の大きなquadratic/逐次bottleneckはかなり緩和した。一方，さらに巨大な整数ではhigher Toom / FFT系，高桁`log`ではbit-burst/AGM系などが次候補になる。
 
 # 39. メモリとサイズの実際の上限
 
@@ -1896,29 +1915,33 @@ std::vector<uint32_t>
 
 ---
 
-# 40. 現行実装で意図的に存在しないもの
+# 40. 採用していない・まだ存在しないもの
 
-この文書の基準ソースでは，次のような高度な多倍長最適化はまだない。
+v1.5.1では「未実装」と「実装して比較したが棄却」を分ける。
 
-- Karatsuba multiplication
-- Toom-Cook multiplication
+## 40.1 比較したが既定採用しなかったもの
+
+- Prime-Swing factorial — 現product treeより巨大factorialで遅かった
+- binary GCD全面置換 — 現Euclidean `%`より約4～30倍遅いcaseがあった
+- Karatsuba workspace pool — 管理costで約5～10%退行
+- Karatsuba depth scratch — 同様に退行
+- Toom-3専用square — Karatsuba squareより遅かった
+
+これらはコードベースやCPU特性が変われば再評価可能であり，算法一般を否定しているわけではない。
+
+## 40.2 まだ導入していないもの
+
+- Toom-4 / higher Toom
 - FFT/NTT integer multiplication
-- Burnikel-Ziegler division
 - Lehmer GCD
-- binary GCDへの全面置換
-- chunked decimal conversion (`10^9`単位等)
+- bit-burst / AGM系の超高精度`log`
 - small-buffer optimization for limbs
 - limb-level custom allocator
-- IEEE互換NaN/Infinityを持つBigFloat
 - arbitrary-size BigFloat exponent
-- sticky-bitベースの巨大exponent-gap加算fast path
 - MPFR/GMP/Boost.Multiprecision backend
+- Exact/Certifiedと暗黙に混在するMachine/double backend
 
-これは「未完成」というより，現行1.5系がまず意味論・exactness・certificationを優先し，基礎算法を自前で明快に保っている結果である。
-
-将来高速化する場合も，上位のRational・BigFloat・RealIntervalの意味論を変えず，最下層backendだけを段階的に差し替えられる構造になっている。
-
----
+最後の項目は単なる未実装ではなく，通常意味論を速度のためにmachine精度へ落とさないという設計判断でもある。
 
 # 41. 現行テストで確認している主な性質
 
@@ -1927,11 +1950,12 @@ std::vector<uint32_t>
 - 64bit境界超えのparse
 - 基数2..36 round trip
 - limb carry / borrow
-- multi-limb multiplication
+- schoolbook/Karatsuba/Toom-3 multiplicationの境界・random照合
+- 専用squareと一般乗算の一致
 - shift境界 31/32/33/63/64bit等
-- Knuth型divisionのreconstruction invariant
+- Knuth/Burnikel–Ziegler divisionのreconstruction invariant
 - divisor top-limb全bit位置のnormalization
-- random 128ケースを別binary division referenceと照合
+- 固定seedの巨大random division / decimal round-tripを`mmCal.Benchmarks`でも継続検証
 
 ## BigInt
 
@@ -1996,64 +2020,30 @@ std::vector<uint32_t>
 
 ---
 
-# 42. 多倍長基盤から見た性能上の優先候補
+# 42. v1.5.1以降の性能候補
 
-現在の意味論を変えずに性能を改善するなら，候補は概ね次の順になる。
+v1.5.1でKaratsuba/Toom-3，専用square，Burnikel–Ziegler，10進D&C，BigFloat exponent-gap fast pathまで導入したため，次の候補は一段上になる。
 
-## 42.1 multiplication thresholdの導入
+## 42.1 higher multiplication
 
-小さい値:
+- Toom-4 / higher Toomのcrossover測定
+- さらに巨大な整数向けFFT/NTT multiplication
 
-```text
-schoolbook
-```
+ただし現在のinteractive用途ではToom-3までで十分な領域も広く，実測でcrossoverが現れるまで複雑化しない。
 
-大きい値:
+## 42.2 GCD
 
-```text
-Karatsuba
-```
+RationalはGCDを頻繁に使う。binary GCDは現backendでは退行したため，次に試すならLehmer GCD等が候補。
 
-さらに巨大ならToom/FFT系，というdispatchが考えられる。
+## 42.3 超高精度log/exp
 
-BigInt multiplicationが改善されれば，
+binary splittingで数千桁は大幅改善したが，さらに高桁では`log`のbit-burst / AGM系，`exp`のrange reduction調整を比較する価値がある。
 
-- Rational
-- factorial
-- integer root
-- BigFloat multiply
-- certified transcendental
+## 42.4 特殊函数横断benchmark
 
-へ広く波及する。
+Gamma / erf等を5000～10000桁まで振り，逐次級数やinterval object生成が新たな崖にならないか`mmCal.Benchmarks`へ追加する。
 
-## 42.2 decimal conversionのchunk化
-
-現在の1 digitずつの
-
-```text
-*10
-/10
-```
-
-を，例えば内部的に `10^9` chunkへすれば，巨大整数のI/O負荷を減らせる。
-
-これは演算意味論へ影響しにくい。
-
-## 42.3 GCD
-
-RationalはGCDを頻繁に使うため，非常に巨大な値ではEuclidean `%` のコストが効く。
-
-Lehmer GCD等は候補になる。
-
-## 42.4 BigFloat addのexponent-gap fast path
-
-現在はcommon exponentへexact shiftしてから丸める。
-
-要求precisionに比べて一方が極端に小さい場合，guard/sticky情報だけを残して巨大shiftを避ける最適化余地がある。
-
-ただしdirected roundingの正しさを崩しやすいため，これは整数backend高速化より慎重に扱うべきである。
-
----
+性能候補は`performance_optimization.ja.md`に採用・棄却理由を残し，threshold変更時は固定seed正当性試験を先に通す。
 
 # 43. 実装上の強み
 
@@ -2091,58 +2081,50 @@ lower <= exact <= upper
 
 # 44. 実装上の弱点・今後の注意
 
-## 44.1 大整数乗算はquadratic
+## 44.1 thresholdは環境依存
 
-現状最大の構造的性能限界。
+Karatsuba / Toom-3 / Burnikel–ZieglerのcrossoverはCPU，compiler，allocator，cacheに依存する。v1.5.1値を普遍的な定数として扱わず，MSVC等では`mmCal.Benchmarks`で再測定する。
 
-## 44.2 除算もquadratic系
+## 44.2 さらに巨大な整数
 
-BigFloat，Rational GCD，Newton rootに広く効く。
+Toom-3より上のhigher Toom / FFT/NTTは未実装。数十万～数百万bit級を頻繁に扱う用途では次の構造的bottleneckになり得る。
 
-## 44.3 入出力変換がdigit-wise
+## 44.3 GCD
 
-極端に巨大なdecimal I/Oには非効率。
+Euclidean GCDはBZ除算の恩恵を受けるが，巨大Rationalの反復約分ではLehmer系の余地がある。binary GCDは実測退行したため採用していない。
 
-## 44.4 BigFloat additionがexact alignment型
+## 44.4 高精度超越函数
 
-exponent gapが巨大な場合に大きなtemporary BigIntを作り得る。
+`Pi`, `exp`, `log`, 巨大trigはv1.5.1で大幅改善したが，さらに高桁では`log`のbit-burst/AGM系や特殊函数固有のasymptotic/binary-splitting backendが候補になる。
 
-## 44.5 `tryToUint64` がdecimal string経由
+## 44.5 directed roundingを壊さないこと
 
-現在は
-
-```text
-BigInt -> toString() -> from_chars()
-```
-
-で変換する箇所がある。
-
-頻繁に呼ぶhot pathになればlimbから直接判定・変換するAPIを追加する価値がある。
-
-## 44.6 高速化でdirected roundingを壊さないこと
-
-BigFloat backendを最適化するとき最も重要。
-
-NearestEvenだけ正しくても不十分で，
+BigFloat backend最適化で最重要。NearestEvenだけ正しくても不十分で，
 
 ```text
 TowardNegative
 TowardPositive
 ```
 
-が1 ulpでも内側へ入るとRealIntervalの保証全体が壊れる。
+が1 ulpでも内側へ入るとRealInterval全体の保証が壊れる。そのためexponent-gap fast pathも証明可能caseだけに限定し，曖昧なら旧exact alignmentへfallbackする。
 
----
+## 44.6 performance testを正当性testと混同しない
+
+速い結果が正しい証拠にはならない。`mmCal.Benchmarks`はthreshold sweepと固定seedrandom invariantを同じprojectへ置くが，通常のUnit/black-box regressionとは役割を分ける。
 
 # 45. まとめ
 
-現行mmCalの多倍長基盤は，次のように整理できる。
+v1.5.1の多倍長・保証付き数値基盤は次のように整理できる。
 
 ```text
 [ exact integer core ]
 std::vector<uint32_t> limbs
         ↓
 BigUInt
+  multiply: schoolbook → Karatsuba → Toom-3
+  square  : dedicated symmetric/Karatsuba path
+  divide  : special → Knuth → Burnikel–Ziegler
+  decimal : 10^9 chunk + divide-and-conquer
         ↓ sign-magnitude
 BigInt
         ↓ normalized numerator/denominator
@@ -2162,30 +2144,22 @@ CertifiedEvaluator
 DecimalApproximation
 ```
 
-最下層のBigUIntは，
-
-- base `2^32`
-- 32bit limb / 64bit accumulator
-- schoolbook multiplication
-- Knuth型normalized long division
-
-という比較的保守的で検証しやすい構成。
-
-BigIntはsign-magnitude，Rationalは常時既約，BigFloatはcanonical dyadic，RealIntervalはdirected outward roundingという形で，それぞれの層に明確なinvariantがある。
-
-mmCalにおける「多倍長」の本質は，BigIntだけではない。
+上位の高精度函数も，
 
 ```text
-任意長整数
-→ exact Rational
-→ exact dyadic arbitrary-precision work value
-→ certified interval
-→ 一意に確定した10進表示
+Pi      → binary-splitting Chudnovsky
+exp/log → binary splitting + certified range reduction
+trig    → certified argument reduction
+sqrt    → exact fixed-point integer root
 ```
 
-までが一続きの数値設計になっている。
+のように，下位BigIntの高速化を再利用しつつ保証区間へ接続する。
 
-現状の主要な改善余地は高速算法であり，意味論の基盤そのものは既に分離されている。したがって今後Karatsuba等を導入する場合も，最優先で守るべき境界は
+v1.5.1で重要なのは「高速算法を入れたこと」そのものではなく，**採用をbenchmarkで決め，速くならなかった算法は棄却し，Exact/Certifiedの意味論を変えないこと**である。
+
+Prime-Swing，binary GCD，workspace化，Toom-3 squareは実際に試したが現環境では採用しなかった。逆にKaratsuba/Toom-3，専用square，Burnikel–Ziegler，decimal D&C，Chudnovsky，binary-splitting exp/logは実測利益と正当性試験の双方を確認して採用した。
+
+今後backendを更新する場合も，最優先で守る境界は
 
 ```text
 BigUInt/BigIntのexact arithmetic
@@ -2193,4 +2167,5 @@ BigFloatのdirected rounding
 RealIntervalのoutward containment
 ```
 
-の3点である。
+の3点である。詳細な採用・棄却履歴と代表benchmarkは`performance_optimization.ja.md`を参照する。
+

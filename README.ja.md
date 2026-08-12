@@ -3,6 +3,8 @@
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
+**Current release: v1.5.1**
+
 [English](README.md) | [日本語](README.ja.md)
 
 ## 概要
@@ -43,7 +45,7 @@ Out[4]> 1/2
 In [5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In [6]> sIn [Pi/6]
+In [6]> sin[Pi/6]
 Out[6]> 1/2
 
 In [7]> expand[(x+1)^3]
@@ -61,10 +63,10 @@ Out[10]> abs[x]
 In [11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In [12]> integrate[x^2+sIn [x],x]
+In [12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In [13]> integrate[sIn [x],{x,0,Pi}]
+In [13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
 In [14]> limit[(1-cos[x])/x^2,x,0]
@@ -91,6 +93,7 @@ Out[20]> 2.82842712474619009760I
 
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
+
 
 ## 1. まず使う
 
@@ -196,7 +199,7 @@ exactな値やexactな記号式は，この意味では`Infinity`を返す。
 函数呼び出しは角括弧を標準表記とする。ただし丸括弧も函数呼び出しに利用できる。
 
 ```text
-sIn [Pi/6]
+sin[Pi/6]
 sqrt[2]
 log[10,1000]
 ```
@@ -230,7 +233,7 @@ log[10,1000]
 既定はラジアンである。
 
 ```text
-sIn [Pi/6]
+sin[Pi/6]
 -> 1/2
 ```
 
@@ -243,15 +246,15 @@ angleMode[]
 angleMode[Deg]
 -> Deg
 
-sIn [30]
+sin[30]
 -> 1/2
 ```
 
 式の一部だけ明示指定することもできる。
 
 ```text
-sIn [30 Deg]
-sIn [Pi/6 Rad]
+sin[30 Deg]
+sin[Pi/6 Rad]
 ```
 
 明示した`Deg` / `Rad` / `Grad`はセッション設定より優先される。
@@ -349,7 +352,7 @@ log[-1]              -> I Pi
 ### 記号微分
 
 ```text
-D[x^3+sIn [x],x]
+D[x^3+sin[x],x]
 -> 3x^2+cos[x]
 
 D[x^5,{x,3}]
@@ -361,11 +364,11 @@ D[x^5,{x,3}]
 不定積分の`+C`は表示しない。原始函数の代表を1つ返す。
 
 ```text
-integrate[x^2+sIn [x],x]
+integrate[x^2+sin[x],x]
 -> x^3/3-cos[x]
 
 integrate[x cos[x],x]
--> x sIn [x]+cos[x]
+-> x sin[x]+cos[x]
 
 integrate[1/(1+x^2),{x,0,1}]
 -> Pi/4
@@ -377,7 +380,7 @@ integrate[exp[-x],{x,0,Infinity}]
 ### 極限
 
 ```text
-limit[sIn [x]/x,x,0]       -> 1
+limit[sin[x]/x,x,0]       -> 1
 limit[1/x,x,0,1]          -> Infinity
 limit[1/x,x,0,-1]         -> -Infinity
 ```
@@ -510,7 +513,9 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — 開発者向け内部構造
 - `docs/roadmap.md` — 現在未実装の主な機能と今後の候補
 - `docs/grammar.ebnf` — 文法の機械可読な概要
-- `docs/multiprecision_implementation.ja` — 多倍長実装に関する件
+- `docs/multiprecision_implementation.ja.md` — 多倍長整数・任意精度・保証付き評価の実装詳細
+- `docs/performance_optimization.ja.md` — v1.5.1で採用・棄却した高速化と実測根拠
+- `CHANGELOG.ja.md` — releaseごとの主要変更
 
 ## 14. ライセンス
 
@@ -529,8 +534,9 @@ Copyright (c) 2021–2026 mmKreutzef
 
 ## 15. テスト・制作環境
 
-本プロジェクトには，1500件を超える内部回帰テストと，1000件を超えるブラックボックステストが含まれる。
+v1.5.1時点で，本プロジェクトには1691件の内部回帰テストと1337件のブラックボックステストが含まれる。
 exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
+さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 
 主なWindows開発環境:
 

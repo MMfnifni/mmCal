@@ -35,6 +35,8 @@ log[-1]  -> I Pi
 
 `:fix`はこれとは別であり、正確値を画面上だけ指定桁数以下の小数へ丸めて表示する。末尾の不要な0は表示時に省略する。
 
+性能最適化でもこの原則を崩さない。例えば巨大Radianの`sin/cos/tan`はmachine `fmod`へ落とさず，Piの保証区間から象限を一意に証明してargument reductionする。`Pi`，`exp`，`log`も高速化のために非保証のmachine近似へ置き換えず，binary splittingやrange reductionをRealIntervalの包含保証と組み合わせる。
+
 ## 定義域と未解決
 
 数学的に未定義なものをNaNへ流して継続しない。原則としてDomainErrorを返す。
