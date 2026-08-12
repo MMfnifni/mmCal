@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.2 — in development
+
+### Syntax (breaking change)
+
+- Function-call syntax is now exclusively `name[...]`; parenthesized `name(...)` calls were removed
+- Parentheses `()` are grouping-only, while `x(x+1)` for an ordinary identifier is parsed as implicit multiplication
+- Legacy `sin(x)` syntax on a known function name raises SyntaxError instead of being silently treated as multiplication
+- The Formatter always emits `name[...]` for calls and explicit `x*(...)` for identifier/group multiplication, preserving unambiguous round trips
+- Removed function-call delimiter branching from Parser/AST/Lowerer
+
+
 ## v1.5.1 — 2026-08-12
 
 v1.5.1 preserves the exact-first CAS foundation of v1.5.0 while concentrating on canonicalization, verification, large-integer arithmetic, high-precision numerical evaluation, and reproducible benchmarking.

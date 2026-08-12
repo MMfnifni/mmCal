@@ -661,6 +661,50 @@ using numeric::Rational;
                 a[1], variable, builtins, mathematics, angles);
         }
         break;
+    case BuiltinId::ExponentialIntegralEi:
+        if (a.size() == 1) {
+            Expr kernel = divide(builtins,
+                call(builtins, BuiltinId::Exp, {a[0]}), a[0]);
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi:
+        if (a.size() == 1) {
+            // Si/Ciの定義核はsession angle modeではなく常にRadian。
+            Expr radian = angles.defaultUnit() == mathematics::AngleUnit::Radian
+                ? a[0]
+                : call(builtins, BuiltinId::UnitApplied, {a[0], Expr{std::string{"Rad"}}});
+            const BuiltinId trig = definition->id == BuiltinId::SineIntegralSi
+                ? BuiltinId::Sin : BuiltinId::Cos;
+            Expr kernel = divide(builtins, call(builtins, trig, {std::move(radian)}), a[0]);
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::LogarithmicIntegralLi:
+        if (a.size() == 1) {
+            Expr kernel = divide(builtins, integer(1), call(builtins, BuiltinId::Log, {a[0]}));
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::Polylog:
+        if (a.size() == 2 && !containsVariable(a[0], variable)) {
+            Expr numerator = integer(0);
+            if (a[0].isNumber() && a[0].asNumber().isReal()
+                && a[0].asNumber().asReal().toRational() == Rational{BigInt{2}}) {
+                // Li_1(z)=-Log(1-z) をここで直接使い、D結果を未評価polylog[1,z]へ戻さない。
+                numerator = negate(builtins, call(builtins, BuiltinId::Log, {
+                    subtract(builtins, integer(1), a[1])}));
+            }
+            else {
+                Expr lowerOrder = subtract(builtins, a[0], integer(1));
+                numerator = call(builtins, BuiltinId::Polylog, {std::move(lowerOrder), a[1]});
+            }
+            Expr kernel = divide(builtins, std::move(numerator), a[1]);
+            return chain(std::move(kernel), a[1], variable, builtins, mathematics, angles);
+        }
+        break;
+
     case BuiltinId::Exp:
         if (a.size() == 1)
             return chain(expression, a[0], variable, builtins, mathematics, angles);

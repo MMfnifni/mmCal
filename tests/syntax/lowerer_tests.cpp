@@ -144,6 +144,8 @@ void runLowererTests(TestRunner& tests) {
         "frontend lowers implicit multiplication");
     tests.expectEqual(lowerAndFormat("Pi(2)"), std::string{"Pi*2"},
         "constant followed by parentheses is multiplication");
+    tests.expectEqual(lowerAndFormat("x(x+1)"), std::string{"x*(x+1)"},
+        "formatter makes identifier/group multiplication explicit");
     tests.expectEqual(lowerAndFormat("f[2]"), std::string{"f[2]"},
         "square bracket syntax lowers to a function call");
     tests.expectEqual(lowerAndFormat("f[x]:=x+1"), std::string{"f[x]:=x+1"},

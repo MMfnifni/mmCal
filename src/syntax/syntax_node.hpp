@@ -40,11 +40,6 @@ enum class ComparisonOperator {
     NotEqual
 };
 
-enum class CallDelimiter {
-    Parentheses,
-    Brackets
-};
-
 struct NumberLiteralSyntax final {
     std::string text;
 };
@@ -68,7 +63,6 @@ struct ArrayLiteralSyntax final {
 struct CallSyntax final {
     std::string name;
     std::vector<SyntaxNodePtr> arguments;
-    CallDelimiter delimiter = CallDelimiter::Parentheses;
 };
 
 struct GroupSyntax final {
@@ -104,7 +98,6 @@ struct AssignmentSyntax final {
 struct FunctionSignatureSyntax final {
     std::string name;
     std::vector<std::string> parameters;
-    CallDelimiter delimiter = CallDelimiter::Parentheses;
 };
 
 struct UnitAppliedSyntax final {

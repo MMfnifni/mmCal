@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{212},
+    tests.expectEqual(registry.size(), std::size_t{217},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -198,7 +198,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: If is a held source-callable special form");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{194},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{199},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
         && sourceFunctions.contains("cos") && sourceFunctions.contains("tan")
@@ -265,6 +265,9 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("ellipticF")
         && sourceFunctions.contains("ellipticE")
         && sourceFunctions.contains("ellipticPi")
+        && sourceFunctions.contains("Ei") && sourceFunctions.contains("Si")
+        && sourceFunctions.contains("Ci") && sourceFunctions.contains("li")
+        && sourceFunctions.contains("polylog")
         && !sourceFunctions.contains("Sin") && !sourceFunctions.contains("ArcTan")
         && !sourceFunctions.contains("Integrate") && !sourceFunctions.contains("Limit")
         && !sourceFunctions.contains("Solve") && !sourceFunctions.contains("Rationalize"),

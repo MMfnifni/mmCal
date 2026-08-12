@@ -1398,6 +1398,11 @@ struct PositiveIntegerPower final {
     case BuiltinId::Expc:
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
+    case BuiltinId::ExponentialIntegralEi:
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi:
+    case BuiltinId::LogarithmicIntegralLi:
+    case BuiltinId::Polylog:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:

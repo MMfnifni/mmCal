@@ -143,14 +143,15 @@ The legacy constants `Tau`, `NA`, and `ESP` are no longer predefined.
 
 ## 4.1 Function calls
 
-Both parentheses and square brackets can be used for function calls.
+Function calls use **square brackets `[]` only**. Parentheses `()` are reserved for grouping and are not function-call delimiters.
 
 ```text
-sin(Pi/6)
 sin[Pi/6]
+sqrt[2]
+f[x]
 ```
 
-Parentheses are used for grouping. A standalone `[x+1]` is not a grouping expression.
+Using the legacy parenthesized form such as `sin(x)` on a known function name is a SyntaxError. For an ordinary identifier, `x(x+1)` is accepted as implicit multiplication, but the Formatter emits the explicit canonical form `x*(x+1)`. Parentheses are used for grouping, a standalone `[x+1]` is not a grouping expression, and user-defined function signatures use `f[x] := ...`.
 
 ## 4.2 Arrays
 
@@ -795,6 +796,64 @@ integrate[1/sqrt[1-x^4],x]
 
 The final quartic reduction is a correct local primitive, but the current `fullSimplify` cannot always prove the corresponding `sin[asin[x]]` and principal-square-root product identity globally. The derivative-back harness therefore monitors it in ResolutionOnly mode instead of reducing integration capability because of a proof-engine limitation. General elliptic equations also remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
 
+
+## 14.9 Ei / Si / Ci / li / Polylogarithm
+
+The principal special functions commonly required by symbolic integration are exposed as
+
+```text
+Ei[x]
+Si[x]
+Ci[x]
+li[x]
+polylog[s,z]
+```
+
+`Ei`, `Ci`, `li`, and `polylog` generally have branch structure and are registered as principal-branch functions. `Si` is entire and odd. The current certified real backends deliberately cover only regions where a rigorous tail bound is available; unsupported regions are not filled with heuristic numeric values.
+
+```text
+Si[0] -> 0
+Si[-1] -> -Si[1]
+polylog[0,z] -> z/(1-z)
+polylog[1,z] -> -log[1-z]
+polylog[2,1] -> Pi^2/6
+polylog[2,-1] -> -Pi^2/12
+
+N[Ei[1],20] -> 1.89511781635593675547
+N[Si[1],20] -> 0.94608307036718301494
+N[Ci[1],20] -> 0.33740392290096813466
+N[li[2],20] -> 1.04516378011749278484
+N[polylog[2,1/2],20] -> 0.58224052646501250590
+```
+
+When the argument and order parameters are independent of the differentiation variable, the derivative knowledge includes
+
+```text
+D[Ei[x],x] -> exp[x]/x
+D[Si[x],x] -> sin[x]/x
+D[Ci[x],x] -> cos[x]/x
+D[li[x],x] -> 1/log[x]
+D[polylog[s,x],x] -> polylog[s-1,x]/x
+```
+
+The exact degeneration `polylog[1,x] -> -log[1-x]` gives
+
+```text
+D[polylog[2,x],x] -> -log[1-x]/x
+```
+
+and the same shared knowledge closes
+
+```text
+integrate[exp[x]/x,x] -> Ei[x]
+integrate[sin[x]/x,x] -> Si[x]
+integrate[cos[x]/x,x] -> Ci[x]
+integrate[1/log[x],x] -> li[x]
+integrate[log[1-x]/x,x] -> -polylog[2,x]
+```
+
+No general `Solve` rule invents a single principal inverse for `Ei/Si/Ci/li/polylog`: global injectivity and branch structure are not generally available. Only exact degenerations such as `polylog[0,z]` and `polylog[1,z]` are passed to the existing algebraic/logarithmic Solver.
+
 ---
 
 # 15. Aggregate functions
@@ -1083,7 +1142,7 @@ Major exact rules currently implemented:
 - Constants, `x`, and arbitrary finite polynomials
 - Rational powers of affine bases; exponent `-1` is mapped to Log
 - Rational functions with Rational coefficients. In addition to linear and quadratic denominators, exact partial fractions are used when Rational roots reduce the denominator to linear factors with at most an irreducible quadratic remainder. Repeated linear factors are supported
-- Quadratic square-root forms with provably positive Rational scale, producing `asin/asinh` primitives
+- Quadratic inverse-square-root forms with provably positive Rational scale, plus `sqrt[q(x)]` primitives for exact Rational quadratics `q(x)`
 - Finite Fourier reduction for `sin^m/cos^n`; the integrator may explicitly expand positive integer total degree up to 256
 - `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) through the standard `csc/sec` reduction recurrences
 - Positive integer powers (`2<=n<=256`) of `tan/cot/sec/csc` through the standard reduction formulas
@@ -1093,12 +1152,15 @@ Major exact rules currently implemented:
 - `log/log1p/expm1/sqrt/cbrt`; logarithmic-derivative knowledge recognizes forms such as `log[x]/x` and `1/(x log[x])`
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
-- `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals
+- `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals; the defining `Pi*x^2/2` kernels are recognized directly
 - `hypergeometric1F1`; `exp[c x^n]` with positive integer `n>=2` reduces to an entire 1F1 primitive at the origin
-- Exact inverse chain rule
+- Exact inverse chain rule; `f'(x) f(x)^p` is also recognized structurally instead of depending on the accidental post-`D` expression shape
 - Finite integration by parts for polynomial × `exp/sin/cos/sinh/cosh`
 - Exact integration of `exp[a x+b] sin/cos[c x+d]` forms by solving a linear system
-- Local substitution `t=sqrt[x]` for `sqrt[q(sqrt[x])]` when `q` is an exact Rational-coefficient quadratic with positive leading coefficient
+- Local principal-branch `t=sqrt[x]` substitution for rational forms involving `sqrt[x]`, including the quadratic nested-radical class
+- Bounded Weierstrass substitution `t=tan(theta/2)` for rational expressions in a common `sin(theta),cos(theta)` argument; the transformed expression is handed to the exact rational integrator
+- Dilogarithm knowledge reducing `log[1+beta*x^n]/x` to `polylog[2,-beta*x^n]`
+- Bounded distribution of products over short sums, while exact whole-expression chain rules are tried first to avoid capability regressions
 - `x^n log[x]` for non-negative integer `n`
 
 Examples:
@@ -1177,6 +1239,28 @@ integrate[1/(x^3+1),{x,0,1}]
 -> log[2] / 3 + Pi sqrt[3] / 9
 ```
 
+Representative substitution and connection cases added in this batch:
+
+```text
+integrate[sqrt[4-x^2],x]
+-> x sqrt[4-x^2]/2+2asin[x/2]
+
+integrate[2*x*(1+x^2)^5,x]
+-> (1+x^2)^6/6
+
+integrate[x/(1+x^4),x]
+-> atan[x^2]/2
+
+integrate[cos[Pi*x^2/2],x]
+-> fresnelc[x]
+
+integrate[log[1+x^2]/x,x]
+-> -polylog[2,-x^2]/2
+
+integrate[1/(1+sin[x]),x]
+-> -2/(1+tan[x/2])
+```
+
 Angle semantics are shared with the existing `AngleSemantics` / `D` infrastructure.
 
 ```text
@@ -1208,10 +1292,21 @@ Linearity over sums also supports partial evaluation.
 ```text
 integrate[x^2 + gamma[x],x]
 -> x^3 / 3 + integrate[gamma[x],x]
-WARN: ... unevaluated integrate[...] remains
+WARN: integrate partially evaluated the expression; remaining subintegral(s) are outside the current symbolic rule set
 ```
 
 Only the unresolved part is retained; successfully integrated terms are not rolled back.
+
+### Unevaluated-integration diagnostics
+
+Unevaluated results are no longer collapsed into one warning. The current diagnostic codes are:
+
+- `integrate::unsupported` — no current symbolic rule matched. **This does not mean no closed form exists.**
+- `integrate::partial` — part of the expression was integrated, but remaining subintegrals are outside the current rules.
+- `integrate::conditionsRequired` — additional domain or branch assumptions are required before choosing a safe primitive.
+- `integrate::noKnownClosedForm` — an explicitly recognized family has no known finite closed form in mmCal's currently supported standard-function vocabulary.
+
+The last category is deliberately narrower than a claim of absolute mathematical impossibility. A series, a newly introduced special function, or a broader function class may still represent the antiderivative.
 
 ### Nested square-root substitution
 
@@ -1725,7 +1820,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **212 built-in definitions / 194 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **217 built-in definitions / 199 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1734,7 +1829,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
-fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
+Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,
@@ -1827,7 +1922,7 @@ See `docs/roadmap.md` for future candidates and the reasons they are deferred.
 
 Representative items:
 
-- `digamma`, `trigamma`, `zeta`, `ibeta`, `polylog`
+- `digamma`, `trigamma`, `zeta`, `ibeta`
 - `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
 - Advanced LU/QR/SVD/eigen/condition number/least squares
 - `hilbert` (legacy naming/specification still to be confirmed)

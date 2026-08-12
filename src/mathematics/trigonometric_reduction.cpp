@@ -58,6 +58,11 @@ ReducedTrigAngle reduceTrigTurns(FunctionId function, Rational turns) {
     case FunctionId::EllipticF:
     case FunctionId::EllipticE:
     case FunctionId::EllipticPi:
+    case FunctionId::ExponentialIntegralEi:
+    case FunctionId::SineIntegralSi:
+    case FunctionId::CosineIntegralCi:
+    case FunctionId::LogarithmicIntegralLi:
+    case FunctionId::Polylog:
     case FunctionId::Beta:
     case FunctionId::BetaLog:
     case FunctionId::Cbrt:

@@ -45,3 +45,24 @@ solve[x^2<4,x]==>{x in Real if x>-2&&x<2}
 solve[exp[x]==2,x,Real]==>{x==log[2]}
 solve[tanh[x]==1/2,x,Real]==>{x==atanh[1/2]}
 solve[tanh[x]==2,x,Real]==>{}
+
+# Integration Knowledge gap regressions (v1.5.2 development).
+integrate[2*x*(x^2+1)^5,x]==>(1+x^2)^6/6
+integrate[3*x^2*sqrt[x^3+1],x]==>2(1+x^3)^(3/2)/3
+integrate[x*sqrt[x^2+1],x]==>(1+x^2)^(3/2)/3
+integrate[sqrt[x]/(1+x),x]==>-2atan[sqrt[x]]+2sqrt[x]
+integrate[x/(1+x^4),x]==>atan[x^2]/2
+integrate[x/sqrt[1-x^4],x]==>asin[x^2]/2
+integrate[sqrt[4-x^2],x]==>x sqrt[4-x^2]/2+2asin[x/2]
+integrate[sqrt[x^2+4],x]==>x sqrt[4+x^2]/2+2log[2x+2sqrt[4+x^2]]
+integrate[sqrt[x^2-4],x]==>x sqrt[x^2-4]/2-2log[2x+2sqrt[x^2-4]]
+integrate[1/(x*(x+1)),x]==>-2atanh[1+2x]
+integrate[cos[Pi*x^2/2],x]==>fresnelc[x]
+integrate[sin[Pi*x^2/2],x]==>fresnels[x]
+integrate[log[1+x]/x,x]==>-polylog[2,-x]
+integrate[log[1+x^2]/x,x]==>-polylog[2,-x^2]/2
+integrate[exp[-x^4],x]==>x hypergeometric1F1[1/4,5/4,-x^4]
+integrate[1/(1+sin[x]),x]==>-2/(1+tan[x/2])
+integrate[1/(1-cos[x]),x]==>-1/tan[x/2]
+integrate[1/(2+cos[x]),x]==>2atan[tan[x/2]/sqrt[3]]sqrt[3]/3
+integrate[(3x^2+1)exp[x^3+x],x]==>exp[x+x^3]

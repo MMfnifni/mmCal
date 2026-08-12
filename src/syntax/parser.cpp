@@ -25,6 +25,7 @@ ParserOptions ParserOptions::defaults() {
     return ParserOptions{
         constants,
         constants,
+        {},
         {"Deg", "Rad", "Grad", "deg", "rad", "grad", "mm", "cm", "m", "inch"}
     };
 }
@@ -35,6 +36,10 @@ bool ParserOptions::isConstant(std::string_view name) const {
 
 bool ParserOptions::isProtected(std::string_view name) const {
     return protectedNames.contains(std::string{name});
+}
+
+bool ParserOptions::isFunction(std::string_view name) const {
+    return functions.contains(std::string{name});
 }
 
 bool ParserOptions::isUnit(std::string_view name) const {
@@ -326,33 +331,34 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
     const Token identifier = consume(TokenKind::Identifier, "Expected identifier");
     const std::string name{tokenText(identifier)};
 
-    if (!check(TokenKind::LParen) && !check(TokenKind::LBracket))
+    // v1.5.2以降、函数呼出しは name[...] に限定する。
+    // name(expr) は通常のidentifierなら暗黙乗算としてparseTermへ返すが、
+    // 既知の函数名については旧構文の打ち間違いを黙って乗算へ変えない。
+    if (check(TokenKind::LParen) && options_.isFunction(name))
+        error::throwCalcError(
+            error::CalcErrorType::Syntax,
+            "Function calls require square brackets; use " + name + "[...]",
+            current().span);
+
+    if (!check(TokenKind::LBracket))
         return makeSyntaxNode(identifier.span, IdentifierSyntax{name});
 
-    const bool parentheses = match(TokenKind::LParen);
-    if (!parentheses)
-        consume(TokenKind::LBracket, "Expected '['");
-
-    const TokenKind closingKind = parentheses ? TokenKind::RParen : TokenKind::RBracket;
-    const std::string_view closingText = parentheses ? ")" : "]";
+    consume(TokenKind::LBracket, "Expected '['");
     std::vector<SyntaxNodePtr> arguments;
 
-    if (!check(closingKind)) {
+    if (!check(TokenKind::RBracket)) {
         do {
             arguments.push_back(parseAssignment());
         } while (match(TokenKind::Comma));
     }
 
     const Token closing = consume(
-        closingKind,
-        std::string{"Expected '"} + std::string{closingText} + "' after function arguments");
+        TokenKind::RBracket,
+        "Expected ']' after function arguments");
 
     return makeSyntaxNode(
         source::SourceSpan{identifier.span.begin, closing.span.end},
-        CallSyntax{
-            name,
-            std::move(arguments),
-            parentheses ? CallDelimiter::Parentheses : CallDelimiter::Brackets});
+        CallSyntax{name, std::move(arguments)});
 }
 
 SyntaxNodePtr Parser::parseGroup() {
@@ -394,11 +400,25 @@ SyntaxNodePtr Parser::makeAssignmentTarget(const SyntaxNodePtr& node) const {
     }
 
     const auto* call = std::get_if<CallSyntax>(&node->data);
-    if (!call)
+    if (!call) {
+        // name(expr) := ... はv1.5.2以前の函数定義構文に見えるため、
+        // 一般的なassignment target errorより移行方法を直接示す。
+        if (const auto* multiply = std::get_if<BinarySyntax>(&node->data);
+            multiply && multiply->operation == BinaryOperator::ImplicitMultiply) {
+            const auto* name = std::get_if<IdentifierSyntax>(&multiply->left->data);
+            if (name && std::holds_alternative<GroupSyntax>(multiply->right->data))
+                error::throwCalcError(
+                    error::CalcErrorType::Syntax,
+                    "Function definitions require square brackets; use "
+                        + name->name + "[...] := ...",
+                    node->span);
+        }
+
         error::throwCalcError(
             error::CalcErrorType::Syntax,
             "Assignment target must be an identifier or function signature",
             node->span);
+    }
 
     if (options_.isProtected(call->name))
         error::throwCalcError(
@@ -435,7 +455,7 @@ SyntaxNodePtr Parser::makeAssignmentTarget(const SyntaxNodePtr& node) const {
 
     return makeSyntaxNode(
         node->span,
-        FunctionSignatureSyntax{call->name, std::move(parameters), call->delimiter});
+        FunctionSignatureSyntax{call->name, std::move(parameters)});
 }
 
 ComparisonOperator Parser::comparisonOperator(TokenKind kind) {

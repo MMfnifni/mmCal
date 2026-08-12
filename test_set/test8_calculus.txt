@@ -51,3 +51,11 @@ solve[ellipticF[x,0]==2,x]==>{x==2}
 solve[ellipticE[x,0]==3,x]==>{x==3}
 solve[ellipticPi[0,x,0]==4,x]==>{x==4}
 solve[hypergeometric2F1[0,2,3,x]==1,x]==>All
+
+# V1.5.2 classical special-integral knowledge
+integrate[sin[x]/x,x]==>Si[x]
+integrate[cos[x]/x,x]==>Ci[x]
+integrate[exp[x]/x,x]==>Ei[x]
+integrate[1/log[x],x]==>li[x]
+integrate[log[1-x]/x,x]==>-polylog[2,x]
+fullSimplify[D[-polylog[2,x],x]-log[1-x]/x]==>0

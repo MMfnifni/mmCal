@@ -206,6 +206,11 @@ private:
             // 一般形をEverywhereと誤認するより、現段階ではdefinedness証明を保守的に保留する。
             return false;
 
+        case FunctionDefinednessRule::SpecialPrincipal:
+            // li/polylog等のprincipal branchはbranch cutとparameter依存特異点を持つ。
+            // 有限Predicateへ弱く近似せず、証明不能として保守的に扱う。
+            return false;
+
         case FunctionDefinednessRule::RealPairNotBothZero:
         case FunctionDefinednessRule::PrincipalPower:
             return false;

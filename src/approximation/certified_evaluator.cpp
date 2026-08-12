@@ -15,6 +15,7 @@
 #include "interval_math.hpp"
 #include "mathematics/exact_trigonometry.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 
 #include <charconv>
@@ -782,6 +783,42 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (!n || !phi || !m)
             return std::nullopt;
         return CertifiedValue{encloseEllipticPiReal(*n, *phi, *m, precisionBits)};
+    }
+
+    case BuiltinId::ExponentialIntegralEi:
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi:
+    case BuiltinId::LogarithmicIntegralLi: {
+        if (call.arguments.size() != 1)
+            return std::nullopt;
+        const auto value = encloseArgument(0);
+        if (!value || !value->isReal())
+            return std::nullopt;
+        switch (definition->id) {
+        case BuiltinId::ExponentialIntegralEi:
+            return CertifiedValue{encloseExponentialIntegralEiReal(value->asReal(), precisionBits)};
+        case BuiltinId::SineIntegralSi:
+            return CertifiedValue{encloseSineIntegralSiReal(value->asReal(), precisionBits)};
+        case BuiltinId::CosineIntegralCi:
+            return CertifiedValue{encloseCosineIntegralCiPositive(value->asReal(), precisionBits)};
+        case BuiltinId::LogarithmicIntegralLi:
+            return CertifiedValue{encloseLogarithmicIntegralLiPositive(value->asReal(), precisionBits)};
+        default:
+            return std::nullopt;
+        }
+    }
+
+    case BuiltinId::Polylog: {
+        if (call.arguments.size() != 2)
+            return std::nullopt;
+        const auto order = exactRealRational(call.arguments[0]);
+        const auto z = exactRealRational(call.arguments[1]);
+        if (!order || !z || !order->isInteger() || !order->numerator().isPositive())
+            return std::nullopt;
+        const auto count = numeric::tryToUint64(order->numerator());
+        if (!count)
+            return std::nullopt;
+        return CertifiedValue{enclosePolylogReal(*count, *z, precisionBits)};
     }
 
     case BuiltinId::Beta:

@@ -13,11 +13,13 @@ namespace mmcal::syntax {
 struct ParserOptions final {
     std::unordered_set<std::string> constants;
     std::unordered_set<std::string> protectedNames;
+    std::unordered_set<std::string> functions;
     std::unordered_set<std::string> units;
 
     [[nodiscard]] static ParserOptions defaults();
     [[nodiscard]] bool isConstant(std::string_view name) const;
     [[nodiscard]] bool isProtected(std::string_view name) const;
+    [[nodiscard]] bool isFunction(std::string_view name) const;
     [[nodiscard]] bool isUnit(std::string_view name) const;
 };
 

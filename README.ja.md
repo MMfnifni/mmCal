@@ -1,7 +1,5 @@
 # mmCalculator – Mathematical Machinery Calculator
 
-厳密値が絶対。近似は明示的に。数学的条件を黙って捨てない。そして手軽に。
-
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
@@ -32,70 +30,85 @@ mmCalculator（以下mmCal）は，研究・設計・製造などの技術用途
 ## 細かいことは置いといて実例超特急
 
 ```text
-In [1]> 999999999999999999999999999999^2
+In[1]> 999999999999999999999999999999^2
 Out[1]> 999999999999999999999999999998000000000000000000000000000001
 
-In [2]> 0.1+0.2
+In[2]> 0.1+0.2
 Out[2]> 3/10
 
-In [3]>  0.1+0.2==0.3
+In[3]>  0.1+0.2==0.3
 Out[3]> True
 
-In [4]> 1/3+1/6
+In[4]> 1/3+1/6
 Out[4]> 1/2
 
-In [5]> sqrt[72]
+In[5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In [6]> sin[Pi/6]
+In[6]> sin[Pi/6]
 Out[6]> 1/2
 
-In [7]> expand[(x+1)^3]
+In[7]> expand[(x+1)^3]
 Out[7]> x^3+3x^2+3x+1
 
-In [8]> factor[x^2-1]
+In[8]> factor[x^2-1]
 Out[8]> (x-1)(x+1)
 
-In [9]> fullSimplify[(x^2-1)/(x-1),x!=1]
+In[9]> fullSimplify[(x^2-1)/(x-1),x!=1]
 Out[9]> 1+x
 
-In [10]> simplify[sqrt[x^2],element[x,Real]]
+In[10]> simplify[sqrt[x^2],element[x,Real]]
 Out[10]> abs[x]
 
-In [11]> D[exp[x^2],x]
+In[11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In [12]> integrate[x^2+sin[x],x]
+In[12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In [13]> integrate[sin[x],{x,0,Pi}]
+In[13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
-In [14]> limit[(1-cos[x])/x^2,x,0]
+In[14]> limit[(1-cos[x])/x^2,x,0]
 Out[14]> 1/2
 
-In [15]> solve[x^2+1==0,x,Complex]
+In[15]> solve[x^2+1==0,x,Complex]
 Out[15]> {x==I, x==-I}
 
-In [16]> (1+I)/(1-I)
+In[16]> (1+I)/(1-I)
 Out[16]> I
 
-In [17]> sqrt[-8]
+In[17]> sqrt[-8]
 Out[17]> 2I sqrt[2]
 
-In [18]> Pi
+In[18]> Pi
 Out[18]> Pi
 
-In [19]> N[%,30]
+In[19]> N[%,30]
 Out[19]> 3.141592653589793238462643383280
 
-In [20]> N[%%%,20]
+In[20]> N[%%%,20]
 Out[20]> 2.82842712474619009760I
 ```
 
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
 
+## v1.5.1
+
+v1.5.1は，v1.5.0のexact-first CAS基盤を保ったまま，canonicalization，検証基盤，多倍長整数，高精度数値評価を重点的に固めたreleaseである。
+
+主な内部改善:
+
+- BigInt乗算をschoolbook / Karatsuba / Toom-3の適応dispatchへ変更し，専用squareも追加
+- Burnikel–Ziegler除算，2冪除算fast path，divide-and-conquer 10進変換
+- `Pi`をbinary-splitting Chudnovsky，`exp` / `log`をbinary splitting中心のcertified算法へ更新
+- 巨大Radianの三角函数を保証付きargument reductionで高速化
+- BigFloatの極端なexponent gap加減算をdirected roundingを保ったままfast-path化
+- formatter/parser生成型round-trip，積分derivative-back，Reference↔registry照合，極端値近似testを追加
+- `mmCal.Benchmarks`を独立projectとして追加
+
+高速化の採用理由，棄却した算法，代表benchmarkは[`docs/performance_optimization.ja.md`](docs/performance_optimization.ja.md)を参照。
 
 ## 1. まず使う
 
@@ -109,7 +122,7 @@ mmCal --angle rad
 mmCal --angle grad --fix 8
 ```
 
-- `--fix 16`: 結果を小数点以下**最大16桁(任意)**で表示する。末尾の不要な0は省略
+- `--fix 16`: 結果を小数点以下**最大16桁**で表示する。末尾の不要な0は省略
 - `--angle deg`: 角度指定のない三角函数を度として扱う
 - `--angle rad`: ラジアン。既定値
 - `--angle grad`: グラード
@@ -128,10 +141,10 @@ cmake --build build
 巨大整数・有理数・根号を含む代数的表現・複素数・記号式も可能な限りexactな形を保ち，展開・因数分解・簡約・微分・積分・極限・方程式求解などを同じ式体系上で処理する。
 
 ```text
-In [1]> 1/3
+In[1]> 1/3
 Out[1]> 1/3
 
-In [2]> sqrt[2]
+In[2]> sqrt[2]
 Out[2]> sqrt[2]
 ```
 
@@ -140,10 +153,10 @@ Out[2]> sqrt[2]
 小数値が必要な場合だけ`N[expr,n]`で任意精度の数値近似を要求する。
 
 ```text
-In [3]> N[1/3,20]
+In[3]> N[1/3,20]
 Out[3]> 0.33333333333333333333
 
-In [4]> N[Pi,30]
+In[4]> N[Pi,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
@@ -154,13 +167,13 @@ Out[4]> 3.141592653589793238462643383280
 :fix 6
 Display: Fixed(6)
 
-In [5]> 1/3
+In[5]> 1/3
 Out[5]> 0.333333
 
 :fix off
 Display: Exact
 
-In [6]> Out[5]
+In[6]> Out[5]
 Out[6]> 1/3
 ```
 
@@ -176,16 +189,16 @@ Out[6]> 1/3
 - `rationalize[x]`: 近似値の保証区間からexactな有理数を復元する
 
 ```text
-In [7]> accuracy[N[1/3,20]]
+In[7]> accuracy[N[1/3,20]]
 Out[7]> 20
 
-In [8]> precision[N[1/3,20]]
+In[8]> precision[N[1/3,20]]
 Out[8]> 19
 
-In [9]> rationalize[N[1/3,20]]
+In[9]> rationalize[N[1/3,20]]
 Out[9]> 1/3
 
-In [10]> accuracy[1/3]
+In[10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
@@ -198,13 +211,15 @@ exactな値やexactな記号式は，この意味では`Infinity`を返す。
 
 ## 3. 基本構文
 
-函数呼び出しは角括弧を標準表記とする。ただし丸括弧も函数呼び出しに利用できる。
+函数呼び出しは**角括弧 `[]` のみ**を使用する。丸括弧 `()` は数式のグルーピング専用であり、函数呼び出しには使用しない。
 
 ```text
 sin[Pi/6]
 sqrt[2]
 log[10,1000]
 ```
+
+したがって `sin(Pi/6)` は函数呼び出しではない。既知の函数名に旧 `()` 構文を使った場合はSyntaxErrorとし、`sin[Pi/6]` のように書く。`x(x+1)` のような通常identifierと丸括弧の隣接は暗黙乗算として受理し、Formatterは明確さのため `x*(x+1)` と正規化する。
 
 四則演算や冪は通常の記法を使う。
 
@@ -310,22 +325,22 @@ Exit[]
 直前の成功結果は`%`，さらに前は`%%`で参照できる。`%%%`のように`%`を重ねれば，さらに前の結果を参照できる。
 
 ```text
-In [1]> 2+3
+In[1]> 2+3
 Out[1]> 5
 
-In [2]> %*2
+In[2]> %*2
 Out[2]> 10
 ```
 
 絶対番号も利用できる。
 
 ```text
-In [1]
+In[1]
 Out[1]
 ```
 
 `Out[n]`はその時点で保存された出力を返す。
-`In [n]`は過去の入力式を取得し，**現在の定義環境でもう一度評価する**。
+`In[n]`は過去の入力式を取得し，**現在の定義環境でもう一度評価する**。
 
 ## 7. 主な数学機能
 
@@ -537,8 +552,7 @@ Copyright (c) 2021–2026 mmKreutzef
 ## 15. テスト・制作環境
 
 v1.5.1時点で，本プロジェクトには1691件の内部回帰テストと1337件のブラックボックステストが含まれる。
-exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
-さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
+exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 
 主なWindows開発環境:
 

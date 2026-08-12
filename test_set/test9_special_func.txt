@@ -54,3 +54,22 @@ D[ellipticPi[1/5,x,1/3],x]==>1/((1-sin[x Rad]^2/5)sqrt[1-sin[x Rad]^2/3])
 N[ellipticF[1/2,1/3],20]=>0.50684775626543110920
 N[ellipticE[1/2,1/3],20]=>0.49331536201475850521
 N[ellipticPi[1/5,1/2,1/3],20]=>0.51520338216141386085
+
+# Exponential / sine / cosine / logarithmic integrals and polylogarithm
+Si[0]==>0
+Si[-1]==>-Si[1]
+polylog[0,x]==>x/(1-x)
+polylog[1,x]==>-log[1-x]
+polylog[2,1]==>Pi^2/6
+polylog[2,-1]==>-Pi^2/12
+D[Ei[x],x]==>exp[x]/x
+D[Si[x],x]==>sin[x]/x
+D[Ci[x],x]==>cos[x]/x
+D[li[x],x]==>1/log[x]
+D[polylog[2,x],x]==>-log[1-x]/x
+D[polylog[3,x],x]==>polylog[2,x]/x
+N[Ei[1],20]=>1.89511781635593675547
+N[Si[1],20]=>0.94608307036718301494
+N[Ci[1],20]=>0.33740392290096813466
+N[li[2],20]=>1.04516378011749278484
+N[polylog[2,1/2],20]=>0.58224052646501250590

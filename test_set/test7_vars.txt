@@ -6,34 +6,35 @@ x=>2
 x:=3=>3
 x=>3
 
-f(x):=2*x=>f[x]:=2x
-f(3)=>6
-f(x)=>6
+f[x]:=2*x=>f[x]:=2x
+f(3)=>SyntaxError: Function calls require square brackets; use f[...]
+f[3]=>6
+f[x]=>6
 
-g(y):=x+y=>g[y]:=x+y
-g(4)=>7
+g[y]:=x+y=>g[y]:=x+y
+g[4]=>7
 
 UnDef[x]=>1
 x=>x
-g(4)=>4+x
+g[4]=>4+x
 
 UnDef[f]=>1
-f(3)=>NameError
-Defs()=>{g[y]:=x+y}
+f[3]=>NameError
+Defs[]=>{g[y]:=x+y}
 
 Clear[]=>"Cleared"
-Defs()=>{}
+Defs[]=>{}
 
 # Own value and function definition may coexist on the same symbol.
 x:=1=>1
-x(y):=y+1=>x[y]:=y+1
+x[y]:=y+1=>x[y]:=y+1
 x=>1
-x(4)=>5
+x[4]=>5
 
-f(x):=x+1=>f[x]:=x+1
+f[x]:=x+1=>f[x]:=x+1
 f:=2=>2
 f=>2
-f(3)=>4
+f[3]=>4
 
 UnDef[x,f]=>2
-Defs()=>{}
+Defs[]=>{}

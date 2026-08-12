@@ -69,6 +69,26 @@ namespace mmcal::approximation {
     const numeric::Rational& m,
     std::size_t precisionBits);
 
+// 古典的積分函数。実数backendではprincipal real valueを保証区間で返す。
+[[nodiscard]] RealInterval encloseExponentialIntegralEiReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseSineIntegralSiReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseCosineIntegralCiPositive(
+    const RealInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseLogarithmicIntegralLiPositive(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
+// 現backendは正整数sと|z|<1のexact Rational pointを級数で保証評価する。
+[[nodiscard]] RealInterval enclosePolylogReal(
+    std::uint64_t order,
+    const numeric::Rational& z,
+    std::size_t precisionBits);
+
 // a,b>0 に対するBetaとlog Beta。Gammaの比ではなくlog-domainで評価する。
 [[nodiscard]] RealInterval encloseBetaPositive(
     const RealInterval& a,

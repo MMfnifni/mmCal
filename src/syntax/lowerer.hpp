@@ -67,7 +67,6 @@ private:
         expression::OriginMap* origins) const;
     [[nodiscard]] expression::Expr lowerCall(
         const CallSyntax& call,
-        source::SourceSpan span,
         expression::OriginMap* origins) const;
     [[nodiscard]] expression::Expr lowerComparison(
         const ComparisonSyntax& comparison,

@@ -159,6 +159,23 @@ MathRegistry MathRegistry::defaults(
     registry.addFunction(evaluation::BuiltinId::EllipticPi, FunctionId::EllipticPi,
         FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
         FunctionBranchRule::PrincipalElliptic, std::nullopt, FunctionDefinednessRule::EllipticPrincipal, 3);
+    // Ei/Ci/li/polylogはprincipal branchを持つため、Everywhereとは扱わない。
+    // Siはentireな奇函数なのでbranch条件なし。
+    registry.addFunction(evaluation::BuiltinId::ExponentialIntegralEi, FunctionId::ExponentialIntegralEi,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalExponentialIntegral, std::nullopt, FunctionDefinednessRule::ArgumentNonZero);
+    registry.addFunction(evaluation::BuiltinId::SineIntegralSi, FunctionId::SineIntegralSi,
+        FunctionParity::Odd, FunctionDomainRule::ComplexToComplexRealPreserving,
+        FunctionBranchRule::SingleValued, std::nullopt);
+    registry.addFunction(evaluation::BuiltinId::CosineIntegralCi, FunctionId::CosineIntegralCi,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalCosineIntegral, std::nullopt, FunctionDefinednessRule::ArgumentNonZero);
+    registry.addFunction(evaluation::BuiltinId::LogarithmicIntegralLi, FunctionId::LogarithmicIntegralLi,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalLogarithmicIntegral, std::nullopt, FunctionDefinednessRule::SpecialPrincipal);
+    registry.addFunction(evaluation::BuiltinId::Polylog, FunctionId::Polylog,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalPolylogarithm, std::nullopt, FunctionDefinednessRule::SpecialPrincipal, 2);
     registry.addFunction(evaluation::BuiltinId::Beta, FunctionId::Beta,
         FunctionParity::Neither, FunctionDomainRule::RealPairToReal,
         FunctionBranchRule::SingleValued, std::nullopt,

@@ -62,19 +62,27 @@ void runParserTests(TestRunner& tests) {
         const auto tree = parse("sqrt[2]");
         const auto* call = std::get_if<syntax::CallSyntax>(&tree.root().data);
         tests.expect(
-            call && call->delimiter == syntax::CallDelimiter::Brackets,
-            "parser stores bracket call delimiter");
+            call && call->name == "sqrt" && call->arguments.size() == 1,
+            "parser recognizes square-bracket function calls");
     }
 
     {
-        const auto tree = parse("f(x, y) := x + y");
+        const auto tree = parse("f[x, y] := x + y");
         const auto* assignment = std::get_if<syntax::AssignmentSyntax>(&tree.root().data);
         const auto* signature = assignment
             ? std::get_if<syntax::FunctionSignatureSyntax>(&assignment->target->data)
             : nullptr;
         tests.expect(
             signature && signature->name == "f" && signature->parameters.size() == 2,
-            "parser recognizes function signature assignment");
+            "parser recognizes square-bracket function signature assignment");
+    }
+
+    {
+        const auto tree = parse("x(x + 1)");
+        const auto* multiply = std::get_if<syntax::BinarySyntax>(&tree.root().data);
+        tests.expect(
+            multiply && multiply->operation == syntax::BinaryOperator::ImplicitMultiply,
+            "parser treats identifier followed by a group as implicit multiplication");
     }
 
     {
@@ -93,8 +101,11 @@ void runParserTests(TestRunner& tests) {
         [] { static_cast<void>(parse("Pi := 3")); },
         "parser rejects constant assignment");
     tests.expectThrows<error::CalcError>(
-        [] { static_cast<void>(parse("f(x, x) := x")); },
+        [] { static_cast<void>(parse("f[x, x] := x")); },
         "parser rejects duplicate function parameters");
+    tests.expectThrows<error::CalcError>(
+        [] { static_cast<void>(parse("f(x) := x")); },
+        "parser rejects parenthesized function definition syntax");
     tests.expect(
         std::holds_alternative<syntax::UnitAppliedSyntax>(parse("(30)rad").root().data),
         "parser accepts an angle-unit suffix on a grouped expression");

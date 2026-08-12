@@ -1,6 +1,6 @@
 # mmCalculator – Mathematical Machinery Calculator
 
-Exact by default. Explicit approximation. No silent loss of mathematics. And EASY.
+An exact-first CLI calculator and compact CAS for engineering, research, and manufacturing.
 
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
@@ -32,69 +32,85 @@ It also does not immediately convert input to `double` as many ordinary calculat
 ## Quick examples — details later
 
 ```text
-In [1]> 999999999999999999999999999999^2
+In[1]> 999999999999999999999999999999^2
 Out[1]> 999999999999999999999999999998000000000000000000000000000001
 
-In [2]> 0.1+0.2
+In[2]> 0.1+0.2
 Out[2]> 3/10
 
-In [3]>  0.1+0.2==0.3
+In[3]>  0.1+0.2==0.3
 Out[3]> True
 
-In [4]> 1/3+1/6
+In[4]> 1/3+1/6
 Out[4]> 1/2
 
-In [5]> sqrt[72]
+In[5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In [6]> sin[Pi/6]
+In[6]> sin[Pi/6]
 Out[6]> 1/2
 
-In [7]> expand[(x+1)^3]
+In[7]> expand[(x+1)^3]
 Out[7]> x^3+3x^2+3x+1
 
-In [8]> factor[x^2-1]
+In[8]> factor[x^2-1]
 Out[8]> (x-1)(x+1)
 
-In [9]> fullSimplify[(x^2-1)/(x-1),x!=1]
+In[9]> fullSimplify[(x^2-1)/(x-1),x!=1]
 Out[9]> 1+x
 
-In [10]> simplify[sqrt[x^2],element[x,Real]]
+In[10]> simplify[sqrt[x^2],element[x,Real]]
 Out[10]> abs[x]
 
-In [11]> D[exp[x^2],x]
+In[11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In [12]> integrate[x^2+sin[x],x]
+In[12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In [13]> integrate[sin[x],{x,0,Pi}]
+In[13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
-In [14]> limit[(1-cos[x])/x^2,x,0]
+In[14]> limit[(1-cos[x])/x^2,x,0]
 Out[14]> 1/2
 
-In [15]> solve[x^2+1==0,x,Complex]
+In[15]> solve[x^2+1==0,x,Complex]
 Out[15]> {x==I, x==-I}
 
-In [16]> (1+I)/(1-I)
+In[16]> (1+I)/(1-I)
 Out[16]> I
 
-In [17]> sqrt[-8]
+In[17]> sqrt[-8]
 Out[17]> 2I sqrt[2]
 
-In [18]> Pi
+In[18]> Pi
 Out[18]> Pi
 
-In [19]> N[%,30]
+In[19]> N[%,30]
 Out[19]> 3.141592653589793238462643383280
 
-In [20]> N[%%%,20]
+In[20]> N[%%%,20]
 Out[20]> 2.82842712474619009760I
 ```
 
 The following sections provide an overview only.
 For function specifications and implementation details, see the [reference](docs/reference.md) or the Markdown documents in the `docs` directory.
+
+## v1.5.1
+
+v1.5.1 keeps the exact-first CAS semantics established in v1.5.0 while concentrating on canonicalization, verification infrastructure, multiprecision arithmetic, and high-precision numerical performance.
+
+Major internal improvements include:
+
+- Adaptive BigInt multiplication using schoolbook / Karatsuba / Toom-3, plus a dedicated squaring path
+- Burnikel–Ziegler division, power-of-two division fast paths, and divide-and-conquer decimal conversion
+- Binary-splitting Chudnovsky for `Pi` and binary-splitting based certified `exp` / `log` evaluation
+- Certified argument reduction for very large radian trigonometric inputs
+- A directed-rounding-safe fast path for extreme BigFloat exponent gaps
+- Generated formatter/parser round-trip tests, integration derivative-back coverage, Reference↔registry checks, and extreme-value approximation tests
+- A separate `mmCal.Benchmarks` project
+
+See [`docs/performance_optimization.md`](docs/performance_optimization.md) for adopted and rejected optimizations and representative benchmark results.
 
 ## 1. Getting started
 
@@ -127,10 +143,10 @@ cmake --build build
 Large integers, rational numbers, algebraic expressions containing radicals, complex numbers, and symbolic expressions are kept exact whenever possible. Expansion, factorization, simplification, differentiation, integration, limits, and equation solving all operate within the same expression system.
 
 ```text
-In [1]> 1/3
+In[1]> 1/3
 Out[1]> 1/3
 
-In [2]> sqrt[2]
+In[2]> sqrt[2]
 Out[2]> sqrt[2]
 ```
 
@@ -139,10 +155,10 @@ Values such as `Pi`, `E`, `Phi`, and `sqrt[2]` are not treated as pre-stored mac
 When a decimal value is required, use `N[expr,n]` to request an arbitrary-precision numerical approximation.
 
 ```text
-In [3]> N[1/3,20]
+In[3]> N[1/3,20]
 Out[3]> 0.33333333333333333333
 
-In [4]> N[Pi,30]
+In[4]> N[Pi,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
@@ -153,13 +169,13 @@ By contrast, `:fix` changes **only how values are displayed** and does not chang
 :fix 6
 Display: Fixed(6)
 
-In [5]> 1/3
+In[5]> 1/3
 Out[5]> 0.333333
 
 :fix off
 Display: Exact
 
-In [6]> Out[5]
+In[6]> Out[5]
 Out[6]> 1/3
 ```
 
@@ -175,16 +191,16 @@ Approximate values produced by `N` retain not only a display string but also pre
 - `rationalize[x]`: Recover an exact rational number from the certified interval of an approximate value
 
 ```text
-In [7]> accuracy[N[1/3,20]]
+In[7]> accuracy[N[1/3,20]]
 Out[7]> 20
 
-In [8]> precision[N[1/3,20]]
+In[8]> precision[N[1/3,20]]
 Out[8]> 19
 
-In [9]> rationalize[N[1/3,20]]
+In[9]> rationalize[N[1/3,20]]
 Out[9]> 1/3
 
-In [10]> accuracy[1/3]
+In[10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
@@ -197,13 +213,15 @@ The basic approach is to compute an interval containing the true value and confi
 
 ## 3. Basic syntax
 
-Square brackets are the standard notation for function calls. Parentheses can also be used for calls.
+Function calls use **square brackets `[]` only**. Parentheses `()` are reserved for expression grouping and are not function-call delimiters.
 
 ```text
 sin[Pi/6]
 sqrt[2]
 log[10,1000]
 ```
+
+Therefore `sin(Pi/6)` is not a function call. Using the legacy `()` syntax on a known function name is a SyntaxError; write `sin[Pi/6]`. Adjacency such as `x(x+1)` for an ordinary identifier is accepted as implicit multiplication, while the Formatter canonicalizes it to the explicit `x*(x+1)`.
 
 Ordinary notation is used for arithmetic and powers.
 
@@ -309,22 +327,22 @@ Exit[]
 The most recent successful result can be referenced with `%`, the one before that with `%%`, and earlier results by adding more `%` characters such as `%%%`.
 
 ```text
-In [1]> 2+3
+In[1]> 2+3
 Out[1]> 5
 
-In [2]> %*2
+In[2]> %*2
 Out[2]> 10
 ```
 
 Absolute indices are also available.
 
 ```text
-In [1]
+In[1]
 Out[1]
 ```
 
 `Out[n]` returns the output stored at that point.
-`In [n]` retrieves the previous input expression and **evaluates it again in the current definition environment**.
+`In[n]` retrieves the previous input expression and **evaluates it again in the current definition environment**.
 
 ## 7. Main mathematical features
 

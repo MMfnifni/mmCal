@@ -52,7 +52,7 @@ void runSessionApproximationTests(TestRunner& tests) {
     kernel::KernelSession definitions;
     tests.expectEqual(eval(definitions, "x:=2"), std::string{"2"},
         "variable definition succeeds");
-    tests.expectEqual(eval(definitions, "f(t):=t^2"), std::string{"f[t]:=t^2"},
+    tests.expectEqual(eval(definitions, "f[t]:=t^2"), std::string{"f[t]:=t^2"},
         "function definition succeeds");
     const std::string defs = eval(definitions, "Defs[]");
     tests.expect(defs.find("x:=2") != std::string::npos

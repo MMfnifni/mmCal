@@ -143,14 +143,15 @@ N[sqrt[2],30]
 
 ## 4.1 function call
 
-丸括弧と角括弧の両方を函数呼出に使用できる。
+函数呼出には**角括弧 `[]` だけ**を使用する。丸括弧 `()` はgrouping専用であり、函数呼出delimiterにはしない。
 
 ```text
-sin(Pi/6)
 sin[Pi/6]
+sqrt[2]
+f[x]
 ```
 
-グルーピングは丸括弧を使う。単独の`[x+1]`はgroupではない。
+既知の函数名に `sin(x)` のような旧丸括弧構文を使うとSyntaxError。通常identifierの `x(x+1)` は暗黙乗算として受理するが、Formatterは `x*(x+1)` と明示する。グルーピングは丸括弧を使い、単独の`[x+1]`はgroupではない。ユーザー函数の定義も `f[x] := ...` の形式に限定する。
 
 ## 4.2 配列
 
@@ -795,6 +796,64 @@ integrate[1/sqrt[1-x^4],x]
 
 最後のquartic reductionは正しい局所primitiveだが、現在の`fullSimplify`は`sin[asin[x]]`とprincipal square rootの積を一般に安全な恒等式へ潰し切れない。そのためderivative-back harnessではResolutionOnlyとして監視し、証明器不足を理由に積分能力を削らない。一般の楕円函数方程式も、逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
 
+
+## 14.9 Ei / Si / Ci / li / Polylogarithm
+
+積分で頻出するprincipal special functionsを次の名前で表す。
+
+```text
+Ei[x]
+Si[x]
+Ci[x]
+li[x]
+polylog[s,z]
+```
+
+`Ei`, `Ci`, `li`, `polylog`は一般にbranchを持つため、MathRegistryではprincipal branchとして扱う。`Si`はentireな奇函数である。現在のcertified real backendは、安全にtail boundを証明できる領域に限定し、対応外を推測値で埋めない。
+
+```text
+Si[0] -> 0
+Si[-1] -> -Si[1]
+polylog[0,z] -> z/(1-z)
+polylog[1,z] -> -log[1-z]
+polylog[2,1] -> Pi^2/6
+polylog[2,-1] -> -Pi^2/12
+
+N[Ei[1],20] -> 1.89511781635593675547
+N[Si[1],20] -> 0.94608307036718301494
+N[Ci[1],20] -> 0.33740392290096813466
+N[li[2],20] -> 1.04516378011749278484
+N[polylog[2,1/2],20] -> 0.58224052646501250590
+```
+
+現在の微分Knowledgeは、引数・order parameterが微分変数に依存しない範囲で
+
+```text
+D[Ei[x],x] -> exp[x]/x
+D[Si[x],x] -> sin[x]/x
+D[Ci[x],x] -> cos[x]/x
+D[li[x],x] -> 1/log[x]
+D[polylog[s,x],x] -> polylog[s-1,x]/x
+```
+
+を使う。`polylog[2,x]`は`polylog[1,x]`を`-log[1-x]`へexact退化させるため、
+
+```text
+D[polylog[2,x],x] -> -log[1-x]/x
+```
+
+まで閉じる。積分器ではこの共有Knowledgeにより、
+
+```text
+integrate[exp[x]/x,x] -> Ei[x]
+integrate[sin[x]/x,x] -> Si[x]
+integrate[cos[x]/x,x] -> Ci[x]
+integrate[1/log[x],x] -> li[x]
+integrate[log[1-x]/x,x] -> -polylog[2,x]
+```
+
+を返す。一般の`Ei/Si/Ci/li/polylog`方程式にprincipal inverseを一個だけ返す`Solve`規則は持たない。大域単射性・branchを証明できないためであり、`polylog[0,z]`や`polylog[1,z]`のように既存の代数函数・`log`へexact退化した場合だけ既存Solverへ渡す。
+
 ---
 
 # 15. 集約函数
@@ -1084,7 +1143,7 @@ integrate[1/(2x+3),x]
 - 定数、`x`、任意の有限多項式
 - affine baseの有理冪。指数`-1`はLogへ送る
 - Rational係数の有理函数。1次・2次分母に加え、Rational rootで1次因子へ分解でき、残余が高々既約2次となる場合はexact partial fractionへ分解する。重複1次因子にも対応
-- 正のRational scaleを証明できる二次平方根型の`asin/asinh` primitive
+- 正のRational scaleを証明できる二次逆平方根型の`asin/asinh` primitive、およびexact Rational係数二次式`q(x)`の`sqrt[q(x)]` primitive
 - `sin^m/cos^n`の有限Fourier reduction。積分器は正整数総次数256までを明示的に展開可能
 - `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) を `csc/sec` の標準漸化式で積分
 - `tan/cot/sec/csc`の正整数冪 (`2<=n<=256`) を標準reduction formulaで積分
@@ -1094,12 +1153,15 @@ integrate[1/(2x+3),x]
 - `log/log1p/expm1/sqrt/cbrt`。`log[x]/x`や`1/(x log[x])`は対数微分Knowledgeから認識
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
-- `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元
+- `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元。`Pi*x^2/2`の定義核も直接認識
 - `hypergeometric1F1`。正整数`n>=2`の`exp[c x^n]`を原点でentireな1F1 primitiveへ還元
-- exactな逆chain rule
+- exactな逆chain rule。`f'(x) f(x)^p`はD後の偶然の式形に依存せず構造的にも認識
 - 多項式×`exp/sin/cos/sinh/cosh`に対する有限回のintegration by parts
 - `exp[a x+b] sin/cos[c x+d]`型を連立一次式としてexact積分
-- `sqrt[q(sqrt[x])]`で`q`がexact Rational係数2次式かつ正leadingの場合の` t=sqrt[x] `局所置換
+- principal `sqrt[x]`を含む有理的な形への` t=sqrt[x] `局所置換、および`sqrt[q(sqrt[x])]`の二次根号class
+- 共通引数を持つ`R(sin(theta),cos(theta))`に対するbounded Weierstrass置換`t=tan(theta/2)`。変換後は既存exact有理積分器へ渡す
+- `log[1+beta*x^n]/x`を`polylog[2,-beta*x^n]`へ還元するdilogarithm Knowledge
+- boundedな積×短い和の分配。ただし全体がexact chain-ruleで一発に閉じる場合はchain-ruleを優先し、能力退行を防ぐ
 - `x^n log[x]` (`n`が非負整数)
 
 例:
@@ -1178,6 +1240,28 @@ integrate[1/(x^3+1),{x,0,1}]
 -> log[2] / 3 + Pi sqrt[3] / 9
 ```
 
+今回追加した置換・接続の代表例:
+
+```text
+integrate[sqrt[4-x^2],x]
+-> x sqrt[4-x^2]/2+2asin[x/2]
+
+integrate[2*x*(1+x^2)^5,x]
+-> (1+x^2)^6/6
+
+integrate[x/(1+x^4),x]
+-> atan[x^2]/2
+
+integrate[cos[Pi*x^2/2],x]
+-> fresnelc[x]
+
+integrate[log[1+x^2]/x,x]
+-> -polylog[2,-x^2]/2
+
+integrate[1/(1+sin[x]),x]
+-> -2/(1+tan[x/2])
+```
+
 角度単位も既存のAngleSemantics/Dと共有する。
 
 ```text
@@ -1209,10 +1293,37 @@ sqrt[x^2-1] == sqrt[x-1] sqrt[x+1]
 ```text
 integrate[x^2 + gamma[x],x]
 -> x^3 / 3 + integrate[gamma[x],x]
-WARN: ... unevaluated integrate[...] remains
+WARN: integrate partially evaluated the expression; remaining subintegral(s) are outside the current symbolic rule set
 ```
 
 解けない部分だけを保持し、既に求まった項まで巻き戻さない。
+
+### 未評価理由の診断
+
+未評価を単一のWARNへ潰さず、現在は次のdiagnostic codeを区別する。
+
+- `integrate::unsupported` — 現在のsymbolic rule setに解法がない。**閉形式が存在しないことを意味しない**。
+- `integrate::partial` — 一部は積分済みだが、残るsubintegralが現在のrule外。
+- `integrate::conditionsRequired` — domain / branch仮定不足で安全なprimitiveを選択できない。
+- `integrate::noKnownClosedForm` — mmCalの現在の標準函数語彙で有限閉形式がない代表familyとして明示的に認識したもの。
+
+例えば、
+
+```text
+integrate[gamma[x],x]
+-> integrate[gamma[x],x]
+WARN: mmCal has no implemented symbolic integration rule for this expression; this does not imply that no closed form exists
+
+integrate[abs[x],x]
+-> integrate[abs[x],x]
+WARN: integrate needs additional domain or branch assumptions before it can choose a safe symbolic antiderivative
+
+integrate[x^x,x]
+-> integrate[x^x,x]
+WARN: integrate recognized a family with no known finite closed form in mmCal's supported standard-function vocabulary; the integral remains unevaluated
+```
+
+`noKnownClosedForm`も「あらゆる数学的表現で不可能」という判定ではない。級数、新しい特殊函数、より広い函数classを許せば表現できる場合がある。mmCalが主張する範囲を現在サポートする有限標準函数語彙に限定する。
 
 ### nested square-root substitution
 
@@ -1726,7 +1837,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現行開発版では **212 builtin definitions / 194 source-callable names**。内部headはsource-callable数に含めない。
+現行開発版では **217 builtin definitions / 199 source-callable names**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1735,7 +1846,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
-fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
+Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,
@@ -1828,7 +1939,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 代表:
 
-- `digamma`, `trigamma`, `zeta`, `ibeta`, `polylog`
+- `digamma`, `trigamma`, `zeta`, `ibeta`
 - `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
 - advanced LU/QR/SVD/eigen/condition number/least squares
 - `hilbert`（旧仕様の名称再確認）

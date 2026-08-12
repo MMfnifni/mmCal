@@ -147,6 +147,55 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"D[ellipticF[x, x], x]"},
         "elliptic parameter derivatives remain unresolved until their complete formulas are implemented");
 
+    tests.expect(evalError(session, "Ei[0]").type() == error::CalcErrorType::Domain,
+        "Ei rejects its logarithmic singularity at zero");
+    tests.expectEqual(eval(session, "Si[0]"), std::string{"0"},
+        "Si is exact at zero");
+    tests.expectEqual(eval(session, "Si[-1]"), std::string{"-Si[1]"},
+        "Si uses exact odd parity");
+    tests.expect(evalError(session, "Ci[0]").type() == error::CalcErrorType::Domain,
+        "Ci rejects its logarithmic singularity at zero");
+    tests.expect(evalError(session, "li[1]").type() == error::CalcErrorType::Domain,
+        "li rejects its logarithmic singularity at one");
+    tests.expectEqual(eval(session, "N[Ei[1],20]"),
+        std::string{"1.89511781635593675547"},
+        "Ei has a certified real backend near the origin");
+    tests.expectEqual(eval(session, "N[Si[1],20]"),
+        std::string{"0.94608307036718301494"},
+        "Si has a certified real backend");
+    tests.expectEqual(eval(session, "N[Ci[1],20]"),
+        std::string{"0.33740392290096813466"},
+        "Ci has a certified positive-real backend");
+    tests.expectEqual(eval(session, "N[li[2],20]"),
+        std::string{"1.04516378011749278484"},
+        "li reuses the certified log and Ei backends");
+    tests.expectEqual(eval(session, "D[Ei[x],x]"), std::string{"exp[x]/x"},
+        "Ei derivative is exact");
+    tests.expectEqual(eval(session, "D[Si[x],x]"), std::string{"sin[x]/x"},
+        "Si derivative uses the default Radian syntax without a redundant unit wrapper");
+    tests.expectEqual(eval(session, "D[Ci[x],x]"), std::string{"cos[x]/x"},
+        "Ci derivative uses the default Radian syntax without a redundant unit wrapper");
+    tests.expectEqual(eval(session, "D[li[x],x]"), std::string{"1/log[x]"},
+        "li derivative is exact");
+
+    tests.expectEqual(eval(session, "polylog[0,x]"), std::string{"x/(1-x)"},
+        "polylog order zero reduces to a rational function");
+    tests.expectEqual(eval(session, "polylog[1,x]"), std::string{"-log[1-x]"},
+        "polylog order one reduces to principal Log");
+    tests.expectEqual(eval(session, "polylog[2,1]"), std::string{"Pi^2/6"},
+        "dilogarithm at one is exact");
+    tests.expectEqual(eval(session, "polylog[2,-1]"), std::string{"-Pi^2/12"},
+        "dilogarithm at minus one is exact");
+    tests.expectEqual(eval(session, "N[polylog[2,1/2],20]"),
+        std::string{"0.58224052646501250590"},
+        "polylog has a certified |z|<1 real series backend for positive integer order");
+    tests.expectEqual(eval(session, "D[polylog[2,x],x]"),
+        std::string{"-log[1-x]/x"},
+        "dilogarithm derivative reduces Li_1 directly to Log");
+    tests.expectEqual(eval(session, "D[polylog[3,x],x]"),
+        std::string{"polylog[2, x]/x"},
+        "general positive-order polylog derivative lowers the order by one");
+
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},
         "Beta at positive integers is exact");
     tests.expectEqual(eval(session, "beta[1/2,1/2]"), std::string{"Pi"},

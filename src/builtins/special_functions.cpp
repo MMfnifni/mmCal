@@ -426,6 +426,93 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return hold(BuiltinId::EllipticPi, arguments, registry);
 }
 
+[[nodiscard]] Expr evaluateClassicalIntegralFunction(
+    BuiltinId id,
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::string_view name;
+    switch (id) {
+    case BuiltinId::ExponentialIntegralEi: name = names::exponentialIntegralEi; break;
+    case BuiltinId::SineIntegralSi: name = names::sineIntegralSi; break;
+    case BuiltinId::CosineIntegralCi: name = names::cosineIntegralCi; break;
+    case BuiltinId::LogarithmicIntegralLi: name = names::logarithmicIntegralLi; break;
+    default:
+        error::throwCalcError(error::CalcErrorType::Internal, "Unexpected classical integral function");
+    }
+    requireArity(arguments, 1, name);
+
+    Rational value;
+    if (!exactRealRational(arguments.front(), value))
+        return hold(id, arguments, registry);
+
+    if ((id == BuiltinId::ExponentialIntegralEi || id == BuiltinId::CosineIntegralCi)
+        && value.isZero())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            std::string{name} + " is undefined at zero");
+    if (id == BuiltinId::LogarithmicIntegralLi && value == Rational{BigInt{1}})
+        error::throwCalcError(error::CalcErrorType::Domain, "li is undefined at one");
+
+    // Siはentireな奇函数。Ei/Ci/liはprincipal branchを持つため、同じ反射を一般化しない。
+    if (id == BuiltinId::SineIntegralSi) {
+        if (value.isZero())
+            return integer(0);
+        if (value.numerator().isNegative())
+            return exact::negate(
+                Expr::call(registry.symbol(id), {rationalExpr(-value)}),
+                registry, mathematics, angles);
+    }
+    return hold(id, arguments, registry);
+}
+
+[[nodiscard]] Expr evaluatePolylog(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 2, names::polylog);
+
+    if (exactZero(arguments[1]))
+        return integer(0);
+
+    Rational order;
+    if (!exactRealRational(arguments[0], order) || !order.isInteger())
+        return hold(BuiltinId::Polylog, arguments, registry);
+
+    if (order.numerator() == BigInt{0}) {
+        // Li_0(z)=z/(1-z)。z=1ではpoleなのでexact divisionのDomainErrorをそのまま使う。
+        return exact::divide(
+            arguments[1],
+            exact::subtract(integer(1), arguments[1], registry, mathematics, angles),
+            registry, mathematics, angles);
+    }
+    if (order.numerator() == BigInt{1}) {
+        // Li_1(z)=-Log(1-z)。zがsymbolicでも成立するprincipal-branch identity。
+        Expr oneMinusZ = exact::subtract(integer(1), arguments[1], registry, mathematics, angles);
+        return exact::negate(
+            exact::call(BuiltinId::Log, {std::move(oneMinusZ)}, registry, mathematics, angles),
+            registry, mathematics, angles);
+    }
+
+    Rational z;
+    if (!exactRealRational(arguments[1], z))
+        return hold(BuiltinId::Polylog, arguments, registry);
+
+    if (order.numerator() == BigInt{2} && (z == Rational{BigInt{1}} || z == Rational{BigInt{-1}})) {
+        Expr piSquared = exact::call(
+            BuiltinId::Power, {piExpr(mathematics), integer(2)}, registry, mathematics, angles);
+        return exact::divide(
+            z.numerator().isNegative()
+                ? exact::negate(std::move(piSquared), registry, mathematics, angles)
+                : std::move(piSquared),
+            integer(z.numerator().isNegative() ? 12 : 6),
+            registry, mathematics, angles);
+    }
+
+    return hold(BuiltinId::Polylog, arguments, registry);
+}
+
 [[nodiscard]] Expr evaluateBeta(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -595,6 +682,13 @@ Expr evaluateSpecialFunction(
         return evaluateEllipticE(arguments, registry, mathematics, angles);
     case BuiltinId::EllipticPi:
         return evaluateEllipticPi(arguments, registry, mathematics, angles);
+    case BuiltinId::ExponentialIntegralEi:
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi:
+    case BuiltinId::LogarithmicIntegralLi:
+        return evaluateClassicalIntegralFunction(id, arguments, registry, mathematics, angles);
+    case BuiltinId::Polylog:
+        return evaluatePolylog(arguments, registry, mathematics, angles);
     case BuiltinId::Beta:
         return evaluateBeta(arguments, registry, mathematics, angles);
     case BuiltinId::BetaLog:

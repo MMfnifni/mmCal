@@ -781,6 +781,222 @@ enum class EllipticSeriesKind { F, E, Pi };
     throw PrecisionInsufficient{"elliptic series did not converge within the term limit"};
 }
 
+
+[[nodiscard]] Rational eulerGammaRemainderBound(std::uint64_t n) {
+    constexpr std::size_t omittedK = 64;
+    const Rational coefficient = absRational(bernoulliNumbers()[2 * omittedK])
+        / Rational{BigInt::fromUnsigned(2 * omittedK)};
+    const BigInt nPower = numeric::pow(BigInt::fromUnsigned(n), 2 * omittedK);
+    return coefficient / Rational{nPower};
+}
+
+[[nodiscard]] RealInterval encloseEulerGamma(std::size_t precisionBits) {
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "EulerGamma target precision is too large"));
+
+    std::uint64_t n = 64;
+    while (eulerGammaRemainderBound(n) > target) {
+        if (n >= (1ULL << 20))
+            throw PrecisionInsufficient{"EulerGamma backend does not support this precision yet"};
+        n *= 2;
+    }
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "EulerGamma working precision is too large");
+    RealInterval harmonic = exactInterval(0, workBits);
+    for (std::uint64_t k = 1; k <= n; ++k)
+        harmonic = add(harmonic,
+            exactInterval(Rational{BigInt{1}, BigInt::fromUnsigned(k)}, workBits), workBits);
+
+    const Rational nR{BigInt::fromUnsigned(n)};
+    RealInterval result = subtract(
+        harmonic,
+        encloseLogPositive(exactInterval(nR, workBits), workBits).interval,
+        workBits);
+    result = subtract(result,
+        exactInterval(Rational{BigInt{1}, BigInt::fromUnsigned(2 * n)}, workBits),
+        workBits);
+
+    const Rational inverseSquare = Rational{BigInt{1}}
+        / (nR * nR);
+    Rational inverseEven = inverseSquare;
+    for (std::size_t k = 1; k < 64; ++k) {
+        const Rational coefficient = bernoulliNumbers()[2 * k]
+            / Rational{BigInt::fromUnsigned(2 * k)};
+        result = add(result,
+            exactInterval(coefficient * inverseEven, workBits), workBits);
+        inverseEven *= inverseSquare;
+    }
+
+    // Euler-Maclaurin剰余は次のBernoulli項の絶対値以下で押さえる。
+    // 符号へ依存せず対称区間を足し、保証を優先する。
+    result = add(result,
+        symmetricError(eulerGammaRemainderBound(n), workBits), workBits);
+    return result.roundedOutward(precisionBits);
+}
+
+[[nodiscard]] RealInterval pointExponentialIntegralEi(
+    Rational x,
+    std::size_t precisionBits) {
+    if (x.isZero())
+        throw std::domain_error("Ei is undefined at zero");
+    const Rational absX = absRational(x);
+    if (absX > rational(8))
+        throw PrecisionInsufficient{"Ei certified series currently requires |x| <= 8"};
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 56, "Ei working precision is too large");
+    RealInterval sum = add(
+        encloseEulerGamma(workBits),
+        encloseLogPositive(exactInterval(absX, workBits), workBits).interval,
+        workBits);
+
+    Rational factorialPower = x; // x^k/k!, k=1
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "Ei target precision is too large"));
+    constexpr std::uint64_t maximumTerms = 200'000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        const Rational term = factorialPower / Rational{BigInt::fromUnsigned(k)};
+        sum = add(sum, exactInterval(term, workBits), workBits);
+
+        if (absX < Rational{BigInt::fromUnsigned(k + 1)}) {
+            const Rational ratio = absX * Rational{BigInt::fromUnsigned(k)}
+                / Rational{numeric::pow(BigInt::fromUnsigned(k + 1), 2)};
+            const Rational q = absX / Rational{BigInt::fromUnsigned(k + 1)};
+            const Rational nextBound = absRational(term) * ratio;
+            const Rational tail = nextBound / (rational(1) - q);
+            if (tail <= target) {
+                sum = add(sum, symmetricError(tail, workBits), workBits);
+                return sum.roundedOutward(precisionBits);
+            }
+        }
+
+        factorialPower *= x;
+        factorialPower /= Rational{BigInt::fromUnsigned(k + 1)};
+    }
+    throw PrecisionInsufficient{"Ei series did not converge within the term limit"};
+}
+
+[[nodiscard]] RealInterval pointSineIntegralSi(
+    Rational x,
+    std::size_t precisionBits) {
+    if (x.isZero())
+        return exactInterval(0, precisionBits);
+    if (x.numerator().isNegative())
+        return negate(pointSineIntegralSi(-x, precisionBits));
+    if (x > rational(8))
+        throw PrecisionInsufficient{"Si certified series currently requires |x| <= 8"};
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 48, "Si working precision is too large");
+    const Rational x2 = x * x;
+    Rational term = x;
+    RealInterval sum = exactInterval(term, workBits);
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "Si target precision is too large"));
+
+    constexpr std::uint64_t maximumTerms = 200'000;
+    for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+        const std::uint64_t a = 2 * k + 1;
+        const std::uint64_t b = 2 * k + 2;
+        const std::uint64_t c = 2 * k + 3;
+        const Rational ratio = x2 * Rational{BigInt::fromUnsigned(a)}
+            / Rational{BigInt::fromUnsigned(c) * BigInt::fromUnsigned(c) * BigInt::fromUnsigned(b)};
+        const Rational nextBound = absRational(term) * ratio;
+        const Rational q = x2
+            / Rational{BigInt::fromUnsigned(b) * BigInt::fromUnsigned(c)};
+        if (q < rational(1)) {
+            const Rational tail = nextBound / (rational(1) - q);
+            if (tail <= target) {
+                sum = add(sum, symmetricError(tail, workBits), workBits);
+                return sum.roundedOutward(precisionBits);
+            }
+        }
+        term = -(term * ratio);
+        sum = add(sum, exactInterval(term, workBits), workBits);
+    }
+    throw PrecisionInsufficient{"Si series did not converge within the term limit"};
+}
+
+[[nodiscard]] RealInterval pointCosineIntegralCiPositive(
+    const Rational& x,
+    std::size_t precisionBits) {
+    if (x <= rational(0))
+        throw std::domain_error("Ci real certified backend requires x > 0");
+    if (x > rational(8))
+        throw PrecisionInsufficient{"Ci certified series currently requires 0 < x <= 8"};
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 56, "Ci working precision is too large");
+    RealInterval sum = add(
+        encloseEulerGamma(workBits),
+        encloseLogPositive(exactInterval(x, workBits), workBits).interval,
+        workBits);
+
+    const Rational x2 = x * x;
+    Rational term = -(x2 / rational(4)); // k=1: -x^2/(2*2!)
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "Ci target precision is too large"));
+    constexpr std::uint64_t maximumTerms = 200'000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        sum = add(sum, exactInterval(term, workBits), workBits);
+        const std::uint64_t a = 2 * k;
+        const std::uint64_t b = 2 * k + 1;
+        const std::uint64_t c = 2 * k + 2;
+        const Rational ratio = x2 * Rational{BigInt::fromUnsigned(a)}
+            / Rational{BigInt::fromUnsigned(c) * BigInt::fromUnsigned(c) * BigInt::fromUnsigned(b)};
+        const Rational nextBound = absRational(term) * ratio;
+        const Rational q = x2
+            / Rational{BigInt::fromUnsigned(b) * BigInt::fromUnsigned(c)};
+        if (q < rational(1)) {
+            const Rational tail = nextBound / (rational(1) - q);
+            if (tail <= target) {
+                sum = add(sum, symmetricError(tail, workBits), workBits);
+                return sum.roundedOutward(precisionBits);
+            }
+        }
+        term = -(term * ratio);
+    }
+    throw PrecisionInsufficient{"Ci series did not converge within the term limit"};
+}
+
+[[nodiscard]] RealInterval pointPolylogPositiveOrder(
+    std::uint64_t order,
+    Rational z,
+    std::size_t precisionBits) {
+    if (order == 0)
+        throw std::invalid_argument("polylog certified series requires positive order");
+    const Rational absZ = absRational(z);
+    if (absZ >= rational(1))
+        throw PrecisionInsufficient{"polylog certified series currently requires |z| < 1"};
+    if (z.isZero())
+        return exactInterval(0, precisionBits);
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "polylog working precision is too large");
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "polylog target precision is too large"));
+    RealInterval sum = exactInterval(0, workBits);
+    Rational zPower{BigInt{1}};
+
+    constexpr std::uint64_t maximumTerms = 1'000'000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        zPower *= z;
+        const BigInt denominator = numeric::pow(BigInt::fromUnsigned(k), order);
+        const Rational term = zPower / Rational{denominator};
+        sum = add(sum, exactInterval(term, workBits), workBits);
+
+        const BigInt nextDenominator = numeric::pow(BigInt::fromUnsigned(k + 1), order);
+        const Rational nextBound = absRational(zPower * z) / Rational{nextDenominator};
+        const Rational tail = nextBound / (rational(1) - absZ);
+        if (tail <= target) {
+            sum = add(sum, symmetricError(tail, workBits), workBits);
+            return sum.roundedOutward(precisionBits);
+        }
+    }
+    throw PrecisionInsufficient{"polylog series did not converge within the term limit"};
+}
+
 RealInterval encloseGammaReal(
     const RealInterval& input,
     std::size_t precisionBits) {
@@ -901,6 +1117,81 @@ RealInterval encloseEllipticEReal(
 RealInterval encloseEllipticPiReal(
     const Rational& n, const Rational& phi, const Rational& m, std::size_t precisionBits) {
     return pointEllipticSeries(EllipticSeriesKind::Pi, n, phi, m, precisionBits);
+}
+
+
+RealInterval encloseExponentialIntegralEiReal(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Ei precision must be at least one bit");
+    if (input.containsZero())
+        throw std::domain_error("Ei interval contains the singular point zero");
+
+    const Rational lower = input.lower().toRational();
+    const Rational upper = input.upper().toRational();
+    const RealInterval lo = pointExponentialIntegralEi(lower, precisionBits);
+    const RealInterval hi = pointExponentialIntegralEi(upper, precisionBits);
+    if (upper < rational(0))
+        return RealInterval{hi.lower(), lo.upper()}; // x<0ではEi' = exp(x)/x < 0。
+    return RealInterval{lo.lower(), hi.upper()};
+}
+
+RealInterval encloseSineIntegralSiReal(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 24, "Si interval precision is too large");
+    const Rational lower = input.lower().toRational();
+    const Rational upper = input.upper().toRational();
+    RealInterval value = pointSineIntegralSi(lower, workBits);
+    const Rational width = upper - lower;
+    // |sin(x)/x|<=1（x=0では極限1）なので入力幅だけ膨らませれば十分。
+    if (!width.isZero())
+        value = add(value, symmetricError(width, workBits), workBits);
+    return value.roundedOutward(precisionBits);
+}
+
+RealInterval encloseCosineIntegralCiPositive(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    const BigFloat zero;
+    if (input.lower() <= zero)
+        throw std::domain_error("Ci real certified backend requires a positive interval");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 24, "Ci interval precision is too large");
+    const Rational lower = input.lower().toRational();
+    const Rational upper = input.upper().toRational();
+    RealInterval value = pointCosineIntegralCiPositive(lower, workBits);
+    const Rational width = upper - lower;
+    // |Ci'(x)|=|cos(x)/x|<=1/lower on a positive interval.
+    if (!width.isZero())
+        value = add(value,
+            symmetricError(width / lower, workBits), workBits);
+    return value.roundedOutward(precisionBits);
+}
+
+RealInterval encloseLogarithmicIntegralLiPositive(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    const BigFloat zero;
+    if (input.lower() <= zero)
+        throw std::domain_error("li real certified backend requires x > 0");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "li working precision is too large");
+    const RealInterval logarithm = encloseLogPositive(input.roundedOutward(workBits), workBits).interval;
+    if (logarithm.containsZero())
+        throw std::domain_error("li interval contains the singular point x=1");
+    return encloseExponentialIntegralEiReal(logarithm, workBits).roundedOutward(precisionBits);
+}
+
+RealInterval enclosePolylogReal(
+    std::uint64_t order,
+    const Rational& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("polylog precision must be at least one bit");
+    return pointPolylogPositiveOrder(order, z, precisionBits);
 }
 
 RealInterval encloseBetaPositive(

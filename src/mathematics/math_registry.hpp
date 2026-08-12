@@ -92,7 +92,11 @@ enum class FunctionBranchRule {
     PrincipalAreaHyperbolicCosine,
     PrincipalAreaHyperbolicTangent,
     PrincipalHypergeometric2F1,
-    PrincipalElliptic
+    PrincipalElliptic,
+    PrincipalExponentialIntegral,
+    PrincipalCosineIntegral,
+    PrincipalLogarithmicIntegral,
+    PrincipalPolylogarithm
 };
 
 // 函数が有限入力で値を持つために必要な追加条件。
@@ -116,7 +120,8 @@ enum class FunctionDefinednessRule {
     GammaPoles,
     Hypergeometric1F1Poles,
     Hypergeometric2F1Poles,
-    EllipticPrincipal
+    EllipticPrincipal,
+    SpecialPrincipal
 };
 
 struct FunctionDefinition final {

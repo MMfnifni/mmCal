@@ -25,12 +25,17 @@ namespace {
 
 [[nodiscard]] syntax::ParserOptions makeParserOptions(
     const symbols::SymbolRegistry& symbols,
-    const evaluation::BuiltinRegistry& registry) {
+    const evaluation::BuiltinRegistry& registry,
+    const evaluation::UserFunctionRegistry& userFunctions) {
     syntax::ParserOptions options = syntax::ParserOptions::defaults();
     options.constants = symbols.sourcePredefinedNames();
     options.protectedNames = options.constants;
-    for (const std::string& name : registry.sourceFunctionNames())
+    for (const std::string& name : registry.sourceFunctionNames()) {
         options.protectedNames.insert(name);
+        options.functions.insert(name);
+    }
+    for (const std::string& name : userFunctions.names())
+        options.functions.insert(name);
     return options;
 }
 
@@ -71,7 +76,7 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
         syntax::Parser parser{
             source,
             lexer.tokenize(),
-            makeParserOptions(symbolRegistry_, registry_)};
+            makeParserOptions(symbolRegistry_, registry_, userFunctions_)};
         syntax::SyntaxTree tree = parser.parse();
         syntax::LoweringResult lowered = lowerer_.lowerTracked(tree, document);
         inputHistory_.back() = lowered.expression;

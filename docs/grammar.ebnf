@@ -1,4 +1,4 @@
-(* mmCal 1.5.1 現行構文。意味判定と名前解決はLowerer / Evaluatorへ分離する。 *)
+(* mmCal 1.5.2 現行構文。意味判定と名前解決はLowerer / Evaluatorへ分離する。 *)
 
 digit          ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 letter         ::= "A" | ... | "Z" | "a" | ... | "z" ;
@@ -43,13 +43,13 @@ Primary        ::= number
 HistoryRef     ::= "%" , { "%" } ;
 ArrayLiteral   ::= "{" , [ Assignment , { "," , Assignment } ] , "}" ;
 IdentifierExpr ::= identifier , [ CallSuffix ] ;
-CallSuffix     ::= "(" , [ Assignment , { "," , Assignment } ] , ")"
-                 | "[" , [ Assignment , { "," , Assignment } ] , "]" ;
+CallSuffix     ::= "[" , [ Assignment , { "," , Assignment } ] , "]" ;
 Group          ::= "(" , Assignment , ")" ;
 ImplicitMul    ::= (* 隣接規則によりParserが生成する。 *) ;
 
-(* 入力では函数呼び出しに () と [] の双方を許可する。 *)
-(* Formatterはすべての函数呼び出しを name[...] 形式で表示する。 *)
+(* 函数呼び出しは name[...] のみ。丸括弧はgrouping専用とする。 *)
+(* 通常identifierに続く (expr) はImplicitMulとして扱い、Formatterは x*(expr) と明示する。 *)
+(* 既知の函数名に旧 name(expr) 構文を使った場合は、乗算へ黙って変えずSyntaxErrorとする。 *)
 (* 角括弧は函数呼び出し専用であり、グループ化には使わない。 *)
 (* 波括弧は配列専用とする。 *)
 (* Iだけを虚数単位として扱い、iは通常の識別子とする。 *)

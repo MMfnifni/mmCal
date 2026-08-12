@@ -839,10 +839,13 @@ expression::Expr Evaluator::dispatchBuiltin(
             assumptions = mathematics::parseAssumptions(arguments[2], registry_, mathematics_);
 
         std::optional<expression::Expr> result;
+        std::optional<symbolic::IntegrationDisposition> integrationDisposition;
         if (arguments[1].isSymbol()) {
-            result = symbolic::integrateExpression(
+            symbolic::IntegrationResult detailed = symbolic::integrateExpressionDetailed(
                 arguments[0], arguments[1].asSymbol(), registry_, mathematics_,
                 angleSemantics_, assumptions);
+            integrationDisposition = detailed.disposition;
+            result = std::move(detailed.expression);
         }
         else if (const auto iterator = parseRangeIteratorSpec(arguments[1])) {
             const auto* infinity = symbolRegistry_.find("Infinity");
@@ -857,9 +860,36 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "integrate expects a symbol or {variable, lower, upper} as the second argument");
         }
 
-        if (containsBuiltinCall(*result, registry_.symbol(BuiltinId::SymbolicIntegral)))
-            emitWarning("integrate::unevaluated",
-                "integrate could not fully prove the symbolic antiderivative or definite integral; unevaluated integrate[...] remains");
+        if (containsBuiltinCall(*result, registry_.symbol(BuiltinId::SymbolicIntegral))) {
+            if (!integrationDisposition) {
+                emitWarning("integrate::conditionsRequired",
+                    "integrate kept the definite integral unevaluated because a safe symbolic result could not be established on the requested interval");
+            }
+            else {
+                switch (*integrationDisposition) {
+                case symbolic::IntegrationDisposition::Partial:
+                    emitWarning("integrate::partial",
+                        "integrate partially evaluated the expression; remaining subintegral(s) are outside the current symbolic rule set");
+                    break;
+                case symbolic::IntegrationDisposition::KnownNoFiniteClosedForm:
+                    emitWarning("integrate::noKnownClosedForm",
+                        "integrate recognized a family with no known finite closed form in mmCal's supported standard-function vocabulary; the integral remains unevaluated");
+                    break;
+                case symbolic::IntegrationDisposition::ConditionsRequired:
+                    emitWarning("integrate::conditionsRequired",
+                        "integrate needs additional domain or branch assumptions before it can choose a safe symbolic antiderivative");
+                    break;
+                case symbolic::IntegrationDisposition::UnsupportedByEngine:
+                    emitWarning("integrate::unsupported",
+                        "mmCal has no implemented symbolic integration rule for this expression; this does not imply that no closed form exists");
+                    break;
+                case symbolic::IntegrationDisposition::Solved:
+                    emitWarning("integrate::unsupported",
+                        "integrate left an unexpected unevaluated subintegral; this does not imply that no closed form exists");
+                    break;
+                }
+            }
+        }
         return *result;
     }
     case BuiltinId::Limit: {
@@ -1083,6 +1113,11 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::EllipticF:
     case BuiltinId::EllipticE:
     case BuiltinId::EllipticPi:
+    case BuiltinId::ExponentialIntegralEi:
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi:
+    case BuiltinId::LogarithmicIntegralLi:
+    case BuiltinId::Polylog:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:

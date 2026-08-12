@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.2 — 開発中
+
+### 構文（breaking change）
+
+- 函数呼び出しを `name[...]` に一本化し、`name(...)` 呼び出しを廃止
+- 丸括弧 `()` はgrouping専用とし、通常identifierの `x(x+1)` は暗黙乗算として扱う
+- 既知の函数名に旧 `sin(x)` 構文を使った場合は、誤って乗算へ解釈せずSyntaxErrorを返す
+- Formatterは函数を常に `name[...]`、identifierとgroupの積を `x*(...)` と明示してround-tripを一意化
+- Parser/AST/Lowererから函数呼出delimiterの分岐を削除
+
+
 ## v1.5.1 — 2026-08-12
 
 v1.5.0のexact-first CAS基盤を維持しつつ、canonicalization、検証、巨大整数、高精度数値評価、benchmark基盤を重点的に改善した。

@@ -375,6 +375,9 @@ void runKernelSessionTests(TestRunner& tests) {
     const error::CalcError protectedBuiltin = evaluateError(session, "sqrt := 3");
     tests.expect(protectedBuiltin.type() == error::CalcErrorType::Syntax,
         "KernelSession: source-callable builtin names are protected from assignment");
+    const error::CalcError parenthesizedBuiltinCall = evaluateError(session, "sqrt(4)");
+    tests.expect(parenthesizedBuiltinCall.type() == error::CalcErrorType::Syntax,
+        "KernelSession: built-in function calls require square brackets");
 
     tests.expectEqual(evaluateAndFormat(session, "x := 3"), std::string{"3"},
         "KernelSession: evaluates assignment");
@@ -716,8 +719,9 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: exposes user-function definitions");
     tests.expectEqual(evaluateAndFormat(functionSession, "f[3]"), std::string{"4"},
         "KernelSession: evaluates user function with bracket call");
-    tests.expectEqual(evaluateAndFormat(functionSession, "f(4)"), std::string{"5"},
-        "KernelSession: remembers user function for parenthesized call");
+    const error::CalcError parenthesizedUserCall = evaluateError(functionSession, "f(4)");
+    tests.expect(parenthesizedUserCall.type() == error::CalcErrorType::Syntax,
+        "KernelSession: rejects parenthesized user-function calls");
 
     static_cast<void>(functionSession.evaluate("x := 100"));
     tests.expectEqual(evaluateAndFormat(functionSession, "f[2]"), std::string{"3"},

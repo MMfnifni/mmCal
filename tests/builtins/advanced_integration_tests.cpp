@@ -82,7 +82,8 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expect(nested.find("integrate[") == std::string::npos
             && nested.find("log[") != std::string::npos,
         "sqrt substitution handles nested quadratic radicals symbolically");
-    tests.expect(findDiagnostic(session, "integrate::unevaluated") == nullptr,
+    tests.expect(findDiagnostic(session, "integrate::unsupported") == nullptr
+            && findDiagnostic(session, "integrate::partial") == nullptr,
         "supported nested radical does not emit an unevaluated warning");
     tests.expect(nested.find("+-") == std::string::npos
             && nested.find(" + ") == std::string::npos
@@ -117,6 +118,17 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[1/(1+x^5),x]"),
         std::string{"x hypergeometric2F1[1, 1/5, 6/5, -x^5]"},
         "rational binomial kernels can use the same 2F1 integration family");
+
+    tests.expectEqual(eval(session, "integrate[exp[x]/x,x]"), std::string{"Ei[x]"},
+        "exponential-over-argument kernels close through Ei");
+    tests.expectEqual(eval(session, "integrate[sin[x]/x,x]"), std::string{"Si[x]"},
+        "sine-over-argument kernels close through Si");
+    tests.expectEqual(eval(session, "integrate[cos[x]/x,x]"), std::string{"Ci[x]"},
+        "cosine-over-argument kernels close through Ci");
+    tests.expectEqual(eval(session, "integrate[1/log[x],x]"), std::string{"li[x]"},
+        "reciprocal-log kernels close through li");
+    tests.expectEqual(eval(session, "integrate[log[1-x]/x,x]"), std::string{"-polylog[2, x]"},
+        "logarithmic-over-argument kernels close through the dilogarithm");
 
     tests.expectEqual(eval(session, "integrate[1/sqrt[1-(1/3)*sin[x]^2],x]"),
         std::string{"ellipticF[x, 1/3]"},
@@ -161,7 +173,7 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expect(partial.find("x^3/3") != std::string::npos
             && partial.find("integrate[gamma[x], x]") != std::string::npos,
         "linear integration preserves solved terms when one term remains unresolved");
-    tests.expect(findDiagnostic(session, "integrate::unevaluated") != nullptr,
+    tests.expect(findDiagnostic(session, "integrate::partial") != nullptr,
         "partially evaluated integral still emits an explicit warning");
 
     // 積分器のruntime gateにはせず、既知rule familyの退行をテスト側から監視する。
@@ -208,6 +220,11 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"quadratic cosine Fresnel", "cos[4*x^2]"},
         {"quadratic sine Fresnel", "sin[8*x^2]"},
         {"shifted quadratic Fresnel", "cos[2*x^2+3*x+1]", DerivativeBackMode::ResolutionOnly},
+        {"exponential integral Ei", "exp[x]/x"},
+        {"sine integral Si", "sin[x]/x"},
+        {"cosine integral Ci", "cos[x]/x"},
+        {"logarithmic integral li", "1/log[x]"},
+        {"dilogarithm", "log[1-x]/x"},
         {"hypergeometric exponential monomial", "exp[x^6]"},
         {"hypergeometric binomial power", "sqrt[1+2*x^3]"},
         {"elliptic first-kind kernel", "1/sqrt[1-(1/3)*sin[x]^2]"},

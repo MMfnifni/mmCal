@@ -65,7 +65,7 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     const std::string internalPole = eval(session, "integrate[1/(x-2),{x,1,Infinity}]");
     tests.expect(internalPole.find("integrate[") == 0,
         "improper integration refuses an internal rational pole");
-    tests.expect(findDiagnostic(session, "integrate::unevaluated") != nullptr,
+    tests.expect(findDiagnostic(session, "integrate::conditionsRequired") != nullptr,
         "unsafe improper integral emits an explicit warning");
 
     tests.expectEqual(eval(session, "integrate[abs[x],x,x>=0]"), std::string{"x^2/2"},

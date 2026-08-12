@@ -281,7 +281,7 @@ Expr Lowerer::lowerNode(
         if (const auto* array = std::get_if<ArrayLiteralSyntax>(&node.data))
             return lowerArray(*array, node.span, origins);
         if (const auto* call = std::get_if<CallSyntax>(&node.data))
-            return lowerCall(*call, node.span, origins);
+            return lowerCall(*call, origins);
         if (const auto* group = std::get_if<GroupSyntax>(&node.data))
             return lowerNode(*group->expression, origins);
         if (const auto* unary = std::get_if<UnarySyntax>(&node.data)) {
@@ -459,7 +459,6 @@ Expr Lowerer::lowerArray(
 
 Expr Lowerer::lowerCall(
     const CallSyntax& call,
-    source::SourceSpan span,
     expression::OriginMap* origins) const {
     std::vector<Expr> arguments;
     arguments.reserve(call.arguments.size());
@@ -476,23 +475,6 @@ Expr Lowerer::lowerCall(
             }
         }
         arguments.push_back(lowerNode(*argument, origins));
-    }
-
-    const bool multiplicationSyntax = call.delimiter == CallDelimiter::Parentheses
-        && !options_.isFunction(call.name)
-        && (options_.isConstant(call.name) || options_.isVariable(call.name));
-
-    if (multiplicationSyntax) {
-        if (arguments.size() != 1)
-            error::throwCalcError(
-                error::CalcErrorType::Syntax,
-                "Implicit multiplication with parentheses requires one expression",
-                span);
-
-        return callExpr(
-            symbolTable_,
-            builtins::names::multiply,
-            {lowerIdentifier(IdentifierSyntax{call.name}), std::move(arguments.front())});
     }
 
     return Expr::call(symbolTable_.intern(call.name), std::move(arguments));
