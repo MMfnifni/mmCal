@@ -6,6 +6,8 @@
 **文書種別:** アーキテクチャ評価・リファクタリング方針  
 **Status:** Design proposal / not an implementation specification
 
+実装状況は [`../refactoring_status.ja.md`](../refactoring_status.ja.md) / [`../refactoring_status.md`](../refactoring_status.md) を参照。
+
 ---
 
 # 日本語版(English version at the bottom)

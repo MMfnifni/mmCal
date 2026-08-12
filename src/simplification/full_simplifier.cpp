@@ -27,8 +27,7 @@ using expression::Expr;
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     evaluation::BuiltinId id) {
-    return expression.isCall()
-        && expression.asCall().head.sameIdentity(builtins.symbol(id));
+    return builtins.isCallTo(expression, id);
 }
 
 [[nodiscard]] Expr integer(std::int64_t value) {

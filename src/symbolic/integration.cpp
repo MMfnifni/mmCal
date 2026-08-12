@@ -67,8 +67,7 @@ constexpr std::size_t maximumSubstitutionCandidates = 32;
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     BuiltinId id) {
-    return expression.isCall()
-        && expression.asCall().head.sameIdentity(builtins.symbol(id));
+    return builtins.isCallTo(expression, id);
 }
 
 [[nodiscard]] bool containsHead(

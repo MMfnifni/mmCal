@@ -44,8 +44,7 @@ using numeric::RealNumber;
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     BuiltinId id) {
-    return expression.isCall()
-        && expression.asCall().head.sameIdentity(builtins.symbol(id));
+    return builtins.isCallTo(expression, id);
 }
 
 [[nodiscard]] bool isExactReal(const Expr& expression, std::int64_t value) {

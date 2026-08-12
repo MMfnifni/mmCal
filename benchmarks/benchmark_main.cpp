@@ -69,7 +69,6 @@ using mmcal::numeric::Rational;
     return std::chrono::duration<double, std::micro>(end - start).count() / iterations;
 }
 
-
 [[nodiscard]] double benchmarkSquare(std::size_t limbs, int iterations) {
     const BigInt value = makeOperand(limbs, 41);
     std::size_t checksum = 0;
@@ -106,7 +105,6 @@ using mmcal::numeric::Rational;
         std::abort();
     return std::chrono::duration<double, std::milli>(end - start).count() / iterations;
 }
-
 
 void benchmarkDecimalConversion(std::uint64_t n) {
     const BigInt value = mmcal::numeric::factorial(n);

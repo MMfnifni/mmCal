@@ -3,7 +3,7 @@
 #include "builtin_registry.hpp"
 #include "builtins/signal_processing.hpp"
 #include "environment.hpp"
-#include "diagnostic.hpp"
+#include "evaluation_context.hpp"
 #include "expression/origin_map.hpp"
 #include "user_function_registry.hpp"
 #include "symbols/symbol_registry.hpp"
@@ -18,19 +18,6 @@
 #include <vector>
 
 namespace mmcal::evaluation {
-
-struct EvaluationContext final {
-    // % / %% 用。従来互換として成功した出力だけを相対順に保持する。
-    std::span<const expression::Expr> history;
-    // In[n] / Out[n] 用。index n-1 が画面上の絶対入力番号nに対応する。
-    std::span<const std::optional<expression::Expr>> inputs;
-    std::span<const std::optional<expression::Expr>> outputs;
-    std::vector<EvaluationDiagnostic>* diagnostics = nullptr;
-    bool* exitRequested = nullptr;
-    bool* clearRequested = nullptr;
-    bool* definitionsChanged = nullptr;
-    mathematics::AngleSemantics* angleSemantics = nullptr;
-};
 
 // 不変な式を入力とし、明示的な評価スタック上で簡約済みの新しい式を返す評価器。
 class Evaluator final {

@@ -37,8 +37,7 @@ using numeric::Rational;
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     BuiltinId id) {
-    return expression.isCall()
-        && expression.asCall().head.sameIdentity(builtins.symbol(id));
+    return builtins.isCallTo(expression, id);
 }
 
 [[nodiscard]] std::optional<std::size_t> nonNegativeIntegerExponent(

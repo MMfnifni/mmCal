@@ -131,6 +131,7 @@
     <ClInclude Include="..\..\src\evaluation\environment.hpp" />
     <ClInclude Include="..\..\src\evaluation\iterator_spec.hpp" />
     <ClInclude Include="..\..\src\evaluation\user_function_registry.hpp" />
+    <ClInclude Include="..\..\src\evaluation\evaluation_context.hpp" />
     <ClInclude Include="..\..\src\evaluation\evaluator.hpp" />
     <ClInclude Include="..\..\src\evaluation\diagnostic.hpp" />
     <ClInclude Include="..\..\src\source\source_span.hpp" />
@@ -240,6 +241,7 @@
     <ClCompile Include="..\..\src\evaluation\environment.cpp" />
     <ClCompile Include="..\..\src\evaluation\user_function_registry.cpp" />
     <ClCompile Include="..\..\src\evaluation\evaluator.cpp" />
+    <ClCompile Include="..\..\src\evaluation\evaluator_dispatch.cpp" />
     <ClCompile Include="..\..\src\source\source_document.cpp" />
     <ClCompile Include="..\..\src\error\error_message.cpp" />
     <ClCompile Include="..\..\src\syntax\token.cpp" />

@@ -2,6 +2,7 @@
 #include "builtin_registry.hpp"
 
 #include "builtins/names.hpp"
+#include "expression/expr.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -409,6 +410,16 @@ bool BuiltinRegistry::contains(const expression::Symbol& symbol) const noexcept 
 
 bool BuiltinRegistry::contains(std::string_view name) const noexcept {
     return find(name) != nullptr;
+}
+
+bool BuiltinRegistry::isCallTo(
+    const expression::Expr& expression,
+    BuiltinId id) const noexcept {
+    if (!expression.isCall())
+        return false;
+    const auto found = symbolsById_.find(id);
+    return found != symbolsById_.end()
+        && expression.asCall().head.sameIdentity(found->second);
 }
 
 const expression::Symbol& BuiltinRegistry::symbol(BuiltinId id) const {

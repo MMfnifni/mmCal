@@ -47,8 +47,7 @@ constexpr std::size_t maximumLHopitalSteps = 12;
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     BuiltinId id) {
-    return expression.isCall()
-        && expression.asCall().head.sameIdentity(builtins.symbol(id));
+    return builtins.isCallTo(expression, id);
 }
 
 [[nodiscard]] Expr call(

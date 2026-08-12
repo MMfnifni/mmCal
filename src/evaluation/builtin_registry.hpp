@@ -10,6 +10,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace mmcal::expression {
+class Expr;
+}
+
 namespace mmcal::evaluation {
 
 // 評価器内の分岐を文字列比較から分離するための組み込み函数識別子。
@@ -256,6 +260,8 @@ public:
     [[nodiscard]] const BuiltinDefinition* find(std::string_view name) const noexcept;
     [[nodiscard]] bool contains(const expression::Symbol& symbol) const noexcept;
     [[nodiscard]] bool contains(std::string_view name) const noexcept;
+    // AST側でBuiltinIdを直接比較する共通query。各subsystemのisHead重複を避ける。
+    [[nodiscard]] bool isCallTo(const expression::Expr& expression, BuiltinId id) const noexcept;
     [[nodiscard]] const expression::Symbol& symbol(BuiltinId id) const;
     [[nodiscard]] std::unordered_set<std::string> sourceFunctionNames() const;
     [[nodiscard]] std::size_t size() const noexcept;

@@ -123,6 +123,9 @@
     <ClInclude Include="..\..\src\evaluation\user_function_registry.hpp">
       <Filter>src\evaluation</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\evaluation\evaluation_context.hpp">
+      <Filter>src\evaluation</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\evaluation\evaluator.hpp">
       <Filter>src\evaluation</Filter>
     </ClInclude>
@@ -444,6 +447,9 @@
       <Filter>src\evaluation</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\evaluation\evaluator.cpp">
+      <Filter>src\evaluation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\evaluation\evaluator_dispatch.cpp">
       <Filter>src\evaluation</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\source\source_document.cpp">
