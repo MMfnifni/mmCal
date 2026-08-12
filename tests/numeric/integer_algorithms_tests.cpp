@@ -62,6 +62,11 @@ void testUint64Conversion(TestRunner& tests) {
         "BigInt uint64 conversion rejects overflow");
     tests.expect(!tryToUint64(BigInt{-1}),
         "BigInt uint64 conversion rejects negative values");
+
+    BigInt huge{1};
+    huge <<= 100000;
+    tests.expect(!tryToUint64(huge),
+        "BigInt uint64 conversion rejects huge values without decimal conversion");
 }
 
 void testIntegerSquareRoot(TestRunner& tests) {

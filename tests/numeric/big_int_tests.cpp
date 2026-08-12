@@ -131,6 +131,21 @@ void testLargeMultiplication(TestRunner& tests) {
     tests.expect(
         toomBelow * toomAbove == toomExpected,
         "BigInt Toom-3 multiplication preserves a huge difference-of-squares identity");
+
+    // 専用square経路は一般乗算と独立した対称算法なので、巨大値で恒等式を直接固定する。
+    constexpr std::size_t squareBits = 32 * 512;
+    BigInt squareBase{1};
+    squareBase <<= squareBits;
+    squareBase += BigInt{1234567};
+    BigInt squareExpected{1};
+    squareExpected <<= squareBits * 2;
+    BigInt squareCross{2469134};
+    squareCross <<= squareBits;
+    squareExpected += squareCross;
+    squareExpected += BigInt{1524155677489LL};
+    tests.expect(
+        squareBase * squareBase == squareExpected,
+        "BigInt dedicated square preserves a 512-limb exact identity");
 }
 
 void testDivision(TestRunner& tests) {
@@ -169,6 +184,15 @@ void testDivision(TestRunner& tests) {
         result.quotient * divisor + result.remainder == dividend,
         "BigInt signed division reconstruction");
     tests.expect(result.remainder.abs() < divisor.abs(), "BigInt signed remainder magnitude bound");
+
+    BigInt powerOfTwo{1};
+    powerOfTwo <<= 4097;
+    BigInt powerDividend = powerOfTwo * BigInt{123456789} + BigInt{987654321};
+    const auto powerResult = divmod(powerDividend, powerOfTwo);
+    tests.expectEqual(powerResult.quotient.toString(), std::string{"123456789"},
+        "BigInt power-of-two division uses the exact shift quotient");
+    tests.expectEqual(powerResult.remainder.toString(), std::string{"987654321"},
+        "BigInt power-of-two division preserves low-bit remainder");
 
     tests.expectThrows<std::domain_error>(
         [] { (void)(BigInt{1} / BigInt{}); },

@@ -107,6 +107,15 @@ void testDecimalConversion(TestRunner& tests) {
         BigUInt::parse(chunked).toString(),
         chunked,
         "chunked decimal conversion round trip");
+
+    // 128 limbsを超えてdivide-and-conquer 10進変換へ入る長さでも、先頭0やblock幅を作らない。
+    std::string divideAndConquer = "9";
+    for (std::size_t i = 0; i < 360; ++i)
+        divideAndConquer += "314159265";
+    tests.expectEqual(
+        BigUInt::parse(divideAndConquer).toString(),
+        divideAndConquer,
+        "divide-and-conquer decimal conversion round trip");
 }
 
 void testRadixConversion(TestRunner& tests) {

@@ -31,7 +31,14 @@ constexpr std::size_t toom3RecursiveThresholdLimbs = MMCAL_TOOM3_RECURSIVE_THRES
 #else
 constexpr std::size_t toom3RecursiveThresholdLimbs = 448;
 #endif
+#ifdef MMCAL_SQUARE_KARATSUBA_THRESHOLD_LIMBS
+constexpr std::size_t squareKaratsubaThresholdLimbs = MMCAL_SQUARE_KARATSUBA_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t squareKaratsubaThresholdLimbs = 48;
+#endif
+
 static_assert(karatsubaThresholdLimbs >= 1, "Karatsuba threshold must be at least one limb");
+static_assert(squareKaratsubaThresholdLimbs >= 1, "Square Karatsuba threshold must be at least one limb");
 static_assert(toom3ThresholdLimbs > karatsubaThresholdLimbs,
     "Toom-3 threshold must be greater than the Karatsuba threshold");
 static_assert(toom3RecursiveThresholdLimbs > karatsubaThresholdLimbs,
@@ -39,6 +46,19 @@ static_assert(toom3RecursiveThresholdLimbs > karatsubaThresholdLimbs,
 
 constexpr BigUInt::limb_type decimalChunkBase = 1'000'000'000u;
 constexpr unsigned decimalChunkDigits = 9;
+
+// 10進文字列化は巨大値だけdivide-and-conquerへ切り替える。Knuth除算の固定費があるため、
+// crossover未満では10^9 chunkの逐次除算を維持する。benchmark時だけ-Dで上書きできる。
+#ifdef MMCAL_DECIMAL_DAC_THRESHOLD_LIMBS
+constexpr std::size_t decimalDacThresholdLimbs = MMCAL_DECIMAL_DAC_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t decimalDacThresholdLimbs = 128;
+#endif
+#ifdef MMCAL_DECIMAL_DAC_LEAF_LIMBS
+constexpr std::size_t decimalDacLeafLimbs = MMCAL_DECIMAL_DAC_LEAF_LIMBS;
+#else
+constexpr std::size_t decimalDacLeafLimbs = 256;
+#endif
 
 using Limb = BigUInt::limb_type;
 using DoubleLimb = BigUInt::double_limb_type;
@@ -155,6 +175,71 @@ void addShiftedLimbs(
     std::span<const Limb> lhs,
     std::span<const Limb> rhs,
     bool insideToom);
+
+void addWideAt(std::vector<Limb>& destination, std::size_t offset, DoubleLimb value) {
+    while (value != 0) {
+        if (offset >= destination.size())
+            throw std::logic_error("BigUInt square carry exceeds result size");
+
+        const DoubleLimb sum =
+            static_cast<DoubleLimb>(destination[offset]) + (value & limbMask);
+        destination[offset] = static_cast<Limb>(sum & limbMask);
+        value = (value >> limbBits) + (sum >> limbBits);
+        ++offset;
+    }
+}
+
+// a^2では非対角項 a[i]a[j] が必ず2回現れる。一般schoolbookのn^2回の
+// limb乗算をそのまま行わず、対角n項と上三角n(n-1)/2項だけを計算する。
+[[nodiscard]] std::vector<Limb> squareSchoolbook(std::span<const Limb> value) {
+    if (value.empty())
+        return {};
+
+    std::vector<Limb> result(value.size() * 2, 0);
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        const DoubleLimb diagonal = static_cast<DoubleLimb>(value[i]) * value[i];
+        addWideAt(result, i * 2, diagonal);
+
+        for (std::size_t j = i + 1; j < value.size(); ++j) {
+            const DoubleLimb cross = static_cast<DoubleLimb>(value[i]) * value[j];
+            // 2*crossは65bitになり得るため、同じ64bit積を2回加えてportableに処理する。
+            addWideAt(result, i + j, cross);
+            addWideAt(result, i + j, cross);
+        }
+    }
+
+    normalizeLimbs(result);
+    return result;
+}
+
+[[nodiscard]] std::vector<Limb> squareAdaptive(
+    std::span<const Limb> value,
+    bool insideToom);
+
+[[nodiscard]] std::vector<Limb> squareKaratsuba(
+    std::span<const Limb> value,
+    bool insideToom) {
+    if (value.size() <= squareKaratsubaThresholdLimbs)
+        return squareSchoolbook(value);
+
+    const std::size_t split = value.size() / 2;
+    const auto low = value.first(split);
+    const auto high = value.subspan(split);
+
+    auto z0 = squareAdaptive(low, insideToom);
+    auto z2 = squareAdaptive(high, insideToom);
+    const auto sum = addLimbs(low, high);
+    auto z1 = squareAdaptive(sum, insideToom);
+    subtractLimbsInPlace(z1, z0);
+    subtractLimbsInPlace(z1, z2);
+
+    std::vector<Limb> result(value.size() * 2, 0);
+    addShiftedLimbs(result, z0, 0);
+    addShiftedLimbs(result, z1, split);
+    addShiftedLimbs(result, z2, split * 2);
+    normalizeLimbs(result);
+    return result;
+}
 
 [[nodiscard]] std::vector<Limb> multiplyKaratsuba(
     std::span<const Limb> lhs,
@@ -383,6 +468,26 @@ void requireNonNegative(const SignedLimbs& value, const char* message) {
     return result;
 }
 
+[[nodiscard]] std::vector<Limb> squareAdaptive(
+    std::span<const Limb> value,
+    bool insideToom) {
+    if (value.empty())
+        return {};
+    if (value.size() <= squareKaratsubaThresholdLimbs)
+        return squareSchoolbook(value);
+
+    /*
+    初版では一般乗算と同じthresholdで専用Toom-3 squareへ切り替えたが、
+    1536～4096 limbsの実測でKaratsuba squareより大幅に遅かった。
+    評価点・補間の固定費に対し、squareではKaratsuba自身の対称性が十分強いため、
+    現段階では巨大squareもKaratsuba再帰を継続する。Toom squareは再設計時に再評価する。
+
+    if (value.size() >= activeToomThreshold)
+        return squareToom3(value);
+    */
+    return squareKaratsuba(value, insideToom);
+}
+
 [[nodiscard]] std::vector<Limb> multiplyAdaptive(
     std::span<const Limb> lhs,
     std::span<const Limb> rhs,
@@ -602,19 +707,115 @@ std::string BigUInt::toString(unsigned radix) const {
         std::reverse(result.begin(), result.end());
         return result;
         */
+        const auto chunkedConversion = [&](BigUInt value) {
+            if (value.isZero())
+                return std::string{"0"};
+
+            std::vector<limb_type> chunks;
+            chunks.reserve((value.bitLength() + 28) / 29);
+            while (!value.isZero())
+                chunks.push_back(value.divideSmall(decimalChunkBase));
+
+            std::string result = std::to_string(chunks.back());
+            result.reserve(chunks.size() * decimalChunkDigits);
+            for (std::size_t i = chunks.size() - 1; i-- > 0;) {
+                const std::string chunk = std::to_string(chunks[i]);
+                result.append(decimalChunkDigits - chunk.size(), '0');
+                result += chunk;
+            }
+            return result;
+        };
+
+        if (limbs_.size() < decimalDacThresholdLimbs)
+            return chunkedConversion(std::move(remaining));
+
+        /*
+        10^9 chunk化後も巨大値では「全limbを10^9で割る」処理をchunk数だけ繰り返すため
+        O(n^2)的な走査が残っていた。初版divide-and-conquerは「値以下で最大の10^(9*2^k)」
+        を常にsplitに使ったため、10進chunk数が2^kを少し超えた値で上側が極端に小さくなり、
+        サイズ境界ごとに性能の谷ができた。
+
+        現在は概算10進chunk数の半分以下で最大の2^k chunkをsplit幅に選び、上下をほぼ
+        balancedにする。また小さくなった再帰葉ではKnuth除算を続けず10^9逐次変換へ戻す。
+
         std::vector<limb_type> chunks;
         chunks.reserve((bitLength() + 28) / 29);
         while (!remaining.isZero())
             chunks.push_back(remaining.divideSmall(decimalChunkBase));
+        ...
+        */
+        const auto decimalChunkEstimate = [](const BigUInt& value) -> std::size_t {
+            const std::size_t bits = value.bitLength();
+            // log10(2) < 30103/100000。積のoverflowを避けて10進桁数の安全な上界を作る。
+            const std::size_t digits =
+                (bits / 100000) * 30103
+                + ((bits % 100000) * 30103) / 100000
+                + 1;
+            return (digits + decimalChunkDigits - 1) / decimalChunkDigits;
+        };
 
-        std::string result = std::to_string(chunks.back());
-        result.reserve(chunks.size() * decimalChunkDigits);
-        for (std::size_t i = chunks.size() - 1; i-- > 0;) {
-            const std::string chunk = std::to_string(chunks[i]);
-            result.append(decimalChunkDigits - chunk.size(), '0');
-            result += chunk;
+        const std::size_t estimatedChunks = decimalChunkEstimate(*this);
+        const std::size_t maxLevel = std::bit_width(std::max<std::size_t>(estimatedChunks / 2, 1)) - 1;
+        std::vector<BigUInt> powers;
+        powers.reserve(maxLevel + 1);
+        powers.emplace_back(decimalChunkBase);
+        for (std::size_t level = 1; level <= maxLevel; ++level) {
+            BigUInt next = powers.back();
+            next *= next;
+            powers.push_back(std::move(next));
         }
-        return result;
+
+        const auto fixedWidth = [](std::size_t level) -> std::size_t {
+            if (level >= std::numeric_limits<std::size_t>::digits)
+                throw std::length_error("BigUInt decimal conversion width is too large");
+            const std::size_t chunks = std::size_t{1} << level;
+            if (chunks > std::numeric_limits<std::size_t>::max() / decimalChunkDigits)
+                throw std::length_error("BigUInt decimal conversion width is too large");
+            return chunks * decimalChunkDigits;
+        };
+
+        const auto convertFixed = [&](const auto& self, const BigUInt& value, std::size_t level) -> std::string {
+            const std::size_t width = fixedWidth(level);
+            if (level == 0 || value.limbCount() < decimalDacLeafLimbs) {
+                std::string text = chunkedConversion(value);
+                if (text.size() > width)
+                    throw std::logic_error("BigUInt decimal fixed-width conversion overflow");
+                text.insert(text.begin(), width - text.size(), '0');
+                return text;
+            }
+
+            auto parts = divmod(value, powers[level - 1]);
+            std::string high = self(self, parts.quotient, level - 1);
+            std::string low = self(self, parts.remainder, level - 1);
+            high += low;
+            return high;
+        };
+
+        const auto convertVariable = [&](const auto& self, const BigUInt& value) -> std::string {
+            if (value.isZero() || value.limbCount() < decimalDacThresholdLimbs)
+                return chunkedConversion(value);
+
+            const std::size_t chunks = decimalChunkEstimate(value);
+            if (chunks <= 1)
+                return chunkedConversion(value);
+            const std::size_t halfChunks = std::max<std::size_t>(chunks / 2, 1);
+            std::size_t level = std::bit_width(halfChunks) - 1;
+            level = std::min(level, powers.size() - 1);
+
+            auto parts = divmod(value, powers[level]);
+            while (parts.quotient.isZero() && level != 0) {
+                --level;
+                parts = divmod(value, powers[level]);
+            }
+
+            std::string high = self(self, parts.quotient);
+            std::string low = convertFixed(convertFixed, parts.remainder, level);
+            high.reserve(high.size() + fixedWidth(level));
+            high += low;
+            return high;
+        };
+
+        return convertVariable(convertVariable, *this);
     }
 
     std::string result;
@@ -706,6 +907,21 @@ BigUInt& BigUInt::operator*=(const BigUInt& rhs) {
     auto product = multiplyKaratsuba(limbs_, rhs.limbs_);
     limbs_ = std::move(product);
     */
+    /*
+    旧実装では x*x も一般のmultiplyAdaptiveへそのまま流し、非対角項を左右から2回計算していた。
+    squareは対称性を使えばlimb乗算をほぼ半減でき、Karatsubaでも平方専用の再帰式を使えるため、
+    値が等しいoperandは専用squareへ送る。operator*(lhs, rhs)ではlhsがcopyされるので、
+    alias(this == &rhs)だけでは検出できず値の一致で判定する。
+
+    auto product = multiplyAdaptive(limbs_, rhs.limbs_, false);
+    limbs_ = std::move(product);
+    */
+    if (limbs_ == rhs.limbs_) {
+        auto squared = squareAdaptive(limbs_, false);
+        limbs_ = std::move(squared);
+        return *this;
+    }
+
     if (rhs.limbs_.size() == 1) {
         const limb_type factor = rhs.limbs_.front();
         multiplySmall(factor);
@@ -956,6 +1172,36 @@ BigUIntDivModResult divmod(const BigUInt& dividend, const BigUInt& divisor) {
 
     if (dividend == divisor)
         return {BigUInt{1}, BigUInt{}};
+
+    /*
+    旧実装では巨大な2^k divisorも、この下のKnuth長除算へそのまま流していた。
+    2^kでの商は右shift、余りは下位k bitだけなので、長除算を使う必要がない。
+    O(n)のbit操作へ落とすことで、巨大なpower-of-two除算と整数算法の補助経路を軽くする。
+
+    // 旧経路: 特別扱いせず divisor.limbs_.size()==1 またはKnuth長除算へ続行
+    */
+    const std::size_t divisorBitLength = divisor.bitLength();
+    const std::size_t divisorTrailingZeros = divisor.trailingZeroBits();
+    if (divisorBitLength == divisorTrailingZeros + 1) {
+        BigUInt quotient = dividend >> divisorTrailingZeros;
+        BigUInt remainder = dividend;
+        const std::size_t wholeLimbs = divisorTrailingZeros / limbBits;
+        const unsigned remainingBits = static_cast<unsigned>(divisorTrailingZeros % limbBits);
+
+        if (remainingBits == 0) {
+            remainder.limbs_.resize(std::min(wholeLimbs, remainder.limbs_.size()));
+        }
+        else {
+            const std::size_t keep = std::min(wholeLimbs + 1, remainder.limbs_.size());
+            remainder.limbs_.resize(keep);
+            if (wholeLimbs < remainder.limbs_.size()) {
+                const BigUInt::limb_type mask = static_cast<BigUInt::limb_type>((std::uint64_t{1} << remainingBits) - 1);
+                remainder.limbs_[wholeLimbs] &= mask;
+            }
+        }
+        remainder.normalize();
+        return {std::move(quotient), std::move(remainder)};
+    }
 
     if (divisor.limbs_.size() == 1) {
         BigUInt quotient = dividend;

@@ -1,4 +1,4 @@
-// BigInt乗算算法のcrossover、factorial、10進変換を測る簡易benchmark
+// BigInt乗算・専用square・除算、factorial、10進変換を測る簡易benchmark
 // GCC/Clang例:
 // g++ -O3 -DNDEBUG -std=c++20 -DMMCAL_TOOM3_THRESHOLD_LIMBS=1280 \
 //   -DMMCAL_TOOM3_RECURSIVE_THRESHOLD_LIMBS=448 -Isrc \
@@ -6,6 +6,8 @@
 //   src/numeric/big_int.cpp src/numeric/integer_algorithms.cpp -o bigint_benchmark
 // Prime-Swing比較時は -DMMCAL_USE_PRIME_SWING_FACTORIAL を追加する。
 // MSVCでは /O2 /DNDEBUG と同じ /D 定義を指定する。
+// square/decimal crossover再測定時は MMCAL_SQUARE_KARATSUBA_THRESHOLD_LIMBS,
+// MMCAL_DECIMAL_DAC_THRESHOLD_LIMBS, MMCAL_DECIMAL_DAC_LEAF_LIMBS も上書きできる。
 // Karatsuba scratch/workspace化はpool型・再帰深度型ともGCC実測で遅くなったため本番採用していない。
 // allocator特性が異なるMSVCでは、このbenchmarkで再評価してから導入する。
 
@@ -44,6 +46,58 @@ using Clock = std::chrono::steady_clock;
     const auto start = Clock::now();
     for (int iteration = 0; iteration < iterations; ++iteration) {
         const BigInt result = lhs * rhs;
+        checksum += result.bitLength();
+    }
+    const auto end = Clock::now();
+
+    if (checksum == 0)
+        std::abort();
+    return std::chrono::duration<double, std::micro>(end - start).count() / iterations;
+}
+
+[[nodiscard]] double benchmarkSquare(std::size_t limbs, int iterations) {
+    const BigInt value = makeOperand(limbs, 41);
+    std::size_t checksum = 0;
+
+    const auto start = Clock::now();
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        const BigInt result = value * value;
+        checksum += result.bitLength();
+    }
+    const auto end = Clock::now();
+
+    if (checksum == 0)
+        std::abort();
+    return std::chrono::duration<double, std::micro>(end - start).count() / iterations;
+}
+
+[[nodiscard]] double benchmarkDivision(std::size_t limbs, int iterations) {
+    const BigInt divisor = makeOperand(limbs, 53);
+    const BigInt quotient = makeOperand(limbs, 71);
+    const BigInt dividend = divisor * quotient + BigInt{123};
+    std::size_t checksum = 0;
+
+    const auto start = Clock::now();
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        const BigInt result = dividend / divisor;
+        checksum += result.bitLength();
+    }
+    const auto end = Clock::now();
+
+    if (checksum == 0)
+        std::abort();
+    return std::chrono::duration<double, std::micro>(end - start).count() / iterations;
+}
+
+[[nodiscard]] double benchmarkPowerOfTwoDivision(std::size_t limbs, int iterations) {
+    const BigInt dividend = makeOperand(limbs, 83);
+    BigInt divisor{1};
+    divisor <<= limbs * 16 + 7;
+    std::size_t checksum = 0;
+
+    const auto start = Clock::now();
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        const BigInt result = dividend / divisor;
         checksum += result.bitLength();
     }
     const auto end = Clock::now();
@@ -97,6 +151,23 @@ int main() {
         std::cout << std::setw(5) << limbs << " limbs  "
                   << std::fixed << std::setprecision(3)
                   << benchmarkMultiply(limbs, iterations) << " us\n";
+    }
+
+    std::cout << "square_us_per_op\n";
+    for (const std::size_t limbs : {16u, 32u, 48u, 64u, 128u, 256u, 512u, 1024u, 2048u, 4096u}) {
+        const int iterations = limbs <= 128 ? 2000 : limbs <= 1024 ? 300 : 40;
+        std::cout << std::setw(5) << limbs << " limbs  "
+                  << std::fixed << std::setprecision(3)
+                  << benchmarkSquare(limbs, iterations) << " us\n";
+    }
+
+    std::cout << "division_us_per_op\n";
+    for (const std::size_t limbs : {64u, 128u, 256u, 512u, 1024u, 2048u}) {
+        const int iterations = limbs <= 256 ? 200 : limbs <= 1024 ? 40 : 8;
+        std::cout << std::setw(5) << limbs << " limbs  general="
+                  << std::fixed << std::setprecision(3)
+                  << benchmarkDivision(limbs, iterations) << " us  power2="
+                  << benchmarkPowerOfTwoDivision(limbs, iterations) << " us\n";
     }
 
     std::cout << "factorial_ms_per_op\n";

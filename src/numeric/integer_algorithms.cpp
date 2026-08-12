@@ -118,6 +118,8 @@ BigInt gcd(BigInt lhs, BigInt rhs) {
     lhs = lhs.abs();
     rhs = rhs.abs();
 
+    // binary GCDも比較したが、現BigIntでは巨大random operandでEuclid法より大幅に遅かった。
+    // Knuth除算の改善前に置き換えるのは逆効果なので、既存Euclid法を維持する。
     while (!rhs.isZero()) {
         lhs %= rhs;
         std::swap(lhs, rhs);
@@ -176,6 +178,18 @@ BigInt factorial(std::uint64_t n) {
 
 std::optional<std::uint64_t> tryToUint64(const BigInt& value) {
     if (value.isNegative())
+        return std::nullopt;
+
+    /*
+    旧実装は範囲外の巨大整数まで10進文字列へ変換してからfrom_charsしていた。
+    100000bit級では「uint64_tに入らない」と判定するだけのために巨大な10進変換が走る。
+    uint64_tは最大64bitなので、それを超える値は表示変換なしで即座に棄却する。
+
+    const std::string text = value.toString();
+    std::uint64_t result = 0;
+    const auto conversion = std::from_chars(text.data(), text.data() + text.size(), result);
+    */
+    if (value.bitLength() > 64)
         return std::nullopt;
 
     const std::string text = value.toString();
