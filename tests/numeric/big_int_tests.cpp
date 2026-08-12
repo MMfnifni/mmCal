@@ -29,6 +29,10 @@ void testConstructionAndFormatting(TestRunner& tests) {
         std::string{"-123456789012345678901234567890"},
         "BigInt parses arbitrary negative values");
     tests.expectEqual(BigInt::parse("-0").toString(), std::string{"0"}, "BigInt normalizes negative zero");
+    tests.expectEqual(
+        BigInt::fromUnsigned(UINT64_MAX).toString(),
+        std::string{"18446744073709551615"},
+        "BigInt constructs the full uint64 range without decimal parsing");
     tests.expectEqual(BigInt::parse("-FF", 16).toString(16), std::string{"-FF"}, "BigInt signed radix conversion");
 
     tests.expectThrows<std::invalid_argument>(
@@ -65,6 +69,56 @@ void testArithmetic(TestRunner& tests) {
     tests.expectEqual(self.toString(), std::string{"-24691357802469135780"}, "BigInt self addition");
     self -= self;
     tests.expect(self.isZero() && !self.isNegative(), "BigInt self subtraction normalizes zero sign");
+}
+
+void testLargeMultiplication(TestRunner& tests) {
+    constexpr std::size_t balancedBits = 32 * 96;
+    BigInt power{1};
+    power <<= balancedBits;
+
+    const BigInt below = power - BigInt{1};
+    const BigInt above = power + BigInt{1};
+    BigInt expected{1};
+    expected <<= balancedBits * 2;
+    expected -= BigInt{1};
+
+    tests.expect(
+        below * above == expected,
+        "BigInt Karatsuba multiplication preserves a large difference-of-squares identity");
+
+    const BigInt negative = -below;
+    tests.expect(
+        negative * above == -expected,
+        "BigInt Karatsuba multiplication preserves signed results");
+
+    BigInt self = above;
+    self *= self;
+    tests.expect(
+        self == above * above,
+        "BigInt Karatsuba multiplication supports self multiplication");
+
+    constexpr std::size_t largeBits = 32 * 200;
+    constexpr std::size_t smallBits = 32 * 20;
+    BigInt large{1};
+    large <<= largeBits;
+    large += BigInt{1};
+    BigInt small{1};
+    small <<= smallBits;
+    small += BigInt{1};
+
+    BigInt unbalancedExpected{1};
+    unbalancedExpected <<= largeBits + smallBits;
+    BigInt largeTerm{1};
+    largeTerm <<= largeBits;
+    BigInt smallTerm{1};
+    smallTerm <<= smallBits;
+    unbalancedExpected += largeTerm;
+    unbalancedExpected += smallTerm;
+    unbalancedExpected += BigInt{1};
+
+    tests.expect(
+        large * small == unbalancedExpected,
+        "BigInt unbalanced multiplication keeps the exact schoolbook fallback result");
 }
 
 void testDivision(TestRunner& tests) {
@@ -141,6 +195,7 @@ void runBigIntTests(TestRunner& tests) {
     testConstructionAndFormatting(tests);
     testComparisonAndUnarySign(tests);
     testArithmetic(tests);
+    testLargeMultiplication(tests);
     testDivision(tests);
     testAgainstInt64(tests);
 }

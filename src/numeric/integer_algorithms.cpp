@@ -17,7 +17,14 @@ namespace {
     if (last - first <= 15) {
         BigInt result{1};
         for (std::uint64_t value = first; value <= last; ++value) {
+            /*
+            旧実装:
             result *= BigInt::parse(std::to_string(value));
+
+            product treeの葉ごとにuint64_t→decimal文字列→BigUIntと往復していた。
+            算術上不要な変換なので、uint64_tからmagnitudeを直接構築する。
+            */
+            result *= BigInt::fromUnsigned(value);
             if (value == last)
                 break;
         }

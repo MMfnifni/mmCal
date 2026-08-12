@@ -22,6 +22,7 @@ public:
     BigInt() = default;
     explicit BigInt(std::int64_t value);
 
+    [[nodiscard]] static BigInt fromUnsigned(std::uint64_t value);
     [[nodiscard]] static BigInt parse(std::string_view text, unsigned radix = 10);
 
     [[nodiscard]] bool isZero() const noexcept;

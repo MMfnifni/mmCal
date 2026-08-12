@@ -510,6 +510,7 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — 開発者向け内部構造
 - `docs/roadmap.md` — 現在未実装の主な機能と今後の候補
 - `docs/grammar.ebnf` — 文法の機械可読な概要
+- `docs/multiprecision_implementation.ja` — 多倍長実装に関する件
 
 ## 14. ライセンス
 

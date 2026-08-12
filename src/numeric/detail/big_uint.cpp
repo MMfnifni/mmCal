@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -13,6 +14,163 @@ namespace {
 constexpr std::uint64_t limbMask = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint64_t limbBase = std::uint64_t{1} << 32;
 constexpr unsigned limbBits = 32;
+
+// 実測でschoolbookとのcrossoverを決める。benchmark時だけ-Dで上書きできる。
+#ifdef MMCAL_KARATSUBA_THRESHOLD_LIMBS
+constexpr std::size_t karatsubaThresholdLimbs = MMCAL_KARATSUBA_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t karatsubaThresholdLimbs = 48;
+#endif
+static_assert(karatsubaThresholdLimbs >= 1, "Karatsuba threshold must be at least one limb");
+
+using Limb = BigUInt::limb_type;
+using DoubleLimb = BigUInt::double_limb_type;
+
+void normalizeLimbs(std::vector<Limb>& limbs) noexcept {
+    while (!limbs.empty() && limbs.back() == 0)
+        limbs.pop_back();
+}
+
+[[nodiscard]] std::vector<Limb> addLimbs(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs) {
+    const std::size_t size = std::max(lhs.size(), rhs.size());
+    std::vector<Limb> result(size, 0);
+    DoubleLimb carry = 0;
+
+    for (std::size_t index = 0; index < size; ++index) {
+        const DoubleLimb lhsLimb = index < lhs.size() ? lhs[index] : 0;
+        const DoubleLimb rhsLimb = index < rhs.size() ? rhs[index] : 0;
+        const DoubleLimb sum = lhsLimb + rhsLimb + carry;
+        result[index] = static_cast<Limb>(sum & limbMask);
+        carry = sum >> limbBits;
+    }
+
+    if (carry != 0)
+        result.push_back(static_cast<Limb>(carry));
+    return result;
+}
+
+void subtractLimbsInPlace(std::vector<Limb>& lhs, std::span<const Limb> rhs) {
+    DoubleLimb borrow = 0;
+
+    for (std::size_t index = 0; index < lhs.size(); ++index) {
+        const DoubleLimb lhsLimb = lhs[index];
+        const DoubleLimb rhsLimb = index < rhs.size() ? rhs[index] : 0;
+        const DoubleLimb subtrahend = rhsLimb + borrow;
+
+        if (lhsLimb >= subtrahend) {
+            lhs[index] = static_cast<Limb>(lhsLimb - subtrahend);
+            borrow = 0;
+        }
+        else {
+            lhs[index] = static_cast<Limb>(limbBase + lhsLimb - subtrahend);
+            borrow = 1;
+        }
+    }
+
+    if (borrow != 0)
+        throw std::logic_error("BigUInt Karatsuba subtraction underflow");
+    normalizeLimbs(lhs);
+}
+
+void addShiftedLimbs(
+    std::vector<Limb>& destination,
+    std::span<const Limb> source,
+    std::size_t offset) {
+    if (source.empty())
+        return;
+
+    if (offset > destination.size() || source.size() > destination.size() - offset)
+        throw std::logic_error("BigUInt Karatsuba shifted sum exceeds result size");
+
+    DoubleLimb carry = 0;
+    std::size_t index = 0;
+    for (; index < source.size(); ++index) {
+        const std::size_t target = offset + index;
+        const DoubleLimb sum =
+            static_cast<DoubleLimb>(destination[target]) + source[index] + carry;
+        destination[target] = static_cast<Limb>(sum & limbMask);
+        carry = sum >> limbBits;
+    }
+
+    std::size_t target = offset + index;
+    while (carry != 0) {
+        if (target == destination.size())
+            throw std::logic_error("BigUInt Karatsuba carry exceeds result size");
+        const DoubleLimb sum = static_cast<DoubleLimb>(destination[target]) + carry;
+        destination[target] = static_cast<Limb>(sum & limbMask);
+        carry = sum >> limbBits;
+        ++target;
+    }
+}
+
+[[nodiscard]] std::vector<Limb> multiplySchoolbook(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs) {
+    if (lhs.empty() || rhs.empty())
+        return {};
+
+    std::vector<Limb> result(lhs.size() + rhs.size(), 0);
+
+    for (std::size_t lhsIndex = 0; lhsIndex < lhs.size(); ++lhsIndex) {
+        DoubleLimb carry = 0;
+
+        for (std::size_t rhsIndex = 0; rhsIndex < rhs.size(); ++rhsIndex) {
+            const std::size_t resultIndex = lhsIndex + rhsIndex;
+            const DoubleLimb product =
+                static_cast<DoubleLimb>(lhs[lhsIndex]) * rhs[rhsIndex]
+                + result[resultIndex]
+                + carry;
+
+            result[resultIndex] = static_cast<Limb>(product & limbMask);
+            carry = product >> limbBits;
+        }
+
+        result[lhsIndex + rhs.size()] = static_cast<Limb>(carry);
+    }
+
+    normalizeLimbs(result);
+    return result;
+}
+
+[[nodiscard]] std::vector<Limb> multiplyKaratsuba(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs) {
+    if (lhs.empty() || rhs.empty())
+        return {};
+
+    const std::size_t smallerSize = std::min(lhs.size(), rhs.size());
+    const std::size_t largerSize = std::max(lhs.size(), rhs.size());
+
+    // 小さい積と極端に不均衡な積は、Karatsubaの一時配列・再帰コストが勝る。
+    if (smallerSize <= karatsubaThresholdLimbs || largerSize - smallerSize > smallerSize)
+        return multiplySchoolbook(lhs, rhs);
+
+    const std::size_t split = largerSize / 2;
+    const std::size_t lhsLowSize = std::min(lhs.size(), split);
+    const std::size_t rhsLowSize = std::min(rhs.size(), split);
+
+    const auto lhsLow = lhs.first(lhsLowSize);
+    const auto lhsHigh = lhs.subspan(lhsLowSize);
+    const auto rhsLow = rhs.first(rhsLowSize);
+    const auto rhsHigh = rhs.subspan(rhsLowSize);
+
+    auto z0 = multiplyKaratsuba(lhsLow, rhsLow);
+    auto z2 = multiplyKaratsuba(lhsHigh, rhsHigh);
+    const auto lhsSum = addLimbs(lhsLow, lhsHigh);
+    const auto rhsSum = addLimbs(rhsLow, rhsHigh);
+    auto z1 = multiplyKaratsuba(lhsSum, rhsSum);
+    subtractLimbsInPlace(z1, z0);
+    subtractLimbsInPlace(z1, z2);
+
+    std::vector<Limb> result(lhs.size() + rhs.size(), 0);
+    addShiftedLimbs(result, z0, 0);
+    addShiftedLimbs(result, z1, split);
+    addShiftedLimbs(result, z2, split * 2);
+    normalizeLimbs(result);
+    return result;
+}
 
 void validateRadix(unsigned radix) {
     if (radix < 2 || radix > 36)
@@ -250,30 +408,52 @@ BigUInt& BigUInt::operator*=(const BigUInt& rhs) {
     if (limbs_.size() > limbs_.max_size() - rhs.limbs_.size())
         throw std::length_error("BigUInt multiplication result is too large");
 
+    /*
+    旧実装では1 limbだけのBigInt×BigIntも、通常の多倍長乗算と同じ一時resultを確保していた。
+    factorialのproduct tree末端ではこの形が非常に多いため、既存multiplySmallを直接使って
+    allocationと二重loopのsetupを避ける。
+
+    auto product = multiplyKaratsuba(limbs_, rhs.limbs_);
+    limbs_ = std::move(product);
+    */
+    if (rhs.limbs_.size() == 1) {
+        const limb_type factor = rhs.limbs_.front();
+        multiplySmall(factor);
+        return *this;
+    }
+
+    if (limbs_.size() == 1) {
+        const limb_type factor = limbs_.front();
+        *this = rhs;
+        multiplySmall(factor);
+        return *this;
+    }
+
+    /*
+    旧実装はすべてのBigInt×BigIntをO(n^2)のschoolbook法で計算していた。
+    巨大階乗のproduct treeでは同程度の大きさの巨大整数同士を繰り返し掛けるため、
+    limb数が増えるほどこの二重loopが支配的になる。
+
     BigUInt result;
     result.limbs_.assign(limbs_.size() + rhs.limbs_.size(), 0);
-
     for (std::size_t lhsIndex = 0; lhsIndex < limbs_.size(); ++lhsIndex) {
         double_limb_type carry = 0;
-
         for (std::size_t rhsIndex = 0; rhsIndex < rhs.limbs_.size(); ++rhsIndex) {
             const std::size_t resultIndex = lhsIndex + rhsIndex;
             const double_limb_type product =
                 static_cast<double_limb_type>(limbs_[lhsIndex]) * rhs.limbs_[rhsIndex]
-                + result.limbs_[resultIndex]
-                + carry;
-
-            result.limbs_[resultIndex] =
-                static_cast<limb_type>(product & limbMask);
+                + result.limbs_[resultIndex] + carry;
+            result.limbs_[resultIndex] = static_cast<limb_type>(product & limbMask);
             carry = product >> limbBits;
         }
-
-        result.limbs_[lhsIndex + rhs.limbs_.size()] =
-            static_cast<limb_type>(carry);
+        result.limbs_[lhsIndex + rhs.limbs_.size()] = static_cast<limb_type>(carry);
     }
+    */
 
-    result.normalize();
-    *this = std::move(result);
+    // 小さい積は従来のschoolbook、大きく釣り合った積はKaratsubaへ自動分岐する。
+    // thresholdはtools/BigInt_benchmarkで実測し、balanced乗算のcrossover付近である48 limbsに置く。
+    auto product = multiplyKaratsuba(limbs_, rhs.limbs_);
+    limbs_ = std::move(product);
     return *this;
 }
 

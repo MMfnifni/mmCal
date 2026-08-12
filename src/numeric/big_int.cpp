@@ -18,6 +18,10 @@ BigInt::BigInt(std::int64_t value) {
     negative_ = true;
 }
 
+BigInt BigInt::fromUnsigned(std::uint64_t value) {
+    return BigInt{detail::BigUInt{value}, false};
+}
+
 BigInt::BigInt(detail::BigUInt magnitude, bool negative) noexcept
     : negative_(negative), magnitude_(std::move(magnitude)) {
     normalizeSign();
