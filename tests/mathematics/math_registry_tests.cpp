@@ -183,6 +183,8 @@ void runMathRegistryTests(TestRunner& tests) {
     const auto* erfc = mathematics.findFunction(mathematics::FunctionId::Erfc);
     const auto* fresnelC = mathematics.findFunction(mathematics::FunctionId::FresnelC);
     const auto* fresnelS = mathematics.findFunction(mathematics::FunctionId::FresnelS);
+    const auto* hypergeometric1F1 =
+        mathematics.findFunction(mathematics::FunctionId::Hypergeometric1F1);
     const auto* beta = mathematics.findFunction(mathematics::FunctionId::Beta);
     const auto* betaLog = mathematics.findFunction(mathematics::FunctionId::BetaLog);
     tests.expect(gamma
@@ -203,6 +205,12 @@ void runMathRegistryTests(TestRunner& tests) {
         && fresnelC->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving
         && fresnelS->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving,
         "MathRegistry: Fresnel C/S are entire odd functions with real-axis preservation");
+    tests.expect(hypergeometric1F1
+        && hypergeometric1F1->arity == 3 && hypergeometric1F1->maximumArity == 3
+        && hypergeometric1F1->branchRule == mathematics::FunctionBranchRule::SingleValued
+        && hypergeometric1F1->definednessRule
+            == mathematics::FunctionDefinednessRule::Hypergeometric1F1Poles,
+        "MathRegistry: 1F1 is single-valued and preserves its denominator-parameter pole set");
     tests.expect(beta && beta->arity == 2 && beta->maximumArity == 2
         && beta->domainRule == mathematics::FunctionDomainRule::RealPairToReal
         && beta->definednessRule == mathematics::FunctionDefinednessRule::ArgumentsPositiveReal

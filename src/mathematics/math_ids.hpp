@@ -35,6 +35,7 @@ enum class FunctionId {
     Erfc,
     FresnelC,
     FresnelS,
+    Hypergeometric1F1,
     Beta,
     BetaLog,
     Sqrt,

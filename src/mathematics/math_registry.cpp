@@ -137,6 +137,12 @@ MathRegistry MathRegistry::defaults(
     registry.addFunction(evaluation::BuiltinId::FresnelS, FunctionId::FresnelS,
         FunctionParity::Odd, FunctionDomainRule::ComplexToComplexRealPreserving,
         FunctionBranchRule::SingleValued, std::nullopt);
+    // 1F1(a;b;z) は z についてentire、b=0,-1,-2,... にparameter poleを持つ。
+    // branchは持たないがdefinednessはEverywhereではないため専用ruleで保守的に追跡する。
+    registry.addFunction(evaluation::BuiltinId::Hypergeometric1F1, FunctionId::Hypergeometric1F1,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::SingleValued, std::nullopt,
+        FunctionDefinednessRule::Hypergeometric1F1Poles, 3);
     registry.addFunction(evaluation::BuiltinId::Beta, FunctionId::Beta,
         FunctionParity::Neither, FunctionDomainRule::RealPairToReal,
         FunctionBranchRule::SingleValued, std::nullopt,

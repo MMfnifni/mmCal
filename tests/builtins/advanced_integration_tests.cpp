@@ -93,6 +93,34 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, nested), nested,
         "compact nested-radical formatting round-trips through the parser");
 
+    tests.expectEqual(eval(session, "integrate[exp[x^6],x]"),
+        std::string{"x hypergeometric1F1[1/6, 7/6, x^6]"},
+        "exp of an integer monomial closes through the entire 1F1 representation");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[x hypergeometric1F1[1/6,7/6,x^6],x]-exp[x^6]]"),
+        std::string{"0"},
+        "1F1 contiguous knowledge proves the exp[x^6] antiderivative exactly");
+    tests.expectEqual(eval(session, "integrate[exp[2*x^3],x]"),
+        std::string{"x hypergeometric1F1[1/3, 4/3, 2x^3]"},
+        "coefficient exponential monomial uses the owned 1F1 argument safely");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[x hypergeometric1F1[1/3,4/3,2*x^3],x]-exp[2*x^3]]"),
+        std::string{"0"},
+        "coefficient exponential monomial 1F1 primitive differentiates back exactly");
+    tests.expectEqual(eval(session, "integrate[sec[x]^3,x]"),
+        std::string{"sec[x]tan[x]/2+log[sec[x]+tan[x]]/2"},
+        "positive secant powers use the standard reduction formula");
+    tests.expectEqual(eval(session, "integrate[csc[x]^3,x]"),
+        std::string{"-cot[x]csc[x]/2-log[cot[x]+csc[x]]/2"},
+        "positive cosecant powers use the standard reduction formula");
+    tests.expectEqual(eval(session, "fullSimplify[D[integrate[tan[x]^4,x],x]-tan[x]^4]"),
+        std::string{"0"},
+        "positive tangent powers share reduction knowledge with the derivative proof engine");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[integrate[cos[2x^2+3x+1],x],x]-cos[2x^2+3x+1]]"),
+        std::string{"0"},
+        "quadratic Fresnel reduction handles linear and constant phase terms by completing the square");
+
     const std::string partial = eval(session, "integrate[x^2+gamma[x],x]");
     tests.expect(partial.find("x^3/3") != std::string::npos
             && partial.find("integrate[gamma[x], x]") != std::string::npos,
@@ -124,6 +152,8 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"inverse chain logarithmic", "2*x/(x^2+1)"},
         {"arctangent rational", "1/(1+x^2)"},
         {"logarithm", "log[x]", DerivativeBackMode::ResolutionOnly},
+        {"logarithmic derivative", "log[x]/x"},
+        {"iterated logarithmic derivative", "1/(x*log[x])", DerivativeBackMode::ResolutionOnly},
         {"log1p", "log1p[x]", DerivativeBackMode::ResolutionOnly},
         {"polynomial times exponential", "x*exp[x]"},
         {"erf", "erf[x]"},
@@ -141,6 +171,12 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"reciprocal cosine fourth power", "cos[3*x]^(-4)", DerivativeBackMode::ResolutionOnly},
         {"quadratic cosine Fresnel", "cos[4*x^2]"},
         {"quadratic sine Fresnel", "sin[8*x^2]"},
+        {"shifted quadratic Fresnel", "cos[2*x^2+3*x+1]", DerivativeBackMode::ResolutionOnly},
+        {"hypergeometric exponential monomial", "exp[x^6]"},
+        {"secant cube reduction", "sec[x]^3", DerivativeBackMode::ResolutionOnly},
+        {"cosecant cube reduction", "csc[x]^3", DerivativeBackMode::ResolutionOnly},
+        {"tangent fourth power reduction", "tan[x]^4", DerivativeBackMode::ResolutionOnly},
+        {"cotangent fourth power reduction", "cot[x]^4", DerivativeBackMode::ResolutionOnly},
         {"Fresnel C primitive", "fresnelc[x]"},
         {"Fresnel S primitive", "fresnels[x]"},
         {"mixed trigonometric integer powers", "sin[x]^5*cos[x]^4"},

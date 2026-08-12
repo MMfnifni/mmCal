@@ -669,6 +669,40 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 微分の位相には`Rad`を明示する。Fresnel函数の定義自体はsessionの既定角度単位に依存しないためである。
 
+## 14.6 合流型超幾何函数 1F1
+
+Kummerの合流型超幾何函数を
+
+```text
+hypergeometric1F1[a,b,z]
+```
+
+で表す。`z`についてentireであり、`b = 0,-1,-2,...`には一般にparameter poleがあるため、その場合を無条件に有限値へ簡約しない。現段階のexact評価は停止する級数、`z=0`、`a=b`等の安全に閉じる場合を扱う。`N`の誤差保証付き実数backendはexact Rationalの`a,b,z`を対象とする。
+
+```text
+hypergeometric1F1[0,3,2] -> 1
+hypergeometric1F1[-2,3,2] -> 0
+hypergeometric1F1[2,2,1] -> E
+N[hypergeometric1F1[1/6,7/6,1],20]
+-> 1.19206880798188830082
+```
+
+parameterが微分変数に依存しないとき、
+
+```text
+D[hypergeometric1F1[a,b,z],z]
+= a hypergeometric1F1[a+1,b+1,z]/b
+```
+
+を使う。積分器では、上側不完全Gammaによる局所式がprincipal branchや原点のremovable holeを持つ場合に、原点を含めてentireな1F1表現を優先する。例えば、
+
+```text
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6, 7/6, x^6]
+```
+
+より一般に正整数`n`について`exp[c x^n]`を同じ系列へ還元できる。
+
 ---
 
 # 15. 集約函数
@@ -961,13 +995,15 @@ integrate[1/(2x+3),x]
 - 正のRational scaleを証明できる二次平方根型の`asin/asinh` primitive
 - `sin^m/cos^n`の有限Fourier reduction。積分器は正整数総次数256までを明示的に展開可能
 - `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) を `csc/sec` の標準漸化式で積分
+- `tan/cot/sec/csc`の正整数冪 (`2<=n<=256`) を標準reduction formulaで積分
 - 和・差・符号反転、積分変数に依存しない係数の線形性
 - `exp/sin/cos/tan/cot/sec/csc`の安全な標準原始函数
 - `sinh/cosh/tanh/coth/sech/csch`の安全な標準原始函数
-- `log/log1p/expm1/sqrt/cbrt`
+- `log/log1p/expm1/sqrt/cbrt`。`log[x]/x`や`1/(x log[x])`は対数微分Knowledgeから認識
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
-- `fresnelc/fresnels`。`cos[a x^2]` / `sin[a x^2]` 型を標準Fresnel積分へ還元
+- `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元
+- `hypergeometric1F1`。正整数`n>=2`の`exp[c x^n]`を原点でentireな1F1 primitiveへ還元
 - exactな逆chain rule
 - 多項式×`exp/sin/cos/sinh/cosh`に対する有限回のintegration by parts
 - `exp[a x+b] sin/cos[c x+d]`型を連立一次式としてexact積分
@@ -1009,6 +1045,15 @@ integrate[1/sqrt[x^2+4],x]
 
 integrate[sin[x]^2,x]
 -> (x - sin[2 x] / 2) / 2
+
+integrate[log[x]/x,x]
+-> log[x]^2/2
+
+integrate[sec[x]^3,x]
+-> sec[x]tan[x]/2+log[sec[x]+tan[x]]/2
+
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6, 7/6, x^6]
 
 integrate[sin[2x]^(-2),x]
 -> -cot[2x]/2
@@ -1589,7 +1634,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現行開発版では **207 builtin definitions / 189 source-callable names**。内部headはsource-callable数に含めない。
+現行開発版では **208 builtin definitions / 190 source-callable names**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1598,7 +1643,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
-fresnelc, fresnels,
+fresnelc, fresnels, hypergeometric1F1,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,

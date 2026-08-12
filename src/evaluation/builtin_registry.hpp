@@ -130,6 +130,7 @@ enum class BuiltinId {
     Erfc,
     FresnelC,
     FresnelS,
+    Hypergeometric1F1,
     Beta,
     BetaLog,
     GeneralizedBinomial,

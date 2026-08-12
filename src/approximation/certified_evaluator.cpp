@@ -147,6 +147,12 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
     return result;
 }
 
+[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal())
+        return std::nullopt;
+    return expression.asNumber().asReal().toRational();
+}
+
 [[nodiscard]] bool isOneHalf(const Expr& expression) {
     if (!expression.isNumber() || !expression.asNumber().isReal())
         return false;
@@ -727,6 +733,18 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         default:
             return std::nullopt;
         }
+    }
+
+    case BuiltinId::Hypergeometric1F1: {
+        if (call.arguments.size() != 3)
+            return std::nullopt;
+        const auto a = exactRealRational(call.arguments[0]);
+        const auto b = exactRealRational(call.arguments[1]);
+        const auto z = exactRealRational(call.arguments[2]);
+        if (!a || !b || !z)
+            return std::nullopt; // 現backendはexact Rationalのparameter/pointだけを保証評価する。
+        return CertifiedValue{encloseHypergeometric1F1Real(
+            *a, *b, *z, precisionBits)};
     }
 
     case BuiltinId::Beta:

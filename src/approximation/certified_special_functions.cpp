@@ -536,6 +536,77 @@ struct FresnelPair final {
 
 } // namespace
 
+
+[[nodiscard]] std::optional<std::uint64_t> ceilAbsToUint64(const Rational& value) {
+    const BigInt numerator = value.numerator().abs();
+    const BigInt& denominator = value.denominator();
+    if (numerator.isZero())
+        return 0;
+    const BigInt quotient = (numerator + denominator - BigInt{1}) / denominator;
+    return numeric::tryToUint64(quotient);
+}
+
+[[nodiscard]] bool nonPositiveInteger(const Rational& value) {
+    return value.isInteger() && !value.numerator().isPositive();
+}
+
+[[nodiscard]] RealInterval pointHypergeometric1F1(
+    const Rational& a,
+    const Rational& b,
+    const Rational& z,
+    std::size_t precisionBits) {
+    if (nonPositiveInteger(b))
+        throw std::domain_error("hypergeometric1F1 has a pole at a non-positive integer b");
+    if (z.isZero())
+        return exactInterval(1, precisionBits);
+
+    const auto absA = ceilAbsToUint64(a);
+    const auto absB = ceilAbsToUint64(b);
+    const auto absZ = ceilAbsToUint64(z);
+    if (!absA || !absB || !absZ)
+        throw PrecisionInsufficient{"hypergeometric1F1 argument is too large for the series backend"};
+
+    // j>=2|a|,2|b|,6|z| なら
+    // |t_{j+1}/t_j| = |z||a+j|/(|b+j|(j+1)) <= 1/2。
+    // 以後のtailは次項の2倍で厳密に上から押さえられる。
+    const std::uint64_t ratioStart = std::max({
+        2U * *absA + 2U,
+        2U * *absB + 2U,
+        6U * *absZ + 2U});
+    constexpr std::uint64_t maximumTerms = 200000;
+    if (ratioStart > maximumTerms)
+        throw PrecisionInsufficient{"hypergeometric1F1 requires too many series terms"};
+
+    Rational term{BigInt{1}};
+    Rational sum{BigInt{1}};
+    const Rational tolerance = binaryThreshold(checkedAdd(
+        precisionBits, 16, "hypergeometric1F1 precision is too large"));
+
+    for (std::uint64_t n = 0; n < maximumTerms; ++n) {
+        const Rational numeratorFactor = a + Rational{BigInt::fromUnsigned(n)};
+        const Rational denominatorFactor = b + Rational{BigInt::fromUnsigned(n)};
+        if (denominatorFactor.isZero())
+            throw std::domain_error("hypergeometric1F1 denominator parameter reaches a pole");
+
+        const Rational next = term * numeratorFactor * z
+            / (denominatorFactor * Rational{BigInt::fromUnsigned(n + 1)});
+
+        if (n >= ratioStart) {
+            const Rational tailBound = rational(2) * absRational(next);
+            if (tailBound <= tolerance)
+                return RealInterval::fromRationalBounds(
+                    sum - tailBound, sum + tailBound, precisionBits);
+        }
+
+        term = next;
+        sum += term;
+        if (term.isZero())
+            return exactInterval(sum, precisionBits);
+    }
+
+    throw PrecisionInsufficient{"hypergeometric1F1 series did not converge within the term limit"};
+}
+
 RealInterval encloseGammaReal(
     const RealInterval& input,
     std::size_t precisionBits) {
@@ -619,6 +690,17 @@ RealInterval encloseFresnelSReal(
     if (precisionBits == 0)
         throw std::invalid_argument("Fresnel precision must be at least one bit");
     return encloseFresnelRealImpl(input, false, precisionBits);
+}
+
+
+RealInterval encloseHypergeometric1F1Real(
+    const Rational& a,
+    const Rational& b,
+    const Rational& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("hypergeometric1F1 precision must be at least one bit");
+    return pointHypergeometric1F1(a, b, z, precisionBits);
 }
 
 RealInterval encloseBetaPositive(

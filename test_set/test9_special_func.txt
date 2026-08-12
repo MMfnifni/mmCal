@@ -32,3 +32,10 @@ D[fresnelc[x],x]==>cos[Pi x^2/2 Rad]
 D[fresnels[x],x]==>sin[Pi x^2/2 Rad]
 N[fresnelc[1],20]=>0.77989340037682282947
 N[fresnels[1],20]=>0.43825914739035476608
+
+# Confluent hypergeometric 1F1
+hypergeometric1F1[0,3,2]==>1
+hypergeometric1F1[-2,3,2]==>0
+hypergeometric1F1[2,2,1]==>E
+D[hypergeometric1F1[1/6,7/6,x],x]==>hypergeometric1F1[7/6, 13/6, x]/7
+N[hypergeometric1F1[1/6,7/6,1],20]=>1.19206880798188830082

@@ -53,6 +53,7 @@ ReducedTrigAngle reduceTrigTurns(FunctionId function, Rational turns) {
     case FunctionId::Erfc:
     case FunctionId::FresnelC:
     case FunctionId::FresnelS:
+    case FunctionId::Hypergeometric1F1:
     case FunctionId::Beta:
     case FunctionId::BetaLog:
     case FunctionId::Cbrt:

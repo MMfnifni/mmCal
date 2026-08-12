@@ -494,6 +494,12 @@ struct FactorSplit final {
     candidates.push_back(subtract(builtins, mathematics, angles,
         multiply(builtins, mathematics, angles, {u, unary(BuiltinId::Log)}), u));
 
+    // 対数微分の基本Knowledge。候補をDで厳密検証してから採用するため、
+    // branchを無視したglobal rewriteにはせず、局所primitiveとしてだけ使う。
+    const Expr logU = unary(BuiltinId::Log);
+    candidates.push_back(power(builtins, mathematics, angles, logU, two));
+    candidates.push_back(call(builtins, BuiltinId::Log, {logU}));
+
     // log(1+u) の標準原始函数。
     Expr onePlusU = add(builtins, mathematics, angles, {one, u});
     candidates.push_back(subtract(builtins, mathematics, angles,
@@ -1434,6 +1440,13 @@ struct TrigArgument final {
     return numeric::tryToUint64(-value->numerator());
 }
 
+[[nodiscard]] std::optional<std::uint64_t> positiveIntegerMagnitude(const Expr& expression) {
+    const auto value = exactRealRational(expression);
+    if (!value || !value->isInteger() || !value->numerator().isPositive())
+        return std::nullopt;
+    return numeric::tryToUint64(value->numerator());
+}
+
 [[nodiscard]] std::optional<Expr> integrateReciprocalTrigPower(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -1509,6 +1522,151 @@ struct TrigArgument final {
         std::move(inverseScale), *primitives[static_cast<std::size_t>(*order)]});
 }
 
+
+[[nodiscard]] std::optional<Expr> integrateDirectTrigPower(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Power)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto& a = expression.asCall().arguments;
+    const auto order = positiveIntegerMagnitude(a[1]);
+    if (!order || *order < 2 || *order > 256)
+        return std::nullopt;
+    const Expr& base = a[0];
+    if (!base.isCall() || base.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const auto* definition = builtins.find(base.asCall().head);
+    if (!definition)
+        return std::nullopt;
+
+    const BuiltinId id = definition->id;
+    if (id != BuiltinId::Tan && id != BuiltinId::Cot
+        && id != BuiltinId::Sec && id != BuiltinId::Csc)
+        return std::nullopt;
+
+    const Expr& sourceArgument = base.asCall().arguments[0];
+    TrigArgument info = trigArgument(sourceArgument, builtins, mathematics, angles);
+    Expr du = differentiateExpression(info.argument, variable, builtins, mathematics, angles);
+    if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
+        return std::nullopt;
+    Expr inverseScale = divide(
+        builtins, mathematics, angles, std::move(info.inverseScale), std::move(du));
+
+    const auto same = [&](BuiltinId function) {
+        return call(builtins, function, {sourceArgument});
+    };
+
+    std::vector<std::optional<Expr>> primitives(static_cast<std::size_t>(*order) + 1);
+    if (id == BuiltinId::Tan || id == BuiltinId::Cot) {
+        primitives[0] = sourceArgument;
+        primitives[1] = id == BuiltinId::Tan
+            ? negate(builtins, mathematics, angles,
+                call(builtins, BuiltinId::Log, {same(BuiltinId::Cos)}))
+            : call(builtins, BuiltinId::Log, {same(BuiltinId::Sin)});
+
+        // tan^n = tan^(n-2)(sec^2-1),
+        // cot^n = cot^(n-2)(csc^2-1) を使う標準漸化式。
+        for (std::uint64_t n = 2; n <= *order; ++n) {
+            Expr boundary = power(builtins, mathematics, angles, same(id),
+                integer(static_cast<std::int64_t>(n - 1)));
+            boundary = divide(builtins, mathematics, angles,
+                std::move(boundary), integer(static_cast<std::int64_t>(n - 1)));
+            if (id == BuiltinId::Cot)
+                boundary = negate(builtins, mathematics, angles, std::move(boundary));
+            primitives[static_cast<std::size_t>(n)] = subtract(
+                builtins, mathematics, angles,
+                std::move(boundary), *primitives[static_cast<std::size_t>(n - 2)]);
+        }
+    }
+    else {
+        const bool secant = id == BuiltinId::Sec;
+        const BuiltinId companion = secant ? BuiltinId::Tan : BuiltinId::Cot;
+        primitives[1] = secant
+            ? call(builtins, BuiltinId::Log, {
+                add(builtins, mathematics, angles, {same(BuiltinId::Sec), same(BuiltinId::Tan)})})
+            : negate(builtins, mathematics, angles,
+                call(builtins, BuiltinId::Log, {
+                    add(builtins, mathematics, angles, {same(BuiltinId::Csc), same(BuiltinId::Cot)})}));
+        primitives[2] = secant ? same(BuiltinId::Tan)
+            : negate(builtins, mathematics, angles, same(BuiltinId::Cot));
+
+        // sec/cscの標準 reduction formula。既存 sin^-n/cos^-n と同じ数学Knowledgeを
+        // 直接函数表記にも適用し、sec^3/csc^3 を個別表で持たない。
+        for (std::uint64_t n = 3; n <= *order; ++n) {
+            Expr reciprocalPower = power(builtins, mathematics, angles, same(id),
+                integer(static_cast<std::int64_t>(n - 2)));
+            Expr boundary = multiply(builtins, mathematics, angles,
+                {std::move(reciprocalPower), same(companion)});
+            if (!secant)
+                boundary = negate(builtins, mathematics, angles, std::move(boundary));
+            boundary = divide(builtins, mathematics, angles,
+                std::move(boundary), integer(static_cast<std::int64_t>(n - 1)));
+            Expr recurrence = multiply(builtins, mathematics, angles, {
+                rational(Rational{BigInt::fromUnsigned(n - 2), BigInt::fromUnsigned(n - 1)}),
+                *primitives[static_cast<std::size_t>(n - 2)]});
+            primitives[static_cast<std::size_t>(n)] = add(
+                builtins, mathematics, angles, {std::move(boundary), std::move(recurrence)});
+        }
+    }
+
+    return multiply(builtins, mathematics, angles, {
+        std::move(inverseScale), *primitives[static_cast<std::size_t>(*order)]});
+}
+
+[[nodiscard]] std::optional<Expr> integrateExponentialMonomial1F1(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Exp)
+        || expression.asCall().arguments.size() != 1)
+        return std::nullopt;
+
+    const Expr& exponent = expression.asCall().arguments[0];
+    Expr coefficient = integer(1);
+    Expr powerExpression = exponent;
+    if (isHead(exponent, builtins, BuiltinId::Multiply)) {
+        FactorSplit split = splitConstantFactor(
+            exponent, variable, builtins, mathematics, angles);
+        if (isOne(split.constant) || isOne(split.dependent))
+            return std::nullopt;
+        coefficient = std::move(split.constant);
+        powerExpression = std::move(split.dependent);
+    }
+
+    // 旧実装はローカルFactorSplit::dependentへのpointerをifブロック外へ保持していたため、
+    // exp[2x^3]のような係数付き指数でdangling pointerとなりsegfaultした。
+    // dependent式を値として所有し、以後の解析中に寿命が切れないようにする。
+    if (!isHead(powerExpression, builtins, BuiltinId::Power)
+        || powerExpression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& powerArguments = powerExpression.asCall().arguments;
+    if (!powerArguments[0].isSymbol()
+        || !powerArguments[0].asSymbol().sameIdentity(variable))
+        return std::nullopt;
+    const auto order = positiveIntegerMagnitude(powerArguments[1]);
+    if (!order || *order < 2 || *order > 4096)
+        return std::nullopt;
+
+    // ∫ exp(c x^n) dx = x 1F1(1/n;1+1/n;c x^n)。
+    // 右辺はx=0でもentireで、incomplete-Gamma表現の見かけのbranch/holeを持ち込まない。
+    const Rational a{BigInt{1}, BigInt::fromUnsigned(*order)};
+    const Rational b = Rational{BigInt{1}} + a;
+    Expr argument = isOne(coefficient)
+        ? powerExpression
+        : multiply(builtins, mathematics, angles, {coefficient, powerExpression});
+    return multiply(builtins, mathematics, angles, {
+        Expr{variable},
+        call(builtins, BuiltinId::Hypergeometric1F1,
+            {rational(a), rational(b), std::move(argument)})});
+}
+
 [[nodiscard]] std::optional<Expr> integrateQuadraticFresnel(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -1525,36 +1683,74 @@ struct TrigArgument final {
     TrigArgument info = trigArgument(sourceArgument, builtins, mathematics, angles);
     const auto polynomial = toRationalPolynomial(
         info.argument, variable, builtins, PolynomialConversionOptions{2, 8});
-    if (!polynomial || polynomial->degree() != 2
-        || !polynomial->coefficient(0).isZero()
-        || !polynomial->coefficient(1).isZero()
-        || polynomial->coefficient(2).isZero())
+    if (!polynomial || polynomial->degree() != 2 || polynomial->coefficient(2).isZero())
         return std::nullopt;
 
     const Rational quadratic = polynomial->coefficient(2);
+    const Rational linear = polynomial->coefficient(1);
+    const Rational constant = polynomial->coefficient(0);
     const bool negative = quadratic < Rational{BigInt{0}};
     const Rational magnitude = negative ? -quadratic : quadratic;
+
+    // q x^2+l x+c = q(x+l/(2q))^2 + c-l^2/(4q)。
+    // 旧実装はl=c=0だけを認識していたため、一般的なchirp位相をFresnelへ落とせなかった。
+    const Rational shift = linear / (Rational{BigInt{2}} * quadratic);
+    const Rational phaseOffset = constant
+        - linear * linear / (Rational{BigInt{4}} * quadratic);
+    Expr shiftedVariable = shift.isZero()
+        ? Expr{variable}
+        : add(builtins, mathematics, angles, {Expr{variable}, rational(shift)});
+
     Expr effectiveMagnitude = multiply(builtins, mathematics, angles,
-        {std::move(info.scale), rational(magnitude)});
+        {info.scale, rational(magnitude)});
     Expr twoEffective = multiply(builtins, mathematics, angles,
         {integer(2), effectiveMagnitude});
     Expr fresnelScale = call(builtins, BuiltinId::Sqrt, {
         divide(builtins, mathematics, angles, twoEffective, pi(mathematics))});
     Expr fresnelArgument = multiply(builtins, mathematics, angles,
-        {fresnelScale, Expr{variable}});
-
-    // sqrt[Pi/(2a)] と 1/sqrt[2a/Pi] は a>0 では同値。
-    // 後者にするとchain-ruleで同じscale因子が構造的に現れ、Knowledgeが非零を証明して
-    // 安全にcancelできるためderivative-backがbranch-sensitiveなsqrt積恒等式へ依存しない。
+        {fresnelScale, shiftedVariable});
     Expr prefactor = divide(builtins, mathematics, angles, integer(1), fresnelScale);
-    Expr result = multiply(builtins, mathematics, angles, {
-        std::move(prefactor),
-        call(builtins,
-            definition->id == BuiltinId::Cos ? BuiltinId::FresnelC : BuiltinId::FresnelS,
-            {std::move(fresnelArgument)})});
-    if (definition->id == BuiltinId::Sin && negative)
-        result = negate(builtins, mathematics, angles, std::move(result));
-    return result;
+
+    Expr cPart = multiply(builtins, mathematics, angles, {
+        prefactor, call(builtins, BuiltinId::FresnelC, {fresnelArgument})});
+    Expr sPart = multiply(builtins, mathematics, angles, {
+        prefactor, call(builtins, BuiltinId::FresnelS, {fresnelArgument})});
+
+    if (phaseOffset.isZero()) {
+        if (definition->id == BuiltinId::Cos)
+            return cPart;
+        return negative
+            ? negate(builtins, mathematics, angles, std::move(sPart))
+            : std::optional<Expr>{std::move(sPart)};
+    }
+
+    // phaseOffsetはinfo.scale適用後のRadian量。session angle modeに再解釈させない。
+    Expr delta = multiply(builtins, mathematics, angles,
+        {info.scale, rational(phaseOffset)});
+    Expr radianDelta = call(builtins, BuiltinId::UnitApplied, {
+        std::move(delta), Expr{std::string{"Rad"}}});
+    Expr cosDelta = call(builtins, BuiltinId::Cos, {radianDelta});
+    Expr sinDelta = call(builtins, BuiltinId::Sin, {radianDelta});
+
+    if (definition->id == BuiltinId::Cos) {
+        Expr sineContribution = multiply(
+            builtins, mathematics, angles, {std::move(sinDelta), std::move(sPart)});
+        if (!negative)
+            sineContribution = negate(
+                builtins, mathematics, angles, std::move(sineContribution));
+        return add(builtins, mathematics, angles, {
+            multiply(builtins, mathematics, angles, {std::move(cosDelta), std::move(cPart)}),
+            std::move(sineContribution)});
+    }
+
+    Expr sineSquareContribution = multiply(
+        builtins, mathematics, angles, {std::move(cosDelta), std::move(sPart)});
+    if (negative)
+        sineSquareContribution = negate(
+            builtins, mathematics, angles, std::move(sineSquareContribution));
+    return add(builtins, mathematics, angles, {
+        multiply(builtins, mathematics, angles, {std::move(sinDelta), std::move(cPart)}),
+        std::move(sineSquareContribution)});
 }
 
 [[nodiscard]] Expr doubledTrigArgument(
@@ -2082,6 +2278,9 @@ struct TrigArgument final {
         if (auto result = integrateReciprocalTrigPower(
                 expression, variable, builtins, mathematics, angles))
             return *result;
+        if (auto result = integrateDirectTrigPower(
+                expression, variable, builtins, mathematics, angles))
+            return *result;
         if (auto result = integratePowerRule(
                 expression, variable, builtins, mathematics, angles))
             return *result;
@@ -2213,6 +2412,10 @@ struct TrigArgument final {
     if (auto fresnel = integrateQuadraticFresnel(
             expression, variable, builtins, mathematics, angles))
         return *fresnel;
+
+    if (auto hypergeometric = integrateExponentialMonomial1F1(
+            expression, variable, builtins, mathematics, angles))
+        return *hypergeometric;
 
     if (auto elementary = integrateElementaryUnary(
             expression, variable, builtins, mathematics, angles))

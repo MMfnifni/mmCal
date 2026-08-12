@@ -1,6 +1,7 @@
 #pragma once
 
 #include "real_interval.hpp"
+#include "numeric/rational.hpp"
 
 #include <cstddef>
 
@@ -32,6 +33,14 @@ namespace mmcal::approximation {
 
 [[nodiscard]] RealInterval encloseFresnelSReal(
     const RealInterval& input,
+    std::size_t precisionBits);
+
+// Kummerの合流型超幾何函数 M(a,b,z)=1F1(a;b;z)。
+// 現backendはexact Rationalのpoint引数を級数＋厳密tail boundで保証評価する。
+[[nodiscard]] RealInterval encloseHypergeometric1F1Real(
+    const numeric::Rational& a,
+    const numeric::Rational& b,
+    const numeric::Rational& z,
     std::size_t precisionBits);
 
 // a,b>0 に対するBetaとlog Beta。Gammaの比ではなくlog-domainで評価する。

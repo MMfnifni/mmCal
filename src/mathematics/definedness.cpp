@@ -191,6 +191,11 @@ private:
             // 正確に表せない。Solverへ弱い条件を返すより未解決を選ぶ。
             return false;
 
+        case FunctionDefinednessRule::Hypergeometric1F1Poles:
+            // 1F1(a;b;z) の b=0,-1,-2,... pole集合も有限Predicateでは正確に表せない。
+            // terminating seriesによる可除ケースもあるため、弱い条件を捏造せず未解決とする。
+            return false;
+
         case FunctionDefinednessRule::RealPairNotBothZero:
         case FunctionDefinednessRule::PrincipalPower:
             return false;

@@ -189,12 +189,11 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"log[x+sqrt[x^2-1]]"},
         "branch-sensitive quadratic root uses a verified local primitive without a global sqrt identity");
 
-    // exp[x^6]には上側不完全Gammaを使う局所表示があるが、
-    // -x^6のprincipal branchとx=0のremovable holeを現在のExprだけでは安全に表現できない。
-    // branch-safeな1F1等を導入するまでは、見た目だけ閉じた式へ書き換えない。
-    const std::string exponentialPower = eval(session, "integrate[exp[x^6],x]");
-    tests.expect(exponentialPower.find("integrate[") == 0,
-        "branch-sensitive exp polynomial primitive stays unevaluated until a safe special-function form exists");
+    // 上側不完全Gammaによる局所表示はbranchとx=0のremovable holeを持つため採用しない。
+    // 1F1基盤導入後は原点でentireな形を安全な標準形として使う。
+    tests.expectEqual(eval(session, "integrate[exp[x^6],x]"),
+        std::string{"x hypergeometric1F1[1/6, 7/6, x^6]"},
+        "exponential monomial uses the branch-safe confluent hypergeometric primitive");
 
     const std::string unsupported = eval(session, "integrate[gamma[x],x]");
     tests.expect(unsupported.find("integrate[") == 0,

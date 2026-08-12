@@ -122,6 +122,7 @@ inline constexpr std::string_view erf = "erf";
 inline constexpr std::string_view erfc = "erfc";
 inline constexpr std::string_view fresnelC = "fresnelc";
 inline constexpr std::string_view fresnelS = "fresnels";
+inline constexpr std::string_view hypergeometric1F1 = "hypergeometric1F1";
 inline constexpr std::string_view beta = "beta";
 inline constexpr std::string_view betaLog = "betaln";
 inline constexpr std::string_view generalizedBinomial = "binom";

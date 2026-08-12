@@ -92,6 +92,19 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"sin[Pi x^2/2 Rad]"},
         "Fresnel S derivative is angle-mode independent and explicitly radian");
 
+    tests.expectEqual(eval(session, "hypergeometric1F1[0,3,2]"), std::string{"1"},
+        "1F1 with a=0 terminates to one exactly");
+    tests.expectEqual(eval(session, "hypergeometric1F1[-2,3,2]"), std::string{"0"},
+        "terminating 1F1 polynomial is evaluated exactly");
+    tests.expectEqual(eval(session, "hypergeometric1F1[2,2,1]"), std::string{"E"},
+        "1F1(a;a;z) reuses exp when the parameter is away from its poles");
+    tests.expectEqual(eval(session, "N[hypergeometric1F1[1/6,7/6,1],20]"),
+        std::string{"1.19206880798188830082"},
+        "1F1 has a certified exact-Rational real series backend");
+    tests.expectEqual(eval(session, "D[hypergeometric1F1[1/6,7/6,x],x]"),
+        std::string{"hypergeometric1F1[7/6, 13/6, x]/7"},
+        "1F1 derivative uses the exact contiguous derivative identity");
+
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},
         "Beta at positive integers is exact");
     tests.expectEqual(eval(session, "beta[1/2,1/2]"), std::string{"Pi"},

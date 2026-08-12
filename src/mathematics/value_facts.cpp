@@ -674,6 +674,18 @@ using numeric::Number;
             return ValueFacts{NumericDomain::Real, RealSign::Unknown, argument(0).exact, false};
         return ValueFacts{NumericDomain::Complex, RealSign::Unknown, argument(0).exact, false};
 
+    case BuiltinId::Hypergeometric1F1:
+        if (call.arguments.size() != 3
+            || !argument(0).isNumeric() || !argument(1).isNumeric() || !argument(2).isNumeric())
+            return {};
+        if (argument(0).isProvablyReal()
+            && argument(1).isProvablyReal()
+            && argument(2).isProvablyReal())
+            return ValueFacts{NumericDomain::Real, RealSign::Unknown,
+                argument(0).exact && argument(1).exact && argument(2).exact, false};
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown,
+            argument(0).exact && argument(1).exact && argument(2).exact, false};
+
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
         if (call.arguments.size() != 2

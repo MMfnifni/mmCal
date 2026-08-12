@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -460,6 +461,147 @@ void collectProductParts(
     return buildProductNormalForm(std::move(parts), builtins);
 }
 
+
+[[nodiscard]] const std::vector<Expr>* hypergeometric1F1Arguments(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Hypergeometric1F1)
+        || expression.asCall().arguments.size() != 3)
+        return nullptr;
+    return &expression.asCall().arguments;
+}
+
+struct PositiveIntegerPower final {
+    Expr base;
+    std::uint64_t exponent = 1;
+};
+
+[[nodiscard]] std::optional<PositiveIntegerPower> positiveIntegerPower(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Power))
+        return PositiveIntegerPower{expression, 1};
+    const auto& arguments = expression.asCall().arguments;
+    if (arguments.size() != 2)
+        return std::nullopt;
+    const auto exponent = exactRealRational(arguments[1]);
+    if (!exponent || !exponent->isInteger() || !exponent->numerator().isPositive())
+        return std::nullopt;
+    const auto count = numeric::tryToUint64(exponent->numerator());
+    if (!count)
+        return std::nullopt;
+    return PositiveIntegerPower{arguments[0], *count};
+}
+
+[[nodiscard]] bool samePositiveMonomial(
+    std::span<const Expr> factors,
+    const Expr& expected,
+    const evaluation::BuiltinRegistry& builtins) {
+    const auto target = positiveIntegerPower(expected, builtins);
+    if (!target)
+        return false;
+    std::uint64_t total = 0;
+    for (const Expr& factor : factors) {
+        const auto power = positiveIntegerPower(factor, builtins);
+        if (!power || !(power->base == target->base)
+            || power->exponent > std::numeric_limits<std::uint64_t>::max() - total)
+            return false;
+        total += power->exponent;
+    }
+    return total == target->exponent;
+}
+
+[[nodiscard]] bool productIsExactly(
+    const Expr& expression,
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (expression == lhs && isExactReal(rhs, 1))
+        return true;
+    if (!isHead(expression, builtins, BuiltinId::Multiply))
+        return false;
+
+    const auto& factors = expression.asCall().arguments;
+    std::vector<Expr> remaining;
+    bool foundRhs = false;
+    remaining.reserve(factors.size());
+    for (const Expr& factor : factors) {
+        if (!foundRhs && factor == rhs) {
+            foundRhs = true;
+            continue;
+        }
+        remaining.push_back(factor);
+    }
+    return foundRhs && !remaining.empty()
+        && samePositiveMonomial(remaining, lhs, builtins);
+}
+
+[[nodiscard]] std::optional<Expr> simplifyHypergeometricContiguous(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Add)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto tryOrientation = [&](const Expr& first, const Expr& second) -> std::optional<Expr> {
+        LinearTerm baseTerm = extractLinearTerm(first, builtins);
+        if (baseTerm.coefficient != Rational{BigInt{1}})
+            return std::nullopt;
+        const auto* base = hypergeometric1F1Arguments(baseTerm.atom, builtins);
+        if (!base)
+            return std::nullopt;
+
+        const auto a = exactRealRational((*base)[0]);
+        const auto b = exactRealRational((*base)[1]);
+        if (!a || !b || a->isZero() || *b != *a + Rational{BigInt{1}})
+            return std::nullopt;
+        // 積分器が生成するa=1/n>0の領域だけに限定し、parameter poleを跨ぐ一般変形にしない。
+        if (a->numerator().isNegative())
+            return std::nullopt;
+
+        const Expr& z = (*base)[2];
+        LinearTerm zTerm = extractLinearTerm(z, builtins);
+        LinearTerm correction = extractLinearTerm(second, builtins);
+        const Rational expectedCoefficient = zTerm.coefficient / *b;
+        if (correction.coefficient != expectedCoefficient)
+            return std::nullopt;
+
+        const auto* shifted = hypergeometric1F1Arguments(
+            isHead(correction.atom, builtins, BuiltinId::Multiply)
+                ? [&]() -> const Expr& {
+                    for (const Expr& factor : correction.atom.asCall().arguments)
+                        if (hypergeometric1F1Arguments(factor, builtins))
+                            return factor;
+                    return correction.atom;
+                }()
+                : correction.atom,
+            builtins);
+        if (!shifted)
+            return std::nullopt;
+
+        const auto shiftedA = exactRealRational((*shifted)[0]);
+        const auto shiftedB = exactRealRational((*shifted)[1]);
+        if (!shiftedA || !shiftedB
+            || *shiftedA != *a + Rational{BigInt{1}}
+            || *shiftedB != *b + Rational{BigInt{1}}
+            || !((*shifted)[2] == z))
+            return std::nullopt;
+
+        const Expr shiftedCall = Expr::call(
+            builtins.symbol(BuiltinId::Hypergeometric1F1), *shifted);
+        if (!productIsExactly(correction.atom, zTerm.atom, shiftedCall, builtins))
+            return std::nullopt;
+
+        // M(a,a+1,z) + z/(a+1) M(a+1,a+2,z) = exp(z)。
+        return Expr::call(builtins.symbol(BuiltinId::Exp), {z});
+    };
+
+    const auto& terms = expression.asCall().arguments;
+    if (auto result = tryOrientation(terms[0], terms[1]))
+        return result;
+    return tryOrientation(terms[1], terms[0]);
+}
+
 [[nodiscard]] TruthValue proveNonZero(
     const Expr& expression,
     const mathematics::KnowledgeContext& knowledge) {
@@ -481,8 +623,12 @@ void collectProductParts(
     const mathematics::KnowledgeContext knowledge = context.knowledge();
 
     switch (definition->id) {
-    case BuiltinId::Add:
-        return canonicalAdd(arguments, context.builtins);
+    case BuiltinId::Add: {
+        Expr canonical = canonicalAdd(arguments, context.builtins);
+        if (auto hypergeometric = simplifyHypergeometricContiguous(canonical, context.builtins))
+            return *hypergeometric;
+        return canonical;
+    }
 
     case BuiltinId::Multiply:
         return canonicalMultiply(arguments, context.builtins);
@@ -1109,6 +1255,9 @@ void collectProductParts(
             return Expr::call(context.builtins.symbol(BuiltinId::Negate), {
                 Expr::call(context.builtins.symbol(definition->id),
                     {arguments[0].asCall().arguments.front()})});
+        return expression;
+
+    case BuiltinId::Hypergeometric1F1:
         return expression;
 
     case BuiltinId::Exp:

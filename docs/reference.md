@@ -669,6 +669,40 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 `Rad` is explicit in the derivatives because the Fresnel definitions themselves must not depend on the session's default angle unit.
 
+## 14.6 Confluent hypergeometric 1F1
+
+Kummer's confluent hypergeometric function is written as
+
+```text
+hypergeometric1F1[a,b,z]
+```
+
+It is entire in `z`; in general `b = 0,-1,-2,...` is a parameter pole, so those cases are not unconditionally simplified to finite values. Exact evaluation currently handles safely terminating series, `z=0`, `a=b`, and related closed cases. The certified real `N` backend currently accepts exact Rational `a,b,z`.
+
+```text
+hypergeometric1F1[0,3,2] -> 1
+hypergeometric1F1[-2,3,2] -> 0
+hypergeometric1F1[2,2,1] -> E
+N[hypergeometric1F1[1/6,7/6,1],20]
+-> 1.19206880798188830082
+```
+
+When the parameters do not depend on the differentiation variable,
+
+```text
+D[hypergeometric1F1[a,b,z],z]
+= a hypergeometric1F1[a+1,b+1,z]/b
+```
+
+is used. For integration, mmCal prefers the 1F1 form when an upper-incomplete-Gamma representation would introduce principal-branch structure or a removable hole at the origin. For example,
+
+```text
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6, 7/6, x^6]
+```
+
+The same family handles `exp[c x^n]` for positive integer `n`.
+
 ---
 
 # 15. Aggregate functions
@@ -960,13 +994,15 @@ Major exact rules currently implemented:
 - Quadratic square-root forms with provably positive Rational scale, producing `asin/asinh` primitives
 - Finite Fourier reduction for `sin^m/cos^n`; the integrator may explicitly expand positive integer total degree up to 256
 - `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) through the standard `csc/sec` reduction recurrences
+- Positive integer powers (`2<=n<=256`) of `tan/cot/sec/csc` through the standard reduction formulas
 - Linearity over sums, differences, negation, and factors independent of the integration variable
 - Safe standard primitives for `exp/sin/cos/tan/cot/sec/csc`
 - Safe standard primitives for `sinh/cosh/tanh/coth/sech/csch`
-- `log/log1p/expm1/sqrt/cbrt`
+- `log/log1p/expm1/sqrt/cbrt`; logarithmic-derivative knowledge recognizes forms such as `log[x]/x` and `1/(x log[x])`
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
-- `fresnelc/fresnels`; quadratic sine/cosine phases reduce to standard Fresnel integrals
+- `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals
+- `hypergeometric1F1`; `exp[c x^n]` with positive integer `n>=2` reduces to an entire 1F1 primitive at the origin
 - Exact inverse chain rule
 - Finite integration by parts for polynomial × `exp/sin/cos/sinh/cosh`
 - Exact integration of `exp[a x+b] sin/cos[c x+d]` forms by solving a linear system
@@ -1008,6 +1044,15 @@ integrate[1/sqrt[x^2+4],x]
 
 integrate[sin[x]^2,x]
 -> (x - sin[2 x] / 2) / 2
+
+integrate[log[x]/x,x]
+-> log[x]^2/2
+
+integrate[sec[x]^3,x]
+-> sec[x]tan[x]/2+log[sec[x]+tan[x]]/2
+
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6, 7/6, x^6]
 
 integrate[sin[2x]^(-2),x]
 -> -cot[2x]/2
@@ -1588,7 +1633,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **207 built-in definitions / 189 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **208 built-in definitions / 190 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1597,7 +1642,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
-fresnelc, fresnels,
+fresnelc, fresnels, hypergeometric1F1,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,

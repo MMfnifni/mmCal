@@ -111,7 +111,8 @@ enum class FunctionDefinednessRule {
     PrincipalPower,
     RealPairNotBothZero,
     ArgumentsPositiveReal,
-    GammaPoles
+    GammaPoles,
+    Hypergeometric1F1Poles
 };
 
 struct FunctionDefinition final {

@@ -227,6 +227,69 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return hold(id, arguments, registry);
 }
 
+
+[[nodiscard]] bool isNonPositiveInteger(const Rational& value) {
+    return value.isInteger() && !value.numerator().isPositive();
+}
+
+[[nodiscard]] Expr evaluateHypergeometric1F1(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 3, names::hypergeometric1F1);
+
+    Rational a;
+    Rational b;
+    Rational z;
+    if (!exactRealRational(arguments[0], a)
+        || !exactRealRational(arguments[1], b)
+        || !exactRealRational(arguments[2], z))
+        return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
+
+    // b=0,-1,-2,... は通常parameter pole。ただし a=-m で級数がpole到達前に
+    // terminateする場合だけ有限多項式として安全に評価できる。
+    std::optional<std::uint64_t> terminatingOrder;
+    if (a.isInteger() && !a.numerator().isPositive()) {
+        const auto order = numeric::tryToUint64(-a.numerator());
+        if (order && *order <= 4096)
+            terminatingOrder = *order;
+    }
+
+    if (isNonPositiveInteger(b)) {
+        if (!terminatingOrder)
+            return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
+        const auto poleIndex = numeric::tryToUint64(-b.numerator());
+        if (!poleIndex || *terminatingOrder > *poleIndex)
+            return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
+    }
+
+    if (z.isZero())
+        return integer(1);
+
+    // M(a,a,z)=exp(z)。parameter poleを跨がない場合のみdefinednessを保って簡約する。
+    if (a == b && !isNonPositiveInteger(b))
+        return exact::call(BuiltinId::Exp, {arguments[2]}, registry, mathematics, angles);
+
+    // a=-m は有限級数なので、exact Rational入力なら完全にexact評価する。
+    if (terminatingOrder) {
+        Rational term{BigInt{1}};
+        Rational sum{BigInt{1}};
+        for (std::uint64_t k = 0; k < *terminatingOrder; ++k) {
+            const Rational numeratorFactor = a + Rational{BigInt::fromUnsigned(k)};
+            const Rational denominatorFactor = b + Rational{BigInt::fromUnsigned(k)};
+            if (denominatorFactor.isZero())
+                return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
+            term *= numeratorFactor * z;
+            term /= denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)};
+            sum += term;
+        }
+        return rationalExpr(std::move(sum));
+    }
+
+    return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
+}
+
 [[nodiscard]] Expr evaluateBeta(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -386,6 +449,8 @@ Expr evaluateSpecialFunction(
     case BuiltinId::FresnelC:
     case BuiltinId::FresnelS:
         return evaluateFresnel(id, arguments, registry, mathematics, angles);
+    case BuiltinId::Hypergeometric1F1:
+        return evaluateHypergeometric1F1(arguments, registry, mathematics, angles);
     case BuiltinId::Beta:
         return evaluateBeta(arguments, registry, mathematics, angles);
     case BuiltinId::BetaLog:

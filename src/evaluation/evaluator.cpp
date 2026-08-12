@@ -1078,6 +1078,7 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Erfc:
     case BuiltinId::FresnelC:
     case BuiltinId::FresnelS:
+    case BuiltinId::Hypergeometric1F1:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:

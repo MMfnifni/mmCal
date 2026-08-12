@@ -594,6 +594,22 @@ using numeric::Rational;
             return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
         }
         break;
+    case BuiltinId::Hypergeometric1F1:
+        if (a.size() == 3
+            && !containsVariable(a[0], variable)
+            && !containsVariable(a[1], variable)) {
+            // d/dz M(a,b,z) = (a/b) M(a+1,b+1,z)。
+            // parameter微分は別の特殊函数知識を要するため、a/bが変数に依存する場合は保持する。
+            Expr shifted = call(builtins, BuiltinId::Hypergeometric1F1, {
+                add(builtins, {a[0], integer(1)}),
+                add(builtins, {a[1], integer(1)}),
+                a[2]});
+            Expr kernel = multiply(builtins, {
+                divide(builtins, a[0], a[1]),
+                std::move(shifted)});
+            return chain(std::move(kernel), a[2], variable, builtins, mathematics, angles);
+        }
+        break;
     case BuiltinId::Exp:
         if (a.size() == 1)
             return chain(expression, a[0], variable, builtins, mathematics, angles);
