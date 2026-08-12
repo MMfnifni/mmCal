@@ -196,6 +196,16 @@ private:
             // terminating seriesによる可除ケースもあるため、弱い条件を捏造せず未解決とする。
             return false;
 
+        case FunctionDefinednessRule::Hypergeometric2F1Poles:
+            // 2F1(a,b;c;z) も c=0,-1,-2,... にparameter poleを持つ。
+            // principal branch cutとterminating caseを同時に有限Predicateへ落とさない。
+            return false;
+
+        case FunctionDefinednessRule::EllipticPrincipal:
+            // Legendre楕円積分のbranch/singularity条件はparameterとamplitudeの双方に依存する。
+            // 一般形をEverywhereと誤認するより、現段階ではdefinedness証明を保守的に保留する。
+            return false;
+
         case FunctionDefinednessRule::RealPairNotBothZero:
         case FunctionDefinednessRule::PrincipalPower:
             return false;

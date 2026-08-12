@@ -87,6 +87,25 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         std::string{"{x==log[a] if a in Real&&a>0}"},
         "symbolic inverse solution retains the real range condition");
 
+    tests.expectEqual(eval(session, "solve[ellipticF[x,0]==2,x]"), std::string{"{x==2}"},
+        "Solve consumes exact ellipticF degeneration before polynomial solving");
+    tests.expectEqual(eval(session, "solve[ellipticE[x,0]==3,x]"), std::string{"{x==3}"},
+        "Solve consumes exact ellipticE degeneration before polynomial solving");
+    tests.expectEqual(eval(session, "solve[ellipticPi[0,x,0]==4,x]"), std::string{"{x==4}"},
+        "Solve consumes exact ellipticPi degeneration before polynomial solving");
+    tests.expectEqual(eval(session, "solve[hypergeometric2F1[0,2,3,x]==1,x]"), std::string{"All"},
+        "Solve recognizes a globally constant terminating 2F1 equation");
+
+    const std::string ellipticUnresolved = eval(session, "solve[ellipticF[x,1/3]==2,x]");
+    tests.expect(ellipticUnresolved == "UnresolvedSolutionSet[x]"
+            && findDiagnostic(session, "solve::unresolved") != nullptr,
+        "Solve does not invent a principal inverse for a general elliptic function");
+    const std::string hypergeometricUnresolved = eval(
+        session, "solve[hypergeometric2F1[1,1,2,x]==2,x]");
+    tests.expect(hypergeometricUnresolved == "UnresolvedSolutionSet[x]"
+            && findDiagnostic(session, "solve::unresolved") != nullptr,
+        "Solve does not invent a global inverse for a general Gauss hypergeometric function");
+
     const std::string periodic = eval(session, "solve[sin[x]==0,x,Real]");
     tests.expect(periodic == "UnresolvedSolutionSet[x]"
             && findDiagnostic(session, "solve::unresolved") != nullptr,

@@ -573,6 +573,10 @@ struct ScaledSqrt final {
     case FunctionId::FresnelC:
     case FunctionId::FresnelS:
     case FunctionId::Hypergeometric1F1:
+    case FunctionId::Hypergeometric2F1:
+    case FunctionId::EllipticF:
+    case FunctionId::EllipticE:
+    case FunctionId::EllipticPi:
     case FunctionId::Beta:
     case FunctionId::BetaLog:
     case FunctionId::Cbrt:

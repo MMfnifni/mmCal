@@ -43,6 +43,32 @@ namespace mmcal::approximation {
     const numeric::Rational& z,
     std::size_t precisionBits);
 
+// Gauss 2F1。現backendはprincipal branchのうち |z|<1 のexact Rational pointを
+// Gauss級数＋厳密な幾何tail boundで保証評価する。
+[[nodiscard]] RealInterval encloseHypergeometric2F1Real(
+    const numeric::Rational& a,
+    const numeric::Rational& b,
+    const numeric::Rational& c,
+    const numeric::Rational& z,
+    std::size_t precisionBits);
+
+// Legendre不完全楕円積分。amplitudeは常にRadian。
+// 現backendは |m|<1（Piは加えて|n|<1）のexact Rational pointを
+// m/n級数とsin偶数冪積分の漸化式で保証評価する。
+[[nodiscard]] RealInterval encloseEllipticFReal(
+    const numeric::Rational& phi,
+    const numeric::Rational& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticEReal(
+    const numeric::Rational& phi,
+    const numeric::Rational& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticPiReal(
+    const numeric::Rational& n,
+    const numeric::Rational& phi,
+    const numeric::Rational& m,
+    std::size_t precisionBits);
+
 // a,b>0 に対するBetaとlog Beta。Gammaの比ではなくlog-domainで評価する。
 [[nodiscard]] RealInterval encloseBetaPositive(
     const RealInterval& a,

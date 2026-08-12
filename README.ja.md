@@ -1,5 +1,7 @@
 # mmCalculator – Mathematical Machinery Calculator
 
+厳密値が絶対。近似は明示的に。数学的条件を黙って捨てない。そして手軽に。
+
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
@@ -107,7 +109,7 @@ mmCal --angle rad
 mmCal --angle grad --fix 8
 ```
 
-- `--fix 16`: 結果を小数点以下**最大16桁**で表示する。末尾の不要な0は省略
+- `--fix 16`: 結果を小数点以下**最大16桁(任意)**で表示する。末尾の不要な0は省略
 - `--angle deg`: 角度指定のない三角函数を度として扱う
 - `--angle rad`: ラジアン。既定値
 - `--angle grad`: グラード

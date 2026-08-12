@@ -1433,6 +1433,129 @@ struct TrigArgument final {
 }
 
 
+
+struct EllipticTrigKernel final {
+    Expr parameter;
+    Expr sourceArgument;
+};
+
+[[nodiscard]] std::optional<EllipticTrigKernel> matchOneMinusParameterSinSquared(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Subtract)
+        || expression.asCall().arguments.size() != 2
+        || !isOne(expression.asCall().arguments[0]))
+        return std::nullopt;
+
+    const Expr& term = expression.asCall().arguments[1];
+    std::vector<std::pair<Expr, Expr>> candidates;
+    if (isHead(term, builtins, BuiltinId::Multiply)
+        && term.asCall().arguments.size() == 2) {
+        const auto& factors = term.asCall().arguments;
+        candidates.emplace_back(factors[0], factors[1]);
+        candidates.emplace_back(factors[1], factors[0]);
+    }
+    else if (isHead(term, builtins, BuiltinId::Divide)
+        && term.asCall().arguments.size() == 2
+        && !containsVariable(term.asCall().arguments[1], variable)) {
+        candidates.emplace_back(
+            Expr::call(builtins.symbol(BuiltinId::Divide), {
+                integer(1), term.asCall().arguments[1]}),
+            term.asCall().arguments[0]);
+    }
+    else {
+        candidates.emplace_back(integer(1), term);
+    }
+
+    for (const auto& [parameter, sinePower] : candidates) {
+        if (containsVariable(parameter, variable)
+            || !isHead(sinePower, builtins, BuiltinId::Power)
+            || sinePower.asCall().arguments.size() != 2)
+            continue;
+        const auto exponent = exactRealRational(sinePower.asCall().arguments[1]);
+        if (!exponent || *exponent != Rational{BigInt{2}})
+            continue;
+        const Expr& sine = sinePower.asCall().arguments[0];
+        if (!isHead(sine, builtins, BuiltinId::Sin)
+            || sine.asCall().arguments.size() != 1)
+            continue;
+        return EllipticTrigKernel{parameter, sine.asCall().arguments[0]};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> integrateEllipticTrigKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    BuiltinId target = BuiltinId::EllipticF;
+    Expr characteristic = integer(0);
+    const Expr* radicand = nullptr;
+    std::optional<EllipticTrigKernel> matched;
+
+    if (isHead(expression, builtins, BuiltinId::Sqrt)
+        && expression.asCall().arguments.size() == 1) {
+        target = BuiltinId::EllipticE;
+        radicand = &expression.asCall().arguments[0];
+        matched = matchOneMinusParameterSinSquared(*radicand, variable, builtins);
+    }
+    else if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2
+        && isOne(expression.asCall().arguments[0])) {
+        const Expr& denominator = expression.asCall().arguments[1];
+        if (isHead(denominator, builtins, BuiltinId::Sqrt)
+            && denominator.asCall().arguments.size() == 1) {
+            target = BuiltinId::EllipticF;
+            radicand = &denominator.asCall().arguments[0];
+            matched = matchOneMinusParameterSinSquared(*radicand, variable, builtins);
+        }
+        else if (isHead(denominator, builtins, BuiltinId::Multiply)) {
+            const auto& factors = denominator.asCall().arguments;
+            if (factors.size() == 2) {
+                for (std::size_t rootIndex = 0; rootIndex < 2; ++rootIndex) {
+                    const Expr& root = factors[rootIndex];
+                    if (!isHead(root, builtins, BuiltinId::Sqrt)
+                        || root.asCall().arguments.size() != 1)
+                        continue;
+                    auto mKernel = matchOneMinusParameterSinSquared(
+                        root.asCall().arguments[0], variable, builtins);
+                    auto nKernel = matchOneMinusParameterSinSquared(
+                        factors[1 - rootIndex], variable, builtins);
+                    if (mKernel && nKernel
+                        && mKernel->sourceArgument == nKernel->sourceArgument) {
+                        target = BuiltinId::EllipticPi;
+                        matched = std::move(mKernel);
+                        characteristic = std::move(nKernel->parameter);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (!matched)
+        return std::nullopt;
+
+    TrigArgument info = trigArgument(
+        matched->sourceArgument, builtins, mathematics, angles);
+    Expr du = differentiateExpression(info.argument, variable, builtins, mathematics, angles);
+    if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
+        return std::nullopt;
+
+    Expr amplitude = isOne(info.scale)
+        ? info.argument
+        : multiply(builtins, mathematics, angles, {info.scale, info.argument});
+    Expr primitive = target == BuiltinId::EllipticPi
+        ? call(builtins, target, {
+            std::move(characteristic), std::move(amplitude), matched->parameter})
+        : call(builtins, target, {std::move(amplitude), matched->parameter});
+    return multiply(builtins, mathematics, angles, {
+        std::move(info.inverseScale),
+        divide(builtins, mathematics, angles, std::move(primitive), std::move(du))});
+}
+
 [[nodiscard]] std::optional<std::uint64_t> negativeIntegerMagnitude(const Expr& expression) {
     const auto value = exactRealRational(expression);
     if (!value || !value->isInteger() || !value->numerator().isNegative())
@@ -1616,6 +1739,106 @@ struct TrigArgument final {
 
     return multiply(builtins, mathematics, angles, {
         std::move(inverseScale), *primitives[static_cast<std::size_t>(*order)]});
+}
+
+
+[[nodiscard]] std::optional<Expr> integrateQuarticEllipticF(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const Expr* radicand = nullptr;
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2
+        && isOne(expression.asCall().arguments[0])
+        && isHead(expression.asCall().arguments[1], builtins, BuiltinId::Sqrt)
+        && expression.asCall().arguments[1].asCall().arguments.size() == 1)
+        radicand = &expression.asCall().arguments[1].asCall().arguments[0];
+    if (!radicand)
+        return std::nullopt;
+
+    const auto polynomial = toRationalPolynomial(
+        *radicand, variable, builtins, PolynomialConversionOptions{4, 16});
+    if (!polynomial || polynomial->degree() != 4
+        || polynomial->coefficient(0) != Rational{BigInt{1}}
+        || !polynomial->coefficient(1).isZero()
+        || !polynomial->coefficient(2).isZero()
+        || !polynomial->coefficient(3).isZero()
+        || polynomial->coefficient(4) != Rational{BigInt{-1}})
+        return std::nullopt;
+
+    // ellipticFのamplitudeはRadian固定。asinのsession角度単位をRadianへ戻す。
+    Expr amplitude = call(builtins, BuiltinId::Asin, {Expr{variable}});
+    Expr radianScale = radiansPerInverseAngleUnit(builtins, mathematics, angles);
+    if (!isOne(radianScale))
+        amplitude = multiply(builtins, mathematics, angles, {
+            std::move(radianScale), std::move(amplitude)});
+    return call(builtins, BuiltinId::EllipticF, {
+        std::move(amplitude), integer(-1)});
+}
+
+[[nodiscard]] std::optional<Expr> integrateBinomialPower2F1(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    // ∫(1+beta*x^n)^p dx
+    // = x 2F1(-p,1/n;1+1/n;-beta*x^n)。
+    const Expr* base = nullptr;
+    std::optional<Rational> exponent;
+
+    if (isHead(expression, builtins, BuiltinId::Sqrt)
+        && expression.asCall().arguments.size() == 1) {
+        base = &expression.asCall().arguments[0];
+        exponent = Rational{BigInt{1}, BigInt{2}};
+    }
+    else if (isHead(expression, builtins, BuiltinId::Power)
+        && expression.asCall().arguments.size() == 2) {
+        base = &expression.asCall().arguments[0];
+        exponent = exactRealRational(expression.asCall().arguments[1]);
+    }
+    else if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2
+        && isOne(expression.asCall().arguments[0])) {
+        const Expr& denominator = expression.asCall().arguments[1];
+        if (isHead(denominator, builtins, BuiltinId::Sqrt)
+            && denominator.asCall().arguments.size() == 1) {
+            base = &denominator.asCall().arguments[0];
+            exponent = Rational{BigInt{-1}, BigInt{2}};
+        }
+        else {
+            base = &denominator;
+            exponent = Rational{BigInt{-1}};
+        }
+    }
+    if (!base || !exponent)
+        return std::nullopt;
+
+    const auto polynomial = toRationalPolynomial(
+        *base, variable, builtins, PolynomialConversionOptions{4096, 8192});
+    if (!polynomial || polynomial->degree() < 2
+        || polynomial->coefficient(0) != Rational{BigInt{1}})
+        return std::nullopt;
+    const std::size_t degree = polynomial->degree();
+    for (std::size_t i = 1; i < degree; ++i)
+        if (!polynomial->coefficient(i).isZero())
+            return std::nullopt;
+    const Rational beta = polynomial->coefficient(degree);
+    if (beta.isZero() || degree > 4096)
+        return std::nullopt;
+
+    const Rational b{BigInt{1}, BigInt::fromUnsigned(degree)};
+    const Rational c = Rational{BigInt{1}} + b;
+    Expr xPower = power(builtins, mathematics, angles,
+        Expr{variable}, integer(static_cast<std::int64_t>(degree)));
+    Expr z = multiply(builtins, mathematics, angles, {
+        rational(-beta), std::move(xPower)});
+    return multiply(builtins, mathematics, angles, {
+        Expr{variable},
+        call(builtins, BuiltinId::Hypergeometric2F1, {
+            rational(-*exponent), rational(b), rational(c), std::move(z)})});
 }
 
 [[nodiscard]] std::optional<Expr> integrateExponentialMonomial1F1(
@@ -2409,9 +2632,21 @@ struct TrigArgument final {
         }
     }
 
+    if (auto ellipticTrig = integrateEllipticTrigKernel(
+            expression, variable, builtins, mathematics, angles))
+        return *ellipticTrig;
+
     if (auto fresnel = integrateQuadraticFresnel(
             expression, variable, builtins, mathematics, angles))
         return *fresnel;
+
+    if (auto elliptic = integrateQuarticEllipticF(
+            expression, variable, builtins, mathematics, angles))
+        return *elliptic;
+
+    if (auto hypergeometric2F1 = integrateBinomialPower2F1(
+            expression, variable, builtins, mathematics, angles))
+        return *hypergeometric2F1;
 
     if (auto hypergeometric = integrateExponentialMonomial1F1(
             expression, variable, builtins, mathematics, angles))

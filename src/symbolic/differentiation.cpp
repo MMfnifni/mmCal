@@ -610,6 +610,57 @@ using numeric::Rational;
             return chain(std::move(kernel), a[2], variable, builtins, mathematics, angles);
         }
         break;
+    case BuiltinId::Hypergeometric2F1:
+        if (a.size() == 4
+            && !containsVariable(a[0], variable)
+            && !containsVariable(a[1], variable)
+            && !containsVariable(a[2], variable)) {
+            // d/dz 2F1(a,b;c;z)=(ab/c)2F1(a+1,b+1;c+1;z)。
+            Expr shifted = call(builtins, BuiltinId::Hypergeometric2F1, {
+                add(builtins, {a[0], integer(1)}),
+                add(builtins, {a[1], integer(1)}),
+                add(builtins, {a[2], integer(1)}),
+                a[3]});
+            Expr kernel = multiply(builtins, {
+                divide(builtins, multiply(builtins, {a[0], a[1]}), a[2]),
+                std::move(shifted)});
+            return chain(std::move(kernel), a[3], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::EllipticF:
+    case BuiltinId::EllipticE:
+        if (a.size() == 2 && !containsVariable(a[1], variable)) {
+            // Legendre incomplete elliptic integrals use a Radian amplitude independent of session angle mode.
+            Expr radianAmplitude = call(builtins, BuiltinId::UnitApplied, {
+                a[0], Expr{std::string{"Rad"}}});
+            Expr sine = call(builtins, BuiltinId::Sin, {std::move(radianAmplitude)});
+            Expr radicand = subtract(builtins, integer(1),
+                multiply(builtins, {a[1], power(builtins, sine, integer(2))}));
+            Expr root = call(builtins, BuiltinId::Sqrt, {std::move(radicand)});
+            Expr kernel = definition->id == BuiltinId::EllipticF
+                ? divide(builtins, integer(1), std::move(root))
+                : std::move(root);
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::EllipticPi:
+        if (a.size() == 3
+            && !containsVariable(a[0], variable)
+            && !containsVariable(a[2], variable)) {
+            Expr radianAmplitude = call(builtins, BuiltinId::UnitApplied, {
+                a[1], Expr{std::string{"Rad"}}});
+            Expr sine = call(builtins, BuiltinId::Sin, {std::move(radianAmplitude)});
+            Expr sineSquared = power(builtins, sine, integer(2));
+            Expr characteristic = subtract(builtins, integer(1),
+                multiply(builtins, {a[0], sineSquared}));
+            Expr radicand = subtract(builtins, integer(1),
+                multiply(builtins, {a[2], sineSquared}));
+            Expr denominator = multiply(builtins, {
+                std::move(characteristic), call(builtins, BuiltinId::Sqrt, {std::move(radicand)})});
+            return chain(divide(builtins, integer(1), std::move(denominator)),
+                a[1], variable, builtins, mathematics, angles);
+        }
+        break;
     case BuiltinId::Exp:
         if (a.size() == 1)
             return chain(expression, a[0], variable, builtins, mathematics, angles);

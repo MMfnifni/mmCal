@@ -143,6 +143,22 @@ MathRegistry MathRegistry::defaults(
         FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
         FunctionBranchRule::SingleValued, std::nullopt,
         FunctionDefinednessRule::Hypergeometric1F1Poles, 3);
+    // 2F1はz=1から実正軸方向にprincipal branch cutを持ち、c=0,-1,... はparameter pole。
+    registry.addFunction(evaluation::BuiltinId::Hypergeometric2F1, FunctionId::Hypergeometric2F1,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalHypergeometric2F1, std::nullopt,
+        FunctionDefinednessRule::Hypergeometric2F1Poles, 4);
+    // Legendre不完全楕円積分。branch/singularity条件は複雑なので、definedness collectorでは
+    // 安全に証明できない一般形をEverywhere扱いせず保守的に保持する。
+    registry.addFunction(evaluation::BuiltinId::EllipticF, FunctionId::EllipticF,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalElliptic, std::nullopt, FunctionDefinednessRule::EllipticPrincipal, 2);
+    registry.addFunction(evaluation::BuiltinId::EllipticE, FunctionId::EllipticE,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalElliptic, std::nullopt, FunctionDefinednessRule::EllipticPrincipal, 2);
+    registry.addFunction(evaluation::BuiltinId::EllipticPi, FunctionId::EllipticPi,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalElliptic, std::nullopt, FunctionDefinednessRule::EllipticPrincipal, 3);
     registry.addFunction(evaluation::BuiltinId::Beta, FunctionId::Beta,
         FunctionParity::Neither, FunctionDomainRule::RealPairToReal,
         FunctionBranchRule::SingleValued, std::nullopt,

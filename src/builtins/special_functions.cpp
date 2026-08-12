@@ -290,6 +290,142 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
 }
 
+
+[[nodiscard]] std::optional<std::uint64_t> terminatingHypergeometricOrder(const Rational& value) {
+    if (!value.isInteger() || value.numerator().isPositive())
+        return std::nullopt;
+    const auto order = numeric::tryToUint64(-value.numerator());
+    if (!order || *order > 4096)
+        return std::nullopt;
+    return *order;
+}
+
+[[nodiscard]] Expr evaluateHypergeometric2F1(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 4, names::hypergeometric2F1);
+    static_cast<void>(mathematics);
+    static_cast<void>(angles);
+
+    Rational a;
+    Rational b;
+    Rational c;
+    Rational z;
+    if (!exactRealRational(arguments[0], a)
+        || !exactRealRational(arguments[1], b)
+        || !exactRealRational(arguments[2], c)
+        || !exactRealRational(arguments[3], z))
+        return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
+
+    const auto orderA = terminatingHypergeometricOrder(a);
+    const auto orderB = terminatingHypergeometricOrder(b);
+    std::optional<std::uint64_t> terminatingOrder;
+    if (orderA && orderB)
+        terminatingOrder = std::min(*orderA, *orderB);
+    else if (orderA)
+        terminatingOrder = orderA;
+    else if (orderB)
+        terminatingOrder = orderB;
+
+    // c=0,-1,-2,... は通常parameter pole。有限級数がpole到達前に停止する場合だけ
+    // exact polynomialとして安全に受理する。1F1と同じdefinedness方針。
+    if (isNonPositiveInteger(c)) {
+        if (!terminatingOrder)
+            return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
+        const auto poleIndex = numeric::tryToUint64(-c.numerator());
+        if (!poleIndex || *terminatingOrder > *poleIndex)
+            return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
+    }
+
+    if (z.isZero())
+        return integer(1);
+
+    if (terminatingOrder) {
+        Rational term{BigInt{1}};
+        Rational sum{BigInt{1}};
+        for (std::uint64_t k = 0; k < *terminatingOrder; ++k) {
+            const Rational ka{BigInt::fromUnsigned(k)};
+            const Rational denominatorFactor = c + ka;
+            if (denominatorFactor.isZero())
+                return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
+            term *= (a + ka) * (b + ka) * z;
+            term /= denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)};
+            sum += term;
+        }
+        return rationalExpr(std::move(sum));
+    }
+
+    return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
+}
+
+[[nodiscard]] bool exactZero(const Expr& expression) {
+    return expression.isNumber() && expression.asNumber().isZero();
+}
+
+[[nodiscard]] Expr evaluateEllipticF(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 2, names::ellipticF);
+    if (exactZero(arguments[0]))
+        return integer(0);
+    // F(phi|0)=phi。phiがsymbolicでも成立するためSolverにも安全に還元できる。
+    if (exactZero(arguments[1]))
+        return arguments[0];
+
+    Rational phi;
+    if (exactRealRational(arguments[0], phi) && phi.numerator().isNegative())
+        return exact::negate(
+            Expr::call(registry.symbol(BuiltinId::EllipticF), {
+                rationalExpr(-phi), arguments[1]}), registry, mathematics, angles);
+    return hold(BuiltinId::EllipticF, arguments, registry);
+}
+
+[[nodiscard]] Expr evaluateEllipticE(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 2, names::ellipticE);
+    if (exactZero(arguments[0]))
+        return integer(0);
+    if (exactZero(arguments[1]))
+        return arguments[0];
+
+    Rational phi;
+    if (exactRealRational(arguments[0], phi) && phi.numerator().isNegative())
+        return exact::negate(
+            Expr::call(registry.symbol(BuiltinId::EllipticE), {
+                rationalExpr(-phi), arguments[1]}), registry, mathematics, angles);
+    return hold(BuiltinId::EllipticE, arguments, registry);
+}
+
+[[nodiscard]] Expr evaluateEllipticPi(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 3, names::ellipticPi);
+    if (exactZero(arguments[1]))
+        return integer(0);
+    // Pi(0;phi|m)=F(phi|m)。特殊値を既存函数へ落とすことでD/N/Solveの知識も共有する。
+    if (exactZero(arguments[0])) {
+        const std::array<Expr, 2> fArguments{arguments[1], arguments[2]};
+        return evaluateEllipticF(fArguments, registry, mathematics, angles);
+    }
+
+    Rational phi;
+    if (exactRealRational(arguments[1], phi) && phi.numerator().isNegative())
+        return exact::negate(
+            Expr::call(registry.symbol(BuiltinId::EllipticPi), {
+                arguments[0], rationalExpr(-phi), arguments[2]}),
+            registry, mathematics, angles);
+    return hold(BuiltinId::EllipticPi, arguments, registry);
+}
+
 [[nodiscard]] Expr evaluateBeta(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -451,6 +587,14 @@ Expr evaluateSpecialFunction(
         return evaluateFresnel(id, arguments, registry, mathematics, angles);
     case BuiltinId::Hypergeometric1F1:
         return evaluateHypergeometric1F1(arguments, registry, mathematics, angles);
+    case BuiltinId::Hypergeometric2F1:
+        return evaluateHypergeometric2F1(arguments, registry, mathematics, angles);
+    case BuiltinId::EllipticF:
+        return evaluateEllipticF(arguments, registry, mathematics, angles);
+    case BuiltinId::EllipticE:
+        return evaluateEllipticE(arguments, registry, mathematics, angles);
+    case BuiltinId::EllipticPi:
+        return evaluateEllipticPi(arguments, registry, mathematics, angles);
     case BuiltinId::Beta:
         return evaluateBeta(arguments, registry, mathematics, angles);
     case BuiltinId::BetaLog:

@@ -703,6 +703,98 @@ integrate[exp[x^6],x]
 
 より一般に正整数`n`について`exp[c x^n]`を同じ系列へ還元できる。
 
+## 14.7 Gauss超幾何函数 2F1
+
+Gaussの超幾何函数を
+
+```text
+hypergeometric2F1[a,b,c,z]
+```
+
+で表す。`c = 0,-1,-2,...`には一般にparameter poleがあり、`z`についてはprincipal branchを採用する。現段階のexact評価は、上側parameterが非正整数で停止する有限級数や、`a=0` / `b=0`など安全に閉じる場合を扱う。誤差保証付き`N` backendはexact Rational parameterと`|z|<1`の実数引数を対象とする。
+
+```text
+hypergeometric2F1[-2,1,3,1/2] -> 17/24
+hypergeometric2F1[0,2,3,x] -> 1
+N[hypergeometric2F1[1/2,1/2,3/2,1/4],20]
+-> 1.04719755119659774615
+```
+
+parameterが微分変数に依存しない場合、
+
+```text
+D[hypergeometric2F1[a,b,c,z],z]
+= a b hypergeometric2F1[a+1,b+1,c+1,z]/c
+```
+
+を使う。積分器では、例えば
+
+```text
+integrate[sqrt[1+2x^3],x]
+-> x hypergeometric2F1[-1/2, 1/3, 4/3, -2x^3]
+
+integrate[1/(1+x^5),x]
+-> x hypergeometric2F1[1, 1/5, 6/5, -x^5]
+```
+
+のようなbinomial-power familyへ利用する。一般の2F1を`Solve`で逆函数化する規則は持たない。大域単射性を証明できないためであり、停止級数やexact退化で既存代数式へ落ちた場合だけ通常のSolverへ渡す。
+
+## 14.8 不完全楕円積分 F / E / Pi
+
+mmCalではLegendre形の不完全楕円積分を
+
+```text
+ellipticF[phi,m]
+ellipticE[phi,m]
+ellipticPi[n,phi,m]
+```
+
+で表す。第2引数`m`はparameterであり、振幅`phi`は**常にRadian**として解釈する。sessionの`Deg/Rad/Grad`設定には依存しない。principal branchを採用し、一般complex parameterのbranch cutやpoleを単純な「everywhere defined」には扱わない。
+
+```text
+ellipticF[x,0] -> x
+ellipticE[x,0] -> x
+ellipticPi[0,x,0] -> x
+
+N[ellipticF[1/2,1/3],20]
+-> 0.50684775626543110920
+N[ellipticE[1/2,1/3],20]
+-> 0.49331536201475850521
+N[ellipticPi[1/5,1/2,1/3],20]
+-> 0.51520338216141386085
+```
+
+現段階のcertified real backendは、exact Rational振幅について`F/E`では`|m|<1`、`Pi`ではさらに`|n|<1`の安全な領域を扱う。振幅微分は
+
+```text
+D[ellipticF[phi,m],phi]
+= 1/sqrt[1-m sin[phi Rad]^2]
+
+D[ellipticE[phi,m],phi]
+= sqrt[1-m sin[phi Rad]^2]
+
+D[ellipticPi[n,phi,m],phi]
+= 1/((1-n sin[phi Rad]^2)sqrt[1-m sin[phi Rad]^2])
+```
+
+である。したがって標準kernelは直接積分できる。
+
+```text
+integrate[1/sqrt[1-(1/3)sin[x]^2],x]
+-> ellipticF[x, 1/3]
+
+integrate[sqrt[1-(1/3)sin[x]^2],x]
+-> ellipticE[x, 1/3]
+
+integrate[1/((1-(1/5)sin[x]^2)sqrt[1-(1/3)sin[x]^2]),x]
+-> ellipticPi[1/5, x, 1/3]
+
+integrate[1/sqrt[1-x^4],x]
+-> ellipticF[asin[x], -1]
+```
+
+最後のquartic reductionは正しい局所primitiveだが、現在の`fullSimplify`は`sin[asin[x]]`とprincipal square rootの積を一般に安全な恒等式へ潰し切れない。そのためderivative-back harnessではResolutionOnlyとして監視し、証明器不足を理由に積分能力を削らない。一般の楕円函数方程式も、逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
+
 ---
 
 # 15. 集約函数
@@ -1634,7 +1726,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現行開発版では **208 builtin definitions / 190 source-callable names**。内部headはsource-callable数に含めない。
+現行開発版では **212 builtin definitions / 194 source-callable names**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1643,7 +1735,7 @@ asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
-fresnelc, fresnels, hypergeometric1F1,
+fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,

@@ -471,6 +471,15 @@ void collectProductParts(
     return &expression.asCall().arguments;
 }
 
+[[nodiscard]] const std::vector<Expr>* hypergeometric2F1Arguments(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Hypergeometric2F1)
+        || expression.asCall().arguments.size() != 4)
+        return nullptr;
+    return &expression.asCall().arguments;
+}
+
 struct PositiveIntegerPower final {
     Expr base;
     std::uint64_t exponent = 1;
@@ -602,6 +611,75 @@ struct PositiveIntegerPower final {
     return tryOrientation(terms[1], terms[0]);
 }
 
+
+[[nodiscard]] std::optional<Expr> simplifyHypergeometric2F1Contiguous(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Add)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto tryOrientation = [&](const Expr& first, const Expr& second) -> std::optional<Expr> {
+        LinearTerm baseTerm = extractLinearTerm(first, builtins);
+        if (baseTerm.coefficient != Rational{BigInt{1}})
+            return std::nullopt;
+        const auto* base = hypergeometric2F1Arguments(baseTerm.atom, builtins);
+        if (!base)
+            return std::nullopt;
+        const auto a = exactRealRational((*base)[0]);
+        const auto b = exactRealRational((*base)[1]);
+        const auto c = exactRealRational((*base)[2]);
+        if (!a || !b || !c || b->numerator().isNegative() || b->isZero()
+            || *c != *b + Rational{BigInt{1}})
+            return std::nullopt;
+
+        const Expr& z = (*base)[3];
+        LinearTerm zTerm = extractLinearTerm(z, builtins);
+        LinearTerm correction = extractLinearTerm(second, builtins);
+        const Rational expectedCoefficient = zTerm.coefficient
+            * *a / (*b + Rational{BigInt{1}});
+        if (correction.coefficient != expectedCoefficient)
+            return std::nullopt;
+
+        const Expr* shiftedAtom = &correction.atom;
+        if (isHead(correction.atom, builtins, BuiltinId::Multiply)) {
+            for (const Expr& factor : correction.atom.asCall().arguments)
+                if (hypergeometric2F1Arguments(factor, builtins)) {
+                    shiftedAtom = &factor;
+                    break;
+                }
+        }
+        const auto* shifted = hypergeometric2F1Arguments(*shiftedAtom, builtins);
+        if (!shifted)
+            return std::nullopt;
+        const auto shiftedA = exactRealRational((*shifted)[0]);
+        const auto shiftedB = exactRealRational((*shifted)[1]);
+        const auto shiftedC = exactRealRational((*shifted)[2]);
+        if (!shiftedA || !shiftedB || !shiftedC
+            || *shiftedA != *a + Rational{BigInt{1}}
+            || *shiftedB != *b + Rational{BigInt{1}}
+            || *shiftedC != *c + Rational{BigInt{1}}
+            || !((*shifted)[3] == z))
+            return std::nullopt;
+
+        const Expr shiftedCall = Expr::call(
+            builtins.symbol(BuiltinId::Hypergeometric2F1), *shifted);
+        if (!productIsExactly(correction.atom, zTerm.atom, shiftedCall, builtins))
+            return std::nullopt;
+
+        // F(a,b;b+1;z)+a z/(b+1) F(a+1,b+1;b+2;z)=(1-z)^(-a)。
+        // binomial-power積分が生成するb>0の限定形だけをproof Knowledgeとして使う。
+        return Expr::call(builtins.symbol(BuiltinId::Power), {
+            Expr::call(builtins.symbol(BuiltinId::Subtract), {integerExpr(1), z}),
+            Expr{Number{RealNumber{-*a}}}});
+    };
+
+    const auto& terms = expression.asCall().arguments;
+    if (auto result = tryOrientation(terms[0], terms[1]))
+        return result;
+    return tryOrientation(terms[1], terms[0]);
+}
+
 [[nodiscard]] TruthValue proveNonZero(
     const Expr& expression,
     const mathematics::KnowledgeContext& knowledge) {
@@ -626,6 +704,8 @@ struct PositiveIntegerPower final {
     case BuiltinId::Add: {
         Expr canonical = canonicalAdd(arguments, context.builtins);
         if (auto hypergeometric = simplifyHypergeometricContiguous(canonical, context.builtins))
+            return *hypergeometric;
+        if (auto hypergeometric = simplifyHypergeometric2F1Contiguous(canonical, context.builtins))
             return *hypergeometric;
         return canonical;
     }
@@ -1258,6 +1338,32 @@ struct PositiveIntegerPower final {
         return expression;
 
     case BuiltinId::Hypergeometric1F1:
+        return expression;
+
+    case BuiltinId::Hypergeometric2F1:
+        if (arguments.size() == 4
+            && (isExactReal(arguments[0], 0) || isExactReal(arguments[1], 0)))
+            return integerExpr(1);
+        return expression;
+
+    case BuiltinId::EllipticF:
+    case BuiltinId::EllipticE:
+        if (arguments.size() == 2) {
+            if (isExactReal(arguments[0], 0))
+                return integerExpr(0);
+            if (isExactReal(arguments[1], 0))
+                return arguments[0];
+        }
+        return expression;
+
+    case BuiltinId::EllipticPi:
+        if (arguments.size() == 3) {
+            if (isExactReal(arguments[1], 0))
+                return integerExpr(0);
+            if (isExactReal(arguments[0], 0))
+                return Expr::call(context.builtins.symbol(BuiltinId::EllipticF),
+                    {arguments[1], arguments[2]});
+        }
         return expression;
 
     case BuiltinId::Exp:

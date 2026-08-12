@@ -747,6 +747,43 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             *a, *b, *z, precisionBits)};
     }
 
+    case BuiltinId::Hypergeometric2F1: {
+        if (call.arguments.size() != 4)
+            return std::nullopt;
+        const auto a = exactRealRational(call.arguments[0]);
+        const auto b = exactRealRational(call.arguments[1]);
+        const auto c = exactRealRational(call.arguments[2]);
+        const auto z = exactRealRational(call.arguments[3]);
+        if (!a || !b || !c || !z)
+            return std::nullopt;
+        return CertifiedValue{encloseHypergeometric2F1Real(
+            *a, *b, *c, *z, precisionBits)};
+    }
+
+    case BuiltinId::EllipticF:
+    case BuiltinId::EllipticE: {
+        if (call.arguments.size() != 2)
+            return std::nullopt;
+        const auto phi = exactRealRational(call.arguments[0]);
+        const auto m = exactRealRational(call.arguments[1]);
+        if (!phi || !m)
+            return std::nullopt;
+        return CertifiedValue{definition->id == BuiltinId::EllipticF
+            ? encloseEllipticFReal(*phi, *m, precisionBits)
+            : encloseEllipticEReal(*phi, *m, precisionBits)};
+    }
+
+    case BuiltinId::EllipticPi: {
+        if (call.arguments.size() != 3)
+            return std::nullopt;
+        const auto n = exactRealRational(call.arguments[0]);
+        const auto phi = exactRealRational(call.arguments[1]);
+        const auto m = exactRealRational(call.arguments[2]);
+        if (!n || !phi || !m)
+            return std::nullopt;
+        return CertifiedValue{encloseEllipticPiReal(*n, *phi, *m, precisionBits)};
+    }
+
     case BuiltinId::Beta:
     case BuiltinId::BetaLog: {
         if (call.arguments.size() != 2)

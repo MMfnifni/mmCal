@@ -185,6 +185,11 @@ void runMathRegistryTests(TestRunner& tests) {
     const auto* fresnelS = mathematics.findFunction(mathematics::FunctionId::FresnelS);
     const auto* hypergeometric1F1 =
         mathematics.findFunction(mathematics::FunctionId::Hypergeometric1F1);
+    const auto* hypergeometric2F1 =
+        mathematics.findFunction(mathematics::FunctionId::Hypergeometric2F1);
+    const auto* ellipticF = mathematics.findFunction(mathematics::FunctionId::EllipticF);
+    const auto* ellipticE = mathematics.findFunction(mathematics::FunctionId::EllipticE);
+    const auto* ellipticPi = mathematics.findFunction(mathematics::FunctionId::EllipticPi);
     const auto* beta = mathematics.findFunction(mathematics::FunctionId::Beta);
     const auto* betaLog = mathematics.findFunction(mathematics::FunctionId::BetaLog);
     tests.expect(gamma
@@ -211,6 +216,21 @@ void runMathRegistryTests(TestRunner& tests) {
         && hypergeometric1F1->definednessRule
             == mathematics::FunctionDefinednessRule::Hypergeometric1F1Poles,
         "MathRegistry: 1F1 is single-valued and preserves its denominator-parameter pole set");
+    tests.expect(hypergeometric2F1
+        && hypergeometric2F1->arity == 4 && hypergeometric2F1->maximumArity == 4
+        && hypergeometric2F1->branchRule
+            == mathematics::FunctionBranchRule::PrincipalHypergeometric2F1
+        && hypergeometric2F1->definednessRule
+            == mathematics::FunctionDefinednessRule::Hypergeometric2F1Poles,
+        "MathRegistry: 2F1 records its principal branch and denominator-parameter pole set");
+    tests.expect(ellipticF && ellipticE && ellipticPi
+        && ellipticF->branchRule == mathematics::FunctionBranchRule::PrincipalElliptic
+        && ellipticE->branchRule == mathematics::FunctionBranchRule::PrincipalElliptic
+        && ellipticPi->branchRule == mathematics::FunctionBranchRule::PrincipalElliptic
+        && ellipticF->definednessRule == mathematics::FunctionDefinednessRule::EllipticPrincipal
+        && ellipticE->definednessRule == mathematics::FunctionDefinednessRule::EllipticPrincipal
+        && ellipticPi->definednessRule == mathematics::FunctionDefinednessRule::EllipticPrincipal,
+        "MathRegistry: incomplete elliptic integrals retain conservative principal-branch definedness");
     tests.expect(beta && beta->arity == 2 && beta->maximumArity == 2
         && beta->domainRule == mathematics::FunctionDomainRule::RealPairToReal
         && beta->definednessRule == mathematics::FunctionDefinednessRule::ArgumentsPositiveReal

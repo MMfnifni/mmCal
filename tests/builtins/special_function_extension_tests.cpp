@@ -105,6 +105,48 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"hypergeometric1F1[7/6, 13/6, x]/7"},
         "1F1 derivative uses the exact contiguous derivative identity");
 
+    tests.expectEqual(eval(session, "hypergeometric2F1[-2,1,3,1/2]"), std::string{"17/24"},
+        "terminating 2F1 polynomial is evaluated exactly");
+    tests.expectEqual(eval(session, "hypergeometric2F1[0,2,3,x]"), std::string{"1"},
+        "2F1 with a zero numerator parameter reduces before numerical evaluation");
+    tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/2,3/2,1/4],20]"),
+        std::string{"1.04719755119659774615"},
+        "2F1 has a certified real backend inside its principal Gauss-series disk");
+    tests.expectEqual(eval(session, "D[hypergeometric2F1[1/2,1/3,5/4,x],x]"),
+        std::string{"2hypergeometric2F1[3/2, 4/3, 9/4, x]/15"},
+        "2F1 differentiates with respect to its argument when parameters are constant");
+    tests.expectEqual(eval(session, "D[hypergeometric2F1[x,1,2,x],x]"),
+        std::string{"D[hypergeometric2F1[x, 1, 2, x], x]"},
+        "2F1 parameter derivatives remain unresolved instead of applying an incomplete z-only rule");
+
+    tests.expectEqual(eval(session, "ellipticF[x,0]"), std::string{"x"},
+        "ellipticF degenerates exactly at m=0");
+    tests.expectEqual(eval(session, "ellipticE[x,0]"), std::string{"x"},
+        "ellipticE degenerates exactly at m=0");
+    tests.expectEqual(eval(session, "ellipticPi[0,x,0]"), std::string{"x"},
+        "ellipticPi reduces through ellipticF when n=0");
+    tests.expectEqual(eval(session, "N[ellipticF[1/2,1/3],20]"),
+        std::string{"0.50684775626543110920"},
+        "ellipticF has a certified real-amplitude backend");
+    tests.expectEqual(eval(session, "N[ellipticE[1/2,1/3],20]"),
+        std::string{"0.49331536201475850521"},
+        "ellipticE has a certified real-amplitude backend");
+    tests.expectEqual(eval(session, "N[ellipticPi[1/5,1/2,1/3],20]"),
+        std::string{"0.51520338216141386085"},
+        "ellipticPi has a certified real-amplitude backend away from poles");
+    tests.expectEqual(eval(session, "D[ellipticF[x,1/3],x]"),
+        std::string{"1/sqrt[1-sin[x Rad]^2/3]"},
+        "ellipticF amplitude derivative is exact and explicitly radian");
+    tests.expectEqual(eval(session, "D[ellipticE[x,1/3],x]"),
+        std::string{"sqrt[1-sin[x Rad]^2/3]"},
+        "ellipticE amplitude derivative is exact and explicitly radian");
+    tests.expectEqual(eval(session, "D[ellipticPi[1/5,x,1/3],x]"),
+        std::string{"1/((1-sin[x Rad]^2/5)sqrt[1-sin[x Rad]^2/3])"},
+        "ellipticPi amplitude derivative is exact and explicitly radian");
+    tests.expectEqual(eval(session, "D[ellipticF[x,x],x]"),
+        std::string{"D[ellipticF[x, x], x]"},
+        "elliptic parameter derivatives remain unresolved until their complete formulas are implemented");
+
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},
         "Beta at positive integers is exact");
     tests.expectEqual(eval(session, "beta[1/2,1/2]"), std::string{"Pi"},

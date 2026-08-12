@@ -1,6 +1,7 @@
 // mmCalの性能測定・ランダム不変量試験を本体testから分離して実行する開発用runner
 #include "approximation/certified_exponential.hpp"
 #include "approximation/certified_logarithm.hpp"
+#include "approximation/certified_special_functions.hpp"
 #include "approximation/precision.hpp"
 #include "approximation/real_interval.hpp"
 #include "numeric/big_int.hpp"
@@ -238,6 +239,37 @@ void benchmarkDecimalConversion(std::uint64_t n) {
     return true;
 }
 
+[[nodiscard]] bool runRandomSpecialFunctionChecks(std::size_t count) {
+    std::mt19937_64 rng{0x324631454C4C4950ULL};
+    constexpr std::size_t bits = 192;
+    const Rational one{BigInt{1}};
+
+    for (std::size_t i = 0; i < count; ++i) {
+        // 2F1(a,b;b,z)=(1-z)^(-a) のうち a=1 を使い、
+        // randomなsafe-domain pointでcertified enclosureがexact値を含むことを監視する。
+        const Rational b{BigInt{1 + static_cast<std::int64_t>(rng() % 9)},
+            BigInt{1 + static_cast<std::int64_t>(rng() % 7)}};
+        const Rational z{BigInt{static_cast<std::int64_t>(rng() % 15) - 7}, BigInt{16}};
+        const Rational expected2F1 = one / (one - z);
+        const auto hyper = mmcal::approximation::encloseHypergeometric2F1Real(
+            one, b, b, z, bits);
+        if (!hyper.contains(expected2F1))
+            return false;
+
+        // m=0では三種の不完全楕円積分が振幅phiへexactに退化する。
+        // symbolic簡約を経由せず数値backend自体の包含性をrandom pointで確認する。
+        const Rational phi{BigInt{static_cast<std::int64_t>(rng() % 31) - 15}, BigInt{8}};
+        if (!mmcal::approximation::encloseEllipticFReal(phi, Rational{BigInt{0}}, bits).contains(phi))
+            return false;
+        if (!mmcal::approximation::encloseEllipticEReal(phi, Rational{BigInt{0}}, bits).contains(phi))
+            return false;
+        if (!mmcal::approximation::encloseEllipticPiReal(
+                Rational{BigInt{0}}, phi, Rational{BigInt{0}}, bits).contains(phi))
+            return false;
+    }
+    return true;
+}
+
 void runBenchmarks(bool full) {
     std::cout << "BigInt multiply/division\n";
     for (const std::size_t limbs : full
@@ -334,6 +366,11 @@ int main(int argc, char** argv) {
         std::cout << "Random certified exp/log checks: " << certifiedCases << " cases\n";
         if (!runRandomCertifiedChecks(certifiedCases)) {
             std::cerr << "Random certified check failed\n";
+            return 1;
+        }
+        std::cout << "Random 2F1/elliptic checks: " << certifiedCases << " cases\n";
+        if (!runRandomSpecialFunctionChecks(certifiedCases)) {
+            std::cerr << "Random special-function check failed\n";
             return 1;
         }
         std::cout << "Random checks: PASS\n";

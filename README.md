@@ -1,6 +1,6 @@
 # mmCalculator – Mathematical Machinery Calculator
 
-An exact-first CLI calculator and compact CAS for engineering, research, and manufacturing.
+Exact by default. Explicit approximation. No silent loss of mathematics. And EASY.
 
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License

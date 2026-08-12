@@ -107,6 +107,42 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         "fullSimplify[D[x hypergeometric1F1[1/3,4/3,2*x^3],x]-exp[2*x^3]]"),
         std::string{"0"},
         "coefficient exponential monomial 1F1 primitive differentiates back exactly");
+    tests.expectEqual(eval(session, "integrate[sqrt[1+2*x^3],x]"),
+        std::string{"x hypergeometric2F1[-1/2, 1/3, 4/3, -2x^3]"},
+        "binomial algebraic powers close through a branch-safe 2F1 primitive");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[x hypergeometric2F1[-1/2,1/3,4/3,-2*x^3],x]-sqrt[1+2*x^3]]"),
+        std::string{"0"},
+        "2F1 contiguous knowledge proves the binomial-power primitive exactly");
+    tests.expectEqual(eval(session, "integrate[1/(1+x^5),x]"),
+        std::string{"x hypergeometric2F1[1, 1/5, 6/5, -x^5]"},
+        "rational binomial kernels can use the same 2F1 integration family");
+
+    tests.expectEqual(eval(session, "integrate[1/sqrt[1-(1/3)*sin[x]^2],x]"),
+        std::string{"ellipticF[x, 1/3]"},
+        "the canonical first-kind elliptic kernel integrates to ellipticF");
+    tests.expectEqual(eval(session, "integrate[sqrt[1-(1/3)*sin[x]^2],x]"),
+        std::string{"ellipticE[x, 1/3]"},
+        "the canonical second-kind elliptic kernel integrates to ellipticE");
+    tests.expectEqual(eval(session,
+        "integrate[1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2]),x]"),
+        std::string{"ellipticPi[1/5, x, 1/3]"},
+        "the canonical third-kind elliptic kernel integrates to ellipticPi");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[ellipticF[x,1/3],x]-1/sqrt[1-(1/3)*sin[x]^2]]"),
+        std::string{"0"},
+        "ellipticF amplitude derivative proves the direct first-kind kernel");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[ellipticE[x,1/3],x]-sqrt[1-(1/3)*sin[x]^2]]"),
+        std::string{"0"},
+        "ellipticE amplitude derivative proves the direct second-kind kernel");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[ellipticPi[1/5,x,1/3],x]-1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2]) ]"),
+        std::string{"0"},
+        "ellipticPi amplitude derivative proves the direct third-kind kernel");
+    tests.expectEqual(eval(session, "integrate[1/sqrt[1-x^4],x]"),
+        std::string{"ellipticF[asin[x], -1]"},
+        "quartic algebraic kernels reduce to ellipticF without unsafe sqrt factorization");
     tests.expectEqual(eval(session, "integrate[sec[x]^3,x]"),
         std::string{"sec[x]tan[x]/2+log[sec[x]+tan[x]]/2"},
         "positive secant powers use the standard reduction formula");
@@ -173,6 +209,11 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"quadratic sine Fresnel", "sin[8*x^2]"},
         {"shifted quadratic Fresnel", "cos[2*x^2+3*x+1]", DerivativeBackMode::ResolutionOnly},
         {"hypergeometric exponential monomial", "exp[x^6]"},
+        {"hypergeometric binomial power", "sqrt[1+2*x^3]"},
+        {"elliptic first-kind kernel", "1/sqrt[1-(1/3)*sin[x]^2]"},
+        {"elliptic second-kind kernel", "sqrt[1-(1/3)*sin[x]^2]"},
+        {"elliptic third-kind kernel", "1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2])"},
+        {"quartic elliptic reduction", "1/sqrt[1-x^4]", DerivativeBackMode::ResolutionOnly},
         {"secant cube reduction", "sec[x]^3", DerivativeBackMode::ResolutionOnly},
         {"cosecant cube reduction", "csc[x]^3", DerivativeBackMode::ResolutionOnly},
         {"tangent fourth power reduction", "tan[x]^4", DerivativeBackMode::ResolutionOnly},

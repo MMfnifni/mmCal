@@ -607,6 +607,180 @@ struct FresnelPair final {
     throw PrecisionInsufficient{"hypergeometric1F1 series did not converge within the term limit"};
 }
 
+
+[[nodiscard]] RealInterval pointHypergeometric2F1(
+    const Rational& a,
+    const Rational& b,
+    const Rational& c,
+    const Rational& z,
+    std::size_t precisionBits) {
+    if (nonPositiveInteger(c))
+        throw std::domain_error("hypergeometric2F1 has a pole at a non-positive integer c");
+    if (z.isZero())
+        return exactInterval(1, precisionBits);
+
+    const Rational absZ = absRational(z);
+    if (absZ >= rational(1))
+        throw PrecisionInsufficient{"hypergeometric2F1 certified series currently requires |z| < 1"};
+
+    const auto absA = ceilAbsToUint64(a);
+    const auto absB = ceilAbsToUint64(b);
+    const auto absC = ceilAbsToUint64(c);
+    if (!absA || !absB || !absC)
+        throw PrecisionInsufficient{"hypergeometric2F1 parameter is too large for the series backend"};
+
+    constexpr std::uint64_t maximumTerms = 250000;
+    const Rational tolerance = binaryThreshold(checkedAdd(
+        precisionBits, 20, "hypergeometric2F1 precision is too large"));
+    Rational term{BigInt{1}};
+    Rational sum{BigInt{1}};
+
+    for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+        const Rational index{BigInt::fromUnsigned(k)};
+        const Rational denominatorFactor = c + index;
+        if (denominatorFactor.isZero())
+            throw std::domain_error("hypergeometric2F1 denominator parameter reaches a pole");
+        const Rational next = term * (a + index) * (b + index) * z
+            / (denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)});
+
+        if (next.isZero())
+            return exactInterval(sum, precisionBits);
+
+        // j>=Nなら |a+j|<=j+A, |b+j|<=j+B, |c+j|>=j-C。
+        // N>Cを満たす領域では、将来全ての項比を一つのq<1で押さえられる。
+        const std::uint64_t n = k + 1;
+        if (n > *absC + 1) {
+            const Rational N{BigInt::fromUnsigned(n)};
+            const Rational q = absZ
+                * (Rational{BigInt{1}} + Rational{BigInt::fromUnsigned(*absA)} / N)
+                * (Rational{BigInt{1}} + Rational{BigInt::fromUnsigned(*absB)} / N)
+                / (Rational{BigInt{1}} - Rational{BigInt::fromUnsigned(*absC)} / N);
+            if (q < rational(1)) {
+                const Rational tail = absRational(next) / (rational(1) - q);
+                if (tail <= tolerance)
+                    return RealInterval::fromRationalBounds(
+                        sum - tail, sum + tail, precisionBits);
+            }
+        }
+
+        term = next;
+        sum += term;
+    }
+    throw PrecisionInsufficient{"hypergeometric2F1 series did not converge within the term limit"};
+}
+
+[[nodiscard]] RealInterval intervalTimesRational(
+    const RealInterval& interval,
+    const Rational& value,
+    std::size_t bits) {
+    return multiply(interval, exactInterval(value, bits), bits);
+}
+
+[[nodiscard]] RealInterval evenSinePowerIntegral(
+    std::size_t k,
+    const RealInterval& cosine,
+    RealInterval previous,
+    RealInterval& sineOdd,
+    const RealInterval& sineSquared,
+    std::size_t bits) {
+    if (k == 0)
+        return previous;
+    const Rational denominator{BigInt::fromUnsigned(2 * k)};
+    const Rational recurrence{BigInt::fromUnsigned(2 * k - 1), BigInt::fromUnsigned(2 * k)};
+    const RealInterval boundary = divide(
+        multiply(sineOdd, cosine, bits), exactInterval(denominator, bits), bits);
+    RealInterval result = subtract(
+        intervalTimesRational(previous, recurrence, bits), boundary, bits);
+    sineOdd = multiply(sineOdd, sineSquared, bits);
+    return result;
+}
+
+enum class EllipticSeriesKind { F, E, Pi };
+
+[[nodiscard]] RealInterval pointEllipticSeries(
+    EllipticSeriesKind kind,
+    const Rational& n,
+    const Rational& phi,
+    const Rational& m,
+    std::size_t precisionBits) {
+    if (phi.isZero())
+        return exactInterval(0, precisionBits);
+    if (phi.numerator().isNegative())
+        return negate(pointEllipticSeries(kind, n, -phi, m, precisionBits));
+
+    const Rational absM = absRational(m);
+    const Rational absN = absRational(n);
+    if (absM >= rational(1))
+        throw PrecisionInsufficient{"elliptic certified series currently requires |m| < 1"};
+    if (kind == EllipticSeriesKind::Pi && absN >= rational(1))
+        throw PrecisionInsufficient{"ellipticPi certified series currently requires |n| < 1"};
+
+    const std::size_t bits = checkedAdd(
+        precisionBits, 32, "elliptic working precision is too large");
+    const auto sinBox = encloseSinRadian(phi, bits).interval;
+    const auto cosBox = encloseCosRadian(phi, bits).interval;
+    const RealInterval sinSquared = multiply(sinBox, sinBox, bits);
+    RealInterval sineOdd = sinBox;
+    RealInterval integral = exactInterval(phi, bits); // I_0(phi)=phi
+    RealInterval sum = integral;
+
+    Rational c{BigInt{1}};       // (1/2)_k/k!
+    Rational e{BigInt{1}};       // coefficients of sqrt(1-x)
+    Rational mPower{BigInt{1}};
+    Rational q{BigInt{1}};       // Pi combined coefficient
+    const Rational r = kind == EllipticSeriesKind::Pi
+        ? (absM < absN ? absN : absM) : absM;
+    const Rational tolerance = binaryThreshold(checkedAdd(
+        precisionBits, 18, "elliptic precision is too large"));
+
+    // 旧実装ではtail評価のたびにr^(k+1)を1から掛け直していたため、
+    // 高精度ほど不要なO(k^2) Rational乗算が増えていた。級数本体と同様に
+    // 冪を逐次更新し、保証境界は変えずにtail評価だけをO(k)へ落とす。
+    Rational rPower = r;
+    constexpr std::size_t maximumTerms = 200000;
+    for (std::size_t k = 1; k < maximumTerms; ++k) {
+        integral = evenSinePowerIntegral(
+            k, cosBox, integral, sineOdd, sinSquared, bits);
+        mPower *= m;
+        c *= Rational{BigInt::fromUnsigned(2 * k - 1), BigInt::fromUnsigned(2 * k)};
+
+        Rational coefficient;
+        if (kind == EllipticSeriesKind::F) {
+            coefficient = c * mPower;
+        }
+        else if (kind == EllipticSeriesKind::E) {
+            e *= Rational{BigInt{static_cast<std::int64_t>(2 * k) - 3},
+                BigInt::fromUnsigned(2 * k)};
+            coefficient = e * Rational{BigInt::fromUnsigned(1)};
+            // e already contains the sign and m^k is applied separately.
+            coefficient *= mPower;
+        }
+        else {
+            q = n * q + c * mPower;
+            coefficient = q;
+        }
+        sum = add(sum, intervalTimesRational(integral, coefficient, bits), bits);
+
+        Rational tail;
+        rPower *= r;
+        if (kind != EllipticSeriesKind::Pi) {
+            tail = absRational(phi) * rPower / (rational(1) - r);
+        }
+        else {
+            const Rational kp1{BigInt::fromUnsigned(k + 1)};
+            const Rational kp2{BigInt::fromUnsigned(k + 2)};
+            tail = absRational(phi) * rPower
+                * (kp2 - kp1 * r)
+                / ((rational(1) - r) * (rational(1) - r));
+        }
+        if (tail <= tolerance) {
+            const RealInterval error = RealInterval::fromRationalBounds(-tail, tail, bits);
+            return add(sum, error, bits).roundedOutward(precisionBits);
+        }
+    }
+    throw PrecisionInsufficient{"elliptic series did not converge within the term limit"};
+}
+
 RealInterval encloseGammaReal(
     const RealInterval& input,
     std::size_t precisionBits) {
@@ -701,6 +875,32 @@ RealInterval encloseHypergeometric1F1Real(
     if (precisionBits == 0)
         throw std::invalid_argument("hypergeometric1F1 precision must be at least one bit");
     return pointHypergeometric1F1(a, b, z, precisionBits);
+}
+
+RealInterval encloseHypergeometric2F1Real(
+    const Rational& a,
+    const Rational& b,
+    const Rational& c,
+    const Rational& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("hypergeometric2F1 precision must be at least one bit");
+    return pointHypergeometric2F1(a, b, c, z, precisionBits);
+}
+
+RealInterval encloseEllipticFReal(
+    const Rational& phi, const Rational& m, std::size_t precisionBits) {
+    return pointEllipticSeries(EllipticSeriesKind::F, rational(0), phi, m, precisionBits);
+}
+
+RealInterval encloseEllipticEReal(
+    const Rational& phi, const Rational& m, std::size_t precisionBits) {
+    return pointEllipticSeries(EllipticSeriesKind::E, rational(0), phi, m, precisionBits);
+}
+
+RealInterval encloseEllipticPiReal(
+    const Rational& n, const Rational& phi, const Rational& m, std::size_t precisionBits) {
+    return pointEllipticSeries(EllipticSeriesKind::Pi, n, phi, m, precisionBits);
 }
 
 RealInterval encloseBetaPositive(

@@ -686,6 +686,27 @@ using numeric::Number;
         return ValueFacts{NumericDomain::Complex, RealSign::Unknown,
             argument(0).exact && argument(1).exact && argument(2).exact, false};
 
+    case BuiltinId::Hypergeometric2F1:
+        if (call.arguments.size() != 4)
+            return {};
+        // principal branchでは実parameterでもz>1で複素値になり得る。
+        // 現Facts層ではbranch cut判定を捏造せずComplex可能性を保持する。
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown,
+            argument(0).exact && argument(1).exact && argument(2).exact && argument(3).exact, false};
+
+    case BuiltinId::EllipticF:
+    case BuiltinId::EllipticE:
+        if (call.arguments.size() != 2)
+            return {};
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown,
+            argument(0).exact && argument(1).exact, false};
+
+    case BuiltinId::EllipticPi:
+        if (call.arguments.size() != 3)
+            return {};
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown,
+            argument(0).exact && argument(1).exact && argument(2).exact, false};
+
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
         if (call.arguments.size() != 2
