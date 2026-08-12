@@ -21,7 +21,24 @@ constexpr std::size_t karatsubaThresholdLimbs = MMCAL_KARATSUBA_THRESHOLD_LIMBS;
 #else
 constexpr std::size_t karatsubaThresholdLimbs = 48;
 #endif
+#ifdef MMCAL_TOOM3_THRESHOLD_LIMBS
+constexpr std::size_t toom3ThresholdLimbs = MMCAL_TOOM3_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t toom3ThresholdLimbs = 1280;
+#endif
+#ifdef MMCAL_TOOM3_RECURSIVE_THRESHOLD_LIMBS
+constexpr std::size_t toom3RecursiveThresholdLimbs = MMCAL_TOOM3_RECURSIVE_THRESHOLD_LIMBS;
+#else
+constexpr std::size_t toom3RecursiveThresholdLimbs = 448;
+#endif
 static_assert(karatsubaThresholdLimbs >= 1, "Karatsuba threshold must be at least one limb");
+static_assert(toom3ThresholdLimbs > karatsubaThresholdLimbs,
+    "Toom-3 threshold must be greater than the Karatsuba threshold");
+static_assert(toom3RecursiveThresholdLimbs > karatsubaThresholdLimbs,
+    "Recursive Toom-3 threshold must be greater than the Karatsuba threshold");
+
+constexpr BigUInt::limb_type decimalChunkBase = 1'000'000'000u;
+constexpr unsigned decimalChunkDigits = 9;
 
 using Limb = BigUInt::limb_type;
 using DoubleLimb = BigUInt::double_limb_type;
@@ -134,9 +151,15 @@ void addShiftedLimbs(
     return result;
 }
 
+[[nodiscard]] std::vector<Limb> multiplyAdaptive(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs,
+    bool insideToom);
+
 [[nodiscard]] std::vector<Limb> multiplyKaratsuba(
     std::span<const Limb> lhs,
-    std::span<const Limb> rhs) {
+    std::span<const Limb> rhs,
+    bool insideToom) {
     if (lhs.empty() || rhs.empty())
         return {};
 
@@ -156,11 +179,11 @@ void addShiftedLimbs(
     const auto rhsLow = rhs.first(rhsLowSize);
     const auto rhsHigh = rhs.subspan(rhsLowSize);
 
-    auto z0 = multiplyKaratsuba(lhsLow, rhsLow);
-    auto z2 = multiplyKaratsuba(lhsHigh, rhsHigh);
+    auto z0 = multiplyAdaptive(lhsLow, rhsLow, insideToom);
+    auto z2 = multiplyAdaptive(lhsHigh, rhsHigh, insideToom);
     const auto lhsSum = addLimbs(lhsLow, lhsHigh);
     const auto rhsSum = addLimbs(rhsLow, rhsHigh);
-    auto z1 = multiplyKaratsuba(lhsSum, rhsSum);
+    auto z1 = multiplyAdaptive(lhsSum, rhsSum, insideToom);
     subtractLimbsInPlace(z1, z0);
     subtractLimbsInPlace(z1, z2);
 
@@ -170,6 +193,213 @@ void addShiftedLimbs(
     addShiftedLimbs(result, z2, split * 2);
     normalizeLimbs(result);
     return result;
+}
+
+
+[[nodiscard]] int compareLimbs(std::span<const Limb> lhs, std::span<const Limb> rhs) noexcept {
+    while (!lhs.empty() && lhs.back() == 0)
+        lhs = lhs.first(lhs.size() - 1);
+    while (!rhs.empty() && rhs.back() == 0)
+        rhs = rhs.first(rhs.size() - 1);
+    if (lhs.size() != rhs.size())
+        return lhs.size() < rhs.size() ? -1 : 1;
+    for (std::size_t i = lhs.size(); i-- > 0;) {
+        if (lhs[i] != rhs[i])
+            return lhs[i] < rhs[i] ? -1 : 1;
+    }
+    return 0;
+}
+
+[[nodiscard]] std::vector<Limb> subtractLimbs(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs) {
+    if (compareLimbs(lhs, rhs) < 0)
+        throw std::logic_error("BigUInt Toom-3 subtraction underflow");
+    std::vector<Limb> result(lhs.begin(), lhs.end());
+    subtractLimbsInPlace(result, rhs);
+    return result;
+}
+
+[[nodiscard]] std::vector<Limb> multiplyLimbsSmall(std::span<const Limb> value, Limb factor) {
+    if (value.empty() || factor == 0)
+        return {};
+    std::vector<Limb> result(value.size(), 0);
+    DoubleLimb carry = 0;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        const DoubleLimb product = static_cast<DoubleLimb>(value[i]) * factor + carry;
+        result[i] = static_cast<Limb>(product & limbMask);
+        carry = product >> limbBits;
+    }
+    if (carry != 0)
+        result.push_back(static_cast<Limb>(carry));
+    return result;
+}
+
+void divideLimbsSmallExact(std::vector<Limb>& value, Limb divisor) {
+    DoubleLimb remainder = 0;
+    for (std::size_t i = value.size(); i-- > 0;) {
+        const DoubleLimb current = (remainder << limbBits) | value[i];
+        value[i] = static_cast<Limb>(current / divisor);
+        remainder = current % divisor;
+    }
+    if (remainder != 0)
+        throw std::logic_error("BigUInt Toom-3 interpolation division was not exact");
+    normalizeLimbs(value);
+}
+
+struct SignedLimbs final {
+    bool negative = false;
+    std::vector<Limb> magnitude;
+};
+
+[[nodiscard]] SignedLimbs signedPositive(std::span<const Limb> value) {
+    return {false, std::vector<Limb>{value.begin(), value.end()}};
+}
+
+[[nodiscard]] SignedLimbs signedNegate(SignedLimbs value) {
+    if (!value.magnitude.empty())
+        value.negative = !value.negative;
+    return value;
+}
+
+[[nodiscard]] SignedLimbs signedAdd(const SignedLimbs& lhs, const SignedLimbs& rhs) {
+    if (lhs.negative == rhs.negative)
+        return {lhs.negative, addLimbs(lhs.magnitude, rhs.magnitude)};
+    const int order = compareLimbs(lhs.magnitude, rhs.magnitude);
+    if (order == 0)
+        return {};
+    if (order > 0)
+        return {lhs.negative, subtractLimbs(lhs.magnitude, rhs.magnitude)};
+    return {rhs.negative, subtractLimbs(rhs.magnitude, lhs.magnitude)};
+}
+
+[[nodiscard]] SignedLimbs signedSub(const SignedLimbs& lhs, const SignedLimbs& rhs) {
+    return signedAdd(lhs, signedNegate(rhs));
+}
+
+[[nodiscard]] SignedLimbs signedDivideExact(SignedLimbs value, Limb divisor) {
+    divideLimbsSmallExact(value.magnitude, divisor);
+    if (value.magnitude.empty())
+        value.negative = false;
+    return value;
+}
+
+[[nodiscard]] std::span<const Limb> chunkAt(
+    std::span<const Limb> value,
+    std::size_t offset,
+    std::size_t size) noexcept {
+    if (offset >= value.size())
+        return {};
+    return value.subspan(offset, std::min(size, value.size() - offset));
+}
+
+[[nodiscard]] std::vector<Limb> evaluateAtOne(
+    std::span<const Limb> x0,
+    std::span<const Limb> x1,
+    std::span<const Limb> x2) {
+    auto result = addLimbs(x0, x1);
+    return addLimbs(result, x2);
+}
+
+[[nodiscard]] SignedLimbs evaluateAtMinusOne(
+    std::span<const Limb> x0,
+    std::span<const Limb> x1,
+    std::span<const Limb> x2) {
+    return signedSub({false, addLimbs(x0, x2)}, signedPositive(x1));
+}
+
+[[nodiscard]] std::vector<Limb> evaluateAtTwo(
+    std::span<const Limb> x0,
+    std::span<const Limb> x1,
+    std::span<const Limb> x2) {
+    auto result = addLimbs(x0, multiplyLimbsSmall(x1, 2));
+    return addLimbs(result, multiplyLimbsSmall(x2, 4));
+}
+
+[[nodiscard]] SignedLimbs multiplySigned(
+    const SignedLimbs& lhs,
+    const SignedLimbs& rhs) {
+    SignedLimbs result;
+    result.negative = lhs.negative != rhs.negative;
+    result.magnitude = multiplyAdaptive(lhs.magnitude, rhs.magnitude, true);
+    if (result.magnitude.empty())
+        result.negative = false;
+    return result;
+}
+
+void requireNonNegative(const SignedLimbs& value, const char* message) {
+    if (value.negative)
+        throw std::logic_error(message);
+}
+
+// 3分割したoperandを t={0,1,-1,2,∞} で評価し、5回の再帰乗算から補間する。
+// Karatsubaより定数項は重いが、十分巨大なbalanced operandでは乗算回数の減少が勝る。
+[[nodiscard]] std::vector<Limb> multiplyToom3(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs) {
+    const std::size_t split = (std::max(lhs.size(), rhs.size()) + 2) / 3;
+    const auto a0 = chunkAt(lhs, 0, split);
+    const auto a1 = chunkAt(lhs, split, split);
+    const auto a2 = chunkAt(lhs, split * 2, split);
+    const auto b0 = chunkAt(rhs, 0, split);
+    const auto b1 = chunkAt(rhs, split, split);
+    const auto b2 = chunkAt(rhs, split * 2, split);
+
+    const auto v0 = multiplyAdaptive(a0, b0, true);
+    const auto v4 = multiplyAdaptive(a2, b2, true);
+    const SignedLimbs v1{false, multiplyAdaptive(
+        evaluateAtOne(a0, a1, a2), evaluateAtOne(b0, b1, b2), true)};
+    const SignedLimbs vm1 = multiplySigned(
+        evaluateAtMinusOne(a0, a1, a2), evaluateAtMinusOne(b0, b1, b2));
+    const SignedLimbs v2{false, multiplyAdaptive(
+        evaluateAtTwo(a0, a1, a2), evaluateAtTwo(b0, b1, b2), true)};
+
+    const SignedLimbs sum13 = signedDivideExact(signedSub(v1, vm1), 2);
+    requireNonNegative(sum13, "BigUInt Toom-3 c1+c3 became negative");
+
+    SignedLimbs c2 = signedDivideExact(signedAdd(v1, vm1), 2);
+    c2 = signedSub(c2, signedPositive(v0));
+    c2 = signedSub(c2, signedPositive(v4));
+    requireNonNegative(c2, "BigUInt Toom-3 c2 became negative");
+
+    SignedLimbs t = signedSub(v2, signedPositive(v0));
+    t = signedSub(t, {false, multiplyLimbsSmall(c2.magnitude, 4)});
+    t = signedSub(t, {false, multiplyLimbsSmall(v4, 16)});
+    t = signedDivideExact(std::move(t), 2);
+    requireNonNegative(t, "BigUInt Toom-3 interpolation term became negative");
+
+    SignedLimbs c3 = signedDivideExact(signedSub(t, sum13), 3);
+    requireNonNegative(c3, "BigUInt Toom-3 c3 became negative");
+    SignedLimbs c1 = signedSub(sum13, c3);
+    requireNonNegative(c1, "BigUInt Toom-3 c1 became negative");
+
+    std::vector<Limb> result(lhs.size() + rhs.size(), 0);
+    addShiftedLimbs(result, v0, 0);
+    addShiftedLimbs(result, c1.magnitude, split);
+    addShiftedLimbs(result, c2.magnitude, split * 2);
+    addShiftedLimbs(result, c3.magnitude, split * 3);
+    addShiftedLimbs(result, v4, split * 4);
+    normalizeLimbs(result);
+    return result;
+}
+
+[[nodiscard]] std::vector<Limb> multiplyAdaptive(
+    std::span<const Limb> lhs,
+    std::span<const Limb> rhs,
+    bool insideToom) {
+    if (lhs.empty() || rhs.empty())
+        return {};
+    const std::size_t smallerSize = std::min(lhs.size(), rhs.size());
+    const std::size_t largerSize = std::max(lhs.size(), rhs.size());
+    if (smallerSize <= karatsubaThresholdLimbs || largerSize - smallerSize > smallerSize)
+        return multiplySchoolbook(lhs, rhs);
+
+    const std::size_t activeToomThreshold = insideToom
+        ? toom3RecursiveThresholdLimbs
+        : toom3ThresholdLimbs;
+    if (smallerSize >= activeToomThreshold)
+        return multiplyToom3(lhs, rhs);
+    return multiplyKaratsuba(lhs, rhs, insideToom);
 }
 
 void validateRadix(unsigned radix) {
@@ -304,16 +534,50 @@ BigUInt BigUInt::parse(std::string_view text, unsigned radix) {
 
     BigUInt result;
 
+    if (radix == 10) {
+        /*
+        旧実装は10進入力を1桁ずつ multiplySmall(10) していた。巨大整数では全limb走査が
+        桁数回発生するため、9桁chunkで multiplySmall(10^9) し、走査回数を最大1/9へ減らす。
+
+        for (; position < text.size(); ++position) {
+            const unsigned digit = digitValue(text[position]);
+            if (digit >= radix)
+                throw std::invalid_argument(
+                    "BigUInt contains a digit invalid for the selected radix");
+            result.multiplySmall(static_cast<limb_type>(radix));
+            result.addSmall(static_cast<limb_type>(digit));
+        }
+        */
+        const std::size_t digits = text.size() - position;
+        std::size_t chunkDigits = digits % decimalChunkDigits;
+        if (chunkDigits == 0)
+            chunkDigits = decimalChunkDigits;
+        while (position < text.size()) {
+            limb_type chunk = 0;
+            limb_type power = 1;
+            for (std::size_t i = 0; i < chunkDigits; ++i) {
+                const unsigned digit = digitValue(text[position++]);
+                if (digit >= 10)
+                    throw std::invalid_argument(
+                        "BigUInt contains a digit invalid for the selected radix");
+                chunk = static_cast<limb_type>(chunk * 10 + digit);
+                power *= 10;
+            }
+            result.multiplySmall(chunkDigits == decimalChunkDigits ? decimalChunkBase : power);
+            result.addSmall(chunk);
+            chunkDigits = decimalChunkDigits;
+        }
+        return result;
+    }
+
     for (; position < text.size(); ++position) {
         const unsigned digit = digitValue(text[position]);
         if (digit >= radix)
             throw std::invalid_argument(
                 "BigUInt contains a digit invalid for the selected radix");
-
         result.multiplySmall(static_cast<limb_type>(radix));
         result.addSmall(static_cast<limb_type>(digit));
     }
-
     return result;
 }
 
@@ -324,15 +588,41 @@ std::string BigUInt::toString(unsigned radix) const {
         return "0";
 
     BigUInt remaining = *this;
-    std::string result;
-    result.reserve((bitLength() + 2) / 3);
+    if (radix == 10) {
+        /*
+        旧実装は10で1桁ずつdivideSmallしていたため、Karatsuba導入後の巨大factorialでは
+        計算本体より10進変換が圧倒的に重かった。10^9で9桁ずつ取り出して除算回数を減らす。
 
-    while (!remaining.isZero()) {
-        const auto remainder =
-            remaining.divideSmall(static_cast<limb_type>(radix));
-        result.push_back(digitCharacter(remainder));
+        std::string result;
+        result.reserve((bitLength() + 2) / 3);
+        while (!remaining.isZero()) {
+            const auto remainder = remaining.divideSmall(static_cast<limb_type>(radix));
+            result.push_back(digitCharacter(remainder));
+        }
+        std::reverse(result.begin(), result.end());
+        return result;
+        */
+        std::vector<limb_type> chunks;
+        chunks.reserve((bitLength() + 28) / 29);
+        while (!remaining.isZero())
+            chunks.push_back(remaining.divideSmall(decimalChunkBase));
+
+        std::string result = std::to_string(chunks.back());
+        result.reserve(chunks.size() * decimalChunkDigits);
+        for (std::size_t i = chunks.size() - 1; i-- > 0;) {
+            const std::string chunk = std::to_string(chunks[i]);
+            result.append(decimalChunkDigits - chunk.size(), '0');
+            result += chunk;
+        }
+        return result;
     }
 
+    std::string result;
+    result.reserve((bitLength() + 2) / 3);
+    while (!remaining.isZero()) {
+        const auto remainder = remaining.divideSmall(static_cast<limb_type>(radix));
+        result.push_back(digitCharacter(remainder));
+    }
     std::reverse(result.begin(), result.end());
     return result;
 }
@@ -450,9 +740,14 @@ BigUInt& BigUInt::operator*=(const BigUInt& rhs) {
     }
     */
 
-    // 小さい積は従来のschoolbook、大きく釣り合った積はKaratsubaへ自動分岐する。
-    // thresholdはtools/BigInt_benchmarkで実測し、balanced乗算のcrossover付近である48 limbsに置く。
+    /*
+    Karatsuba導入直後は、1-limb fast path以外をすべて multiplyKaratsuba へ渡していた。
+    さらに巨大なbalanced operandではToom-3の方が実測で速いため、schoolbook / Karatsuba /
+    Toom-3をoperand sizeで選ぶadaptive dispatcherへ置き換える。
+
     auto product = multiplyKaratsuba(limbs_, rhs.limbs_);
+    */
+    auto product = multiplyAdaptive(limbs_, rhs.limbs_, false);
     limbs_ = std::move(product);
     return *this;
 }

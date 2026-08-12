@@ -98,6 +98,15 @@ void testDecimalConversion(TestRunner& tests) {
         BigUInt::parse(huge).toString(),
         huge,
         "large decimal round trip");
+
+    // 10^9 chunk境界をまたぐ長さでも先頭chunkと0埋めを崩さないことを確認する。
+    std::string chunked = "7";
+    for (std::size_t i = 0; i < 120; ++i)
+        chunked += "123456789";
+    tests.expectEqual(
+        BigUInt::parse(chunked).toString(),
+        chunked,
+        "chunked decimal conversion round trip");
 }
 
 void testRadixConversion(TestRunner& tests) {

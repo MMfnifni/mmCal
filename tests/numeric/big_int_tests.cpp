@@ -119,6 +119,18 @@ void testLargeMultiplication(TestRunner& tests) {
     tests.expect(
         large * small == unbalancedExpected,
         "BigInt unbalanced multiplication keeps the exact schoolbook fallback result");
+
+    constexpr std::size_t toomBits = 32 * 1800;
+    BigInt toomPower{1};
+    toomPower <<= toomBits;
+    const BigInt toomBelow = toomPower - BigInt{1};
+    const BigInt toomAbove = toomPower + BigInt{1};
+    BigInt toomExpected{1};
+    toomExpected <<= toomBits * 2;
+    toomExpected -= BigInt{1};
+    tests.expect(
+        toomBelow * toomAbove == toomExpected,
+        "BigInt Toom-3 multiplication preserves a huge difference-of-squares identity");
 }
 
 void testDivision(TestRunner& tests) {
