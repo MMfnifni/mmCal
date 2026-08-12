@@ -1,5 +1,6 @@
 // 対数函数の保証付き評価
 #include "certified_logarithm.hpp"
+#include "certified_sqrt.hpp"
 
 #include "numeric/detail/binary_scale.hpp"
 #include "numeric/big_int.hpp"
@@ -20,12 +21,6 @@ using numeric::Rational;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] Rational binaryThreshold(std::size_t bits) {
-    BigInt denominator{1};
-    denominator <<= bits;
-    return Rational{BigInt{1}, std::move(denominator)};
-}
-
 [[nodiscard]] std::size_t checkedAdd(
     std::size_t lhs,
     std::size_t rhs,
@@ -42,10 +37,6 @@ using numeric::Rational;
 }
 
 [[nodiscard]] Rational scalePowerOfTwo(Rational value, std::int64_t exponent) {
-    // value * 2^exponent をexact Rationalで作る。
-    //
-    // BigIntのshift countはsize_tなので、int64_tから無条件にcastしない。
-    // x64では通常同じ幅だが、型の意味としては別物であり、32-bit buildでもsilent truncationを起こさないよう明示的に範囲検査する。
     BigInt numerator = value.numerator();
     BigInt denominator = value.denominator();
     if (exponent >= 0) {
@@ -70,12 +61,174 @@ struct SeriesResult final {
     std::size_t termsUsed = 0;
 };
 
-// 1 <= m <= 2 に対し、
-//   log(m) = 2 atanh(t),  t=(m-1)/(m+1)
-//          = 2 (t + t^3/3 + t^5/5 + ...)
-// を使う。この範囲なら 0 <= t <= 1/3 なので非常に安定して収束する。全項が非負で、次項以降の比は t^2 以下だから、次項Aから先のtailは
-//   tail <= A / (1 - t^2)
-// と厳密に上から押さえられる。
+struct LogSeriesSplit final {
+    BigInt p{1};
+    BigInt q{1};
+    BigInt t{};
+};
+
+struct IntervalSeriesSplit final {
+    RealInterval p;
+    RealInterval t;
+};
+
+[[nodiscard]] bool preferExactSeries(const Rational& value) {
+    constexpr std::size_t exactOperandBits = 16;
+    return value.numerator().abs().bitLength() <= exactOperandBits
+        && value.denominator().bitLength() <= exactOperandBits;
+}
+
+[[nodiscard]] IntervalSeriesSplit splitLogSeriesInterval(
+    const RealInterval& tSquared,
+    std::uint64_t begin,
+    std::uint64_t end,
+    std::size_t precisionBits) {
+    if (end == begin + 1) {
+        if (begin > (std::numeric_limits<std::uint64_t>::max() - 1) / 2)
+            throw std::overflow_error("Certified log series index is too large");
+        const Rational oddRatio{
+            BigInt::fromUnsigned(2 * begin - 1),
+            BigInt::fromUnsigned(2 * begin + 1)};
+        const RealInterval ratio = multiply(
+            tSquared, RealInterval::fromRational(oddRatio, precisionBits), precisionBits);
+        return IntervalSeriesSplit{ratio, ratio};
+    }
+
+    const std::uint64_t middle = begin + (end - begin) / 2;
+    IntervalSeriesSplit left = splitLogSeriesInterval(
+        tSquared, begin, middle, precisionBits);
+    IntervalSeriesSplit right = splitLogSeriesInterval(
+        tSquared, middle, end, precisionBits);
+    return IntervalSeriesSplit{
+        multiply(left.p, right.p, precisionBits),
+        add(left.t, multiply(left.p, right.t, precisionBits), precisionBits)
+    };
+}
+
+// u_n=t^(2n+1)/(2n+1) は
+//   u_n/u_(n-1) = t^2 * (2n-1)/(2n+1)
+// を満たす。t=a/bとして、このratio列をbinary splittingする。
+[[nodiscard]] LogSeriesSplit splitLogSeries(
+    const BigInt& numeratorSquared,
+    const BigInt& denominatorSquared,
+    std::uint64_t begin,
+    std::uint64_t end) {
+    if (end == begin + 1) {
+        if (begin > (std::numeric_limits<std::uint64_t>::max() - 1) / 2)
+            throw std::overflow_error("Certified log series index is too large");
+        const std::uint64_t previousOdd = 2 * begin - 1;
+        const std::uint64_t nextOdd = 2 * begin + 1;
+        const BigInt p = numeratorSquared * BigInt::fromUnsigned(previousOdd);
+        const BigInt q = denominatorSquared * BigInt::fromUnsigned(nextOdd);
+        return LogSeriesSplit{p, q, p};
+    }
+
+    const std::uint64_t middle = begin + (end - begin) / 2;
+    LogSeriesSplit left = splitLogSeries(
+        numeratorSquared, denominatorSquared, begin, middle);
+    LogSeriesSplit right = splitLogSeries(
+        numeratorSquared, denominatorSquared, middle, end);
+
+    LogSeriesSplit result;
+    result.p = left.p * right.p;
+    result.q = left.q * right.q;
+    result.t = left.t * right.q + left.p * right.t;
+    return result;
+}
+
+[[nodiscard]] SeriesResult encloseLogMantissaReducedInterval(
+    const Rational& m,
+    std::size_t precisionBits) {
+    constexpr std::size_t sqrtReductions = 16;
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "Certified log precision is too large");
+
+    RealInterval reduced = RealInterval::fromRational(m, workBits);
+    for (std::size_t i = 0; i < sqrtReductions; ++i)
+        reduced = encloseSqrt(reduced, workBits).interval;
+
+    const RealInterval one = RealInterval::fromRational(rational(1), workBits);
+    const RealInterval t = divide(
+        subtract(reduced, one, workBits),
+        add(reduced, one, workBits),
+        workBits);
+    const RealInterval tSquared = multiply(t, t, workBits);
+
+    // 1<=m<=2なら、sqrtをs回適用した後は
+    //   t=(root-1)/(root+1) < 2^-(s+1)
+    // と保守的に押さえられる。元のlogへ戻す2^(s+1)倍も含め、
+    // tailが要求bitを下回る項数を固定回数ではなく精度から決める。
+    const std::size_t targetBits = checkedAdd(
+        precisionBits, 28, "Certified log precision is too large");
+    constexpr std::size_t reductionDenominator = 2 * (sqrtReductions + 1);
+    if (targetBits > std::numeric_limits<std::size_t>::max() - reductionDenominator)
+        throw std::overflow_error("Certified log precision is too large");
+    const std::size_t terms = (targetBits + reductionDenominator - 1)
+        / reductionDenominator + 2;
+    if (terms == 0 || terms >= std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Certified log series index is too large");
+
+    RealInterval normalizedSum = one;
+    RealInterval lastRatioProduct = one;
+    if (terms > 1) {
+        const IntervalSeriesSplit split = splitLogSeriesInterval(
+            tSquared, 1, static_cast<std::uint64_t>(terms), workBits);
+        normalizedSum = add(normalizedSum, split.t, workBits);
+        lastRatioProduct = split.p;
+    }
+
+    const RealInterval partialHalf = multiply(t, normalizedSum, workBits);
+    const std::uint64_t nextIndex = static_cast<std::uint64_t>(terms);
+    if (nextIndex > (std::numeric_limits<std::uint64_t>::max() - 1) / 2)
+        throw std::overflow_error("Certified log series index is too large");
+    const Rational nextOddRatio{
+        BigInt::fromUnsigned(2 * nextIndex - 1),
+        BigInt::fromUnsigned(2 * nextIndex + 1)};
+    const RealInterval nextRatio = multiply(
+        tSquared,
+        RealInterval::fromRational(nextOddRatio, workBits),
+        workBits);
+    const RealInterval nextTerm = multiply(
+        multiply(t, lastRatioProduct, workBits), nextRatio, workBits);
+    const RealInterval tailHalf = divide(
+        nextTerm,
+        subtract(one, tSquared, workBits),
+        workBits);
+    const RealInterval nonNegativeTail = RealInterval::fromRationalBounds(
+        rational(0), tailHalf.upper().toRational(), workBits);
+
+    BigInt scaleInteger{1};
+    scaleInteger <<= sqrtReductions + 1;
+    const RealInterval scale = RealInterval::fromRational(
+        Rational{std::move(scaleInteger)}, workBits);
+    const RealInterval lower = multiply(partialHalf, scale, workBits);
+    const RealInterval upper = multiply(
+        add(partialHalf, nonNegativeTail, workBits), scale, workBits);
+    return SeriesResult{
+        RealInterval{lower.lower(), upper.upper()}.roundedOutward(precisionBits),
+        terms
+    };
+}
+
+[[nodiscard]] std::size_t requiredLogTerms(std::size_t precisionBits) {
+    // 1<=m<=2では t=(m-1)/(m+1)<=1/3。
+    // M項採用後、log(m)=2*sum u_n のtailは
+    //   2*R_M <= 2*u_M/(1-t^2) < 2^(-3M)
+    // と保守的に抑えられる。したがってprecision+guardを3で割るだけで
+    // correctnessに依存しない十分な項数を決められる。
+    const std::size_t targetBits = checkedAdd(
+        precisionBits, 28, "Certified log precision is too large");
+    if (targetBits > std::numeric_limits<std::size_t>::max() - 2)
+        throw std::overflow_error("Certified log precision is too large");
+    return (targetBits + 2) / 3;
+}
+
+/*
+旧実装（逐次RealInterval atanh級数）。
+高精度では各項の巨大除算・外向き丸めが支配的になったため、
+binary splitting + 必要時のsqrt range reductionへ置き換えた。
+比較・検証用に旧コードをそのまま残す。
+
 [[nodiscard]] SeriesResult encloseLogMantissa(
     const Rational& m,
     std::size_t precisionBits) {
@@ -133,6 +286,64 @@ struct SeriesResult final {
         odd = nextOdd;
     }
 }
+*/
+
+// 1 <= m <= 2 に対して log(m)=2*atanh((m-1)/(m+1)) を保証付き評価する。
+[[nodiscard]] SeriesResult encloseLogMantissa(
+    const Rational& m,
+    std::size_t precisionBits) {
+    if (m < rational(1) || m > rational(2))
+        throw std::invalid_argument("Log mantissa must be in [1, 2]");
+    if (m == rational(1))
+        return SeriesResult{RealInterval::fromRational(rational(0), precisionBits), 0};
+
+    const Rational t = (m - rational(1)) / (m + rational(1));
+    const Rational tSquared = t * t;
+    const std::size_t terms = requiredLogTerms(precisionBits);
+    if (terms == 0)
+        throw std::logic_error("Certified log term count is zero");
+    if (terms >= std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Certified log series index is too large");
+
+    const std::uint64_t nextIndex = static_cast<std::uint64_t>(terms);
+    if (nextIndex > (std::numeric_limits<std::uint64_t>::max() - 1) / 2)
+        throw std::overflow_error("Certified log series index is too large");
+
+    if (preferExactSeries(t)) {
+        Rational normalizedSum = rational(1);
+        Rational lastRatioProduct = rational(1);
+        if (terms > 1) {
+            const LogSeriesSplit split = splitLogSeries(
+                tSquared.numerator(), tSquared.denominator(),
+                1, static_cast<std::uint64_t>(terms));
+            normalizedSum += Rational{split.t, split.q};
+            lastRatioProduct = Rational{split.p, split.q};
+        }
+
+        const Rational partialHalf = t * normalizedSum;
+        const BigInt nextNumerator = tSquared.numerator()
+            * BigInt::fromUnsigned(2 * nextIndex - 1);
+        const BigInt nextDenominator = tSquared.denominator()
+            * BigInt::fromUnsigned(2 * nextIndex + 1);
+        const Rational nextTerm = t * lastRatioProduct
+            * Rational{nextNumerator, nextDenominator};
+        const Rational tailHalf = nextTerm / (rational(1) - tSquared);
+
+        const Rational lower = partialHalf * rational(2);
+        const Rational upper = (partialHalf + tailHalf) * rational(2);
+        return SeriesResult{
+            RealInterval::fromRationalBounds(lower, upper, precisionBits),
+            terms
+        };
+    }
+
+    // 巨大Rationalではexact splitのa^(2N), b^(2N)が必要precisionを超えて
+    // 巨大化する。旧fallbackは同じtのまま固定precision interval splitしていたが、
+    // 項数自体は減らないため5000桁級で秒単位まで伸びた。
+    // 16回のcertified sqrtでmantissaを1へ近づけてから級数を評価し、
+    // 最後に2^16倍してlog(m)へ戻す。
+    return encloseLogMantissaReducedInterval(m, precisionBits);
+}
 
 [[nodiscard]] SeriesResult encloseLogPoint(
     const Rational& x,
@@ -144,15 +355,13 @@ struct SeriesResult final {
     std::int64_t k = numeric::detail::floorLog2PositiveRatio(
         x.numerator(), x.denominator());
 
-    // 通常のbinary normalizationでは 1 <= m < 2 だが、atanh級数の |t|=(m-1)/(m+1) を小さくするため、
-    // sqrt(2)に近いexact rational threshold 99/70 を使って上半分をさらに2で割る。恒等式 x=m*2^k はexactのままで、近似thresholdは値そのものには入らない。
+    // 1<=m<2へbinary normalizationし、sqrt(2)近傍の99/70を境にさらに2で割る。
     Rational m = scalePowerOfTwo(x, -k);
     if (m > Rational{BigInt{99}, BigInt{70}}) {
         m /= rational(2);
         ++k;
     }
 
-    // m<1なら log(m)=-log(1/m)。上のrange reductionにより1/mも約sqrt(2)以下なので、級数の最大|t|は約0.172に抑えられる。
     bool negateMantissa = false;
     if (m < rational(1)) {
         m = rational(1) / m;
@@ -185,10 +394,9 @@ CertifiedLogarithmResult encloseLogPositive(
     if (input.lower() <= zero)
         throw std::domain_error("Real Log interval must be strictly positive");
 
-    // log(2)は同一enclosure内で一度だけ計算する。旧実装はlower/upperの各point評価で重複していた。
+    // log(2)は同一enclosure内で一度だけ計算する。
     const SeriesResult log2 = encloseLogMantissa(rational(2), precisionBits);
 
-    // point intervalなら同じ級数を二度評価しない。
     const SeriesResult lower = encloseLogPoint(
         input.lower().toRational(), precisionBits, &log2);
     if (input.isPoint())

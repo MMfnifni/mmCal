@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal.Core", "projects\mmCa
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal.Tests", "projects\mmCal.Tests\mmCal.Tests.vcxproj", "{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mmCal.Benchmarks", "projects\mmCal.Benchmarks\mmCal.Benchmarks.vcxproj", "{8FB04AE9-2134-4825-82CD-AF668E340974}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C7983E80-1DFC-4CBD-BAAB-C840C0F7EA02}"
 	ProjectSection(SolutionItems) = preProject
 		.gitignore = .gitignore
@@ -50,6 +52,14 @@ Global
 		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x64.Build.0 = Release|x64
 		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x86.ActiveCfg = Release|Win32
 		{A65F4A84-9B0A-4F67-A6D4-8E23487B8A90}.Release|x86.Build.0 = Release|Win32
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Debug|x64.ActiveCfg = Debug|x64
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Debug|x64.Build.0 = Debug|x64
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Debug|x86.ActiveCfg = Debug|Win32
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Debug|x86.Build.0 = Debug|Win32
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Release|x64.ActiveCfg = Release|x64
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Release|x64.Build.0 = Release|x64
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Release|x86.ActiveCfg = Release|Win32
+		{8FB04AE9-2134-4825-82CD-AF668E340974}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

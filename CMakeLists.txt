@@ -15,6 +15,13 @@ add_executable(mmCal src/cli/main.cpp)
 target_link_libraries(mmCal PRIVATE mmCal.Core)
 target_include_directories(mmCal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
+
+add_executable(mmCal.Benchmarks EXCLUDE_FROM_ALL benchmarks/benchmark_main.cpp)
+target_link_libraries(mmCal.Benchmarks PRIVATE mmCal.Core)
+target_include_directories(mmCal.Benchmarks PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks")
+
 file(GLOB_RECURSE MMCAL_TEST_SOURCES CONFIGURE_DEPENDS "tests/*.cpp")
 add_executable(mmCal.Tests ${MMCAL_TEST_SOURCES})
 target_link_libraries(mmCal.Tests PRIVATE mmCal.Core)
@@ -26,10 +33,12 @@ if(MSVC)
     target_compile_options(mmCal.Core PRIVATE /W4 /utf-8)
     target_compile_options(mmCal PRIVATE /W4 /utf-8)
     target_compile_options(mmCal.Tests PRIVATE /W4 /utf-8)
+    target_compile_options(mmCal.Benchmarks PRIVATE /W4 /utf-8)
 else()
     target_compile_options(mmCal.Core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(mmCal PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(mmCal.Tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(mmCal.Benchmarks PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 enable_testing()

@@ -6,6 +6,7 @@
 #include "approximation/certified_trigonometry.hpp"
 #include "approximation/real_interval.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/decimal_approximation.hpp"
 #include "numeric/rational.hpp"
 #include "test_framework.hpp"
 
@@ -22,7 +23,7 @@ void runCertifiedTranscendentalTests(TestRunner& tests) {
     tests.expect(expOne.interval.contains(eProbe),
         "Certified Exp: enclosure contains a high-precision E probe");
     tests.expect(expOne.termsUsed > 0,
-        "Certified Exp: reports actual Taylor work");
+        "Certified Exp: reports actual binary-splitting Taylor work");
 
     const auto logTwo = approximation::encloseLogPositive(
         approximation::RealInterval::fromRational(two, 192), 192);
@@ -31,7 +32,25 @@ void runCertifiedTranscendentalTests(TestRunner& tests) {
     tests.expect(logTwo.interval.contains(logTwoProbe),
         "Certified Log: enclosure contains a high-precision log(2) probe");
     tests.expect(logTwo.termsUsed > 0,
-        "Certified Log: reports actual atanh-series work");
+        "Certified Log: reports actual binary-splitting atanh-series work");
+
+    const auto expHigh = approximation::encloseExp(
+        approximation::RealInterval::fromRational(one, 400), 400);
+    const auto expHighDecimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        expHigh.interval.lower().toRational(), expHigh.interval.upper().toRational(), 100);
+    tests.expect(expHighDecimal.has_value()
+            && expHighDecimal->text()
+                == "2.7182818284590452353602874713526624977572470936999595749669676277240766303535475945713821785251664274",
+        "Certified Exp: binary-splitting series certifies 100 fractional digits");
+
+    const auto logHigh = approximation::encloseLogPositive(
+        approximation::RealInterval::fromRational(two, 400), 400);
+    const auto logHighDecimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        logHigh.interval.lower().toRational(), logHigh.interval.upper().toRational(), 100);
+    tests.expect(logHighDecimal.has_value()
+            && logHighDecimal->text()
+                == "0.6931471805599453094172321214581765680755001343602552541206800094933936219696947156058633269964186875",
+        "Certified Log: binary-splitting series certifies 100 fractional digits");
 
 
     // 極端な大きさでも、単発のdecimal文字列ではなく包含不変量を検証する。
