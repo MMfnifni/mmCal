@@ -16,7 +16,7 @@
 >
 > - **可:** `Numerica — mmCal 用 GUI`
 > - **可:** `Acme Solver — powered by mmCal`
-> - **可:** `FooMath — mmCal 1.5.1 を基に開発`
+> - **可:** `FooMath — mmCal 1.5.2 を基に開発`
 > - **許可なしでは不可:** `mmCal GUI`
 > - **許可なしでは不可:** `mmCal Desktop`, `mmCal Pro`, `mmCal Studio`, `mmCal Enterprise`
 > - **許可なしでは不可:** `Official mmCal GUI`
@@ -133,7 +133,7 @@ mmCal プロジェクトまたは mmCal ソフトウェアを事実として指�
 - `mmCal と互換性があります。`
 - `mmCal 用 frontend`
 - `mmCal 用 plugin`
-- `mmCal 1.5.1 を基に開発`
+- `mmCal 1.5.2 を基に開発`
 - `mmCal のソースコードから派生`
 - `未改変の mmCal を同梱`
 - `mmCal の式構文をサポート`
@@ -309,7 +309,7 @@ mmCal との由来を説明するため，名称を説明的に使用するこ�
 ### 良い例
 
 - `ExactFox — based on mmCal`
-- `ExactFox — mmCal 1.5.1 から派生`
+- `ExactFox — mmCal 1.5.2 から派生`
 - `Numerica — mmCal engine を基に開発`
 - `FooCAS — mmCal-derived symbolic calculator`
 
@@ -602,14 +602,14 @@ BSD 3-Clause License による notice requirement は，本ポリシーとは独
 
 upstream version を正確に参照できる。
 
-- `compatible with mmCal 1.5.1`
-- `based on mmCal 1.5.1`
-- `includes mmCal 1.5.1`
-- `forked from mmCal v1.5.1`
+- `compatible with mmCal 1.5.2`
+- `based on mmCal 1.5.2`
+- `includes mmCal 1.5.2`
+- `forked from mmCal v1.5.2`
 
 独立派生版について，次のような公式 edition に見える version name を作ってはならない。
 
-- `mmCal 1.5.1 Pro`
+- `mmCal 1.5.2 Pro`
 - `mmCal 2.0 Enterprise`
 
 書面による許可がある場合を除く。

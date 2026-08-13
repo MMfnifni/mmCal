@@ -616,11 +616,16 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 
 優先度は次のように考える。
 
-1. Toom-4 / higher Toom crossover測定
-2. さらに巨大ならFFT/NTT integer multiplication
-3. Lehmer GCD
-4. `log`のbit-burst / AGM backend
-5. Gamma / erf等の5000～10000桁横断benchmark
-6. allocator/SBOは実測利益が出る場合のみ
+1. `Expr::Node`の巨大`std::variant`固定費をkind別typed nodeへ分離し，1024 dense MatrixのRSSを再測定
+2. BigUInt / BigIntのsmall-object optimizationを単独benchmarkし，小整数のheap allocation削減効果を確認
+3. numeric Array / approximate Matrixのcompact packed storageと巨大brace parse/loweringのallocation削減
+4. 上記storage改善後にblocked LU / QR等を再測定
+5. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
+6. Lehmer GCD
+7. `log`のbit-burst / AGM backend
+8. Gamma / erf等の5000～10000桁横断benchmark
+9. exact FFTのCyclotomic backend
+
+特に1～3はv1.5.2の1024×1024監査で見つかったrepresentation bottleneckを対象とする。`Expr::Node`変更は他の性能変更と混ぜず，公開`Expr` APIと全regressionを固定した単独refactorとして採否を測る。
 
 採用時にはこの文書へ「なぜ採用したか」「なぜ前案を棄却したか」「どのbenchmarkで判断したか」を追記する。

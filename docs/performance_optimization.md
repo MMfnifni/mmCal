@@ -476,11 +476,16 @@ Correctness checks should run before accepting any new threshold solely because 
 
 # 18. Next candidates
 
-1. Toom-4 / higher-Toom crossover measurement;
-2. FFT/NTT integer multiplication for still larger operands;
-3. Lehmer GCD;
-4. bit-burst / AGM logarithm backends;
-5. 5,000–10,000-digit benchmark coverage for Gamma, erf, and other special functions;
-6. allocator/SBO work only if benchmarks show a real gain.
+1. Replace the large fixed-size `Expr::Node` `std::variant` payload with kind-specific typed nodes and remeasure order-1024 dense Matrix RSS.
+2. Benchmark BigUInt / BigInt small-object optimization independently to determine whether removing heap allocation for small integers pays off.
+3. Investigate compact packed storage for numeric Arrays / approximate Matrices and reduce temporary allocation while parsing/lowering huge braces.
+4. Remeasure blocked LU / QR only after the storage work changes the cost balance.
+5. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
+6. Lehmer GCD.
+7. bit-burst / AGM logarithm backends.
+8. 5,000–10,000-digit benchmark coverage for Gamma, erf, and other special functions.
+9. A Cyclotomic exact FFT backend.
+
+Items 1–3 specifically target the representation bottleneck exposed by the v1.5.2 order-1024 audit. The `Expr::Node` change should be a standalone refactor with the public `Expr` API and full regression corpus frozen, rather than being mixed with unrelated performance work.
 
 Future changes should continue to record both adoption and rejection rationale in this document.

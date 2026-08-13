@@ -1,55 +1,78 @@
 # Changelog
 
-## v1.5.2 — in development
+## v1.5.2 — 2026-08-13
 
-- Array / Matrix + Bareiss / `solveLinear` / `nullSpace` / LU / Householder QR / SVD / Eigen regression: internal `2027 / 2027 PASS`, black-box `1504 / 1504 PASS`. Fixed-seed Matrix / FFT checks in `mmCal.Benchmarks --random-only` also pass.
+v1.5.2 preserves the exact-first numerical foundation of v1.5.1 while substantially expanding symbolic calculus, special functions, precision-aware evaluation, Arrays, and linear algebra. Release state: internal `2027 / 2027 PASS`, black-box `1504 / 1504 PASS`; fixed-seed BigInt, special-function, Matrix, and FFT invariants in `mmCal.Benchmarks --random-only` also pass.
 
-- Reworked `RealInterval::point` so the same `BigFloat` is no longer copied and moved within one initialization expression. This prevents negative point intervals from becoming reversed on MSVC, fixing `RealInterval lower bound exceeds upper bound` failures in SVD/Eigen interval audits, and adds a dedicated negative-point regression test.
+### Syntax and REPL (including breaking changes)
 
-### Syntax (breaking change)
+- Function calls are now exclusively `name[...]`; `name(...)` is removed and `()` is grouping only.
+- Ordinary identifier adjacency such as `x(x+1)` remains implicit multiplication and formats canonically as `x*(x+1)`.
+- Parser/AST/Lowerer call-delimiter branching was removed; legacy `sin(x)` on a known function is a SyntaxError.
+- History access is standardized on `In[n]` / `Out[n]`: positive indices are absolute, negative indices are relative, and zero is invalid.
+- `@` / `@@` / ... map to `In[-1]` / `In[-2]` / ...; `%` / `%%` / ... map to `Out[-1]` / `Out[-2]` / .... Relative `In` counts input slots, while relative `Out` counts successful outputs.
 
-- Function-call syntax is now exclusively `name[...]`; parenthesized `name(...)` calls were removed
-- Parentheses `()` are grouping-only, while `x(x+1)` for an ordinary identifier is parsed as implicit multiplication
-- Legacy `sin(x)` syntax on a known function name raises SyntaxError instead of being silently treated as multiplication
-- The Formatter always emits `name[...]` for calls and explicit `x*(...)` for identifier/group multiplication, preserving unambiguous round trips
-- Removed function-call delimiter branching from Parser/AST/Lowerer
-- Unified formal history access around `In[n]` / `Out[n]` and added negative relative indices; zero is invalid
-- Added repeated `@` shorthand for `In[-1]`, `In[-2]`, ... and documented the matching repeated `%` shorthand for `Out[-n]`
-- Negative `Out[-n]` counts successful outputs, while negative `In[-n]` counts input slots
+### Symbolic calculus and integration Knowledge
 
-### Array / basic linear algebra
+- Added shared finite-Fourier reduction for nonnegative integer powers of `sin[u]^m cos[u]^n`, avoiding per-power rules.
+- Added reciprocal-trigonometric recurrence handling for negative integer sine/cosine powers, including results such as `integrate[sin[2x]^(-2),x] -> -cot[2x]/2`.
+- Added integer-power reduction for `tan/cot/sec/csc` and cross-frequency trigonometric product-to-sum rules.
+- Added bounded Weierstrass substitution `t=tan[x/2]` for rational expressions in a common `sin/cos` argument, feeding the transformed expression into the exact rational integrator.
+- Strengthened structural inverse-chain/substitution matching and concrete quadratic-radical families.
+- Retained derivative-back auditing while explicitly allowing `ResolutionOnly` cases so proof-engine limitations do not remove useful primitives.
+- Integration diagnostics now distinguish `unsupported`, `partial`, `conditionsRequired`, and `noKnownClosedForm`, avoiding the false implication that an unimplemented method proves mathematical impossibility.
+- The broad `docs/memorandum/integralCatalog.md` catalog was used to audit trigonometric, rational, special-function, and branch-sensitive families.
 
-- Consolidated Array invariants around shape + row-major flat storage; evaluated nested Arrays are rectangularity-checked and flattened at the `Expr::array` normalization boundary
-- Preserved zero-length dimensions explicitly and format otherwise ambiguous empty shapes through `reshape[{}, {...}]` for round-trip safety
-- Added `dimensions`, `arrayRank`, `at`, and `reshape`, with shared zero-based Array indexing
-- Added `MatrixView` / `MatrixBuffer` so matrix algorithms operate directly on flat Arrays instead of repeatedly materializing `vector<vector<Expr>>`
-- Unified canonical names around `dot`, `matrixRank`, `norm`, and `normalize`; legacy matrix/vector names remain compatibility aliases
-- Integrated same-shape Array `+` / `-` and scalar×Array into ordinary arithmetic, while Array×Array `*` is rejected in favor of explicit `dot[...]` contraction
-- Added a flat exact-Number Gaussian / Gauss-Jordan backend that keeps Expr/Simplifier out of pivot loops for `det`, `inverse`, `rref`, and `matrixRank`
-- Added Stage 3 Bareiss fraction-free elimination for integer/Rational matrices. Rational inputs are lifted by per-row denominator LCMs and `det`, `rref`, `matrixRank`, and `inverse` share the `IntegerMatrixBuffer` kernel
-- Bareiss divisions verify exactness through `divmod`; pivot selection prefers the smallest nonzero bit length to limit BigInt growth. Exact complex matrices retain the Gaussian fallback
-- Added `solveLinear[A,b]`: square systems and consistent overdetermined systems with full column rank return a unique solution, while inconsistent or free-variable systems are Domain errors
-- Added `nullSpace[A]`: free columns in ascending order define a canonical RREF basis; full column rank preserves the empty-basis vector dimension as `reshape[{}, {0,n}]`. Integer/Rational inputs share Bareiss forward elimination, exact complex uses Gaussian fallback, and symbolic input proceeds only with provably nonzero pivots
-- Exact integer/Rational `solveLinear` reuses per-row denominator clearing and augmented Bareiss `[A|b]`, limiting pivots to coefficient columns for consistency/uniqueness checks; exact complex uses Gaussian fallback and symbolic systems proceed only with provably nonzero pivots
-- On the same Release benchmark, Stage 3 improves `det` by about 5.4–11.4x and `rref` by about 7.7–15.5x for orders 8–16
-- Added a shared symbolic-expansion budget plus triangular fast path for `det` / `inverse` to prevent factorial expression growth on dense high-order symbolic matrices
-- Extracted certified expression→interval conversion, decimalization, and guard-digit refinement into a shared approximation layer used by both FFT and Matrix backends
-- Added direct precision-aware certified Matrix dispatch for `N[dot[...],p]`, `N[det[...],p]`, `N[inverse[...],p]`, `N[rref[...],p]`, `N[matrixRank[...],p]`, `N[norm[...],p]`, and related operations
-- `N[solveLinear[...],p]` likewise dispatches directly to certified augmented interval elimination without constructing the exact solution first, and never substitutes epsilon guesses when pivots or consistency cannot be certified
-- `matrixRank` prefers exact elimination for exact inputs and uses no epsilon threshold in the approximate backend; only certified nonzero pivots advance the rank, and rank deficiency is never guessed from a tolerance
-- `nullSpace` is likewise discontinuous at rank deficiency: exact inputs prefer exact pivot structure, while approximate inputs return a basis only when interval elimination certifies the pivot structure
-- Extended `at` with zero-based prefix indexing so rank-3 decomposition results can expose factor subarrays through calls such as `at[result,0]`
-- Added `luDecomposition[A]` for square matrices with exact-first row-pivoted `P A = L U`; certified approximate LU uses interval-based partial pivoting and `N[...]` dispatches directly to certified interval LU
-- Added Householder `qrDecomposition[A]` with `A = Q R`; `N[...]` dispatches directly to certified real/complex interval Householder QR. A measured 4x4 exact expression explosion led to a policy limit of 3x3 for general exact QR, while upper-triangular matrices use an any-size fast path
-- Prototyped a column-block Householder-application kernel and benchmarked block sizes 1/8/16/32. Orders 8/16/24 showed no consistent win, so automatic blocking is not enabled; the kernel/benchmark remain for future backend work
-- Compacted `N` output without weakening certification: exact terminating decimals remain unpadded, while certified fixed-digit results retain only one zero from a redundant trailing-zero run (`1.000... -> 1.0`, `1.500... -> 1.50`). Requested digits and the certified enclosure remain in metadata
-- Added fixed-seed Matrix random checks (exact/Rational `solveLinear` round trip, `nullSpace` basis verification through `A.v==0`, exact inverse round trip, determinant transpose invariance, RREF, certified determinant) and Matrix timings to `mmCal.Benchmarks`
-- Generalized `{...}` to a finite brace container: equal-shape children auto-optimize to dense Arrays, while heterogeneous-shape results such as `{Q,R}` / `{U,S,V}` remain general braces and are audited at Matrix boundaries
-- Extended `qrDecomposition` to rectangular reduced QR and added real/complex reduced `svd` / `singularValueDecomposition`; the numerical SVD avoids `A^H A` and uses Householder bidiagonalization + one-sided Jacobi
-- Added `eigenvalues`, `eigenvectors`, and `eigensystem`. Exact triangular/diagonal/distinct-root Number 2x2 cases remain exact; general `N[...]` dispatches directly to a Complex BigFloat Hessenberg + implicit shifted QR Schur backend with interval audits of Schur/eigenpair relations
-- Added an explicit `<stdexcept>` include to `expression_interval.cpp`, where `std::overflow_error` is used directly, removing reliance on a transitive declaration
-- Added `mmCal.Benchmarks --matrix-large`. Ten-decimal random matrices model the supplied generator workload; order-1024 parsing alone measured about 10.9 s / 1.99 GB RSS, while direct Expr construction was already about 0.69 GB, exposing a storage bottleneck before dense cubic algorithms
+### Special functions
 
+- Added `fresnelc` / `fresnels` with exact special values, odd symmetry, differentiation, certified real `N`, and quadratic-phase integration support.
+- Added `hypergeometric1F1[a,b,z]` with terminating/safe exact reductions, differentiation, certified real `N`, and branch-safer `integrate[exp[x^n],x]` representations.
+- Added `hypergeometric2F1[a,b,c,z]` with terminating exact series, differentiation, certified real `N`, and binomial-power integration families.
+- Added incomplete `ellipticF` / `ellipticE` / `ellipticPi` with principal-branch semantics, amplitude derivatives, certified real `N`, and standard-kernel integration.
+- Added `Ei` / `Si` / `Ci` / `li` / `polylog`, including representative exact reductions, derivatives, certified real `N`, and integration Knowledge.
+- General inverse special functions are not invented for `solve`; only safe exact degeneracies fall through to existing solvers.
+
+### Precision-aware `N` and FFT
+
+- Extended `N[expr,p]` into a precision-aware evaluation entry point for opted-in builtins rather than always materializing a complete exact result first.
+- `N[fft[data],p]` dispatches directly to certified BigFloat/`ComplexInterval` radix-2 transforms instead of constructing huge exact Fourier expressions.
+- Certified non-power-of-two FFT uses direct DFT for smaller cases and Bluestein for larger ones; the current measured policy crossover is around 96 points and remains environment-dependent.
+- FFT and Matrix paths share expression-to-interval conversion, decimalization, and guard-digit refinement helpers.
+- Certified fixed-digit display compresses redundant trailing-zero runs while preserving precision/enclosure metadata (`1.000... -> 1.0`, `1.500... -> 1.50`); exact finite decimals remain compact (`N[1/2,10] -> 0.5`).
+
+### Arrays and linear algebra
+
+- `{...}` is now a general finite brace container. Rectangular children are automatically optimized into dense row-major `ArrayExpr`; differently shaped factors such as `{Q,R}` / `{U,S,V}` remain general brace values.
+- Zero-length dimensions are preserved; empty shapes that cannot round-trip through braces alone format via `reshape[{}, {...}]`.
+- Added/regularized `dimensions`, `arrayRank`, `length`, prefix-aware `at`, and `reshape`, using zero-based indexing.
+- Added `MatrixView` / `MatrixBuffer` so row-major Arrays are not unnecessarily copied into nested vectors.
+- Canonicalized core APIs around `dot`, `matrixRank`, `norm`, and `normalize`, retaining legacy aliases.
+- Added Bareiss fraction-free elimination for Integer/Rational matrices. Per-row denominator clearing lifts to integer buffers shared by `det`, `rref`, `matrixRank`, `inverse`, `solveLinear`, and `nullSpace`.
+- Added `solveLinear[A,b]` for unique solutions, including consistent overdetermined full-column-rank systems; inconsistent or underdetermined systems produce Domain errors rather than invented parameterizations.
+- Added `nullSpace[A]` with a deterministic free-column basis while preserving `{0,n}` shape for full-column-rank empty bases.
+- Added `luDecomposition[A]` with exact row-pivoted `P A = L U` and direct certified interval partial pivoting under `N[...]`.
+- Added rectangular reduced Householder `qrDecomposition[A]`. General exact QR is policy-limited to 3x3 after measured radical-expression explosion, with triangular/trapezoidal fast paths retained.
+- A column-block Householder kernel was benchmarked at block sizes 1/8/16/32; no stable winner emerged, so automatic blocking is not enabled.
+- Added real/complex reduced `svd` / `singularValueDecomposition`, deliberately avoiding `A^H A`; the numerical backend uses Householder bidiagonalization plus one-sided Jacobi and interval-audits reconstruction/orthogonality.
+- Added `conjugateTranspose` for shared Hermitian relations.
+- Added `eigenvalues` / `eigenvectors` / `eigensystem`: exact triangular/diagonal and distinct-root exact Number 2x2 cases remain exact, while general `N[...]` uses Complex BigFloat Hessenberg reduction, implicit shifted QR, and Schur relations.
+- Symbolic `det` / `inverse` use triangular fast paths and a shared expansion budget to avoid factorial expression growth.
+- Discontinuous rank/null-space decisions use exact pivots or interval-certified structure; no arbitrary epsilon threshold is introduced.
+
+### Performance, stability, and development infrastructure
+
+- Bareiss measured about 5.4–11.4x faster for order-8–16 determinants and 7.7–15.5x faster for RREF than the Stage-2 Gaussian/Gauss-Jordan path.
+- Added `mmCal.Benchmarks --matrix-large` for order-32/64 Matrix timings and order-1024 storage/parse stress measurements.
+- Directly constructing a 1024x1024 ten-decimal Rational Expr matrix reached about 0.69 GB maximum RSS; parsing generator-style text and evaluating only `dimensions` took about 10.9 s and 1.99 GB, showing that representation cost precedes algorithmic cost at this scale.
+- Recorded next-version performance ToDos: typed `Expr::Node` storage instead of the large variant fixed cost, BigUInt/BigInt SBO, packed numeric Array/approximate Matrix storage, and fewer temporary allocations while parsing huge braces.
+- Fixed evaluation-order-sensitive `RealInterval::point` construction that could reverse negative point intervals under MSVC and fail SVD/Eigen audits; added a direct negative-point regression.
+- Added an explicit `<stdexcept>` include where `std::overflow_error` is used instead of relying on transitive declarations.
+- Expanded fixed-seed Matrix invariants through Bareiss, inverse, solve, nullSpace, LU, QR, real/complex SVD, and Eigen, alongside FFT round-trip checks.
+
+### Documentation and licensing
+
+- Synchronized README, Reference, Architecture, Roadmap, and performance documentation with the v1.5.2 release state.
+- Aligned the BSD 3-Clause copyright notice with project metadata and explicitly separated trademark/brand policy into `TRADEMARKS.md` / `TRADEMARKS.ja.md` without changing the copyright permissions granted by BSD-3-Clause.
 
 ## v1.5.1 — 2026-08-12
 

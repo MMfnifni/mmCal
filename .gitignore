@@ -32,7 +32,6 @@ Makefile
 Thumbs.db
 
 # hidden
-/docs/roadmap.md
 /res/
 tools/*.txt
 tools/FFT_tool/*.txt

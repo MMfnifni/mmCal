@@ -5,7 +5,7 @@ An exact-first CLI calculator and compact CAS for engineering, research, and man
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Current release: v1.5.1**
+**Current release: v1.5.2**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -32,85 +32,108 @@ It also does not immediately convert input to `double` as many ordinary calculat
 ## Quick examples — details later
 
 ```text
-In[1]> 999999999999999999999999999999^2
+In [1]> 999999999999999999999999999999^2
 Out[1]> 999999999999999999999999999998000000000000000000000000000001
 
-In[2]> 0.1+0.2
+In [2]> 0.1+0.2
 Out[2]> 3/10
 
-In[3]>  0.1+0.2==0.3
+In [3]> 0.1+0.2==0.3
 Out[3]> True
 
-In[4]> 1/3+1/6
+In [4]> 1/3+1/6
 Out[4]> 1/2
 
-In[5]> sqrt[72]
+In [5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In[6]> sin[Pi/6]
+In [6]> sin[Pi/6]
 Out[6]> 1/2
 
-In[7]> expand[(x+1)^3]
+In [7]> expand[(x+1)^3]
 Out[7]> x^3+3x^2+3x+1
 
-In[8]> factor[x^2-1]
+In [8]> factor[x^2-1]
 Out[8]> (x-1)(x+1)
 
-In[9]> fullSimplify[(x^2-1)/(x-1),x!=1]
+In [9]> fullSimplify[(x^2-1)/(x-1),x!=1]
 Out[9]> 1+x
 
-In[10]> simplify[sqrt[x^2],element[x,Real]]
+In [10]> simplify[sqrt[x^2],element[x,Real]]
 Out[10]> abs[x]
 
-In[11]> D[exp[x^2],x]
+In [11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In[12]> integrate[x^2+sin[x],x]
+In [12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In[13]> integrate[sin[x],{x,0,Pi}]
+In [13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
-In[14]> limit[(1-cos[x])/x^2,x,0]
+In [14]> limit[(1-cos[x])/x^2,x,0]
 Out[14]> 1/2
 
-In[15]> solve[x^2+1==0,x,Complex]
-Out[15]> {x==I, x==-I}
+In [15]> solve[x^2+1==0,x,Complex]
+Out[15]> {x==I,x==-I}
 
-In[16]> (1+I)/(1-I)
+In [16]> (1+I)/(1-I)
 Out[16]> I
 
-In[17]> sqrt[-8]
+In [17]> sqrt[-8]
 Out[17]> 2I sqrt[2]
 
-In[18]> Pi
-Out[18]> Pi
+In [18]> a:=12
+Out[18]> 12
 
-In[19]> N[%,30]
-Out[19]> 3.141592653589793238462643383280
+In [19]> a^2+1
+Out[19]> 145
 
-In[20]> N[%%%,20]
-Out[20]> 2.82842712474619009760I
+In [20]> @+a
+Out[20]> 157
+
+In [21]> A:={{1,2},{3,4}}
+Out[21]> {{1,2},{3,4}}
+
+In [22]> det[A]
+Out[22]> -2
+
+In [23]> inverse[A]
+Out[23]> {{-2,1},{3/2,-1/2}}
+
+In [24]> solveLinear[A,{5,11}]
+Out[24]> {1,2}
+
+In [25]> dot[A,inverse[A]]
+Out[25]> {{1,0},{0,1}}
+
+In [26]> Pi
+Out[26]> Pi
+
+In [27]> N[%,30]
+Out[27]> 3.141592653589793238462643383280
 ```
 
 The following sections provide an overview only.
 For function specifications and implementation details, see the [reference](docs/reference.md) or the Markdown documents in the `docs` directory.
 
-## v1.5.1
+## v1.5.2
 
-v1.5.1 keeps the exact-first CAS semantics established in v1.5.0 while concentrating on canonicalization, verification infrastructure, multiprecision arithmetic, and high-precision numerical performance.
+v1.5.2 keeps the exact-first numerical foundation of v1.5.1 while substantially expanding **symbolic calculus, special functions, precision-aware numerical evaluation, Arrays, and linear algebra**.
 
-Major internal improvements include:
+Highlights:
 
-- Adaptive BigInt multiplication using schoolbook / Karatsuba / Toom-3, plus a dedicated squaring path
-- Burnikel–Ziegler division, power-of-two division fast paths, and divide-and-conquer decimal conversion
-- Binary-splitting Chudnovsky for `Pi` and binary-splitting based certified `exp` / `log` evaluation
-- Certified argument reduction for very large radian trigonometric inputs
-- A directed-rounding-safe fast path for extreme BigFloat exponent gaps
-- Generated formatter/parser round-trip tests, integration derivative-back coverage, Reference↔registry checks, and extreme-value approximation tests
-- A separate `mmCal.Benchmarks` project
+- function calls are now canonicalized to `name[...]`; `()` is grouping only
+- `In [n]` / `Out[n]` and the `@` / `%` shorthands provide absolute and relative history access
+- integration Knowledge now covers broader trigonometric powers, reciprocal powers, product-to-sum, bounded Weierstrass substitution, inverse-chain matching, and related families
+- added `fresnelc/fresnels`, `hypergeometric1F1/2F1`, incomplete elliptic integrals, and `Ei/Si/Ci/li/polylog`, connected to `D`, `integrate`, and certified `N` where supported
+- `N[expr,p]` is precision-aware, allowing FFT and Matrix operations to enter BigFloat/interval backends without first materializing huge exact intermediate expressions
+- `{...}` is a general brace container; rectangular values are automatically optimized into dense row-major Arrays
+- added Bareiss fraction-free elimination, `solveLinear`, `nullSpace`, LU, rectangular Householder QR, real/complex SVD, and Eigen/Schur support
+- large dense Matrix benchmarks show that at order 1024 the current Expr/Rational representation and parse/storage cost become major bottlenecks before the algorithms themselves
+- release state: internal **2027 / 2027** PASS, black-box **1504 / 1504** PASS, with fixed-seed Matrix/FFT invariants also passing
 
-See [`docs/performance_optimization.md`](docs/performance_optimization.md) for adopted and rejected optimizations and representative benchmark results.
+See [`CHANGELOG.md`](CHANGELOG.md) for release details and [`docs/performance_optimization.md`](docs/performance_optimization.md) for measured adoption/rejection rationale.
 
 ## 1. Getting started
 
@@ -143,10 +166,10 @@ cmake --build build
 Large integers, rational numbers, algebraic expressions containing radicals, complex numbers, and symbolic expressions are kept exact whenever possible. Expansion, factorization, simplification, differentiation, integration, limits, and equation solving all operate within the same expression system.
 
 ```text
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 1/3
 
-In[2]> sqrt[2]
+In [2]> sqrt[2]
 Out[2]> sqrt[2]
 ```
 
@@ -155,10 +178,10 @@ Values such as `Pi`, `E`, `Phi`, and `sqrt[2]` are not treated as pre-stored mac
 When a decimal value is required, use `N[expr,n]` to request an arbitrary-precision numerical approximation.
 
 ```text
-In[3]> N[1/3,20]
+In [3]> N[1/3,20]
 Out[3]> 0.33333333333333333333
 
-In[4]> N[Pi,30]
+In [4]> N[Pi,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
@@ -169,13 +192,13 @@ By contrast, `:fix` changes **only how values are displayed** and does not chang
 :fix 6
 Display: Fixed(6)
 
-In[5]> 1/3
+In [5]> 1/3
 Out[5]> 0.333333
 
 :fix off
 Display: Exact
 
-In[6]> Out[5]
+In [6]> Out[5]
 Out[6]> 1/3
 ```
 
@@ -191,16 +214,16 @@ Approximate values produced by `N` retain not only a display string but also pre
 - `rationalize[x]`: Recover an exact rational number from the certified interval of an approximate value
 
 ```text
-In[7]> accuracy[N[1/3,20]]
+In [7]> accuracy[N[1/3,20]]
 Out[7]> 20
 
-In[8]> precision[N[1/3,20]]
+In [8]> precision[N[1/3,20]]
 Out[8]> 19
 
-In[9]> rationalize[N[1/3,20]]
+In [9]> rationalize[N[1/3,20]]
 Out[9]> 1/3
 
-In[10]> accuracy[1/3]
+In [10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
@@ -284,8 +307,8 @@ Explicit `Deg` / `Rad` / `Grad` units take precedence over the session default.
 x:=2
 -> 2
 
-f(t):=t^2+1
-f(4)
+f[t]:=t^2+1
+f[4]
 -> 17
 ```
 
@@ -327,30 +350,30 @@ Exit[]
 The most recent successful output is referenced with `%`, while the immediately previous input expression is referenced with `@`. Repeating the shorthand moves further back: `%%` / `%%%` for earlier successful outputs and `@@` / `@@@` for earlier inputs. There is no fixed shorthand depth limit.
 
 ```text
-In[1]> 2+3
+In [1]> 2+3
 Out[1]> 5
 
-In[2]> %*2
+In [2]> %*2
 Out[2]> 10
 
-In[3]> Pi
+In [3]> Pi
 Out[3]> Pi
 
-In[4]> N[@,30]
+In [4]> N[@,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
-The formal history interface is `In[n]` / `Out[n]`: positive indices are absolute and negative indices are relative. Zero is invalid.
+The formal history interface is `In [n]` / `Out[n]`: positive indices are absolute and negative indices are relative. Zero is invalid.
 
 ```text
-In[1]
+In [1]
 Out[1]
-In[-1]    // previous input; equivalent to @
+In [-1]    // previous input; equivalent to @
 Out[-1]   // previous successful output; equivalent to %
 ```
 
 `Out[n]` returns a stored output snapshot without reevaluation. Negative `Out[-n]` counts successful outputs only, so `% == Out[-1]` remains true across failed evaluations.
-`In[n]` retrieves a previous lowered input expression and **evaluates it again in the current definition environment**. Negative `In[-n]` counts input slots, so `In[-1]` / `@` reevaluates the immediately previous input.
+`In [n]` retrieves a previous lowered input expression and **evaluates it again in the current definition environment**. Negative `In [-n]` counts input slots, so `In [-1]` / `@` reevaluates the immediately previous input.
 
 ## 7. Main mathematical features
 
@@ -403,6 +426,38 @@ integrate[1/(1+x^2),{x,0,1}]
 integrate[exp[-x],{x,0,Infinity}]
 -> 1
 ```
+
+v1.5.2 expands integration as shared Knowledge rather than as isolated rules: finite-Fourier reduction for integer trigonometric powers, sec/csc recurrences for negative powers, cross-frequency product-to-sum, bounded Weierstrass substitution, inverse-chain candidates, quadratic radicals, and related families. Failure diagnostics distinguish unsupported rules, partial evaluation, missing conditions, and recognized families with no known finite closed form in the current standard-function vocabulary. Proof limitations alone do not remove a useful primitive.
+
+### Special functions added in v1.5.2
+
+The following special-function foundations are connected to symbolic differentiation, integration, and certified numerical evaluation where supported:
+
+```text
+fresnelc[x]  fresnels[x]
+hypergeometric1F1[a,b,z]
+hypergeometric2F1[a,b,c,z]
+ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
+Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
+```
+
+Representative reductions include:
+
+```text
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6,7/6,x^6]
+
+integrate[1/(1+x^5),x]
+-> x hypergeometric2F1[1,1/5,6/5,-x^5]
+
+integrate[sin[x]/x,x] -> Si[x]
+integrate[cos[x]/x,x] -> Ci[x]
+integrate[exp[x]/x,x] -> Ei[x]
+integrate[1/log[x],x] -> li[x]
+integrate[log[1-x]/x,x] -> -polylog[2,x]
+```
+
+mmCal does not invent general inverse special functions for `solve`; when branch structure or injectivity cannot be established, the equation remains unresolved.
 
 ### Limits
 
@@ -618,28 +673,25 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — Internal architecture for developers
 - `docs/roadmap.md` — Major currently unsupported features and future candidates
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
-- `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1, with benchmark rationale
+- `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.2, with benchmark rationale
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
 - `CHANGELOG.md` — Major changes by release
 
-## 14. License
+## 14. License and trademarks
 
-BSD 3-Clause
+The source code is distributed under the **BSD 3-Clause License**. See `LICENSE` for the copyright permissions governing commercial use, modification, redistribution, and incorporation into other software.
 
-Copyright (c) 2021–2026 mmKreutzef
+**Use of the mmCal name, official logos, and related branding is addressed separately by `TRADEMARKS.md` / `TRADEMARKS.ja.md`.** The trademark policy does not prohibit independent GUIs, forks, commercial products, or other uses permitted by the BSD license; it is intended to avoid confusion about whether a third-party product is mmCal itself or is officially endorsed.
 
-See `LICENSE` for the full terms.
+- [BSD 3-Clause License](LICENSE)
+- [Trademark and Brand Policy](TRADEMARKS.md)
+- [Japanese Trademark and Brand Policy](TRADEMARKS.ja.md)
 
-If mmCal is used in an academic paper, product, or similar work, I would appreciate a note in the documentation or publication acknowledging its use, although **this is not an additional license requirement**.
-I'd be even happier if you let me know.
-
-Reselling the source with little more than a different platform wrapper or UI is permitted by BSD 3-Clause, but it does make the author a little sad.
-
-Embedding mmCal as part of another software system is very welcome.
+If mmCal is used in an academic publication or product, attribution beyond the BSD requirements is not mandatory, but a factual acknowledgement is appreciated.
 
 ## 15. Tests and development environment
 
-As of v1.5.1, this project contains 1,691 internal regression tests and 1,337 black-box tests.
+At the v1.5.2 release point, this project contains 2,027 internal regression tests and 1,504 black-box tests.
 They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures. A separate `mmCal.Benchmarks` project provides fixed-seed randomized correctness checks, algorithm-threshold sweeps, and performance comparisons without mixing benchmark workloads into the ordinary test suite.
 
 Primary Windows development environment:

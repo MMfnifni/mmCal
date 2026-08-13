@@ -4,6 +4,15 @@
 ユーザー向けの導入はルートの`README.ja.md`を参照する。
 この文書はバージョンごとに常に変動するため，過去バージョンはgitより引っ張り出してください。
 
+## 0. 不変の理念
+
+### 設計理念
+厳密に。全て自前で。近似は明示的に。解らないものは解らないと言う。
+
+### 配布理念
+唯一本の実行ファイルに。
+Open source under the BSD 3-Clause License.
+
 ## 1. 現在の設計思想
 
 mmCalは、入力を最初から`double`へ落とす電卓ではなく **exact-firstの小型CAS / 数値計算kernel** とする。
@@ -168,8 +177,8 @@ f[x]
 x := 3
 -> 3
 
-f(t) := t^2 + 1
-f(4)
+f[t] := t^2 + 1
+f[4]
 -> 17
 ```
 
@@ -206,50 +215,50 @@ UnDef[x,y,f]
 短縮記法は次のとおり。
 
 ```text
-@       // In[-1]
-@@      // In[-2]
-@@@     // In[-3]
+@       // In [-1]
+@@      // In [-2]
+@@@     // In [-3]
 %       // Out[-1]
 %%      // Out[-2]
 %%%     // Out[-3]
 ```
 
-正式な参照は`In[n]` / `Out[n]`を使う。`n > 0`は画面上の絶対入力番号，`n < 0`は相対参照，`n = 0`はTypeErrorとする。
+正式な参照は`In [n]` / `Out[n]`を使う。`n > 0`は画面上の絶対入力番号，`n < 0`は相対参照，`n = 0`はTypeErrorとする。
 
 ```text
-In[1]
+In [1]
 Out[1]
-In[-1]
+In [-1]
 Out[-1]
 ```
 
-`In[n]`は対象入力のlowered Exprを取得した後，**現在のsession環境で通常評価する**。正の`In[n]`は絶対入力番号，負の`In[-n]`は現在評価中の入力slotを除いて過去の入力slotを数える。したがって`@` / `@@` / `@@@` / ... はそれぞれ`In[-1]` / `In[-2]` / `In[-3]` / ... を意味する。連続個数に固定上限はない。評価エラーになった入力でもparse/lowerまで成功していれば`In[-1]`で再評価できる。parse/lowerできなかったslotには参照できない。
+`In [n]`は対象入力のlowered Exprを取得した後，**現在のsession環境で通常評価する**。正の`In [n]`は絶対入力番号，負の`In [-n]`は現在評価中の入力slotを除いて過去の入力slotを数える。したがって`@` / `@@` / `@@@` / ... はそれぞれ`In [-1]` / `In [-2]` / `In [-3]` / ... を意味する。連続個数に固定上限はない。評価エラーになった入力でもparse/lowerまで成功していれば`In [-1]`で再評価できる。parse/lowerできなかったslotには参照できない。
 
 `Out[n]`は保存済み結果snapshotを返し，再評価しない。正の`Out[n]`は絶対入力番号に対応するsnapshot，負の`Out[-n]`は**成功した出力だけ**を直前から数える。このため評価失敗を挟んでも常に`% == Out[-1]`，`%% == Out[-2]`，`%%% == Out[-3]`，... となる。`%`も連続個数に固定上限はない。
 
 ```text
-In[1]> fft[{1,2,3}]
+In [1]> fft[{1,2,3}]
 Out[1]> {6, ...}
-In[2]> N[@,30]
+In [2]> N[@,30]
 Out[2]> {6, -1.50+0.866025403784...I, ...}
 ```
 
-上の`N[@,30]`では，`Out[1]`を後から30桁化するのではなく，`In[1]`の`fft[...]`を30桁のapproximation contextで再評価できる。
+上の`N[@,30]`では，`Out[1]`を後から30桁化するのではなく，`In [1]`の`fft[...]`を30桁のapproximation contextで再評価できる。
 
 絶対参照の例：
 
 ```text
-In[1]> 1+1
+In [1]> 1+1
 Out[1]> 2
-In[2]> 2+2
+In [2]> 2+2
 Out[2]> 4
-In[3]> In[1]+In[2]
+In [3]> In [1]+In [2]
 Out[3]> 6
-In[4]> In[3]
+In [4]> In [3]
 Out[4]> 6
 ```
 
-したがって`In[n]`は「過去入力を現在環境へ貼り戻して再実行する」意味である。過去入力が変数参照・代入・乱数等を含めば現在の定義やRNG stateを使う。生の入力ASTを表示する用途とは分離する。正の添字で現在評価中の入力自身を参照することは禁止し，自己再帰によるstack overflowを防ぐ。
+したがって`In [n]`は「過去入力を現在環境へ貼り戻して再実行する」意味である。過去入力が変数参照・代入・乱数等を含めば現在の定義やRNG stateを使う。生の入力ASTを表示する用途とは分離する。正の添字で現在評価中の入力自身を参照することは禁止し，自己再帰によるstack overflowを防ぐ。
 
 評価エラーになった入力でもparse/lowerまで成功していれば絶対入力slot自体は残るが，対応する正の`Out[n]`は存在しない。
 
@@ -1691,6 +1700,9 @@ solve[x^2 + 1 == 0,x,Complex]
 
 solve[x^2 < 4,x]
 -> {x in Real if x > -2 && x < 2}
+
+solve[{2x+3y==5,x-2y==9},{x,y}]
+-> {{x==37/7, y==-13/7}}
 ```
 
 `SolutionSet`はEmpty / Finite / Universal / Conditional / Unresolvedを区別する。
@@ -1732,6 +1744,7 @@ solve[sin[x]==0,x,Real]
 ```
 
 Complex領域でもprincipal inverseだけから全解を捏造しない。
+
 
 ---
 
@@ -1975,7 +1988,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現行開発版では **builtin/alias登録名236個 / sourceから呼出可能な名前218個**。内部headはsource-callable数に含めない。
+mmCal v1.5.2では **builtin/alias登録名236個 / sourceから呼出可能な名前218個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2079,7 +2092,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 - `digamma`, `trigamma`, `zeta`, `ibeta`
 - `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
-- advanced SVD/eigen/condition number/least squares
+- condition number / least squares / 一般parametric linear system
 - `hilbert`（旧仕様の名称再確認）
 - `fma`, `clamp`, `proj`
 - 工学函数、財務函数、単位変換
@@ -2108,16 +2121,16 @@ mmCal --angle grad --fix 8
 - `--help`, `-h`: 使用法を表示
 
 ```text
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 1/3
 ```
 
 - 1行ごとにparse/evaluate
-- promptは`In[n]>` / `Out[n]>`で固定し、余分な空白を入れない
+- promptは`In [n]>` / `Out[n]>`で固定し、余分な空白を入れない
 - 終了は`Exit[]`に一本化。裸の`exit` / `quit`特別扱いはない
 - `Clear[]`: user definitionsと全履歴を消し、次の入力番号を1へ戻す
 - `Defs[]`, `UnDef[...]`: user definitionsの確認・削除
-- 計算履歴 `@`, `%`, `%%`, ... および正負添字を持つ再評価型`In[n]`, snapshot型`Out[n]`
+- 計算履歴 `@`, `%`, `%%`, ... および正負添字を持つ再評価型`In [n]`, snapshot型`Out[n]`
 
 ## 33.1 `:fix` — presentation-only小数表示
 
@@ -2125,13 +2138,13 @@ Out[1]> 1/3
 :fix 16
 Display: Fixed(16)
 
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 0.3333333333333333
 
 :fix off
 Display: Exact
 
-In[2]> Out[1]
+In [2]> Out[1]
 Out[2]> 1/3
 ```
 

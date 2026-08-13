@@ -4,6 +4,18 @@ This document is the detailed specification of **mmCal as implemented**.
 For a user-oriented introduction, see the root-level `README.md`.
 This document changes with each version; retrieve older versions from the Git history when needed.
 
+## 0. Unchanging Principles
+
+### Design Principles
+Be rigorous.
+Do everything from scratch.
+Explicitly state any approximations.
+Admit when you don’t know something.
+
+### Distribution Principles
+Distribute only the executable file included in this book.
+Open source under the BSD 3-Clause License.
+
 ## 1. Current design philosophy
 
 mmCal is not a calculator that immediately lowers every input to `double`. It is designed as an **exact-first compact CAS / numerical-computation kernel**.
@@ -168,8 +180,8 @@ Internally, arrays are represented as `ArrayExpr` values containing shape inform
 x := 3
 -> 3
 
-f(t) := t^2 + 1
-f(4)
+f[t] := t^2 + 1
+f[4]
 -> 17
 ```
 
@@ -206,50 +218,50 @@ UnDef[x,y,f]
 The shorthand forms are:
 
 ```text
-@       // In[-1]
-@@      // In[-2]
-@@@     // In[-3]
+@       // In [-1]
+@@      // In [-2]
+@@@     // In [-3]
 %       // Out[-1]
 %%      // Out[-2]
 %%%     // Out[-3]
 ```
 
-The formal interface is `In[n]` / `Out[n]`. `n > 0` is an absolute prompt index, `n < 0` is relative, and `n = 0` raises TypeError.
+The formal interface is `In [n]` / `Out[n]`. `n > 0` is an absolute prompt index, `n < 0` is relative, and `n = 0` raises TypeError.
 
 ```text
-In[1]
+In [1]
 Out[1]
-In[-1]
+In [-1]
 Out[-1]
 ```
 
-`In[n]` retrieves the lowered Expr for the target input and then **evaluates it normally in the current session environment**. Positive `In[n]` uses an absolute input number. Negative `In[-n]` counts previous input slots while excluding the input currently being evaluated. Therefore `@` / `@@` / `@@@` / ... mean `In[-1]` / `In[-2]` / `In[-3]` / ... respectively, with no fixed shorthand depth limit. An input that reached parse/lower but failed during evaluation can therefore be retried through `In[-1]`; a slot that never produced a lowered Expr is unavailable.
+`In [n]` retrieves the lowered Expr for the target input and then **evaluates it normally in the current session environment**. Positive `In [n]` uses an absolute input number. Negative `In [-n]` counts previous input slots while excluding the input currently being evaluated. Therefore `@` / `@@` / `@@@` / ... mean `In [-1]` / `In [-2]` / `In [-3]` / ... respectively, with no fixed shorthand depth limit. An input that reached parse/lower but failed during evaluation can therefore be retried through `In [-1]`; a slot that never produced a lowered Expr is unavailable.
 
 `Out[n]` returns a stored result snapshot without reevaluation. Positive `Out[n]` is indexed by the absolute input number, while negative `Out[-n]` counts **successful outputs only** from the most recent one. Therefore `% == Out[-1]`, `%% == Out[-2]`, `%%% == Out[-3]`, ... remain true even when failed evaluations occur between successful outputs. Repeated `%` also has no fixed shorthand depth limit.
 
 ```text
-In[1]> fft[{1,2,3}]
+In [1]> fft[{1,2,3}]
 Out[1]> {6, ...}
-In[2]> N[@,30]
+In [2]> N[@,30]
 Out[2]> {6, -1.50+0.866025403784...I, ...}
 ```
 
-Here `N[@,30]` does not merely approximate the stored `Out[1]`; it reevaluates the `fft[...]` from `In[1]` inside a 30-digit approximation context.
+Here `N[@,30]` does not merely approximate the stored `Out[1]`; it reevaluates the `fft[...]` from `In [1]` inside a 30-digit approximation context.
 
 Absolute-reference example:
 
 ```text
-In[1]> 1+1
+In [1]> 1+1
 Out[1]> 2
-In[2]> 2+2
+In [2]> 2+2
 Out[2]> 4
-In[3]> In[1]+In[2]
+In [3]> In [1]+In [2]
 Out[3]> 6
-In[4]> In[3]
+In [4]> In [3]
 Out[4]> 6
 ```
 
-Thus, `In[n]` means "paste the previous input back into the current environment and execute it again." If the previous input contains variable references, assignment, randomness, or other stateful behavior, the current definitions and RNG state are used. This is deliberately separate from displaying a raw historical AST. A positive absolute reference to the input currently being evaluated is forbidden to prevent direct self-recursion.
+Thus, `In [n]` means "paste the previous input back into the current environment and execute it again." If the previous input contains variable references, assignment, randomness, or other stateful behavior, the current definitions and RNG state are used. This is deliberately separate from displaying a raw historical AST. A positive absolute reference to the input currently being evaluated is forbidden to prevent direct self-recursion.
 
 If evaluation fails but parsing/lowering succeeded, the absolute input slot remains, but no corresponding positive `Out[n]` snapshot exists.
 
@@ -1673,6 +1685,9 @@ solve[x^2 + 1 == 0,x,Complex]
 
 solve[x^2 < 4,x]
 -> {x in Real if x > -2 && x < 2}
+
+solve[{2x+3y==5,x-2y==9},{x,y}]
+-> {{x==37/7, y==-13/7}}
 ```
 
 `SolutionSet` distinguishes Empty / Finite / Universal / Conditional / Unresolved.
@@ -1957,7 +1972,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **236 registered builtin/alias names / 218 source-callable names**. Internal heads are not included in the source-callable count.
+mmCal v1.5.2 contains **236 registered builtin/alias names / 218 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2061,7 +2076,7 @@ Representative items:
 
 - `digamma`, `trigamma`, `zeta`, `ibeta`
 - `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
-- Advanced LU/QR/SVD/eigen/condition number/least squares
+- Condition number / least squares / general parametric linear systems
 - `hilbert` (legacy naming/specification still to be confirmed)
 - `fma`, `clamp`, `proj`
 - Engineering functions, financial functions, and unit conversion
@@ -2090,16 +2105,16 @@ mmCal --angle grad --fix 8
 - `--help`, `-h`: Show usage
 
 ```text
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 1/3
 ```
 
 - Parse/evaluate one line at a time
-- Prompts are fixed as `In[n]>` / `Out[n]>` with no extra spaces
+- Prompts are fixed as `In [n]>` / `Out[n]>` with no extra spaces
 - Exit is unified under `Exit[]`; bare `exit` / `quit` receive no special treatment
 - `Clear[]`: Remove user definitions and all history, resetting the next input number to 1
 - `Defs[]`, `UnDef[...]`: Inspect and remove user definitions
-- History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In[n]` and snapshot `Out[n]`
+- History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In [n]` and snapshot `Out[n]`
 
 ## 33.1 `:fix` — presentation-only decimal display
 
@@ -2107,13 +2122,13 @@ Out[1]> 1/3
 :fix 16
 Display: Fixed(16)
 
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 0.3333333333333333
 
 :fix off
 Display: Exact
 
-In[2]> Out[1]
+In [2]> Out[1]
 Out[2]> 1/3
 ```
 

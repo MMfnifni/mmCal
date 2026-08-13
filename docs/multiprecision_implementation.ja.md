@@ -1,4 +1,4 @@
-# mmCal 多倍長数値基盤 実装詳細
+# mmCal v1.5.2 自作多倍長数値基盤 — 実装解剖
 
 対象は主として次の層である。
 
@@ -24,6 +24,24 @@ DecimalApproximation
 
 記号積分，Solver，Simplifier，特殊函数そのものの規則は扱わない。
 ただし，それらが多倍長基盤をどう利用しているかを理解するために必要な範囲で，`N[...]`，保証区間，平方根などとの接続は説明する。
+
+> 対象：mmCal v1.5.2
+>
+> この文書はAPIリファレンスではなく，mmCalが外部多倍長ライブラリを使わず，整数・有理数・任意精度2進浮動小数・保証区間をどのように積み上げているかを，実装を読みたい人向けに解剖する文書である。
+> 「多倍長整数とは何を保存しているのか」「丸めはどこで発生するのか」「なぜ`BigFloat`だけでは保証にならないのか」「巨大行列でメモリを食うのはlimbなのかExprなのか」まで扱う。
+
+## この文書の読み方
+
+最初から通読してもよいが，興味別には次の順が読みやすい。
+
+- **多倍長整数を自作したい**：3～15章。
+- **任意精度浮動小数を自作したい**：18～26章。
+- **誤差保証まで理解したい**：27～37章。
+- **速さの理由を知りたい**：6，8，9，23，37，38章。
+- **メモリがどこへ消えるか知りたい**：39章と46章。
+- **実装で踏みやすい罠を見たい**：47～49章。
+
+数学記号としての「任意精度」と，計算機上の「無限」を混同しないことが大前提である。mmCalの型は固定桁数を意味論上要求しないが，メモリ，`size_t`，`int64_t`指数，演算時間には当然有限の上限がある。
 
 ---
 
@@ -115,7 +133,46 @@ lower <= true value <= upper
 | decimal result | `src/numeric/decimal_approximation.hpp/.cpp` | 10進丸めと保証区間metadata |
 | certified evaluation | `src/approximation/certified_evaluator.hpp/.cpp` | Expr全体の区間評価 |
 
-この周辺はv1.5.1で高速算法・benchmark基盤が増えているため，行数そのものは仕様値として固定しない。
+この周辺はv1.5.1～v1.5.2で高速算法・benchmark基盤が増えているため，行数そのものは仕様値として固定しない。
+
+## 2.1 まず押さえる語彙
+
+### limb
+
+多倍長整数を一定幅に分割した1要素をlimbと呼ぶ。mmCalでは1 limb = 32 bitである。
+
+```text
+10進の「桁」ではない
+2進32bitの「節」
+```
+
+したがって1000 decimal digitsの整数が1000 limbを持つわけではない。必要limb数は概ね
+
+```text
+ceil(bitLength / 32)
+```
+
+で決まる。
+
+### exact
+
+そのオブジェクトが表す値そのものに丸め誤差がないこと。`BigInt`，`Rational`，そして`BigFloat`の**保存されたdyadic値そのもの**はexactである。
+
+### approximate
+
+求めたい数学的真値と保存値が一致するとは限らないこと。例えば`BigFloat`で丸めた`1/3`はapproximateである。
+
+### certified
+
+真値を1個の近似値として信じるのではなく，
+
+```text
+lower <= true value <= upper
+```
+
+を演算全体で保証すること。mmCalでは`RealInterval` / `ComplexInterval`がこの責務を持つ。
+
+この区別は重要である。`BigFloat`は「任意精度だから自動的に厳密」ではない。`BigFloat`が厳密なのは**保存している2進有理数そのもの**であって，本来求めたい`Pi`や`1/3`の真値ではない。
 
 ---
 
@@ -222,6 +279,41 @@ bitLength
 
 この値は整数平方根，BigFloat変換，binary scale判定など多くの上位算法で使われる。
 
+## 3.5 limbを手で追う
+
+32bit limbを説明のため8bit limbへ縮めて考える。基数を`B=256`とすると，
+
+```text
+0x02_34
+```
+
+はlittle-endian limb列では
+
+```text
+{0x34, 0x02}
+```
+
+であり，値は
+
+```text
+0x34 + 0x02 * 256 = 564
+```
+
+となる。
+
+mmCalの実装ではこれを8bitではなく32bitで行うだけである。内部基数が2の冪なので，bit shift，bit length，trailing zeroの計算が自然にlimb演算へ落ちる。
+
+### なぜdecimal chunkで保存しないのか
+
+10進入出力だけなら`10^9`を基数にした配列も考えられる。しかし内部基数`2^32`には，
+
+- 32bit×32bitが64bitへちょうど収まる。
+- shiftが自然。
+- `std::bit_width` / `std::countr_zero`が直接使える。
+- BigFloatの2進scaleと親和性が高い。
+
+という利点がある。その代わり，人間向け10進表示にはbase conversionが必要になる。v1.5.1で10進divide-and-conquerを入れた理由はここにある。
+
 ## 3.4 trailing zero bits
 
 下位limbから0を飛ばし，最初の非0 limbに `std::countr_zero` を使う。
@@ -318,7 +410,7 @@ O(n)
 
 # 6. `BigUInt` の乗算とsquare
 
-v1.5.1では単一算法ではなく，operand sizeと形状に応じてbackendを切り替える。
+v1.5.1で導入した適応dispatchをv1.5.2でも維持し，operand sizeと形状に応じてbackendを切り替える。
 
 ```text
 small / unbalanced
@@ -445,7 +537,7 @@ high << (32-bitShift)
 
 # 8. `BigUInt` の除算
 
-v1.5.1では**特殊case → Knuth base case → Burnikel–Ziegler**の段階dispatchを使う。
+v1.5.1で導入した**特殊case → Knuth base case → Burnikel–Ziegler**の段階dispatchをv1.5.2でも使う。
 
 ## 8.1 fast path
 
@@ -682,6 +774,27 @@ sign-magnitudeなので，
 実装はabsolute magnitudeを右shiftして符号を戻すので，意味は**0方向切り捨て**である。
 
 この仕様はbitwise integer型として使う場合に重要である。
+
+## 10.7 符号のためにlimbを1個余計に使っているか
+
+使っていない。`BigInt`は2の補数limb列ではなく，
+
+```text
+negative_ + magnitude_
+```
+
+というsign-magnitudeである。負数だから最上位へ`0xFFFFFFFF`を延々と並べるような符号拡張はない。
+
+例えば`-1`もmagnitude側は正の`1`と同じ1 limbで，符号は`bool negative_`へ分離される。
+
+ただしC++ objectとしてはalignment/paddingがあるため，「符号は1bitだからコストも1bit」という意味ではない。x86-64 GCCでのv1.5.2参考測定では，
+
+```text
+sizeof(BigUInt) = 24 bytes
+sizeof(BigInt)  = 32 bytes
+```
+
+だった。これはABI依存の参考値であり仕様ではない。重要なのは，余分な**数値limb**を符号用に保持してはいないという点である。
 
 ---
 
@@ -1157,6 +1270,28 @@ exponent += zeros
 
 これは**その値を生成したときの目標有効bit数**として保持されるmetadataであり，normalizeでsignificandの末尾0が消えれば実bit長は小さくなり得る。
 
+## 19.1 `precisionBits`は「そのbit数だけメモリを予約する」という意味ではない
+
+ここは誤解しやすい。
+
+```text
+N[x,10000]
+```
+
+相当の作業で`precisionBits_`が大きくなっても，`BigFloat`が常にそのbit数ぶんの0-filled limb領域を抱えるわけではない。実際のpayloadは`BigInt significand_`であり，canonicalize後に必要なlimbだけを持つ。
+
+例えばexactな`1`は高いprecision metadataを持っていても，significandそのものは`1`で済む。
+
+逆に，非dyadicなRationalをp bitへ丸めれば，通常はp bit前後のsignificandが必要になる。
+
+したがってBigFloatのメモリ量は，概ね
+
+```text
+object fixed cost + significand limb capacity
+```
+
+で決まり，`precisionBits_`の数値だけから一意には決まらない。
+
 ---
 
 # 20. BigFloatの丸めmode
@@ -1470,6 +1605,38 @@ upper = BigFloat::fromRational(x,p,TowardPositive)
 1/3 → non-dyadic  → [lower,upper]
 ```
 
+## 27.2 point intervalですら実装を雑にすると壊れる
+
+`RealInterval::point(x)`は数学的には単に
+
+```text
+[x,x]
+```
+
+である。しかしC++実装ではv1.5.2開発中に，
+
+```cpp
+return RealInterval{value, std::move(value)};
+```
+
+という形がMSVCで問題を露出させた。同一objectを同一初期化式の中でcopyとmoveの双方へ使うと，引数評価順やmove後状態に依存し得る。負値で一方がmove後の0相当になれば，概念的に
+
+```text
+[0, negative]
+```
+
+となり，`lower > upper` invariantを破壊する。
+
+現在は明示的に2端点へcopyしてからmoveする。
+
+```cpp
+BigFloat lower = value;
+BigFloat upper = value;
+return RealInterval{std::move(lower), std::move(upper)};
+```
+
+この一件は，多倍長や区間演算で怖いのは数学式だけではなく，**C++ object lifetimeと評価順も証明の一部**であることを示す好例である。
+
 ---
 
 # 28. RealInterval四則
@@ -1702,6 +1869,26 @@ std::nullopt
 
 これがmmCalの `N[...]` の最終certification条件である。
 
+## 34.1 v1.5.2のcompact decimal表示
+
+内部のcertification metadataと，CLIで人間へ見せる末尾0は同じ情報ではない。v1.5.2ではcertified fixed-digit結果について，冗長な末尾0列を圧縮する。
+
+```text
+1.000000000000 → 1.0
+1.500000000000 → 1.50
+1.230000000000 → 1.230
+```
+
+ただし要求precisionや`certifiedLower/certifiedUpper`は内部に全て残る。したがって表示が`1.0`になっても，「1桁しか計算していない」わけではない。
+
+一方，exact Rationalの有限小数はもともと必要以上に0埋めしない。
+
+```text
+N[1/2,10] → 0.5
+```
+
+これは表示policyであり，exact/approximate semanticsをdecimal literalへ逆輸入しない。mmCalでは`0.5`を再入力すればexact `1/2`であり，表示文字列だけを完全なapproximate round-trip syntaxとはみなしていない。
+
 ---
 
 # 35. `N[...]` までの流れ
@@ -1729,6 +1916,50 @@ DecimalApproximation::fromCertifiedInterval(..., n)
 ```
 
 一方，入力が最初からexact `Number`，つまり整数・有理数・exact複素数なら，一般CertifiedEvaluatorを通さず直接 `DecimalApproximation::fromReal()` で10進化するfast pathがある。
+
+## 35.1 v1.5.2のprecision-aware `N`
+
+一般のscalar式では上記の`CertifiedEvaluator`が中心になる。ただしv1.5.2では，FFTや線形代数のように「exactな巨大中間式を作ってから近似すると本質的に遅い」builtinについて，`N`が要求precisionを**先に**確定してから専用backendへdispatchできる。
+
+概念的には，
+
+```text
+旧: N[fft[data], p]
+      ↓
+    exact Fourier expressionを構築
+      ↓
+    最後に近似
+
+現: N[fft[data], p]
+      ↓
+    pを先に確定
+      ↓
+    ComplexInterval / BigFloat FFTへ直接dispatch
+```
+
+Matrixも同様で，
+
+```text
+N[inverse[A], p]
+N[qrDecomposition[A], p]
+N[svd[A], p]
+N[eigenvalues[A], p]
+```
+
+は，巨大なexact inverseやradical式を一度完成してから数値化する設計ではない。
+
+これはexact-firstと矛盾しない。
+
+```text
+fft[exactData]      → exact path
+N[fft[exactData],p] → certified approximate path
+```
+
+と，呼出し側が`N`で近似を明示しているからである。
+
+### 不連続量は例外
+
+`matrixRank`や`nullSpace`は微小摂動で結果の次元自体が変わる。このためexact入力ならexact eliminationで構造を確定できる場合を優先し，「近いから0」というepsilon判定はしない。precision-awareとは，何でも近似へ落とすことではない。
 
 ---
 
@@ -1857,7 +2088,7 @@ point Rationalだけでなく，`sqrt[2]`を含むような保証区間全体に
 
 大まかには次の通り。threshold以下ではより単純な算法へ戻るため，表は巨大operand側の性格を示す。
 
-| 演算 | v1.5.1の主要算法 | 備考 |
+| 演算 | v1.5.2現在の主要算法 | 備考 |
 |---|---|---|
 | BigUInt add/sub | linear carry/borrow | `O(n)` |
 | BigUInt compare | 上位から比較 | `O(n)` worst |
@@ -1877,47 +2108,120 @@ point Rationalだけでなく，`sqrt[2]`を含むような保証区間全体に
 | exp/log | binary splitting + range reduction | certified interval |
 | trig huge radian | certified argument reduction | Pi enclosureを利用 |
 
-v1.5.1で乗算・除算・10進I/O・主要超越函数の大きなquadratic/逐次bottleneckはかなり緩和した。一方，さらに巨大な整数ではhigher Toom / FFT系，高桁`log`ではbit-burst/AGM系などが次候補になる。
+v1.5.1で導入した乗算・除算・10進I/O・主要超越函数の高速化をv1.5.2でも維持しており，大きなquadratic/逐次bottleneckはかなり緩和されている。一方，さらに巨大な整数ではhigher Toom / FFT系，高桁`log`ではbit-burst/AGM系などが次候補になる。
 
 # 39. メモリとサイズの実際の上限
 
-「任意精度」は数学的に固定桁数を設けていないという意味であり，物理的に無限ではない。
+「任意精度」は数学的に固定桁数を設けていないという意味であり，物理的に無限ではない。さらに，mmCalでは**limbそのものよりC++ objectの固定費が支配する領域**がある。
 
-## BigUInt
+## 39.1 `BigUInt`のpayloadと固定費
 
-```text
-std::vector<uint32_t>
+`BigUInt`は
+
+```cpp
+std::vector<std::uint32_t> limbs_;
 ```
 
-なので，実際の最大長は
+を持つ。したがって実際の最大長は，
 
-- `vector::max_size()`
-- address space
-- available memory
+- `vector::max_size()`，
+- address space，
+- available memory，
+- 各算法の一時buffer，
 
 で制約される。
 
-乗算・左shiftではoverflow前にサイズ検査がある。
+0はempty vectorなのでheap payloadを必要としない。一方，1 limbの小整数でも通常の`std::vector`である以上，非zero payload用heap allocationが発生し得る。
 
-## BigFloat
+また`normalize()`は上位0 limbを`pop_back()`するが，`vector::capacity()`を毎回縮めない。これは高速化には妥当であるが，一度巨大化した長寿命objectが小さくなっても高水位capacityを保持することはある。無条件`shrink_to_fit()`はallocator churnを増やすため，現在は採用していない。
 
-仮数はBigIntだが，指数は `int64_t`。
+## 39.2 BigIntの符号は数値limbを増やさない
 
-したがって指数範囲は有限。
+前述の通りsign-magnitudeなので，負数の符号拡張limbはない。符号のコストはC++ object内の`bool`とpaddingであり，数値桁数に比例して増えるものではない。
 
-要求precisionは `size_t` だが，巨大shiftやdecimal→binary precision変換でoverflowを明示的に検出する。
+## 39.3 BigFloatの指数範囲
 
-## CertifiedEvaluator
+仮数はBigIntだが，指数は`std::int64_t`である。したがって指数範囲は有限であり，overflow/underflowは明示的に検査する。
 
-数値桁数とは別に，病的な深さのASTでC++ call stackを破壊しないため，certified expression depthに96段の安全上限がある。
+`precisionBits`は`std::size_t`だが，巨大shift，precision conversion，allocationには別の現実的上限がある。
 
-これは多倍長値の桁数制限ではなく，式木の深さ制限である。
+## 39.4 x86-64 GCCでの参考`sizeof`
 
----
+以下はv1.5.2 sourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。
+
+| 型 | `sizeof`参考値 | 主な理由 |
+|---|---:|---|
+| `BigUInt` | 24 B | `std::vector<uint32_t>` object |
+| `BigInt` | 32 B | sign + padding + BigUInt |
+| `Rational` | 64 B | BigInt × 2 |
+| `BigFloat` | 48 B | BigInt + exponent + precision |
+| `RealNumber` | 72 B | `variant<BigInt,Rational>` |
+| `Number` | 152 B | real/complex variantの最大payload |
+| `DecimalApproximation` | 248 B | text + metadata + Rational bounds |
+| `ComplexDecimalApproximation` | 536 B | real/imag approximate metadata |
+| `Expr` handle | 16 B | `shared_ptr` |
+| `Expr::Node::Value`相当variant | 544 B | 最大alternativeをinline保持 |
+
+ここから重要なことが分かる。
+
+**「BigIntが符号1bitのために1 limb損している」ことは問題ではない。小さい数でも汎用C++ objectを何層も通る固定費の方が桁違いに大きい。**
+
+## 39.5 `Expr::Node`が巨大dense Arrayで本丸になる理由
+
+現在の`Expr::Node`は，
+
+```cpp
+std::variant<
+    Number,
+    DecimalApproximation,
+    ComplexDecimalApproximation,
+    bool,
+    std::string,
+    Symbol,
+    ArrayExpr,
+    ListExpr,
+    CallExpr,
+    std::shared_ptr<const SolutionSet>>
+```
+
+をinline保持する。`std::variant`は最大alternativeを入れられるだけの領域を全Nodeへ確保するため，小整数`1`のNodeでも`ComplexDecimalApproximation`級の箱を払う。
+
+v1.5.2の1024×1024 dense Matrix監査では，添付形式と同等の10桁Rational Exprを1,048,576個C++から直接構築しただけで最大RSS約0.69 GB，約14.16 MBのテキストをCLIでparseし`dimensions[...]`を求めるだけでは最大RSS約1.99 GBだった。
+
+このため次版ToDoでは，算法block化より前に，
+
+1. `Expr::Node`をkind別typed nodeへ分離し巨大variant固定費を除去する。
+2. BigUInt / BigIntへsmall-object optimizationを検討する。
+3. numeric Array / approximate Matrixへpacked storageを検討する。
+4. 巨大brace literalのparser/lowering allocationを削減する。
+
+という順を候補にしている。
+
+これは多倍長算術の意味論を変える最適化ではなく，**同じ値をもっと薄い器へ入れる**ためのrepresentation refactorである。
+
+## 39.6 なぜBigUInt SBOを先にやらないのか
+
+small-object optimizationで1～2 limb整数のheap allocationを消す価値は高い。しかし1024² Matrixの現状では，1要素あたり数byte～数十byteを節約する前に，数百byte級の`Expr::Node`固定費がある。
+
+したがって費用対効果としては，
+
+```text
+Expr Node fixed cost
+    ↓
+small BigInt allocation
+    ↓
+packed numeric Array
+```
+
+の順に単独benchmarkする方が原因を切り分けやすい。
+
+## 39.7 CertifiedEvaluatorの深さ制限
+
+数値桁数とは別に，病的な深さのASTでC++ call stackを破壊しないため，certified expression depthには安全上限がある。これは多倍長値の桁数制限ではなく，式木評価の安全制限である。
 
 # 40. 採用していない・まだ存在しないもの
 
-v1.5.1では「未実装」と「実装して比較したが棄却」を分ける。
+v1.5.2現在でも「未実装」と「実装して比較したが棄却」を分ける。
 
 ## 40.1 比較したが既定採用しなかったもの
 
@@ -2020,9 +2324,9 @@ v1.5.1では「未実装」と「実装して比較したが棄却」を分け�
 
 ---
 
-# 42. v1.5.1以降の性能候補
+# 42. v1.5.2以降の性能候補
 
-v1.5.1でKaratsuba/Toom-3，専用square，Burnikel–Ziegler，10進D&C，BigFloat exponent-gap fast pathまで導入したため，次の候補は一段上になる。
+v1.5.1でKaratsuba/Toom-3，専用square，Burnikel–Ziegler，10進D&C，BigFloat exponent-gap fast pathまで導入し，v1.5.2でもその基盤を維持しているため，次の候補は一段上になる。
 
 ## 42.1 higher multiplication
 
@@ -2044,6 +2348,19 @@ binary splittingで数千桁は大幅改善したが，さらに高桁では`log
 Gamma / erf等を5000～10000桁まで振り，逐次級数やinterval object生成が新たな崖にならないか`mmCal.Benchmarks`へ追加する。
 
 性能候補は`performance_optimization.ja.md`に採用・棄却理由を残し，threshold変更時は固定seed正当性試験を先に通す。
+
+## 42.5 representation最適化
+
+v1.5.2の大行列監査で，算術algorithmよりrepresentation固定費が先に壁になる領域が確認された。次の候補は，
+
+- `Expr::Node`巨大variantのkind別typed node化，
+- BigUInt / BigInt small-object optimization，
+- numeric Array / approximate Matrix packed storage，
+- 巨大brace parser/loweringのallocation削減，
+
+である。
+
+これらは一括で変更しない。まずNodeだけ，次にBigInt SBOだけ，というように全regressionとRSS benchmarkを固定して採否を測る。
 
 # 43. 実装上の強み
 
@@ -2112,9 +2429,9 @@ TowardPositive
 
 速い結果が正しい証拠にはならない。`mmCal.Benchmarks`はthreshold sweepと固定seedrandom invariantを同じprojectへ置くが，通常のUnit/black-box regressionとは役割を分ける。
 
-# 45. まとめ
+# 45. 既存基盤の要約
 
-v1.5.1の多倍長・保証付き数値基盤は次のように整理できる。
+v1.5.2の多倍長・保証付き数値基盤は次のように整理できる。
 
 ```text
 [ exact integer core ]
@@ -2155,7 +2472,7 @@ sqrt    → exact fixed-point integer root
 
 のように，下位BigIntの高速化を再利用しつつ保証区間へ接続する。
 
-v1.5.1で重要なのは「高速算法を入れたこと」そのものではなく，**採用をbenchmarkで決め，速くならなかった算法は棄却し，Exact/Certifiedの意味論を変えないこと**である。
+v1.5.1～v1.5.2を通して重要なのは「高速算法を入れたこと」そのものではなく，**採用をbenchmarkで決め，速くならなかった算法は棄却し，Exact/Certifiedの意味論を変えないこと**である。
 
 Prime-Swing，binary GCD，workspace化，Toom-3 squareは実際に試したが現環境では採用しなかった。逆にKaratsuba/Toom-3，専用square，Burnikel–Ziegler，decimal D&C，Chudnovsky，binary-splitting exp/logは実測利益と正当性試験の双方を確認して採用した。
 
@@ -2169,3 +2486,136 @@ RealIntervalのoutward containment
 
 の3点である。詳細な採用・棄却履歴と代表benchmarkは`performance_optimization.ja.md`を参照する。
 
+
+# 46. 「自作多倍長」を層ごとに見る
+
+多倍長を1個の巨大classとして実装すると，exact整数，符号，有理約分，丸め，区間保証が混ざる。mmCalは責務を分けている。
+
+```text
+BigUInt
+  「桁列をどう足し，引き，掛け，割るか」
+
+BigInt
+  「符号をどう付けるか」
+
+Rational
+  「分子分母をどうcanonicalに保つか」
+
+BigFloat
+  「有限precisionへどちら向きに丸めるか」
+
+RealInterval
+  「真値を外へ逃がさないか」
+
+DecimalApproximation
+  「保証された内部結果をどう10進表示へ確定するか」
+```
+
+この分離により，例えばKaratsubaをToomへ差し替えても`integrate`や`solve`はlimbを知る必要がない。またBigFloatの高速化をしても，`TowardNegative/TowardPositive`契約を守る限りRealIntervalの証明構造は維持できる。
+
+# 47. 実装者が踏みやすい罠
+
+## 47.1 「任意精度floatだからexact」と思う
+
+誤りである。`BigFloat::fromRational(1/3,p)`は有限dyadicへ丸める。保証が必要なら上下方向へ別々に丸め，intervalにする。
+
+## 47.2 乗算だけ高速化する
+
+巨大整数では，乗算を速くすると次にdivision，GCD，decimal conversionがbottleneckとして現れる。mmCalでもfactorial本体の高速化後，10進表示が支配的になった。
+
+## 47.3 Rationalを毎回`ad+bc / bd`で作る
+
+数学的には正しいが，中間値を巨大化させる。多倍長では「最終値が小さい」ことと「途中も小さい」ことは別問題である。
+
+## 47.4 directed roundingをnearestで代用する
+
+1 ulp内側へ入っただけでinterval certificateが壊れる。高速化のfast pathは，全rounding modeで正しいことを別々に証明する必要がある。
+
+## 47.5 moveを数学的に無害だと思う
+
+`[x,x]`を作るだけでも，同一C++ objectをcopy/move混在させれば評価順差で壊れ得る。数値証明の最下層ではobject lifetimeも正当性の一部である。
+
+## 47.6 benchmarkで速いから採用する
+
+random invariantや境界試験を先に通す。mmCalではPrime-Swing，binary GCD，workspace Karatsuba，Toom-3 squareなどを実装した上で，現backendでは遅かったため採用しなかった。
+
+# 48. コードを読むならこの順
+
+初見で`big_uint.cpp`の5万行級実装へ飛び込むより，次の順が理解しやすい。
+
+1. `numeric/detail/big_uint.hpp` — limb APIとinvariantを見る。
+2. `numeric/big_int.hpp` — sign-magnitudeの薄いwrapperであることを見る。
+3. `numeric/rational.cpp` — cross-cancelとcanonicalizationを見る。
+4. `numeric/big_float.hpp/.cpp` — dyadic表現とrounding modeを見る。
+5. `approximation/real_interval.cpp` — outward roundingがどこで入るかを見る。
+6. `numeric/decimal_approximation.cpp` — 最終10進表示の確定条件を見る。
+7. `approximation/certified_evaluator.cpp` — 式全体をどうinterval化するかを見る。
+8. `builtins/signal_processing.cpp`，`linear_algebra/*` — precision-aware `N`がexact式構築を避ける実例を見る。
+9. `benchmarks/benchmark_main.cpp` — thresholdが理論ではなく実測で決められていることを見る。
+
+# 49. 自作多倍長の設計チェックリスト
+
+mmCal以外で同種の型を書く場合にも使える最低限の確認項目である。
+
+- zero representationは1種類か。
+- negative zeroは残らないか。
+- limbの最大積＋carryが中間型へ収まるか。
+- self-assignment / self-additionで参照無効化しないか。
+- shift量0，limb幅境界，巨大shiftを扱えるか。
+- divisionは`q*d+r==n`とremainder範囲を常に満たすか。
+- signed divisionの丸め方向を仕様化しているか。
+- Rationalは分母正・既約・zero canonicalを維持するか。
+- BigFloatのrounding modeがAPI上明示されているか。
+- nearest-evenのtie判定をexact remainderで行えるか。
+- interval演算は必ず外向き丸めか。
+- 0を含む区間によるdivisionを拒否するか。
+- decimal表示と内部precision metadataを混同していないか。
+- compiler差のある評価順やmove状態へ依存していないか。
+- algorithm thresholdをCPU非依存の数学定数だと思っていないか。
+- 大値だけでなく，小値のobject fixed costも測ったか。
+
+# 50. v1.5.2時点での結論
+
+mmCalの自作多倍長基盤は，
+
+```text
+32bit limb exact integer
+    ↓
+sign-magnitude BigInt
+    ↓
+canonical Rational
+    ↓
+exact dyadic BigFloat + directed rounding
+    ↓
+outward Real/Complex Interval
+    ↓
+certified decimal result
+```
+
+という一貫した層構造になっている。
+
+性能面では，schoolbook/Karatsuba/Toom-3，専用square，Knuth/Burnikel–Ziegler，10進divide-and-conquer，Chudnovsky，binary-splitting exp/logまで入り，単純な「自作BigInt」の域はかなり越えている。
+
+一方，v1.5.2の1024 dense Matrix監査で，次のbottleneckは算術algorithmだけではなく**representation**であることも明確になった。特に`Expr::Node`の巨大variant固定費は，small BigIntの符号やlimbより影響が大きい。
+
+したがって次段の性能改善では，
+
+```text
+意味論を変えない
+    ↓
+器を薄くする
+    ↓
+その後に算法をさらに高度化する
+```
+
+という順が合理的である。
+
+mmCalが守るべき核心は，最後まで次の3点である。
+
+```text
+BigUInt / BigInt のexact arithmetic
+BigFloat の明示的directed rounding
+RealInterval / ComplexInterval のoutward containment
+```
+
+ここを守る限り，内部表現や乗算algorithmは将来いくらでも交換できる。逆に，ここを曖昧にして得た高速化はmmCalの「exact-first，近似は明示的，解らないものは解らないと言う」という設計思想そのものを壊す。

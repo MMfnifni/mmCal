@@ -3,7 +3,7 @@
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Current release: v1.5.1**
+**Current release: v1.5.2**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -22,7 +22,7 @@ mmCalculator（以下mmCal）は，研究・設計・製造などの技術用途
 
 鈍重なシステムとは違い，本ツールは：
 
-> **軽量、そしてすぐに使える — 実務に役立つ実用的なツール**
+> **軽量，そしてすぐに使える — 実務に役立つ実用的なツール**
 
 また一般的な電卓のように入力直後から`double`へ変換せず，必要なときだけ数値近似を求める。
 
@@ -30,85 +30,108 @@ mmCalculator（以下mmCal）は，研究・設計・製造などの技術用途
 ## 細かいことは置いといて実例超特急
 
 ```text
-In[1]> 999999999999999999999999999999^2
+In [1]> 999999999999999999999999999999^2
 Out[1]> 999999999999999999999999999998000000000000000000000000000001
 
-In[2]> 0.1+0.2
+In [2]> 0.1+0.2
 Out[2]> 3/10
 
-In[3]>  0.1+0.2==0.3
+In [3]> 0.1+0.2==0.3
 Out[3]> True
 
-In[4]> 1/3+1/6
+In [4]> 1/3+1/6
 Out[4]> 1/2
 
-In[5]> sqrt[72]
+In [5]> sqrt[72]
 Out[5]> 6sqrt[2]
 
-In[6]> sin[Pi/6]
+In [6]> sin[Pi/6]
 Out[6]> 1/2
 
-In[7]> expand[(x+1)^3]
+In [7]> expand[(x+1)^3]
 Out[7]> x^3+3x^2+3x+1
 
-In[8]> factor[x^2-1]
+In [8]> factor[x^2-1]
 Out[8]> (x-1)(x+1)
 
-In[9]> fullSimplify[(x^2-1)/(x-1),x!=1]
+In [9]> fullSimplify[(x^2-1)/(x-1),x!=1]
 Out[9]> 1+x
 
-In[10]> simplify[sqrt[x^2],element[x,Real]]
+In [10]> simplify[sqrt[x^2],element[x,Real]]
 Out[10]> abs[x]
 
-In[11]> D[exp[x^2],x]
+In [11]> D[exp[x^2],x]
 Out[11]> 2x exp[x^2]
 
-In[12]> integrate[x^2+sin[x],x]
+In [12]> integrate[x^2+sin[x],x]
 Out[12]> x^3/3-cos[x]
 
-In[13]> integrate[sin[x],{x,0,Pi}]
+In [13]> integrate[sin[x],{x,0,Pi}]
 Out[13]> 2
 
-In[14]> limit[(1-cos[x])/x^2,x,0]
+In [14]> limit[(1-cos[x])/x^2,x,0]
 Out[14]> 1/2
 
-In[15]> solve[x^2+1==0,x,Complex]
-Out[15]> {x==I, x==-I}
+In [15]> solve[x^2+1==0,x,Complex]
+Out[15]> {x==I,x==-I}
 
-In[16]> (1+I)/(1-I)
+In [16]> (1+I)/(1-I)
 Out[16]> I
 
-In[17]> sqrt[-8]
+In [17]> sqrt[-8]
 Out[17]> 2I sqrt[2]
 
-In[18]> Pi
-Out[18]> Pi
+In [18]> a:=12
+Out[18]> 12
 
-In[19]> N[%,30]
-Out[19]> 3.141592653589793238462643383280
+In [19]> a^2+1
+Out[19]> 145
 
-In[20]> N[%%%,20]
-Out[20]> 2.82842712474619009760I
+In [20]> @+a
+Out[20]> 157
+
+In [21]> A:={{1,2},{3,4}}
+Out[21]> {{1,2},{3,4}}
+
+In [22]> det[A]
+Out[22]> -2
+
+In [23]> inverse[A]
+Out[23]> {{-2,1},{3/2,-1/2}}
+
+In [24]> solveLinear[A,{5,11}]
+Out[24]> {1,2}
+
+In [25]> dot[A,inverse[A]]
+Out[25]> {{1,0},{0,1}}
+
+In [26]> Pi
+Out[26]> Pi
+
+In [27]> N[%,30]
+Out[27]> 3.141592653589793238462643383280
 ```
 
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
 
-## v1.5.1
+## v1.5.2
 
-v1.5.1は，v1.5.0のexact-first CAS基盤を保ったまま，canonicalization，検証基盤，多倍長整数，高精度数値評価を重点的に固めたreleaseである。
+v1.5.2は，v1.5.1までのexact-first数値基盤を保ったまま，**記号微積分・特殊函数・precision-aware数値評価・Array/線形代数**を一段まとめて拡張したreleaseである。
 
-主な内部改善:
+主な変更:
 
-- BigInt乗算をschoolbook / Karatsuba / Toom-3の適応dispatchへ変更し，専用squareも追加
-- Burnikel–Ziegler除算，2冪除算fast path，divide-and-conquer 10進変換
-- `Pi`をbinary-splitting Chudnovsky，`exp` / `log`をbinary splitting中心のcertified算法へ更新
-- 巨大Radianの三角函数を保証付きargument reductionで高速化
-- BigFloatの極端なexponent gap加減算をdirected roundingを保ったままfast-path化
-- formatter/parser生成型round-trip，積分derivative-back，Reference↔registry照合，極端値近似testを追加
-- `mmCal.Benchmarks`を独立projectとして追加
+- 函数呼び出しを`name[...]`へ一本化し，`()`をgrouping専用に整理
+- `In [n]` / `Out[n]`と`@` / `%`による絶対・相対履歴参照を整理
+- 三角整数冪，逆数冪，product-to-sum，Weierstrass置換，inverse-chain等の積分Knowledgeを拡張
+- `fresnelc/fresnels`，`hypergeometric1F1/2F1`，不完全楕円積分，`Ei/Si/Ci/li/polylog`を追加し，`D`・`integrate`・certified `N`へ接続
+- `N[expr,p]`をprecision-aware化し，FFTやMatrixが巨大exact中間式を作らずBigFloat/interval backendへ直接入れる経路を追加
+- `{...}`を一般brace containerとし，矩形値はdense row-major Arrayへ自動最適化
+- Bareiss fraction-free elimination，`solveLinear`，`nullSpace`，LU，矩形Householder QR，実/複素SVD，Eigen/Schurを追加
+- 大きなdense Matrixをbenchmarkし，1024次では算法以前にExpr/Rationalのstorage・parse memoryが主要課題になることを確認
+- fixed-seed random invariantをMatrix/FFTまで拡張し，正式化時点でinternal **2027 / 2027**，black-box **1504 / 1504** PASS
 
-高速化の採用理由，棄却した算法，代表benchmarkは[`docs/performance_optimization.ja.md`](docs/performance_optimization.ja.md)を参照。
+詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)，高速化の採用・棄却理由と実測値は[`docs/performance_optimization.ja.md`](docs/performance_optimization.ja.md)を参照。
 
 ## 1. まず使う
 
@@ -141,10 +164,10 @@ cmake --build build
 巨大整数・有理数・根号を含む代数的表現・複素数・記号式も可能な限りexactな形を保ち，展開・因数分解・簡約・微分・積分・極限・方程式求解などを同じ式体系上で処理する。
 
 ```text
-In[1]> 1/3
+In [1]> 1/3
 Out[1]> 1/3
 
-In[2]> sqrt[2]
+In [2]> sqrt[2]
 Out[2]> sqrt[2]
 ```
 
@@ -153,10 +176,10 @@ Out[2]> sqrt[2]
 小数値が必要な場合だけ`N[expr,n]`で任意精度の数値近似を要求する。
 
 ```text
-In[3]> N[1/3,20]
+In [3]> N[1/3,20]
 Out[3]> 0.33333333333333333333
 
-In[4]> N[Pi,30]
+In [4]> N[Pi,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
@@ -167,13 +190,13 @@ Out[4]> 3.141592653589793238462643383280
 :fix 6
 Display: Fixed(6)
 
-In[5]> 1/3
+In [5]> 1/3
 Out[5]> 0.333333
 
 :fix off
 Display: Exact
 
-In[6]> Out[5]
+In [6]> Out[5]
 Out[6]> 1/3
 ```
 
@@ -189,16 +212,16 @@ Out[6]> 1/3
 - `rationalize[x]`: 近似値の保証区間からexactな有理数を復元する
 
 ```text
-In[7]> accuracy[N[1/3,20]]
+In [7]> accuracy[N[1/3,20]]
 Out[7]> 20
 
-In[8]> precision[N[1/3,20]]
+In [8]> precision[N[1/3,20]]
 Out[8]> 19
 
-In[9]> rationalize[N[1/3,20]]
+In [9]> rationalize[N[1/3,20]]
 Out[9]> 1/3
 
-In[10]> accuracy[1/3]
+In [10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
@@ -211,7 +234,7 @@ exactな値やexactな記号式は，この意味では`Infinity`を返す。
 
 ## 3. 基本構文
 
-函数呼び出しは**角括弧 `[]` のみ**を使用する。丸括弧 `()` は数式のグルーピング専用であり、函数呼び出しには使用しない。
+函数呼び出しは**角括弧 `[]` のみ**を使用する。丸括弧 `()` は数式のグルーピング専用であり，函数呼び出しには使用しない。
 
 ```text
 sin[Pi/6]
@@ -219,7 +242,7 @@ sqrt[2]
 log[10,1000]
 ```
 
-したがって `sin(Pi/6)` は函数呼び出しではない。既知の函数名に旧 `()` 構文を使った場合はSyntaxErrorとし、`sin[Pi/6]` のように書く。`x(x+1)` のような通常identifierと丸括弧の隣接は暗黙乗算として受理し、Formatterは明確さのため `x*(x+1)` と正規化する。
+したがって `sin(Pi/6)` は函数呼び出しではない。既知の函数名に旧 `()` 構文を使った場合はSyntaxErrorとし，`sin[Pi/6]` のように書く。`x(x+1)` のような通常identifierと丸括弧の隣接は暗黙乗算として受理し，Formatterは明確さのため `x*(x+1)` と正規化する。
 
 四則演算や冪は通常の記法を使う。
 
@@ -282,8 +305,8 @@ sin[Pi/6 Rad]
 x:=2
 -> 2
 
-f(t):=t^2+1
-f(4)
+f[t]:=t^2+1
+f[4]
 -> 17
 ```
 
@@ -325,30 +348,30 @@ Exit[]
 直前の成功結果は`%`，直前の入力式は`@`で参照できる。`%%`，`%%%`はさらに前の成功出力，`@@`，`@@@`はさらに前の入力式を参照する。連続個数に固定上限はない。
 
 ```text
-In[1]> 2+3
+In [1]> 2+3
 Out[1]> 5
 
-In[2]> %*2
+In [2]> %*2
 Out[2]> 10
 
-In[3]> Pi
+In [3]> Pi
 Out[3]> Pi
 
-In[4]> N[@,30]
+In [4]> N[@,30]
 Out[4]> 3.141592653589793238462643383280
 ```
 
-正式な履歴参照は`In[n]` / `Out[n]`で，正の添字は絶対番号，負の添字は相対参照とする。`0`は無効。
+正式な履歴参照は`In [n]` / `Out[n]`で，正の添字は絶対番号，負の添字は相対参照とする。`0`は無効。
 
 ```text
-In[1]
+In [1]
 Out[1]
-In[-1]    // 直前の入力。@ と同義
+In [-1]    // 直前の入力。@ と同義
 Out[-1]   // 直前の成功出力。% と同義
 ```
 
 `Out[n]`は保存済み出力snapshotを返し，再評価しない。負の`Out[-n]`は成功出力だけを数えるため，評価失敗を挟んでも`% == Out[-1]`が成立する。
-`In[n]`は過去のlowered入力式を取得し，**現在の定義環境でもう一度評価する**。負の`In[-n]`は入力slotを数え，`In[-1]` / `@`は直前の入力を再評価する。
+`In [n]`は過去のlowered入力式を取得し，**現在の定義環境でもう一度評価する**。負の`In [-n]`は入力slotを数え，`In [-1]` / `@`は直前の入力を再評価する。
 
 ## 7. 主な数学機能
 
@@ -401,6 +424,38 @@ integrate[1/(1+x^2),{x,0,1}]
 integrate[exp[-x],{x,0,Infinity}]
 -> 1
 ```
+
+v1.5.2では，個別規則の羅列だけでなく三角整数冪の有限Fourier還元，負整数冪のsec/csc reduction，異周波数product-to-sum，bounded Weierstrass置換，inverse-chain候補，二次根号等を共通知識として強化した。積分できない場合も「未実装」「一部のみ解決」「条件不足」「現在の標準函数語彙では既知の有限閉形式なし」を区別してWarningを出し，証明器不足だけを理由に既存のprimitiveを削らない。
+
+### v1.5.2で追加した特殊函数
+
+積分・微分・数値評価を共有するため，次の特殊函数基盤を追加した。
+
+```text
+fresnelc[x]  fresnels[x]
+hypergeometric1F1[a,b,z]
+hypergeometric2F1[a,b,c,z]
+ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
+Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
+```
+
+代表例:
+
+```text
+integrate[exp[x^6],x]
+-> x hypergeometric1F1[1/6,7/6,x^6]
+
+integrate[1/(1+x^5),x]
+-> x hypergeometric2F1[1,1/5,6/5,-x^5]
+
+integrate[sin[x]/x,x] -> Si[x]
+integrate[cos[x]/x,x] -> Ci[x]
+integrate[exp[x]/x,x] -> Ei[x]
+integrate[1/log[x],x] -> li[x]
+integrate[log[1-x]/x,x] -> -polylog[2,x]
+```
+
+一般の特殊函数方程式について逆函数を捏造せず，branchや単射性を証明できない場合は`solve`を未解決のまま保持する。
 
 ### 極限
 
@@ -617,28 +672,27 @@ D N In Out Exit Clear Defs UnDef
 - `docs/roadmap.md` — 現在未実装の主な機能と今後の候補
 - `docs/grammar.ebnf` — 文法の機械可読な概要
 - `docs/multiprecision_implementation.ja.md` — 多倍長整数・任意精度・保証付き評価の実装詳細
-- `docs/performance_optimization.ja.md` — v1.5.1で採用・棄却した高速化と実測根拠
+- `docs/performance_optimization.ja.md` — v1.5.1–v1.5.2で採用・棄却した高速化と実測根拠
 - `CHANGELOG.ja.md` — releaseごとの主要変更
 
-## 14. ライセンス
+## 14. ライセンスと商標
 
-BSD 3-Clause
+ソースコードは**BSD 3-Clause License**で提供する。商用利用，改変，再配布，組込み利用を含む著作権上の許諾条件は`LICENSE`を参照。
 
-Copyright (c) 2021–2026 mmKreutzef
+**mmCalの名称・公式ロゴ等のブランド利用は，ソースコードのライセンスとは別に`TRADEMARKS.md` / `TRADEMARKS.ja.md`で扱う。** 
+独立したGUI，fork，商用製品等を作ること自体を制限するものではなく，第三者製品を公式mmCalそのもの・公式認定品であるかのように表示しないための方針である。
 
-詳細な条件は`LICENSE`を参照。
+- [BSD 3-Clause License](LICENSE)
+- [Trademark and Brand Policy](TRADEMARKS.md)
+- [商標・ブランドポリシー](TRADEMARKS.ja.md)
 
-学術論文や製品等でmmCalを利用した場合，**ライセンス上の追加義務ではないが**，ドキュメントや出版物等で使用した旨を記載していただけると嬉しい。
-お知らせいただければ，さらに喜びます。
-
-また，BSD 3-Clause上は許可されるが，ソースへ別プラットフォームやUIを被せただけの再販は作者が少し萎えます。
-
-何かのソフトウェアの一部として組み込む利用は大歓迎です。
+学術論文や製品等でmmCalを利用した場合，ライセンス上の追加義務ではないが，使用した旨を記載していただけると嬉しい。
 
 ## 15. テスト・制作環境
 
-v1.5.1時点で，本プロジェクトには1691件の内部回帰テストと1337件のブラックボックステストが含まれる。
-exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
+v1.5.2正式化時点で，本プロジェクトには2027件の内部回帰テストと1504件のブラックボックステストが含まれる。
+exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
+さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 
 主なWindows開発環境:
 
@@ -663,7 +717,8 @@ LinuxではGCCおよびClangによるビルド・テストも行っている。
 商業的利用の適合性，特定目的への適合性，非侵害など，明示または黙示の保証は一切ありません。
 著者または著作権者は，契約，不法行為，その他の理由で発生する，または発生したソフトウェアに関連するすべての請求，損害，またはその他の責任に対して，一切責任を負いません。
 
-本ソフトウェアを使用することにより，ソフトウェアの使用に関して発生するすべてのリスクは自己責任であることを認め，自動的に同意したことになります。著者は，データの損失，システムの不具合，その他ソフトウェアの使用によって生じた損害について一切責任を負いません。
+本ソフトウェアを使用することにより，ソフトウェアの使用に関して発生するすべてのリスクは自己責任であることを認め，自動的に同意したことになります。
+著者は，データの損失，システムの不具合，その他ソフトウェアの使用によって生じた損害について一切責任を負いません。
 
 正式な条件および免責事項は`LICENSE`を参照。
 

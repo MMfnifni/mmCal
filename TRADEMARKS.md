@@ -2,7 +2,7 @@
 
 **Version 1.0 — 2026-08-13**
 
-[Japanese](./TRADEMARKS.ja.md)
+[日本語](./TRADEMARKS.ja.md)
 
 > **Short version**
 >
@@ -12,7 +12,7 @@
 >
 > - **Allowed:** `Numerica — a GUI for mmCal`
 > - **Allowed:** `Acme Solver, powered by mmCal`
-> - **Allowed:** `FooMath — based on mmCal 1.5.1`
+> - **Allowed:** `FooMath — based on mmCal 1.5.2`
 > - **Not allowed without permission:** `mmCal GUI`
 > - **Not allowed without permission:** `mmCal Desktop`, `mmCal Pro`, `mmCal Studio`, `mmCal Enterprise`
 > - **Not allowed without permission:** `Official mmCal GUI`
@@ -119,7 +119,7 @@ Examples:
 - `Compatible with mmCal.`
 - `A frontend for mmCal.`
 - `A plugin for mmCal.`
-- `Based on mmCal 1.5.1.`
+- `Based on mmCal 1.5.2.`
 - `Derived from the mmCal source code.`
 - `Includes an unmodified copy of mmCal.`
 - `Supports mmCal expression syntax.`
@@ -286,7 +286,7 @@ The mmCal name may still be used descriptively to explain lineage.
 ### Good examples
 
 - `ExactFox — based on mmCal`
-- `ExactFox, derived from mmCal 1.5.1`
+- `ExactFox, derived from mmCal 1.5.2`
 - `Numerica — built on the mmCal engine`
 - `FooCAS — an mmCal-derived symbolic calculator`
 
@@ -577,14 +577,14 @@ This policy does not require anyone to hide the relationship to mmCal. Accurate 
 
 You may accurately refer to upstream versions:
 
-- `compatible with mmCal 1.5.1`
-- `based on mmCal 1.5.1`
-- `includes mmCal 1.5.1`
-- `forked from mmCal v1.5.1`
+- `compatible with mmCal 1.5.2`
+- `based on mmCal 1.5.2`
+- `includes mmCal 1.5.2`
+- `forked from mmCal v1.5.2`
 
 Do not invent an official-looking mmCal version number for an independent derivative, such as:
 
-- `mmCal 1.5.1 Pro`
+- `mmCal 1.5.2 Pro`
 - `mmCal 2.0 Enterprise`
 
 without written permission.

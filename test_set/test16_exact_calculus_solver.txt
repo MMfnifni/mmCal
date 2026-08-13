@@ -46,7 +46,7 @@ solve[exp[x]==2,x,Real]==>{x==log[2]}
 solve[tanh[x]==1/2,x,Real]==>{x==atanh[1/2]}
 solve[tanh[x]==2,x,Real]==>{}
 
-# Integration Knowledge gap regressions (v1.5.2 development).
+# Integration Knowledge gap regressions (v1.5.2).
 integrate[2*x*(x^2+1)^5,x]==>(1+x^2)^6/6
 integrate[3*x^2*sqrt[x^3+1],x]==>2(1+x^3)^(3/2)/3
 integrate[x*sqrt[x^2+1],x]==>(1+x^2)^(3/2)/3
