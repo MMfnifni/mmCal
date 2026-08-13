@@ -182,6 +182,12 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && !simplify->acceptsArity(3),
         "BuiltinRegistry: simplify accepts optional assumptions");
 
+    const BuiltinDefinition* numericalApproximation = registry.find(
+        builtins::names::numericalApproximation);
+    tests.expect(numericalApproximation
+        && numericalApproximation->argumentEvaluation == ArgumentEvaluation::HoldFirst,
+        "BuiltinRegistry: N holds its expression so precision-aware builtins can see the request");
+
     const BuiltinDefinition* solve = registry.find(builtins::names::solve);
     tests.expect(solve && solve->argumentEvaluation == ArgumentEvaluation::HoldAll
         && solve->acceptsArity(2) && solve->acceptsArity(3)

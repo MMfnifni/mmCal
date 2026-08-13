@@ -324,7 +324,7 @@ Exit[]
 
 ## 6. Input/output history
 
-The most recent successful result can be referenced with `%`, the one before that with `%%`, and earlier results by adding more `%` characters such as `%%%`.
+The most recent successful output is referenced with `%`, while the immediately previous input expression is referenced with `@`. Repeating the shorthand moves further back: `%%` / `%%%` for earlier successful outputs and `@@` / `@@@` for earlier inputs. There is no fixed shorthand depth limit.
 
 ```text
 In[1]> 2+3
@@ -332,17 +332,25 @@ Out[1]> 5
 
 In[2]> %*2
 Out[2]> 10
+
+In[3]> Pi
+Out[3]> Pi
+
+In[4]> N[@,30]
+Out[4]> 3.141592653589793238462643383280
 ```
 
-Absolute indices are also available.
+The formal history interface is `In[n]` / `Out[n]`: positive indices are absolute and negative indices are relative. Zero is invalid.
 
 ```text
 In[1]
 Out[1]
+In[-1]    // previous input; equivalent to @
+Out[-1]   // previous successful output; equivalent to %
 ```
 
-`Out[n]` returns the output stored at that point.
-`In[n]` retrieves the previous input expression and **evaluates it again in the current definition environment**.
+`Out[n]` returns a stored output snapshot without reevaluation. Negative `Out[-n]` counts successful outputs only, so `% == Out[-1]` remains true across failed evaluations.
+`In[n]` retrieves a previous lowered input expression and **evaluates it again in the current definition environment**. Negative `In[-n]` counts input slots, so `In[-1]` / `@` reevaluates the immediately previous input.
 
 ## 7. Main mathematical features
 

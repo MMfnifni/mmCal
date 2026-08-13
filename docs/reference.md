@@ -203,22 +203,40 @@ UnDef[x,y,f]
 
 ## 4.4 History
 
+The shorthand forms are:
+
 ```text
-%
-%%
-%%%
+@       // In[-1]
+@@      // In[-2]
+@@@     // In[-3]
+%       // Out[-1]
+%%      // Out[-2]
+%%%     // Out[-3]
 ```
 
-These reference previous successful outputs, starting with the most recent.
-
-Absolute references use:
+The formal interface is `In[n]` / `Out[n]`. `n > 0` is an absolute prompt index, `n < 0` is relative, and `n = 0` raises TypeError.
 
 ```text
 In[1]
 Out[1]
+In[-1]
+Out[-1]
 ```
 
-`In[n]` retrieves the lowered Expr for input `n` and then **evaluates it normally in the current session environment**. `Out[n]` returns the currently stored output snapshot for successful input `n` without reevaluating it.
+`In[n]` retrieves the lowered Expr for the target input and then **evaluates it normally in the current session environment**. Positive `In[n]` uses an absolute input number. Negative `In[-n]` counts previous input slots while excluding the input currently being evaluated. Therefore `@` / `@@` / `@@@` / ... mean `In[-1]` / `In[-2]` / `In[-3]` / ... respectively, with no fixed shorthand depth limit. An input that reached parse/lower but failed during evaluation can therefore be retried through `In[-1]`; a slot that never produced a lowered Expr is unavailable.
+
+`Out[n]` returns a stored result snapshot without reevaluation. Positive `Out[n]` is indexed by the absolute input number, while negative `Out[-n]` counts **successful outputs only** from the most recent one. Therefore `% == Out[-1]`, `%% == Out[-2]`, `%%% == Out[-3]`, ... remain true even when failed evaluations occur between successful outputs. Repeated `%` also has no fixed shorthand depth limit.
+
+```text
+In[1]> fft[{1,2,3}]
+Out[1]> {6, ...}
+In[2]> N[@,30]
+Out[2]> {6, -1.500000000000000000000000000000+0.866025403784...I, ...}
+```
+
+Here `N[@,30]` does not merely approximate the stored `Out[1]`; it reevaluates the `fft[...]` from `In[1]` inside a 30-digit approximation context.
+
+Absolute-reference example:
 
 ```text
 In[1]> 1+1
@@ -231,9 +249,9 @@ In[4]> In[3]
 Out[4]> 6
 ```
 
-Thus, `In[n]` means "paste the previous input back into the current environment and execute it again." If the previous input contains variable references, assignment, randomness, or other stateful behavior, the current definitions and RNG state are used. This is deliberately separate from merely displaying a raw historical AST. Referring to the input currently being evaluated via `In[n]` is forbidden to prevent self-recursive stack overflow.
+Thus, `In[n]` means "paste the previous input back into the current environment and execute it again." If the previous input contains variable references, assignment, randomness, or other stateful behavior, the current definitions and RNG state are used. This is deliberately separate from displaying a raw historical AST. A positive absolute reference to the input currently being evaluated is forbidden to prevent direct self-recursion.
 
-If evaluation fails but parsing/lowering succeeded, the history slot remains, but no corresponding `Out[n]` exists.
+If evaluation fails but parsing/lowering succeeded, the absolute input slot remains, but no corresponding positive `Out[n]` snapshot exists.
 
 ## 4.5 Comparisons
 
@@ -1040,8 +1058,11 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-Power-of-two FFTs use radix-2 Cooley–Tukey. Non-power-of-two lengths fall back to exact DFT.
-The current implementation is not a machine-number FFT.
+For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey and non-power-of-two lengths fall back to exact DFT. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
+
+`N[fft[v],p]` does not first expand the full exact Fourier expression. `N` propagates the requested precision into the FFT call, which performs butterflies directly on certified `ComplexInterval`/BigFloat endpoints and returns decimal components only after their requested rounding is proven unique. `fft[v]` with approximate operands dispatches to the same backend.
+
+The approximate path uses radix-2 for power-of-two sizes and Bluestein convolution for sufficiently large non-power-of-two sizes. Small non-power-of-two transforms keep direct DFT because its constant factor wins there; the current measured crossover policy uses direct evaluation below 96 points and should be remeasured with `mmCal.Benchmarks` on MSVC.
 
 ---
 # 19. Symbolic and numerical differentiation
@@ -1593,6 +1614,8 @@ N[expr,digits]
 The default is 16 fractional digits.
 `N` applies recursively to Arrays. For explicit angle-unit values such as those returned by `arg`, only the numeric component is approximated and the unit is retained.
 
+Since v1.5.2, `N` is also the entry point for precision-aware evaluation. It resolves the requested precision before evaluating its first argument and keeps that precision context active while the child expression is evaluated. Ordinary builtins still follow exact-first evaluation; only explicitly supported builtins such as FFT consume the context and evaluate directly in a certified approximate domain.
+
 ```text
 N[Pi,20]
 -> 3.14159265358979323846
@@ -1962,7 +1985,7 @@ Out[1]> 1/3
 - Exit is unified under `Exit[]`; bare `exit` / `quit` receive no special treatment
 - `Clear[]`: Remove user definitions and all history, resetting the next input number to 1
 - `Defs[]`, `UnDef[...]`: Inspect and remove user definitions
-- History references `%`, `%%`, ... together with reevaluating `In[n]` and snapshot `Out[n]`
+- History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In[n]` and snapshot `Out[n]`
 
 ## 33.1 `:fix` — presentation-only decimal display
 

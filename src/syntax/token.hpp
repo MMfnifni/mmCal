@@ -31,7 +31,8 @@ enum class TokenKind {
     LBrace,
     RBrace,
     Comma,
-    Percent
+    Percent,
+    At
 };
 
 struct Token final {

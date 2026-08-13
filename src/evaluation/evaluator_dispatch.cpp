@@ -266,10 +266,22 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Fibonacci:
         return builtins::evaluateFibonacci(arguments, registry_);
     case BuiltinId::DiscreteFourierTransform:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateDft(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateDft(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::FastFourierTransform:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateFft(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateFft(arguments, registry_, mathematics_, angleSemantics_, fourierTransformCache_);
     case BuiltinId::InverseFourierTransform:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateIfft(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateIfft(arguments, registry_, mathematics_, angleSemantics_, fourierTransformCache_);
     case BuiltinId::Convolution:
         return builtins::evaluateConvolution(arguments, registry_, mathematics_, angleSemantics_);
@@ -508,7 +520,8 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Exp:
         return builtins::evaluateExp(arguments, registry_, mathematics_);
     case BuiltinId::NumericalApproximation:
-        return evaluateNumericalApproximation(call, arguments);
+        error::throwCalcError(error::CalcErrorType::Internal,
+            "N must be evaluated through the precision-aware evaluation path");
     case BuiltinId::Precision: {
         const auto* infinity = symbolRegistry_.find("Infinity");
         if (!infinity)
@@ -705,9 +718,9 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::History:
         return evaluateHistory(arguments);
     case BuiltinId::InputHistory:
-        return evaluateAbsoluteHistory(arguments, true);
+        return evaluateIndexedHistory(arguments, true);
     case BuiltinId::OutputHistory:
-        return evaluateAbsoluteHistory(arguments, false);
+        return evaluateIndexedHistory(arguments, false);
     case BuiltinId::Exit:
         if (context_ && context_->exitRequested)
             *context_->exitRequested = true;

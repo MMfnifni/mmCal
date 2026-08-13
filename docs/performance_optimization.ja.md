@@ -399,6 +399,43 @@ process-globalにはせずSymbol/session lifetimeを安全に保つ。
 
 ---
 
+# 15.5. precision-aware `N` と certified FFT
+
+## 旧経路 — exact FFT完成後に`N`を適用
+
+従来の`N`は引数を通常評価してから呼ばれていたため、
+
+```text
+N[fft[data],16]
+```
+
+でもまず巨大なexact Fourier式を構築し、その後に各成分を近似していた。FFT本体が`Expr`のexact multiply/add/Simplifierをbutterflyごとに通るため、近似値しか要らない場合にもsymbolic costを全額支払っていた。
+
+## precision-aware evaluation — 採用
+
+`N`の第1引数を保持し、precisionを先に確定する。FFT dispatch時にprecision contextが存在すれば、`double`ではなく`ComplexInterval`/BigFloat端点で直接transformする。exactな`fft[...]`の経路は変更しない。
+
+代表benchmark（同一GCC Release環境、16 fractional digits）:
+
+```text
+32 points   exact ~11.6 ms   certified ~2.7 ms
+64 points   exact ~63.5 ms   certified ~6.2 ms
+128 points  exact ~327.6 ms  certified ~13.1 ms
+```
+
+非2冪のcertified FFTではdirect DFTとBluesteinを比較し、65点ではdirectが約60 ms、127点ではBluesteinが約199 msでdirect約217 msを上回った。現在は96点未満をdirect、それ以上をBluesteinへ送る。これは数学定数ではなく現benchmark環境のpolicy値なので、MSVCでは再測定する。
+
+採用理由:
+
+- exact-first APIを維持したまま近似要求だけを高速化できる
+- machine `double`を導入せず任意精度・外向き丸めを維持できる
+- `N`のprecision伝播は将来ほかの高cost builtinにも再利用できる
+- 非2冪のO(N^2)崖をapproximate pathではBluesteinで回避できる
+
+exact FFT自体のsymbolic expression explosionは別問題であり、この変更では意図的に残している。
+
+---
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1でVisual Studio solutionへ独立Console projectとして追加した。
@@ -420,6 +457,8 @@ mmCal.Benchmarks
 - factorial benchmark
 - decimal parse/toString benchmark
 - high-precision `Pi/exp/log` benchmark
+- exact/certified FFT benchmark + direct/Bluestein crossover
+- fixed-seed certified FFT round-trip invariant
 
 実行例:
 

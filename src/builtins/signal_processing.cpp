@@ -1,10 +1,16 @@
 // DFT・FFT・畳み込み
 #include "signal_processing.hpp"
 
+#include "approximation/certification_error.hpp"
+#include "approximation/certified_evaluator.hpp"
+#include "approximation/certified_trigonometry.hpp"
+#include "approximation/complex_interval.hpp"
 #include "builtins/exact_operations.hpp"
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/complex_decimal_approximation.hpp"
+#include "numeric/decimal_approximation.hpp"
 #include "numeric/number.hpp"
 
 #include <algorithm>
@@ -248,6 +254,433 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return data;
 }
 
+[[nodiscard]] Expr vectorExpr(std::vector<Expr> elements);
+
+[[nodiscard]] std::size_t nextGuardDigits(std::size_t current) {
+    const std::size_t growth = std::max<std::size_t>(8, current / 2);
+    if (growth > std::numeric_limits<std::size_t>::max() - current)
+        throw std::overflow_error("Fourier approximation precision is too large");
+    return current + growth;
+}
+
+[[nodiscard]] approximation::RealInterval intervalFromDecimal(
+    const numeric::DecimalApproximation& value,
+    std::size_t precisionBits) {
+    return approximation::RealInterval::fromRationalBounds(
+        value.certifiedLower(), value.certifiedUpper(), precisionBits);
+}
+
+[[nodiscard]] std::optional<approximation::ComplexInterval> approximateInput(
+    const Expr& expression,
+    std::size_t precisionBits,
+    const approximation::CertifiedEvaluator& certified) {
+    if (expression.isDecimalApproximation())
+        return approximation::ComplexInterval::fromReal(
+            intervalFromDecimal(expression.asDecimalApproximation(), precisionBits));
+
+    if (expression.isComplexDecimalApproximation()) {
+        const auto& value = expression.asComplexDecimalApproximation();
+        return approximation::ComplexInterval{
+            intervalFromDecimal(value.real(), precisionBits),
+            intervalFromDecimal(value.imaginary(), precisionBits)};
+    }
+
+    const auto enclosed = certified.enclose(expression, precisionBits);
+    if (!enclosed)
+        return std::nullopt;
+    return enclosed->toComplex();
+}
+
+[[nodiscard]] approximation::ComplexInterval exactComplexRational(
+    const Rational& real,
+    const Rational& imaginary,
+    std::size_t precisionBits) {
+    return approximation::ComplexInterval{
+        approximation::RealInterval::fromRational(real, precisionBits),
+        approximation::RealInterval::fromRational(imaginary, precisionBits)};
+}
+
+[[nodiscard]] std::optional<approximation::ComplexInterval> exactQuarterTurnRoot(
+    std::size_t exponent,
+    std::size_t length,
+    bool inverse,
+    std::size_t precisionBits) {
+    if (length == 0 || exponent > std::numeric_limits<std::size_t>::max() / 4)
+        return std::nullopt;
+    const std::size_t scaled = exponent * 4;
+    if (scaled % length != 0)
+        return std::nullopt;
+
+    std::size_t quarter = (scaled / length) & 3U;
+    if (!inverse && quarter != 0)
+        quarter = (4 - quarter) & 3U;
+    switch (quarter) {
+    case 0: return exactComplexRational(Rational{BigInt{1}}, Rational{}, precisionBits);
+    case 1: return exactComplexRational(Rational{}, Rational{BigInt{1}}, precisionBits);
+    case 2: return exactComplexRational(Rational{BigInt{-1}}, Rational{}, precisionBits);
+    case 3: return exactComplexRational(Rational{}, Rational{BigInt{-1}}, precisionBits);
+    default: return std::nullopt;
+    }
+}
+
+[[nodiscard]] approximation::ComplexInterval approximatePrimitiveRoot(
+    std::size_t length,
+    bool inverse,
+    std::size_t precisionBits) {
+    // radix-2の最初の二段は根が有理複素数なので、Pi/trig区間へ落とさずexact pointを使う。
+    // これによりN[fft[{1,2,3,4}],p]でも整数・Gaussian integer成分を従来どおり最小表記で保てる。
+    if (length == 2)
+        return exactComplexRational(Rational{BigInt{-1}}, Rational{}, precisionBits);
+    if (length == 4)
+        return exactComplexRational(
+            Rational{}, Rational{BigInt{inverse ? 1 : -1}}, precisionBits);
+
+    Rational turns{BigInt{1}, sizeInteger(length)};
+    if (!inverse)
+        turns = -turns;
+    return approximation::ComplexInterval{
+        approximation::encloseCosTurns(turns, precisionBits).interval,
+        approximation::encloseSinTurns(turns, precisionBits).interval};
+}
+
+[[nodiscard]] std::vector<approximation::ComplexInterval> approximateDirectTransform(
+    const std::vector<approximation::ComplexInterval>& input,
+    bool inverse,
+    std::size_t precisionBits) {
+    const std::size_t n = input.size();
+    if (n == 0)
+        return {};
+
+    const auto one = exactComplexRational(Rational{BigInt{1}}, Rational{}, precisionBits);
+    const auto primitive = approximatePrimitiveRoot(n, inverse, precisionBits);
+    std::vector<approximation::ComplexInterval> roots;
+    roots.reserve(n);
+    roots.push_back(one);
+    for (std::size_t i = 1; i < n; ++i) {
+        if (const auto exact = exactQuarterTurnRoot(i, n, inverse, precisionBits))
+            roots.push_back(*exact);
+        else
+            roots.push_back(approximation::multiply(roots.back(), primitive, precisionBits));
+    }
+
+    std::vector<approximation::ComplexInterval> output;
+    output.reserve(n);
+    for (std::size_t k = 0; k < n; ++k) {
+        approximation::ComplexInterval sum = exactComplexRational(Rational{}, Rational{}, precisionBits);
+        std::size_t rootIndex = 0;
+        for (std::size_t j = 0; j < n; ++j) {
+            sum = approximation::add(sum,
+                approximation::multiply(input[j], roots[rootIndex], precisionBits),
+                precisionBits);
+            if (j + 1 < n && k != 0) {
+                if (rootIndex >= n - k)
+                    rootIndex -= n - k;
+                else
+                    rootIndex += k;
+            }
+        }
+        if (inverse) {
+            const auto scale = approximation::ComplexInterval::fromReal(
+                approximation::RealInterval::fromRational(
+                    Rational{BigInt{1}, sizeInteger(n)}, precisionBits));
+            sum = approximation::multiply(sum, scale, precisionBits);
+        }
+        output.push_back(std::move(sum));
+    }
+    return output;
+}
+
+[[nodiscard]] std::vector<std::size_t> bitReversedIndices(std::size_t n) {
+    std::vector<std::size_t> result(n);
+    for (std::size_t i = 0, j = 0; i < n; ++i) {
+        result[i] = j;
+        if (i + 1 == n)
+            break;
+        std::size_t bit = n >> 1;
+        while ((j & bit) != 0) {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+    }
+    return result;
+}
+
+[[nodiscard]] std::vector<approximation::ComplexInterval> approximateRadix2PowerOfTwo(
+    const std::vector<approximation::ComplexInterval>& input,
+    bool inverse,
+    std::size_t precisionBits) {
+    const std::size_t n = input.size();
+    if (n == 0)
+        return {};
+    if (!isPowerOfTwo(n))
+        throw std::invalid_argument("Radix-2 Fourier backend requires a power-of-two length");
+
+    const std::vector<std::size_t> bitReversed = bitReversedIndices(n);
+    const auto zero = exactComplexRational(Rational{}, Rational{}, precisionBits);
+    std::vector<approximation::ComplexInterval> data(n, zero);
+    for (std::size_t i = 0; i < n; ++i)
+        data[bitReversed[i]] = input[i];
+
+    for (std::size_t length = 2; length <= n; length <<= 1) {
+        const std::size_t half = length >> 1;
+        const auto primitive = approximatePrimitiveRoot(length, inverse, precisionBits);
+        std::vector<approximation::ComplexInterval> roots;
+        roots.reserve(half);
+        roots.push_back(exactComplexRational(Rational{BigInt{1}}, Rational{}, precisionBits));
+        for (std::size_t j = 1; j < half; ++j) {
+            if (const auto exact = exactQuarterTurnRoot(j, length, inverse, precisionBits))
+                roots.push_back(*exact);
+            else
+                roots.push_back(approximation::multiply(roots.back(), primitive, precisionBits));
+        }
+
+        for (std::size_t block = 0; block < n; block += length) {
+            for (std::size_t j = 0; j < half; ++j) {
+                const auto even = data[block + j];
+                const auto odd = approximation::multiply(
+                    data[block + j + half], roots[j], precisionBits);
+                data[block + j] = approximation::add(even, odd, precisionBits);
+                data[block + j + half] = approximation::subtract(even, odd, precisionBits);
+            }
+        }
+        if (length == n)
+            break;
+    }
+
+    if (inverse) {
+        const auto scale = approximation::ComplexInterval::fromReal(
+            approximation::RealInterval::fromRational(
+                Rational{BigInt{1}, sizeInteger(n)}, precisionBits));
+        for (auto& value : data)
+            value = approximation::multiply(value, scale, precisionBits);
+    }
+    return data;
+}
+
+[[nodiscard]] approximation::ComplexInterval conjugate(
+    const approximation::ComplexInterval& value) {
+    return approximation::ComplexInterval{
+        value.real(), approximation::negate(value.imaginary())};
+}
+
+[[nodiscard]] approximation::ComplexInterval approximateTurnRoot(
+    const Rational& turns,
+    std::size_t precisionBits) {
+    return approximation::ComplexInterval{
+        approximation::encloseCosTurns(turns, precisionBits).interval,
+        approximation::encloseSinTurns(turns, precisionBits).interval};
+}
+
+[[nodiscard]] std::vector<approximation::ComplexInterval> approximateChirp(
+    std::size_t n,
+    bool inverse,
+    std::size_t precisionBits) {
+    if (n == 0)
+        return {};
+
+    // c_k = exp(sign*pi*i*k^2/n)。各kでtrigを再評価せず、
+    // c_{k+1}/c_k = exp(sign*pi*i*(2k+1)/n) をさらに一定比で更新する。
+    // これによりBluestein用chirp生成のtranscendental評価は2回だけで済む。
+    BigInt sign{inverse ? 1 : -1};
+    const BigInt denominator = sizeInteger(n);
+    const Rational initialTurns{sign, denominator * BigInt{2}};
+    const Rational ratioStepTurns{sign, denominator};
+    approximation::ComplexInterval ratio = approximateTurnRoot(initialTurns, precisionBits);
+    const approximation::ComplexInterval ratioStep = approximateTurnRoot(
+        ratioStepTurns, precisionBits);
+
+    std::vector<approximation::ComplexInterval> chirp;
+    chirp.reserve(n);
+    chirp.push_back(exactComplexRational(Rational{BigInt{1}}, Rational{}, precisionBits));
+    for (std::size_t k = 1; k < n; ++k) {
+        chirp.push_back(approximation::multiply(chirp.back(), ratio, precisionBits));
+        ratio = approximation::multiply(ratio, ratioStep, precisionBits);
+    }
+    return chirp;
+}
+
+[[nodiscard]] std::size_t convolutionLength(std::size_t n) {
+    if (n == 0)
+        return 0;
+    const std::size_t maximumInput = std::numeric_limits<std::size_t>::max() / 2 + 1;
+    if (n > maximumInput)
+        throw std::overflow_error("Fourier transform size is too large");
+    const std::size_t required = n * 2 - 1;
+    std::size_t length = 1;
+    while (length < required) {
+        if (length > std::numeric_limits<std::size_t>::max() / 2)
+            throw std::overflow_error("Fourier convolution size is too large");
+        length <<= 1;
+    }
+    return length;
+}
+
+[[nodiscard]] std::vector<approximation::ComplexInterval> approximateBluesteinTransform(
+    const std::vector<approximation::ComplexInterval>& input,
+    bool inverse,
+    std::size_t precisionBits) {
+    const std::size_t n = input.size();
+    if (n == 0)
+        return {};
+
+    const std::size_t m = convolutionLength(n);
+    const auto zero = exactComplexRational(Rational{}, Rational{}, precisionBits);
+    const std::vector<approximation::ComplexInterval> chirp = approximateChirp(
+        n, inverse, precisionBits);
+
+    std::vector<approximation::ComplexInterval> a(m, zero);
+    std::vector<approximation::ComplexInterval> b(m, zero);
+    for (std::size_t k = 0; k < n; ++k) {
+        a[k] = approximation::multiply(input[k], chirp[k], precisionBits);
+        const auto opposite = conjugate(chirp[k]);
+        b[k] = opposite;
+        if (k != 0)
+            b[m - k] = opposite;
+    }
+
+    auto spectrumA = approximateRadix2PowerOfTwo(a, false, precisionBits);
+    auto spectrumB = approximateRadix2PowerOfTwo(b, false, precisionBits);
+    for (std::size_t k = 0; k < m; ++k)
+        spectrumA[k] = approximation::multiply(
+            spectrumA[k], spectrumB[k], precisionBits);
+    auto convolution = approximateRadix2PowerOfTwo(spectrumA, true, precisionBits);
+
+    std::vector<approximation::ComplexInterval> output;
+    output.reserve(n);
+    for (std::size_t k = 0; k < n; ++k)
+        output.push_back(approximation::multiply(
+            convolution[k], chirp[k], precisionBits));
+
+    if (inverse) {
+        const auto scale = approximation::ComplexInterval::fromReal(
+            approximation::RealInterval::fromRational(
+                Rational{BigInt{1}, sizeInteger(n)}, precisionBits));
+        for (auto& value : output)
+            value = approximation::multiply(value, scale, precisionBits);
+    }
+    return output;
+}
+
+[[nodiscard]] std::vector<approximation::ComplexInterval> approximateFastTransform(
+    const std::vector<approximation::ComplexInterval>& input,
+    bool inverse,
+    std::size_t precisionBits) {
+    if (isPowerOfTwo(input.size()))
+        return approximateRadix2PowerOfTwo(input, inverse, precisionBits);
+
+    // ごく小さい非2冪は直接DFTの方が定数項が小さい。それ以上はBluesteinで
+    // O(N^2) fallbackを避け、次の2冪長のconvolutionへ還元する。
+    // 現benchmarkでは60点級までは直接DFTの方が軽く、127点ではBluesteinが逆転した。
+    // 境界近傍の余裕を見て96未満をdirectとし、MSVCではBenchmarksで再測定可能にする。
+    if (input.size() < 96)
+        return approximateDirectTransform(input, inverse, precisionBits);
+    return approximateBluesteinTransform(input, inverse, precisionBits);
+}
+
+[[nodiscard]] bool exactZero(const approximation::RealInterval& value) noexcept {
+    return value.isPoint() && value.lower().isZero();
+}
+
+[[nodiscard]] std::optional<Expr> decimalExpression(
+    const approximation::ComplexInterval& value,
+    std::size_t fractionalDigits) {
+    // 区間演算の結果が厳密な一点へ潰れた成分は、従来のN[exact,n]と同じ最小10進表記を使う。
+    // 例えばDFTのDC成分6を6.000...へ不必要に固定桁化しない。
+    if (value.real().isPoint() && value.imaginary().isPoint()) {
+        const auto real = numeric::DecimalApproximation::fromReal(
+            numeric::RealNumber{value.real().lower().toRational()}, fractionalDigits);
+        const auto imaginary = numeric::DecimalApproximation::fromReal(
+            numeric::RealNumber{value.imaginary().lower().toRational()}, fractionalDigits);
+        if (exactZero(value.imaginary()))
+            return Expr{real};
+        return Expr{numeric::ComplexDecimalApproximation::fromComponents(
+            real, imaginary, exactZero(value.real()), false)};
+    }
+
+    const auto real = numeric::DecimalApproximation::fromCertifiedInterval(
+        value.real().lower().toRational(), value.real().upper().toRational(), fractionalDigits);
+    const auto imaginary = numeric::DecimalApproximation::fromCertifiedInterval(
+        value.imaginary().lower().toRational(), value.imaginary().upper().toRational(), fractionalDigits);
+    if (!real || !imaginary)
+        return std::nullopt;
+
+    if (exactZero(value.imaginary()))
+        return Expr{*real};
+    return Expr{numeric::ComplexDecimalApproximation::fromComponents(
+        *real, *imaginary, exactZero(value.real()), false)};
+}
+
+[[nodiscard]] std::optional<approximation::ApproximationContext> inferredApproximationContext(
+    const std::vector<Expr>& input) {
+    std::optional<std::size_t> digits;
+    for (const Expr& value : input) {
+        std::optional<std::size_t> current;
+        if (value.isDecimalApproximation())
+            current = value.asDecimalApproximation().requestedFractionalDigits();
+        else if (value.isComplexDecimalApproximation()) {
+            const auto& complex = value.asComplexDecimalApproximation();
+            current = std::min(
+                complex.real().requestedFractionalDigits(),
+                complex.imaginary().requestedFractionalDigits());
+        }
+
+        if (current)
+            digits = digits ? std::min(*digits, *current) : current;
+    }
+    if (!digits || *digits == 0)
+        return std::nullopt;
+    return approximation::ApproximationContext{*digits};
+}
+
+template <class Transform>
+[[nodiscard]] std::optional<Expr> approximateTransform(
+    std::span<const Expr> arguments,
+    std::string_view name,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context,
+    Transform&& transform) {
+    requireArity(arguments, 1, name);
+    const std::vector<Expr> inputExpressions = vectorArgument(arguments.front(), name);
+    approximation::CertifiedEvaluator certified{registry, mathematics, angles};
+
+    for (;;) {
+        const std::size_t bits = context.workingBinaryBits();
+        try {
+            std::vector<approximation::ComplexInterval> input;
+            input.reserve(inputExpressions.size());
+            for (const Expr& expression : inputExpressions) {
+                const auto value = approximateInput(expression, bits, certified);
+                if (!value)
+                    return std::nullopt;
+                input.push_back(*value);
+            }
+
+            const auto transformed = transform(input, bits);
+            std::vector<Expr> output;
+            output.reserve(transformed.size());
+            bool rounded = true;
+            for (const auto& value : transformed) {
+                const auto decimal = decimalExpression(value, context.decimalDigits());
+                if (!decimal) {
+                    rounded = false;
+                    break;
+                }
+                output.push_back(*decimal);
+            }
+            if (rounded)
+                return vectorExpr(std::move(output));
+        }
+        catch (const approximation::PrecisionInsufficient&) {
+            // 現作業精度では象限や丸めを証明できない。guardを増やして同じ式を再評価する。
+        }
+
+        context.setGuardDigits(nextGuardDigits(context.guardDigits()));
+    }
+}
+
 [[nodiscard]] Expr vectorExpr(std::vector<Expr> elements) {
     const std::size_t count = elements.size();
     return Expr::array({count}, std::move(elements));
@@ -273,8 +706,12 @@ Expr evaluateDft(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::dft);
-    return vectorExpr(directTransform(
-        vectorArgument(arguments.front(), names::dft), false, registry, mathematics, angles));
+    const std::vector<Expr> input = vectorArgument(arguments.front(), names::dft);
+    if (const auto context = inferredApproximationContext(input))
+        if (const auto result = evaluateApproximateDft(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+    return vectorExpr(directTransform(input, false, registry, mathematics, angles));
 }
 
 Expr evaluateFft(
@@ -284,9 +721,13 @@ Expr evaluateFft(
     const mathematics::AngleSemantics& angles,
     FourierTransformCache& cache) {
     requireArity(arguments, 1, names::fft);
+    const std::vector<Expr> input = vectorArgument(arguments.front(), names::fft);
+    if (const auto context = inferredApproximationContext(input))
+        if (const auto result = evaluateApproximateFft(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
     return vectorExpr(radix2Transform(
-        vectorArgument(arguments.front(), names::fft), false,
-        registry, mathematics, angles, cache));
+        input, false, registry, mathematics, angles, cache));
 }
 
 Expr evaluateIfft(
@@ -296,9 +737,49 @@ Expr evaluateIfft(
     const mathematics::AngleSemantics& angles,
     FourierTransformCache& cache) {
     requireArity(arguments, 1, names::ifft);
+    const std::vector<Expr> input = vectorArgument(arguments.front(), names::ifft);
+    if (const auto context = inferredApproximationContext(input))
+        if (const auto result = evaluateApproximateIfft(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
     return vectorExpr(radix2Transform(
-        vectorArgument(arguments.front(), names::ifft), true,
-        registry, mathematics, angles, cache));
+        input, true, registry, mathematics, angles, cache));
+}
+
+std::optional<Expr> evaluateApproximateDft(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return approximateTransform(arguments, names::dft, registry, mathematics, angles,
+        std::move(context), [](const auto& input, std::size_t bits) {
+            return approximateDirectTransform(input, false, bits);
+        });
+}
+
+std::optional<Expr> evaluateApproximateFft(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return approximateTransform(arguments, names::fft, registry, mathematics, angles,
+        std::move(context), [](const auto& input, std::size_t bits) {
+            return approximateFastTransform(input, false, bits);
+        });
+}
+
+std::optional<Expr> evaluateApproximateIfft(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return approximateTransform(arguments, names::ifft, registry, mathematics, angles,
+        std::move(context), [](const auto& input, std::size_t bits) {
+            return approximateFastTransform(input, true, bits);
+        });
 }
 
 Expr evaluateConvolution(

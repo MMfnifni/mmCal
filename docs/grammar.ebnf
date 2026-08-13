@@ -40,7 +40,7 @@ Primary        ::= number
                  | IdentifierExpr
                  | Group ;
 
-HistoryRef     ::= "%" , { "%" } ;
+HistoryRef     ::= "%" , { "%" } | "@" , { "@" } ;
 ArrayLiteral   ::= "{" , [ Assignment , { "," , Assignment } ] , "}" ;
 IdentifierExpr ::= identifier , [ CallSuffix ] ;
 CallSuffix     ::= "[" , [ Assignment , { "," , Assignment } ] , "]" ;

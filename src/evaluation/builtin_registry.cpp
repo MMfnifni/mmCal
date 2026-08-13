@@ -249,7 +249,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
 
     // 近似・式変形・Solver。
     range(builtins::names::numericalApproximation, BuiltinId::NumericalApproximation, 1, 2,
-        ArgumentEvaluation::All, true),
+        ArgumentEvaluation::HoldFirst, true),
     fixed(builtins::names::precision, BuiltinId::Precision, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::accuracy, BuiltinId::Accuracy, 1, ArgumentEvaluation::All, true),
     range(builtins::names::rationalize, BuiltinId::Rationalize, 1, 2, ArgumentEvaluation::All, true),

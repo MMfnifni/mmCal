@@ -9,6 +9,7 @@
 #include "evaluation/iterator_spec.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "simplification/simplifier.hpp"
 
 #include <algorithm>
@@ -69,6 +70,18 @@ struct EnterUserFunctionTask final {
 
 struct FinishUserFunctionTask final {};
 
+// N[...] は第1引数を先にexact評価しない。precisionだけを確定してから子式を評価し、
+// precision-aware builtinへ要求精度を伝播した後、最後に従来どおりcertified decimalへ落とす。
+struct BeginNumericalApproximationTask final {
+    expression::Expr expression;
+    const expression::OriginMap* origins = nullptr;
+    std::size_t childDepth = 1;
+};
+
+struct FinishNumericalApproximationTask final {
+    std::size_t fractionalDigits = approximation::ApproximationContext::defaultDecimalDigits;
+};
+
 using EvaluationTask = std::variant<
     EvaluateTask,
     PushResultTask,
@@ -77,7 +90,9 @@ using EvaluationTask = std::variant<
     DispatchBuiltinTask,
     IfConditionTask,
     EnterUserFunctionTask,
-    FinishUserFunctionTask>;
+    FinishUserFunctionTask,
+    BeginNumericalApproximationTask,
+    FinishNumericalApproximationTask>;
 
 struct TaskSource final {
     const expression::Expr* expression = nullptr;
@@ -106,6 +121,9 @@ Overloaded(Ts...) -> Overloaded<Ts...>;
             return TaskSource{&value.expression, value.origins};
         },
         [](const EnterUserFunctionTask& value) noexcept {
+            return TaskSource{&value.expression, value.origins};
+        },
+        [](const BeginNumericalApproximationTask& value) noexcept {
             return TaskSource{&value.expression, value.origins};
         },
         [](const auto&) noexcept {
@@ -188,6 +206,28 @@ void scheduleIteratorSpecArgument(
     return message;
 }
 
+struct HistoryIndex final {
+    bool relative = false;
+    std::size_t magnitude = 0;
+};
+
+[[nodiscard]] std::optional<HistoryIndex> historyIndexValue(
+    const expression::Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+
+    const numeric::BigInt& value = expression.asNumber().asReal().asInteger();
+    if (value.isZero())
+        return std::nullopt;
+
+    const auto magnitude = numeric::tryToUint64(value.abs());
+    if (!magnitude || *magnitude > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+
+    return HistoryIndex{value.isNegative(), static_cast<std::size_t>(*magnitude)};
+}
+
 [[nodiscard]] std::optional<std::size_t> positiveSizeValue(
     const expression::Expr& expression) {
     if (!expression.isNumber() || !expression.asNumber().isReal()
@@ -248,6 +288,35 @@ void scheduleIteratorSpecArgument(
         *imaginary,
         intervalIsExactZero(complex.real()),
         intervalIsExactZero(complex.imaginary()))};
+}
+
+[[nodiscard]] numeric::DecimalApproximation reduceApproximationDigits(
+    const numeric::DecimalApproximation& value,
+    std::size_t fractionalDigits) {
+    if (fractionalDigits >= value.requestedFractionalDigits())
+        return value;
+
+    // exact point由来なら従来の有限小数最小表記を維持する。
+    if (value.enclosureIsPoint())
+        return numeric::DecimalApproximation::fromReal(
+            numeric::RealNumber{value.certifiedLower()}, fractionalDigits);
+
+    if (const auto rounded = numeric::DecimalApproximation::fromCertifiedInterval(
+        value.certifiedLower(), value.certifiedUpper(), fractionalDigits))
+        return *rounded;
+
+    // 元の保証区間が粗く、より低い桁への丸め境界を跨ぐ特殊caseでは、
+    // 情報を捨てて誤った桁へ丸めず既存の近似値を保持する。
+    return value;
+}
+
+[[nodiscard]] expression::Expr reduceApproximationDigits(
+    const numeric::ComplexDecimalApproximation& value,
+    std::size_t fractionalDigits) {
+    const auto real = reduceApproximationDigits(value.real(), fractionalDigits);
+    const auto imaginary = reduceApproximationDigits(value.imaginary(), fractionalDigits);
+    return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
+        real, imaginary, value.realExactlyZero(), value.imaginaryExactlyZero())};
 }
 
 [[nodiscard]] bool isBooleanExpression(const expression::Expr& expression) {
@@ -323,6 +392,7 @@ expression::Expr Evaluator::evaluateMachine(
     origins_ = origins;
     resolvingSymbols_.clear();
     activeUserFunctions_.clear();
+    approximationContexts_.clear();
 
     std::vector<EvaluationTask> tasks;
     std::vector<expression::Expr> results;
@@ -335,6 +405,7 @@ expression::Expr Evaluator::evaluateMachine(
             environment_.popScope();
         resolvingSymbols_.clear();
         activeUserFunctions_.clear();
+        approximationContexts_.clear();
         origins_ = nullptr;
         context_ = nullptr;
     };
@@ -420,6 +491,23 @@ expression::Expr Evaluator::evaluateMachine(
                                         current.origins,
                                         current.depth + 1
                                     });
+                                    return;
+                                }
+
+                                // Nだけは値を先にexact評価すると、FFT等が巨大なexact中間式を構築した後でしか
+                                // 近似要求を知れない。第1引数を保持し、precisionを先に評価してから子式へ伝播する。
+                                if (definition->id == BuiltinId::NumericalApproximation) {
+                                    tasks.emplace_back(BeginNumericalApproximationTask{
+                                        current.expression,
+                                        current.origins,
+                                        current.depth + 1
+                                    });
+                                    if (call.arguments.size() == 2)
+                                        tasks.emplace_back(EvaluateTask{
+                                            call.arguments[1],
+                                            current.origins,
+                                            current.depth + 1
+                                        });
                                     return;
                                 }
 
@@ -641,6 +729,49 @@ expression::Expr Evaluator::evaluateMachine(
 
                         environment_.popScope();
                         activeUserFunctions_.pop_back();
+                    },
+                    [&](const BeginNumericalApproximationTask& current) {
+                        constexpr std::size_t defaultFractionalDigits = 16;
+                        const expression::CallExpr& call = current.expression.asCall();
+                        std::size_t fractionalDigits = defaultFractionalDigits;
+
+                        if (call.arguments.size() == 2) {
+                            std::vector<expression::Expr> precisionResult = takeResults(results, 1);
+                            const auto requestedDigits = positiveSizeValue(precisionResult.front());
+                            if (!requestedDigits) {
+                                if (const auto origin = current.origins
+                                    ? current.origins->find(call.arguments[1])
+                                    : std::nullopt)
+                                    error::throwCalcError(
+                                        error::CalcErrorType::Type,
+                                        "N precision must be a positive integer",
+                                        *origin);
+                                error::throwCalcError(
+                                    error::CalcErrorType::Type,
+                                    "N precision must be a positive integer");
+                            }
+                            fractionalDigits = *requestedDigits;
+                        }
+
+                        approximationContexts_.emplace_back(fractionalDigits);
+                        tasks.emplace_back(FinishNumericalApproximationTask{fractionalDigits});
+                        tasks.emplace_back(EvaluateTask{
+                            call.arguments.front(),
+                            current.origins,
+                            current.childDepth
+                        });
+                    },
+                    [&](const FinishNumericalApproximationTask& current) {
+                        if (approximationContexts_.empty())
+                            error::throwCalcError(
+                                error::CalcErrorType::Internal,
+                                "Numerical approximation context stack is inconsistent");
+
+                        std::vector<expression::Expr> valueResult = takeResults(results, 1);
+                        expression::Expr approximated = finalizeNumericalApproximation(
+                            valueResult.front(), current.fractionalDigits);
+                        approximationContexts_.pop_back();
+                        results.push_back(std::move(approximated));
                     }
                 }, task);
             }
@@ -822,30 +953,63 @@ expression::Expr Evaluator::evaluateHistory(
     return context_->history[context_->history.size() - *depth];
 }
 
-expression::Expr Evaluator::evaluateAbsoluteHistory(
+expression::Expr Evaluator::evaluateIndexedHistory(
     std::span<const expression::Expr> arguments,
     bool input) {
-    const auto number = positiveSizeValue(arguments.front());
-    if (!number)
+    const auto index = historyIndexValue(arguments.front());
+    if (!index)
         error::throwCalcError(
             error::CalcErrorType::Type,
-            input ? "In index must be a positive integer" : "Out index must be a positive integer");
+            input ? "In index must be a non-zero integer" : "Out index must be a non-zero integer");
 
     if (!context_)
         error::throwCalcError(error::CalcErrorType::Evaluation, "Session history is not available");
 
+    if (index->relative) {
+        // In[-n]は入力履歴そのものを相対参照する。現在評価中の入力slotは除外するため、
+        // In[-1] / @ は必ず直前の入力を指す。評価失敗した入力でもlower済みExprがあれば再評価できる。
+        if (input) {
+            const std::size_t previousInputCount = context_->inputs.empty()
+                ? 0
+                : context_->inputs.size() - 1;
+            if (index->magnitude > previousInputCount)
+                error::throwCalcError(
+                    error::CalcErrorType::Evaluation,
+                    "Input entry is not available at relative index -"
+                        + std::to_string(index->magnitude));
+
+            const std::size_t entryIndex = previousInputCount - index->magnitude;
+            if (!context_->inputs[entryIndex])
+                error::throwCalcError(
+                    error::CalcErrorType::Evaluation,
+                    "Input entry is not available at relative index -"
+                        + std::to_string(index->magnitude));
+            return *context_->inputs[entryIndex];
+        }
+
+        // Out[-n]は%/%%と同じく「成功した出力」の相対履歴を参照する。
+        // これにより評価失敗した入力slotを挟んでも % == Out[-1] が常に成立する。
+        if (index->magnitude > context_->history.size())
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "Output entry is not available at relative index -"
+                    + std::to_string(index->magnitude));
+        return context_->history[context_->history.size() - index->magnitude];
+    }
+
+    const std::size_t number = index->magnitude;
     const auto& entries = input ? context_->inputs : context_->outputs;
-    if (input && *number == context_->inputs.size()
-        && *number <= context_->outputs.size() && !context_->outputs[*number - 1])
+    if (input && number == context_->inputs.size()
+        && number <= context_->outputs.size() && !context_->outputs[number - 1])
         error::throwCalcError(
             error::CalcErrorType::Evaluation,
             "In cannot reference the input currently being evaluated");
-    if (*number > entries.size() || !entries[*number - 1])
+    if (number > entries.size() || !entries[number - 1])
         error::throwCalcError(
             error::CalcErrorType::Evaluation,
             std::string{input ? "Input" : "Output"} + " entry is not available at index "
-                + std::to_string(*number));
-    return *entries[*number - 1];
+                + std::to_string(number));
+    return *entries[number - 1];
 }
 
 void Evaluator::emitWarning(std::string_view code, std::string message) {
@@ -924,34 +1088,22 @@ expression::Expr Evaluator::evaluateUndefine(std::span<const expression::Expr> a
     return expression::Expr{numeric::Number{numeric::BigInt::parse(std::to_string(changed))}};
 }
 
-expression::Expr Evaluator::evaluateNumericalApproximation(
-    const expression::CallExpr& call,
-    std::span<const expression::Expr> arguments) {
-    constexpr std::size_t defaultFractionalDigits = 16;
-    std::size_t fractionalDigits = defaultFractionalDigits;
-
-    if (arguments.size() == 2) {
-        const auto requestedDigits = positiveSizeValue(arguments[1]);
-        if (!requestedDigits) {
-            if (const auto origin = originOf(call.arguments[1]))
-                error::throwCalcError(
-                    error::CalcErrorType::Type,
-                    "N precision must be a positive integer",
-                    *origin);
-            error::throwCalcError(
-                error::CalcErrorType::Type,
-                "N precision must be a positive integer");
-        }
-
-        fractionalDigits = *requestedDigits;
-    }
-
-    const expression::Expr& value = arguments.front();
-
+expression::Expr Evaluator::finalizeNumericalApproximation(
+    const expression::Expr& value,
+    std::size_t fractionalDigits) {
     // Nはscalarだけでなく配列へも要素単位に作用する。
     // FFT/行列等のexact配列を表示用近似へ落とす際に、各builtinが独自のdigits引数を持つ必要をなくす。
     std::function<expression::Expr(const expression::Expr&)> approximate;
     approximate = [&](const expression::Expr& current) -> expression::Expr {
+        // precision-aware builtinが既に近似値を返した場合、外側Nがより低い桁を要求するなら
+        // certified enclosureから安全に丸め直す。より高い桁は元情報以上に増やせないため保持する。
+        if (current.isDecimalApproximation())
+            return expression::Expr{reduceApproximationDigits(
+                current.asDecimalApproximation(), fractionalDigits)};
+        if (current.isComplexDecimalApproximation())
+            return reduceApproximationDigits(
+                current.asComplexDecimalApproximation(), fractionalDigits);
+
         if (current.isArray()) {
             const auto& array = current.asArray();
             std::vector<expression::Expr> elements;
@@ -1012,6 +1164,10 @@ expression::Expr Evaluator::evaluateNumericalApproximation(
     };
 
     return approximate(value);
+}
+
+const approximation::ApproximationContext* Evaluator::currentApproximationContext() const noexcept {
+    return approximationContexts_.empty() ? nullptr : &approximationContexts_.back();
 }
 
 std::optional<source::SourceReference> Evaluator::originOf(

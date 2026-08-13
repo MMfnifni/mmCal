@@ -153,7 +153,9 @@ void runLowererTests(TestRunner& tests) {
     tests.expectEqual(lowerAndFormat("1 < x <= 3"), std::string{"And[1<x, x<=3]"},
         "comparison chain lowers without losing operands");
     tests.expectEqual(lowerAndFormat("%%"), std::string{"%%"},
-        "history reference depth is preserved");
+        "output history reference depth is preserved");
+    tests.expectEqual(lowerAndFormat("@"), std::string{"In[-1]"},
+        "input history shorthand lowers to the formal relative reference");
     tests.expectEqual(lowerAndFormat("30deg"), std::string{"30 deg"},
         "unit suffix is represented explicitly");
     tests.expectEqual(lowerAndFormat("\"a\\nb\""), std::string{"\"a\\nb\""},

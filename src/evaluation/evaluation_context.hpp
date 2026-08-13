@@ -13,9 +13,10 @@ namespace mmcal::evaluation {
 // 1回の評価要求にだけ属する外部状態をまとめる。
 // Evaluator本体の永続状態(Environment/registry等)と、履歴・diagnostic・session flagを分離する。
 struct EvaluationContext final {
-    // % / %% 用。従来互換として成功した出力だけを相対順に保持する。
+    // % / %% と Out[-n] 用。成功した出力だけを相対順に保持する。
     std::span<const expression::Expr> history;
-    // In[n] / Out[n] 用。index n-1 が画面上の絶対入力番号nに対応する。
+    // 正の In[n] / Out[n] 用。index n-1 が画面上の絶対入力番号nに対応する。
+    // 負のIn参照は現在入力slotを除いたinputsから相対参照する。
     std::span<const std::optional<expression::Expr>> inputs;
     std::span<const std::optional<expression::Expr>> outputs;
     std::vector<EvaluationDiagnostic>* diagnostics = nullptr;

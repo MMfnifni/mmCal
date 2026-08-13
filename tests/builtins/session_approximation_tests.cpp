@@ -100,6 +100,13 @@ void runSessionApproximationTests(TestRunner& tests) {
         "approximation reports conservative relative decimal digits");
     tests.expectEqual(eval(approximation, "rationalize[N[1/3,20]]"), std::string{"1/3"},
         "rationalize recovers a rational from a certified point enclosure");
+    tests.expectEqual(eval(approximation, "N[N[1/3,20],10]"),
+        std::string{"0.3333333333"},
+        "outer N can safely reduce the requested digits of an existing approximation");
+    tests.expectEqual(eval(approximation, "N[N[1/3,10],20]"),
+        std::string{"0.3333333333"},
+        "outer N never invents precision beyond an existing approximation");
+
     tests.expectEqual(eval(approximation, "rationalize[N[1/3,20],0]"),
         std::string{"33333333333333333333/100000000000000000000"},
         "zero-tolerance rationalize preserves the displayed decimal exactly");

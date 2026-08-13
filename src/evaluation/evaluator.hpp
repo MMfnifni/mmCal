@@ -1,6 +1,7 @@
 #pragma once
 
 #include "builtin_registry.hpp"
+#include "approximation/approximation_context.hpp"
 #include "builtins/signal_processing.hpp"
 #include "environment.hpp"
 #include "evaluation_context.hpp"
@@ -70,6 +71,9 @@ private:
     std::size_t depthLimit_ = 1024;
     std::vector<expression::Symbol> resolvingSymbols_;
     std::vector<ActiveUserFunctionFrame> activeUserFunctions_;
+    // N[...] の評価中だけ有効な要求精度スタック。
+    // 外側のexact評価規則は変えず、FFT等のprecision-aware builtinだけがこの情報を参照する。
+    std::vector<approximation::ApproximationContext> approximationContexts_;
 
     [[nodiscard]] expression::Expr evaluateMachine(
         const expression::Expr& expression,
@@ -87,7 +91,7 @@ private:
         std::span<const expression::Expr> arguments);
     [[nodiscard]] expression::Expr evaluateHistory(
         std::span<const expression::Expr> arguments);
-    [[nodiscard]] expression::Expr evaluateAbsoluteHistory(
+    [[nodiscard]] expression::Expr evaluateIndexedHistory(
         std::span<const expression::Expr> arguments,
         bool input);
     [[nodiscard]] expression::Expr evaluateDefinitions() const;
@@ -95,9 +99,10 @@ private:
     void emitWarning(std::string_view code, std::string message);
     void emitInfo(std::string_view code, std::string message,
         std::optional<expression::Expr> previousExpression = std::nullopt);
-    [[nodiscard]] expression::Expr evaluateNumericalApproximation(
-        const expression::CallExpr& call,
-        std::span<const expression::Expr> arguments);
+    [[nodiscard]] expression::Expr finalizeNumericalApproximation(
+        const expression::Expr& value,
+        std::size_t fractionalDigits);
+    [[nodiscard]] const approximation::ApproximationContext* currentApproximationContext() const noexcept;
     [[nodiscard]] std::optional<source::SourceReference> originOf(
         const expression::Expr& expression) const;
 };

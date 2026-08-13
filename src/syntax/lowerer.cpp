@@ -273,11 +273,17 @@ Expr Lowerer::lowerNode(
             return lowerString(*string, node.span);
         if (const auto* identifier = std::get_if<IdentifierSyntax>(&node.data))
             return lowerIdentifier(*identifier);
-        if (const auto* history = std::get_if<HistoryReferenceSyntax>(&node.data))
+        if (const auto* history = std::get_if<HistoryReferenceSyntax>(&node.data)) {
+            if (history->kind == HistoryReferenceKind::Input)
+                return callExpr(
+                    symbolTable_,
+                    builtins::names::inputHistory,
+                    {integerExpr(-static_cast<std::int64_t>(history->depth))});
             return callExpr(
                 symbolTable_,
                 builtins::names::history,
                 {integerExpr(static_cast<std::int64_t>(history->depth))});
+        }
         if (const auto* array = std::get_if<ArrayLiteralSyntax>(&node.data))
             return lowerArray(*array, node.span, origins);
         if (const auto* call = std::get_if<CallSyntax>(&node.data))

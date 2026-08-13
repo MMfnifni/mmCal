@@ -260,6 +260,43 @@ Exact radix-2 transforms cache size-dependent bit-reversal and twiddle informati
 
 ---
 
+# 15.5. Precision-aware `N` and certified FFT
+
+## Old path — construct exact FFT first, approximate afterward
+
+Previously `N` received already-evaluated arguments, so
+
+```text
+N[fft[data],16]
+```
+
+first built the complete exact Fourier expression and only then approximated its components. Each butterfly therefore paid the full generic `Expr` multiply/add/simplification cost even when the caller only wanted decimal output.
+
+## Precision-aware evaluation — selected
+
+`N` now holds its first argument, resolves the requested precision first, and keeps a precision context active while evaluating the child expression. FFT consumes that context and performs the transform directly on certified `ComplexInterval`/BigFloat endpoints. Ordinary exact `fft[...]` is unchanged, and no machine `double` backend is introduced.
+
+Representative benchmark in the same GCC Release environment at 16 fractional digits:
+
+```text
+32 points   exact ~11.6 ms   certified ~2.7 ms
+64 points   exact ~63.5 ms   certified ~6.2 ms
+128 points  exact ~327.6 ms  certified ~13.1 ms
+```
+
+For non-power-of-two certified transforms, direct DFT and Bluestein were measured against each other. Around 65 points direct evaluation remains about 60 ms, while at 127 points Bluestein is about 199 ms versus about 217 ms direct. The current policy therefore keeps direct evaluation below 96 points and uses Bluestein above it. This is a measured implementation threshold, not a mathematical constant, and should be remeasured on MSVC.
+
+Why selected:
+
+- preserves the exact-first public API while accelerating explicit approximation;
+- keeps arbitrary precision and outward rounding without introducing machine `double`;
+- makes precision propagation reusable by other expensive builtins;
+- removes the approximate-path O(N^2) cliff for larger non-power-of-two sizes.
+
+Exact symbolic FFT expression growth is a separate problem and is intentionally not changed here.
+
+---
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1 adds a separate console project to the Visual Studio solution:
@@ -281,7 +318,9 @@ It includes:
 - certified `log(x)+log(1/x)` invariants;
 - multiplication/square/division threshold benchmarks;
 - factorial and decimal I/O benchmarks;
-- high-precision `Pi/exp/log` benchmarks.
+- high-precision `Pi/exp/log` benchmarks;
+- exact/certified FFT benchmarks and direct/Bluestein crossover measurements;
+- fixed-seed certified FFT round-trip invariants.
 
 Modes:
 

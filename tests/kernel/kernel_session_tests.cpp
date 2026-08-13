@@ -393,6 +393,41 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: resolves multi-depth history");
     tests.expectEqual(evaluateAndFormat(historySession, "% + 5"), std::string{"15"},
         "KernelSession: uses history inside expressions");
+    tests.expectEqual(evaluateAndFormat(historySession, "Out[-2]"), std::string{"10"},
+        "KernelSession: resolves negative output history");
+
+    kernel::KernelSession relativeInputSession;
+    static_cast<void>(relativeInputSession.evaluate("7*8"));
+    tests.expectEqual(evaluateAndFormat(relativeInputSession, "In[-1]"), std::string{"56"},
+        "KernelSession: negative input history re-evaluates previous input");
+
+    kernel::KernelSession atHistorySession;
+    static_cast<void>(atHistorySession.evaluate("7*8"));
+    static_cast<void>(atHistorySession.evaluate("3+4"));
+    static_cast<void>(atHistorySession.evaluate("2^5"));
+    tests.expectEqual(evaluateAndFormat(atHistorySession, "@"), std::string{"32"},
+        "KernelSession: at shorthand resolves previous input");
+
+    kernel::KernelSession repeatedAtHistorySession;
+    static_cast<void>(repeatedAtHistorySession.evaluate("7*8"));
+    static_cast<void>(repeatedAtHistorySession.evaluate("3+4"));
+    static_cast<void>(repeatedAtHistorySession.evaluate("2^5"));
+    tests.expectEqual(evaluateAndFormat(repeatedAtHistorySession, "@@"), std::string{"7"},
+        "KernelSession: repeated at shorthand resolves older input");
+
+    kernel::KernelSession deepAtHistorySession;
+    static_cast<void>(deepAtHistorySession.evaluate("7*8"));
+    static_cast<void>(deepAtHistorySession.evaluate("3+4"));
+    static_cast<void>(deepAtHistorySession.evaluate("2^5"));
+    tests.expectEqual(evaluateAndFormat(deepAtHistorySession, "@@@"), std::string{"56"},
+        "KernelSession: repeated at shorthand depth matches In[-n]");
+
+    kernel::KernelSession deepPercentHistorySession;
+    static_cast<void>(deepPercentHistorySession.evaluate("7*8"));
+    static_cast<void>(deepPercentHistorySession.evaluate("3+4"));
+    static_cast<void>(deepPercentHistorySession.evaluate("2^5"));
+    tests.expectEqual(evaluateAndFormat(deepPercentHistorySession, "%%%"), std::string{"56"},
+        "KernelSession: repeated percent shorthand resolves older output");
 
     kernel::KernelSession emptyHistory;
     const error::CalcError historyError = evaluateError(emptyHistory, "%");

@@ -55,6 +55,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
         return ",";
     case TokenKind::Percent:
         return "%";
+    case TokenKind::At:
+        return "@";
     }
 
     return "token";

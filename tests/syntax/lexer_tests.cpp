@@ -71,6 +71,14 @@ void runLexerTests(TestRunner& tests) {
         "lexer separates e/E identifiers from numbers when no decimal exponent follows");
 
     tests.expect(
+        tokenKinds("@+%") == std::vector<TokenKind>{
+            TokenKind::At,
+            TokenKind::Plus,
+            TokenKind::Percent,
+            TokenKind::End},
+        "lexer tokenizes input/output history shorthands");
+
+    tests.expect(
         tokenKinds("a<=b!=c==d>=e") == std::vector<TokenKind>{
             TokenKind::Identifier,
             TokenKind::LessEqual,

@@ -56,6 +56,7 @@ private:
     [[nodiscard]] SyntaxNodePtr parsePrimary();
     [[nodiscard]] SyntaxNodePtr parseArray();
     [[nodiscard]] SyntaxNodePtr parseHistoryReference();
+    [[nodiscard]] SyntaxNodePtr parseInputHistoryReference();
     [[nodiscard]] SyntaxNodePtr parseIdentifierOrCall();
     [[nodiscard]] SyntaxNodePtr parseGroup();
 

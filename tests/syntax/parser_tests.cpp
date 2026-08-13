@@ -86,6 +86,15 @@ void runParserTests(TestRunner& tests) {
     }
 
     {
+        const auto tree = parse("@");
+        const auto* history = std::get_if<syntax::HistoryReferenceSyntax>(&tree.root().data);
+        tests.expect(
+            history && history->kind == syntax::HistoryReferenceKind::Input
+                && history->depth == 1,
+            "parser recognizes previous-input shorthand");
+    }
+
+    {
         const auto tree = parse("{1, {2, 3}}");
         tests.expect(
             std::holds_alternative<syntax::ArrayLiteralSyntax>(tree.root().data),
@@ -94,6 +103,14 @@ void runParserTests(TestRunner& tests) {
             "parser stores source span on root");
     }
 
+    {
+        const auto tree = parse("@@@");
+        const auto* history = std::get_if<syntax::HistoryReferenceSyntax>(&tree.root().data);
+        tests.expect(
+            history && history->kind == syntax::HistoryReferenceKind::Input
+                && history->depth == 3,
+            "parser recognizes multi-depth input-history shorthand");
+    }
     tests.expectThrows<error::CalcError>(
         [] { static_cast<void>(parse("[1 + 2]")); },
         "parser rejects square bracket grouping");

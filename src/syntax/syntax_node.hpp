@@ -52,7 +52,13 @@ struct IdentifierSyntax final {
     std::string name;
 };
 
+enum class HistoryReferenceKind {
+    Input,
+    Output
+};
+
 struct HistoryReferenceSyntax final {
+    HistoryReferenceKind kind = HistoryReferenceKind::Output;
     std::size_t depth = 1;
 };
 

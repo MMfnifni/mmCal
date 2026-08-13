@@ -203,22 +203,40 @@ UnDef[x,y,f]
 
 ## 4.4 履歴
 
+短縮記法は次のとおり。
+
 ```text
-%
-%%
-%%%
+@       // In[-1]
+@@      // In[-2]
+@@@     // In[-3]
+%       // Out[-1]
+%%      // Out[-2]
+%%%     // Out[-3]
 ```
 
-成功した出力を直前から参照する。
-
-絶対番号では次を使う。
+正式な参照は`In[n]` / `Out[n]`を使う。`n > 0`は画面上の絶対入力番号，`n < 0`は相対参照，`n = 0`はTypeErrorとする。
 
 ```text
 In[1]
 Out[1]
+In[-1]
+Out[-1]
 ```
 
-`In[n]`は入力nのlowered Exprを取得した後、**現在のsession環境で通常評価する**。`Out[n]`は入力nが成功した現在の保存済み出力snapshotを返し、再評価しない。
+`In[n]`は対象入力のlowered Exprを取得した後，**現在のsession環境で通常評価する**。正の`In[n]`は絶対入力番号，負の`In[-n]`は現在評価中の入力slotを除いて過去の入力slotを数える。したがって`@` / `@@` / `@@@` / ... はそれぞれ`In[-1]` / `In[-2]` / `In[-3]` / ... を意味する。連続個数に固定上限はない。評価エラーになった入力でもparse/lowerまで成功していれば`In[-1]`で再評価できる。parse/lowerできなかったslotには参照できない。
+
+`Out[n]`は保存済み結果snapshotを返し，再評価しない。正の`Out[n]`は絶対入力番号に対応するsnapshot，負の`Out[-n]`は**成功した出力だけ**を直前から数える。このため評価失敗を挟んでも常に`% == Out[-1]`，`%% == Out[-2]`，`%%% == Out[-3]`，... となる。`%`も連続個数に固定上限はない。
+
+```text
+In[1]> fft[{1,2,3}]
+Out[1]> {6, ...}
+In[2]> N[@,30]
+Out[2]> {6, -1.500000000000000000000000000000+0.866025403784...I, ...}
+```
+
+上の`N[@,30]`では，`Out[1]`を後から30桁化するのではなく，`In[1]`の`fft[...]`を30桁のapproximation contextで再評価できる。
+
+絶対参照の例：
 
 ```text
 In[1]> 1+1
@@ -231,9 +249,9 @@ In[4]> In[3]
 Out[4]> 6
 ```
 
-したがって`In[n]`は「過去入力を現在環境へ貼り戻して再実行する」意味である。過去入力が変数参照・代入・乱数等を含めば現在の定義やRNG stateを使う。生の入力ASTを表示する用途とは分離する。現在評価中の入力自身を`In[n]`で参照することは禁止し、自己再帰によるstack overflowを防ぐ。
+したがって`In[n]`は「過去入力を現在環境へ貼り戻して再実行する」意味である。過去入力が変数参照・代入・乱数等を含めば現在の定義やRNG stateを使う。生の入力ASTを表示する用途とは分離する。正の添字で現在評価中の入力自身を参照することは禁止し，自己再帰によるstack overflowを防ぐ。
 
-評価エラーになった入力でもparse/lowerまで成功していれば履歴slot自体は残るが、対応する`Out[n]`は存在しない。
+評価エラーになった入力でもparse/lowerまで成功していれば絶対入力slot自体は残るが，対応する正の`Out[n]`は存在しない。
 
 ## 4.5 比較
 
@@ -1040,8 +1058,11 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-2冪長FFTはradix-2 Cooley–Tukey。非2冪長はexact DFTへfallback。
-現在はmachine FFTではない。
+exact入力では2冪長FFTはradix-2 Cooley–Tukey、非2冪長はexact DFTへfallbackする。通常の`fft[...]`は引き続きexact-firstであり、machine `double`へ暗黙変換しない。
+
+`N[fft[v],p]`では`N`が第1引数を先にexact展開せず、要求精度`p`をFFTへ伝播する。FFT側は`ComplexInterval`/BigFloat端点で直接butterflyを行い、各出力成分が要求桁へ一意に丸められることを証明してから`DecimalApproximation`を返す。近似入力を含む`fft[v]`も同じbackendへdispatchする。
+
+近似FFTでは2冪長をradix-2、十分大きい非2冪長をBluestein convolutionへ還元する。小さい非2冪はdirect DFTの定数項が小さいため、現在のbenchmarkでは96点未満をdirectとしている。この閾値はMSVC環境で`mmCal.Benchmarks`から再測定する前提の実装値である。
 
 ---
 
@@ -1610,6 +1631,8 @@ N[expr,digits]
 既定は16 fractional digits。
 Arrayへ再帰的に適用できるほか、`arg`などが返す明示角度単位では値の部分だけを近似し、単位は保持する。
 
+v1.5.2では`N`をprecision-aware evaluationの入口として扱う。第2引数の要求精度を先に確定し、第1引数の評価中はそのprecision contextを保持する。通常builtinは従来どおりexact評価され、FFTなど明示的に対応したbuiltinだけが要求精度を受け取って直接certified backendへ降りる。したがってexact-firstの意味論を全体へ暗黙に変更しない。
+
 ```text
 N[Pi,20]
 -> 3.14159265358979323846
@@ -1979,7 +2002,7 @@ Out[1]> 1/3
 - 終了は`Exit[]`に一本化。裸の`exit` / `quit`特別扱いはない
 - `Clear[]`: user definitionsと全履歴を消し、次の入力番号を1へ戻す
 - `Defs[]`, `UnDef[...]`: user definitionsの確認・削除
-- 計算履歴 `%`, `%%`, ... および再評価型`In[n]`, snapshot型`Out[n]`
+- 計算履歴 `@`, `%`, `%%`, ... および正負添字を持つ再評価型`In[n]`, snapshot型`Out[n]`
 
 ## 33.1 `:fix` — presentation-only小数表示
 

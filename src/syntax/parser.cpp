@@ -282,6 +282,8 @@ SyntaxNodePtr Parser::parsePrimary() {
 
     if (check(TokenKind::Percent))
         return parseHistoryReference();
+    if (check(TokenKind::At))
+        return parseInputHistoryReference();
     if (check(TokenKind::LBrace))
         return parseArray();
     if (check(TokenKind::Identifier))
@@ -324,7 +326,18 @@ SyntaxNodePtr Parser::parseHistoryReference() {
 
     return makeSyntaxNode(
         source::SourceSpan{first.span.begin, previous().span.end},
-        HistoryReferenceSyntax{depth});
+        HistoryReferenceSyntax{HistoryReferenceKind::Output, depth});
+}
+
+SyntaxNodePtr Parser::parseInputHistoryReference() {
+    const Token first = consume(TokenKind::At, "Expected '@'");
+    std::size_t depth = 1;
+    while (match(TokenKind::At))
+        ++depth;
+
+    return makeSyntaxNode(
+        source::SourceSpan{first.span.begin, previous().span.end},
+        HistoryReferenceSyntax{HistoryReferenceKind::Input, depth});
 }
 
 SyntaxNodePtr Parser::parseIdentifierOrCall() {
@@ -377,6 +390,7 @@ bool Parser::canStartImplicitFactor() const noexcept {
     case TokenKind::Identifier:
     case TokenKind::LParen:
     case TokenKind::Percent:
+    case TokenKind::At:
         return true;
     default:
         return false;

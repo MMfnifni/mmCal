@@ -102,6 +102,9 @@ std::vector<Token> Lexer::tokenize() {
         case '%':
             tokens.push_back(makeToken(TokenKind::Percent, begin));
             break;
+        case '@':
+            tokens.push_back(makeToken(TokenKind::At, begin));
+            break;
         case ':':
             if (current() != '=')
                 error::throwCalcError(

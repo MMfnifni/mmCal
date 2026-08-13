@@ -52,9 +52,11 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 任意精度作業値と区間演算を使い、必要桁が保証できる数値近似を生成する。`Pi`はbinary-splitting Chudnovsky，`exp/log`はbinary splittingと保証付きrange reduction，巨大Radianの三角函数はPi保証区間によるargument reductionを使う。深すぎるASTはOSのstack overflowへ到達する前に拒否する。
 
+v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく、明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず、`ComplexInterval`上のradix-2/Bluestein backendへ降りる。
+
 ### `evaluation`
 
-Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参照、診断を統合する。評価器は深い通常式でC++再帰stackを消費しにくい明示task-stack方式を維持する。
+Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参照、診断を統合する。評価器は深い通常式でC++再帰stackを消費しにくい明示task-stack方式を維持する。`N`は特殊taskとして第1引数を保持し、precisionを先に確定してから子式を評価する。precision contextはstack管理されるためnested `N`でも外側の要求精度を破壊しない。
 
 ### `kernel`
 

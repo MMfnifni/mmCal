@@ -47,13 +47,30 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expectEqual(eval(history, "%"), std::string{"100"},
         "percent history remains relative to successful outputs");
 
+    tests.expectEqual(eval(history, "In[-1]"), std::string{"100"},
+        "In[-1] re-evaluates the immediately previous input");
+    tests.expectEqual(eval(history, "Out[-1]"), std::string{"100"},
+        "Out[-1] returns the most recent successful output");
+    tests.expectEqual(eval(history, "@"), std::string{"100"},
+        "at shorthand re-evaluates the immediately previous input");
+
     static_cast<void>(evalError(history, "1/0"));
     const std::size_t failedIndex = history.inputCount();
     tests.expect(history.inputHistory(failedIndex) != nullptr,
         "lowered input remains available after evaluation failure");
     tests.expect(history.outputHistory(failedIndex) == nullptr,
         "failed evaluation has no Out entry");
-    tests.expect(evalError(history, "Out[6]").type() == error::CalcErrorType::Evaluation,
+    tests.expect(evalError(history, "In[-1]").type() == error::CalcErrorType::Domain,
+        "negative In can re-evaluate the previous lowered input even when its evaluation failed");
+    tests.expectEqual(eval(history, "Out[-1]"), std::string{"100"},
+        "negative Out skips failed inputs like percent history");
+    tests.expect(evalError(history, "In[0]").type() == error::CalcErrorType::Type,
+        "In[0] is invalid");
+    tests.expect(evalError(history, "Out[0]").type() == error::CalcErrorType::Type,
+        "Out[0] is invalid");
+    tests.expect(evalError(history, "Out[-100]").type() == error::CalcErrorType::Evaluation,
+        "unavailable negative Out entry reports an evaluation error");
+    tests.expect(evalError(history, "Out[1000]").type() == error::CalcErrorType::Evaluation,
         "unavailable Out entry reports an evaluation error");
 
     const std::size_t beforeClear = history.inputCount();

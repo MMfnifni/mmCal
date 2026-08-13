@@ -9,6 +9,9 @@
 - Legacy `sin(x)` syntax on a known function name raises SyntaxError instead of being silently treated as multiplication
 - The Formatter always emits `name[...]` for calls and explicit `x*(...)` for identifier/group multiplication, preserving unambiguous round trips
 - Removed function-call delimiter branching from Parser/AST/Lowerer
+- Unified formal history access around `In[n]` / `Out[n]` and added negative relative indices; zero is invalid
+- Added repeated `@` shorthand for `In[-1]`, `In[-2]`, ... and documented the matching repeated `%` shorthand for `Out[-n]`
+- Negative `Out[-n]` counts successful outputs, while negative `In[-n]` counts input slots
 
 
 ## v1.5.1 — 2026-08-12
