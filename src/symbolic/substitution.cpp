@@ -1,5 +1,6 @@
 // 式中Symbolの置換
 #include "substitution.hpp"
+#include "expression/array_utils.hpp"
 
 #include <utility>
 #include <vector>
@@ -27,6 +28,14 @@ expression::Expr substituteSymbol(
         for (const expression::Expr& element : expression.asArray().elements)
             elements.push_back(substituteSymbol(element, variable, value));
         return expression::Expr::array(expression.asArray().shape, std::move(elements));
+    }
+
+    if (expression.isList()) {
+        std::vector<expression::Expr> elements;
+        elements.reserve(expression.asList().elements.size());
+        for (const expression::Expr& element : expression.asList().elements)
+            elements.push_back(substituteSymbol(element, variable, value));
+        return expression::braceValue(std::move(elements));
     }
 
     return expression;

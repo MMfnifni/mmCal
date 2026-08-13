@@ -426,11 +426,40 @@ solve[exp[x]==2,x,Real]
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。
 
-## 8. 行列・ベクトル・統計
+## 8. Array・行列・ベクトル・統計
+
+`{...}`は一般の有限brace containerであり，vector / matrix / tensor専用の構文ではない。child shapeが全て一致する矩形値は**shape + row-major flat storage**のdense `ArrayExpr`へ自動最適化し，`{Q,R}`のようにshapeが異なる値は一般braceとして保持する。Matrix函数へ入る境界では矩形性を監査し，非矩形値はWarning + 未評価とする。shapeをbraceだけでは保存できない空Arrayのみ`reshape`を用いて表示する。
 
 ```text
-matmul[{{1,2},{3,4}},{{5,6},{7,8}}]
+dimensions[{{1,2,3},{4,5,6}}]
+-> {2, 3}
+
+arrayRank[{{1,2},{3,4}}]
+-> 2
+
+at[{{1,2},{3,4}},1]
+-> {3, 4}
+
+at[{{1,2},{3,4}},1,0]
+-> 3
+
+reshape[{1,2,3,4},{2,2}]
+-> {{1, 2}, {3, 4}}
+
+zeros[0,3]
+-> reshape[{}, {0, 3}]
+```
+
+添字は0-based。`arrayRank[A]`はArrayの次元数，`matrixRank[A]`は線形代数上の階数であり，意味を分離している。
+
+基本線形代数のcanonical APIは次のとおり。
+
+```text
+dot[{{1,2},{3,4}},{{5,6},{7,8}}]
 -> {{19, 22}, {43, 50}}
+
+dot[{1,2},{3,4}]
+-> 11
 
 det[{{1,2},{3,4}}]
 -> -2
@@ -441,15 +470,67 @@ inverse[{{1,2},{3,4}}]
 rref[{{1,2},{3,4}}]
 -> {{1, 0}, {0, 1}}
 
-vdot[{1,2},{3,4}]
--> 11
+matrixRank[{{1,2},{2,4}}]
+-> 1
 
-vcross[{1,0,0},{0,1,0}]
--> {0, 0, 1}
+nullSpace[{{1,2},{2,4}}]
+-> {{-2, 1}}
 
-vnorm[{3,4}]
+solveLinear[{{2,1},{1,-1}},{5,1}]
+-> {2, 1}
+
+luDecomposition[{{0,2},{3,4}}]
+-> {{{0,1},{1,0}},{{1,0},{0,1}},{{3,4},{0,2}}}
+
+qrDecomposition[{{3,0},{4,0}}]
+-> {{{-3/5,-4/5},{-4/5,3/5}},{{-5,0},{0,0}}}
+
+svd[{{3,0},{0,4}}]
+-> {{{0,1},{1,0}},{{4,0},{0,3}},{{0,1},{1,0}}}
+
+eigenvalues[{{0,-1},{1,0}}]
+-> {I, -I}
+
+norm[{3+4I}]
 -> 5
 
+normalize[{3,4}]
+-> {3/5, 4/5}
+```
+
+`dot`はvector-vector / matrix-vector / vector-matrix / matrix-matrixを扱う。
+`A*B`を行列積にはせず，同shape Arrayの`+` / `-`とscalar×Arrayのみを通常算術へ統合する。行列積・内積は`dot[A,B]`で明示する。
+
+整数・Rational行列は不用意にBigFloatへ変換せずexactに処理する。`det` / `rref` / `matrixRank` / `nullSpace` / `inverse` / `solveLinear`は行ごとの分母除去とBareiss fraction-free eliminationを共有し，中間Rationalの増殖を抑える。exact complex行列は`Number` Gaussian backendへfallbackする。`solveLinear[A,b]`は一意解だけを返し，整合した過剰決定系もfull column rankなら扱う。不整合系や自由変数が残る系はDomain errorとし，parametric solutionを捏造しない。一般symbolic determinant / inverseには式爆発を防ぐ展開budgetを設け，三角・疎行列など安全に処理できる場合を除き，巨大な式を作る前に未評価で保持する。`luDecomposition[A]`は正方行列に`{P,L,U}`を返す。`qrDecomposition[A]`は矩形にも対応するreduced Householder QRで，m×nに対し`k=min[m,n]`，`Q:m×k`，`R:k×n`の`{Q,R}`を返す。`svd[A]`も矩形reduced `{U,S,V}`を返し，一般数値backendは条件数を二乗する`A^H A`を形成せずHouseholder bidiagonalization + one-sided Jacobiを使う。`at[result,0]`等でfactorを取り出せる。一般exact QRは式爆発を避けるため3×3以下に制限し，上三角/上台形caseだけ任意次数のexact fast pathを許す。`eigenvalues` / `eigenvectors` / `eigensystem`は正方行列を対象とし，exact pathは三角・対角・distinct-root exact Number 2×2を処理，一般`N[...]`はHessenberg + implicit shifted complex QRでSchur形を作り，元入力intervalに対するSchur/eigenpair relationを監査する。defective/近接重根で独立vectorを安全に構成できない場合は推測しない。
+
+`N`の下ではFFTと同様にprecision-aware backendへ直接dispatchする。
+
+```text
+N[det[{{Pi,0},{0,2}}],12]
+-> 6.283185307180
+
+N[inverse[{{Pi,0},{0,2}}],12]
+-> {{0.318309886184, 0}, {0, 0.5}}
+
+N[solveLinear[{{Pi,0},{0,2}},{Pi,4}],12]
+-> {1.0, 2}
+
+N[qrDecomposition[{{1,2},{3,4}}],8]
+-> {{{-0.31622777,-0.94868330},{-0.94868330,0.31622777}},{{-3.16227766,-4.42718872},{0,-0.63245553}}}
+
+N[eigenvalues[{{1,2},{3,4}}],8]
+-> {-0.37228132, 5.37228132}
+```
+
+この経路はexactな巨大中間式を完成させてから丸めるのではなく，BigFloat/interval系のcertified演算で要求精度を直接処理する。`solveLinear`もaugmented interval eliminationを直接試し，pivotと整合性を証明できない場合にepsilonで推測しない。特に依存した過剰決定系ではinterval相関のため整合性証明が難しい場合がある。`matrixRank`と`nullSpace`はrank deficiencyに依存する不連続量なのでexact入力ではexact eliminationを先に使い，近似入力・未解決caseでもepsilon閾値は導入しない。interval backendはpivot構造を証明できる場合だけ結果を返し，rank deficiencyを推測しない。
+
+`N`の表示ではexact有限小数は `N[1/2,10] -> 0.5` のように不要な0埋めをしない。certified interval由来で固定桁の末尾0が連続する場合は1個だけ残し，`1.000000000000 -> 1.0`，`1.500000000000 -> 1.50` と表示する。要求桁数と保証区間はmetadataに保持される。
+
+旧`matmul` / `mmul` / `vdot`，`rank` / `mrank`，`vnorm`，`vnormalize`，`mget`は互換aliasとして残している。
+
+統計処理でも，可能な範囲では要素をexactな数や記号式のまま扱う。
+
+```text
 mean[{1,2,4}]
 -> 7/3
 
@@ -462,9 +543,6 @@ stddev[{1,2,3}]
 corr[{1,2,3},{2,4,6}]
 -> 1
 ```
-
-行列や統計処理でも，可能な範囲では要素をexactな数や記号式のまま扱う。
-`N[{...}]`は配列要素を再帰的に数値近似する。
 
 ## 9. FFT・乱数
 

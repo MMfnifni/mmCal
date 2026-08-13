@@ -1,5 +1,6 @@
 // precision・accuracy・rationalize
 #include "approximation_utilities.hpp"
+#include "expression/array_utils.hpp"
 
 #include "error/error_message.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
@@ -120,12 +121,16 @@ using numeric::RealNumber;
         else if (current.isArray())
             for (const Expr& element : current.asArray().elements)
                 stack.push_back(element);
+        else if (current.isList())
+            for (const Expr& element : current.asList().elements)
+                stack.push_back(element);
     }
     return false;
 }
 
 [[nodiscard]] bool isExactNumericLike(const Expr& value) {
-    return value.isNumber() || value.isSymbol() || value.isCall() || value.isArray();
+    return value.isNumber() || value.isSymbol() || value.isCall()
+        || value.isArray() || value.isList();
 }
 
 [[nodiscard]] std::optional<Expr> accuracyOf(const Expr& value, const expression::Symbol& infinity) {
@@ -239,6 +244,17 @@ using numeric::RealNumber;
             else
                 elements.push_back(element);
         return Expr::array(array.shape, std::move(elements));
+    }
+    if (value.isList()) {
+        const auto& list = value.asList();
+        std::vector<Expr> elements;
+        elements.reserve(list.elements.size());
+        for (const Expr& element : list.elements)
+            if (const auto rationalized = rationalizeValue(element, tolerance))
+                elements.push_back(*rationalized);
+            else
+                elements.push_back(element);
+        return expression::braceValue(std::move(elements));
     }
     if (value.isCall()) {
         std::vector<Expr> arguments;

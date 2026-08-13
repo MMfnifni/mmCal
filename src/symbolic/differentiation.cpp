@@ -9,6 +9,7 @@
 #include "simplification/simplification_context.hpp"
 #include "simplification/simplifier.hpp"
 #include "evaluation/iterator_spec.hpp"
+#include "expression/array_utils.hpp"
 #include "symbolic/substitution.hpp"
 
 #include <cstdint>
@@ -143,6 +144,10 @@ using numeric::Rational;
             for (const Expr& element : current.asArray().elements)
                 pending.push_back(element);
         }
+        else if (current.isList()) {
+            for (const Expr& element : current.asList().elements)
+                pending.push_back(element);
+        }
     }
     return false;
 }
@@ -245,6 +250,14 @@ using numeric::Rational;
             elements.push_back(derivativeCore(
                 element, variable, builtins, mathematics, angles));
         return Expr::array(expression.asArray().shape, std::move(elements));
+    }
+    if (expression.isList()) {
+        std::vector<Expr> elements;
+        elements.reserve(expression.asList().elements.size());
+        for (const Expr& element : expression.asList().elements)
+            elements.push_back(derivativeCore(
+                element, variable, builtins, mathematics, angles));
+        return expression::braceValue(std::move(elements));
     }
 
     const auto* definition = builtins.find(expression.asCall().head);
@@ -832,6 +845,10 @@ using numeric::Rational;
     case BuiltinId::Correlation:
     case BuiltinId::SpearmanCorrelation:
     case BuiltinId::PercentRank:
+    case BuiltinId::Dimensions:
+    case BuiltinId::ArrayRank:
+    case BuiltinId::ArrayGet:
+    case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
     case BuiltinId::MatrixGet:
@@ -860,6 +877,16 @@ using numeric::Rational;
     case BuiltinId::Inverse:
     case BuiltinId::Rref:
     case BuiltinId::Rank:
+    case BuiltinId::SolveLinear:
+    case BuiltinId::NullSpace:
+    case BuiltinId::LuDecomposition:
+    case BuiltinId::QrDecomposition:
+    case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::Eigenvalues:
+    case BuiltinId::Eigenvectors:
+    case BuiltinId::Eigensystem:
+    case BuiltinId::ConjugateTranspose:
+    case BuiltinId::Length:
     case BuiltinId::NumericDerivative:
     case BuiltinId::NumericIntegral:
     case BuiltinId::NumericalApproximation:

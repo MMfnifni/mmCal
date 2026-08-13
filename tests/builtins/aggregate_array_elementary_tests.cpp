@@ -67,6 +67,37 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         "cols reports matrix shape");
     tests.expectEqual(eval(session, "diag[{{1,2,3},{4,5,6}}]"), std::string{"{1, 5}"},
         "diag supports rectangular matrices");
+    tests.expectEqual(eval(session, "dimensions[{{1,2,3},{4,5,6}}]"),
+        std::string{"{2, 3}"}, "dimensions exposes the stored shape");
+    tests.expectEqual(eval(session, "arrayRank[{{1,2},{3,4}}]"), std::string{"2"},
+        "arrayRank is distinct from matrixRank");
+    tests.expectEqual(eval(session, "at[{{1,2},{3,4}},1,0]"), std::string{"3"},
+        "at uses zero-based multi-dimensional indices");
+    tests.expectEqual(eval(session, "at[{{1,2},{3,4}},1]"), std::string{"{3, 4}"},
+        "at supports row-major prefix slicing for higher-level Array results");
+    tests.expectEqual(eval(session, "reshape[{1,2,3,4},{2,2}]"),
+        std::string{"{{1, 2}, {3, 4}}"}, "reshape preserves row-major element order");
+    tests.expectEqual(eval(session, "dimensions[zeros[0,3]]"), std::string{"{0, 3}"},
+        "zero-length leading dimensions preserve their trailing shape");
+    tests.expectEqual(eval(session, "zeros[0,3]"), std::string{"reshape[{}, {0, 3}]"},
+        "formatter preserves zero-length matrix shape through reshape");
+    tests.expectEqual(eval(session, "reshape[{}, {0,3}]"),
+        std::string{"reshape[{}, {0, 3}]"}, "zero-length reshape is round-trip stable");
+    static_cast<void>(eval(session, "arrayPair[x]:={x,x+1}"));
+    tests.expectEqual(eval(session, "{arrayPair[1],arrayPair[3]}"),
+        std::string{"{{1, 2}, {3, 4}}"},
+        "evaluated nested arrays are flattened into one rectangular Array");
+    tests.expect(evalError(session, "{identity[1],2}").type() == error::CalcErrorType::Type,
+        "evaluated arrays reject mixed scalar and array leaves");
+    tests.expect(evalError(session, "{identity[1],identity[2]}").type() == error::CalcErrorType::Type,
+        "evaluated arrays reject inconsistent child shapes");
+    tests.expectEqual(eval(session, "{{1,2},{3,4}}+{{5,6},{7,8}}"),
+        std::string{"{{6, 8}, {10, 12}}"}, "same-shape Array addition is elementwise");
+    tests.expectEqual(eval(session, "2*{{1,2},{3,4}}"),
+        std::string{"{{2, 4}, {6, 8}}"}, "Array multiplication accepts scalar factors only");
+    tests.expect(evalError(session, "{{1,2},{3,4}}*{{5,6},{7,8}}").type()
+            == error::CalcErrorType::Type,
+        "Array-by-Array multiplication requires explicit dot");
     tests.expectEqual(eval(session, "vadd[{1,2},{3,4}]"), std::string{"{4, 6}"},
         "vector addition is elementwise and exact");
     tests.expect(evalError(session, "vscalar[{1,2},{}]").type() == error::CalcErrorType::Type,
@@ -126,10 +157,10 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         std::string{"1.27323954473516268615"},
         "tanc has certified pole-aware evaluation");
     tests.expectEqual(eval(session, "N[expm1[1/10^30],50]"),
-        std::string{"0.00000000000000000000000000000100000000000000000000"},
+        std::string{"0.0000000000000000000000000000010"},
         "expm1 survives severe cancellation by precision refinement");
     tests.expectEqual(eval(session, "N[log1p[1/10^30],50]"),
-        std::string{"0.00000000000000000000000000000100000000000000000000"},
+        std::string{"0.0000000000000000000000000000010"},
         "log1p survives severe cancellation by precision refinement");
     tests.expect(evalError(session, "log1p[-1]").type() == error::CalcErrorType::Domain,
         "log1p rejects its exact branch singularity");

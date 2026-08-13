@@ -1,0 +1,882 @@
+// exact Matrix elimination。Number行列はExpr/Simplifierを経由せず直接処理する。
+#include "exact_matrix.hpp"
+
+#include "builtins/exact_operations.hpp"
+#include "mathematics/value_facts.hpp"
+#include "numeric/big_int.hpp"
+#include "numeric/number.hpp"
+#include "expression/array_utils.hpp"
+#include "linear_algebra/fraction_free_elimination.hpp"
+#include "numeric/integer_algorithms.hpp"
+#include "numeric/rational.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace mmcal::linear_algebra {
+namespace {
+
+using expression::Expr;
+using numeric::BigInt;
+using numeric::Number;
+
+[[nodiscard]] Expr integer(std::int64_t value) {
+    return Expr{Number{BigInt{value}}};
+}
+
+[[nodiscard]] bool exactZero(const Expr& value) {
+    return value.isNumber() && value.asNumber().isZero();
+}
+
+[[nodiscard]] bool provablyNonZero(
+    const Expr& value,
+    const ExactMatrixContext& context) {
+    if (value.isNumber())
+        return !value.asNumber().isZero();
+    const auto facts = mathematics::inferValueFacts(
+        value, context.builtins, context.mathematics);
+    return facts.sign == mathematics::RealSign::Positive
+        || facts.sign == mathematics::RealSign::Negative
+        || facts.sign == mathematics::RealSign::NonZero;
+}
+
+[[nodiscard]] Expr add(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
+    return builtins::exact::add({std::move(lhs), std::move(rhs)},
+        context.builtins, context.mathematics, context.angles);
+}
+
+[[nodiscard]] Expr subtract(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
+    return builtins::exact::subtract(std::move(lhs), std::move(rhs),
+        context.builtins, context.mathematics, context.angles);
+}
+
+[[nodiscard]] Expr multiply(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
+    return builtins::exact::multiply({std::move(lhs), std::move(rhs)},
+        context.builtins, context.mathematics, context.angles);
+}
+
+[[nodiscard]] Expr divide(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
+    return builtins::exact::divide(std::move(lhs), std::move(rhs),
+        context.builtins, context.mathematics, context.angles);
+}
+
+[[nodiscard]] Expr negate(Expr value, const ExactMatrixContext& context) {
+    return builtins::exact::negate(std::move(value),
+        context.builtins, context.mathematics, context.angles);
+}
+
+[[nodiscard]] Expr simplify(Expr value, const ExactMatrixContext& context) {
+    return builtins::exact::simplify(std::move(value),
+        context.builtins, context.mathematics, context.angles);
+}
+
+class NumericMatrix final {
+public:
+    NumericMatrix(std::size_t rows, std::size_t columns)
+        : rows_(rows), columns_(columns) {
+        const std::size_t shape[] = {rows, columns};
+        values_.assign(expression::arrayElementCount(shape), Number{BigInt{0}});
+    }
+
+    explicit NumericMatrix(const MatrixView& matrix)
+        : NumericMatrix(matrix.rows(), matrix.columns()) {
+        for (std::size_t i = 0; i < values_.size(); ++i)
+            values_[i] = matrix.elements()[i].asNumber();
+    }
+
+    [[nodiscard]] std::size_t rows() const noexcept { return rows_; }
+    [[nodiscard]] std::size_t columns() const noexcept { return columns_; }
+    [[nodiscard]] Number& operator()(std::size_t row, std::size_t column) noexcept {
+        return values_[row * columns_ + column];
+    }
+    [[nodiscard]] const Number& operator()(std::size_t row, std::size_t column) const noexcept {
+        return values_[row * columns_ + column];
+    }
+
+    void swapRows(std::size_t lhs, std::size_t rhs) noexcept {
+        if (lhs == rhs)
+            return;
+        for (std::size_t column = 0; column < columns_; ++column)
+            std::swap((*this)(lhs, column), (*this)(rhs, column));
+    }
+
+    [[nodiscard]] MatrixBuffer toExprBuffer() const {
+        std::vector<Expr> elements;
+        elements.reserve(values_.size());
+        for (const Number& value : values_)
+            elements.emplace_back(value);
+        return MatrixBuffer{rows_, columns_, std::move(elements)};
+    }
+
+private:
+    std::size_t rows_ = 0;
+    std::size_t columns_ = 0;
+    std::vector<Number> values_;
+};
+
+[[nodiscard]] std::size_t augmentedColumns(std::size_t columns);
+
+struct IntegerLift final {
+    IntegerMatrixBuffer matrix;
+    std::vector<BigInt> rowScales;
+};
+
+[[nodiscard]] bool allExactRealNumbers(const MatrixView& matrix) noexcept {
+    return std::all_of(matrix.elements().begin(), matrix.elements().end(),
+        [](const Expr& item) {
+            return item.isNumber() && item.asNumber().isReal();
+        });
+}
+
+template <class ElementAt>
+[[nodiscard]] IntegerLift liftRealRows(
+    std::size_t rows,
+    std::size_t columns,
+    ElementAt&& elementAt) {
+    IntegerMatrixBuffer lifted{rows, columns};
+    std::vector<BigInt> rowScales(rows, BigInt{1});
+
+    for (std::size_t row = 0; row < rows; ++row) {
+        BigInt scale{1};
+        for (std::size_t column = 0; column < columns; ++column) {
+            const auto rational = elementAt(row, column).asNumber().asReal().toRational();
+            scale = numeric::lcm(scale, rational.denominator());
+        }
+        rowScales[row] = scale;
+
+        for (std::size_t column = 0; column < columns; ++column) {
+            const auto rational = elementAt(row, column).asNumber().asReal().toRational();
+            lifted(row, column) = rational.numerator()
+                * (scale / rational.denominator());
+        }
+    }
+    return {std::move(lifted), std::move(rowScales)};
+}
+
+[[nodiscard]] IntegerLift liftRealMatrix(const MatrixView& source) {
+    return liftRealRows(source.rows(), source.columns(),
+        [&](std::size_t row, std::size_t column) -> const Expr& {
+            return source(row, column);
+        });
+}
+
+[[nodiscard]] BigInt rowScaleProduct(const std::vector<BigInt>& scales) {
+    BigInt result{1};
+    for (const BigInt& scale : scales)
+        result *= scale;
+    return result;
+}
+
+[[nodiscard]] NumericMatrix rrefFromBareiss(BareissEchelonResult result) {
+    NumericMatrix matrix{result.matrix.rows(), result.matrix.columns()};
+    for (std::size_t row = 0; row < result.matrix.rows(); ++row)
+        for (std::size_t column = 0; column < result.matrix.columns(); ++column)
+            matrix(row, column) = Number{result.matrix(row, column)};
+
+    for (std::size_t pivotIndex = result.pivotColumns.size(); pivotIndex-- > 0;) {
+        const std::size_t row = pivotIndex;
+        const std::size_t column = result.pivotColumns[pivotIndex];
+        const Number pivot = matrix(row, column);
+        matrix(row, column) = Number{BigInt{1}};
+        for (std::size_t c = column + 1; c < matrix.columns(); ++c)
+            matrix(row, c) /= pivot;
+
+        for (std::size_t upper = 0; upper < row; ++upper) {
+            const Number factor = matrix(upper, column);
+            if (factor.isZero())
+                continue;
+            matrix(upper, column) = Number{BigInt{0}};
+            for (std::size_t c = column + 1; c < matrix.columns(); ++c)
+                matrix(upper, c) -= factor * matrix(row, c);
+        }
+    }
+    return matrix;
+}
+
+[[nodiscard]] Number bareissDeterminantOfRealMatrix(const MatrixView& source) {
+    IntegerLift lift = liftRealMatrix(source);
+    BigInt determinant = bareissDeterminant(std::move(lift.matrix));
+    return Number{numeric::Rational{
+        std::move(determinant), rowScaleProduct(lift.rowScales)}};
+}
+
+[[nodiscard]] MatrixBuffer bareissRrefOfRealMatrix(const MatrixView& source) {
+    IntegerLift lift = liftRealMatrix(source);
+    return rrefFromBareiss(bareissEchelon(
+        std::move(lift.matrix), source.columns())).toExprBuffer();
+}
+
+[[nodiscard]] std::size_t bareissRankOfRealMatrix(const MatrixView& source) {
+    IntegerLift lift = liftRealMatrix(source);
+    return bareissEchelon(std::move(lift.matrix), source.columns()).pivotColumns.size();
+}
+
+[[nodiscard]] Expr numericNullSpaceBasis(
+    const NumericMatrix& reduced,
+    const std::vector<std::size_t>& pivotColumns,
+    std::size_t variables) {
+    std::vector<bool> isPivot(variables, false);
+    for (const std::size_t column : pivotColumns)
+        isPivot[column] = true;
+
+    const std::size_t nullity = variables - pivotColumns.size();
+    std::vector<Expr> elements;
+    const std::size_t shape[] = {nullity, variables};
+    elements.reserve(expression::arrayElementCount(shape));
+
+    for (std::size_t freeColumn = 0; freeColumn < variables; ++freeColumn) {
+        if (isPivot[freeColumn])
+            continue;
+
+        std::vector<Number> basis(variables, Number{BigInt{0}});
+        basis[freeColumn] = Number{BigInt{1}};
+        for (std::size_t pivotRow = 0; pivotRow < pivotColumns.size(); ++pivotRow)
+            basis[pivotColumns[pivotRow]] = -reduced(pivotRow, freeColumn);
+        for (const Number& value : basis)
+            elements.emplace_back(value);
+    }
+    return Expr::array({nullity, variables}, std::move(elements));
+}
+
+[[nodiscard]] std::vector<std::size_t> numericPivotColumns(
+    const NumericMatrix& reduced,
+    std::size_t variables) {
+    std::vector<std::size_t> pivots;
+    pivots.reserve(std::min(reduced.rows(), variables));
+    for (std::size_t row = 0; row < reduced.rows(); ++row)
+        for (std::size_t column = 0; column < variables; ++column)
+            if (!reduced(row, column).isZero()) {
+                pivots.push_back(column);
+                break;
+            }
+    return pivots;
+}
+
+[[nodiscard]] Expr bareissNullSpaceOfRealMatrix(const MatrixView& source) {
+    IntegerLift lift = liftRealMatrix(source);
+    auto echelon = bareissEchelon(std::move(lift.matrix), source.columns());
+    const std::vector<std::size_t> pivots = echelon.pivotColumns;
+    if (pivots.size() == source.columns())
+        return Expr::array({0, source.columns()}, {});
+    return numericNullSpaceBasis(
+        rrefFromBareiss(std::move(echelon)), pivots, source.columns());
+}
+
+[[nodiscard]] MatrixBuffer bareissInverseOfRealMatrix(const MatrixView& source) {
+    const std::size_t n = source.rows();
+    IntegerLift lift = liftRealMatrix(source);
+    const std::size_t columns = augmentedColumns(n);
+    IntegerMatrixBuffer augmented{n, columns};
+
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t column = 0; column < n; ++column)
+            augmented(row, column) = lift.matrix(row, column);
+        augmented(row, n + row) = lift.rowScales[row];
+    }
+
+    auto echelon = bareissEchelon(std::move(augmented), n);
+    if (echelon.pivotColumns.size() != n)
+        throw std::domain_error("Matrix is singular");
+    NumericMatrix reduced = rrefFromBareiss(std::move(echelon));
+
+    std::vector<Expr> elements;
+    const std::size_t shape[] = {n, n};
+    elements.reserve(expression::arrayElementCount(shape));
+    for (std::size_t row = 0; row < n; ++row)
+        for (std::size_t column = 0; column < n; ++column)
+            elements.emplace_back(reduced(row, n + column));
+    return MatrixBuffer{n, n, std::move(elements)};
+}
+
+// exact complexは整数lift対象外なので、専用環を導入するまでは従来Gaussianを保持する。
+[[nodiscard]] Number numericDeterminantGaussian(NumericMatrix matrix) {
+    const std::size_t n = matrix.rows();
+    Number result{BigInt{1}};
+    bool negative = false;
+
+    for (std::size_t column = 0; column < n; ++column) {
+        std::size_t pivot = column;
+        while (pivot < n && matrix(pivot, column).isZero())
+            ++pivot;
+        if (pivot == n)
+            return Number{BigInt{0}};
+        if (pivot != column) {
+            matrix.swapRows(pivot, column);
+            negative = !negative;
+        }
+
+        const Number pivotValue = matrix(column, column);
+        result *= pivotValue;
+        for (std::size_t row = column + 1; row < n; ++row) {
+            if (matrix(row, column).isZero())
+                continue;
+            const Number factor = matrix(row, column) / pivotValue;
+            matrix(row, column) = Number{BigInt{0}};
+            for (std::size_t c = column + 1; c < n; ++c)
+                matrix(row, c) -= factor * matrix(column, c);
+        }
+    }
+
+    return negative ? -result : result;
+}
+
+// 同じfallbackをinverse/rref/rankで共有する。実Rational主経路はBareissへ送る。
+[[nodiscard]] NumericMatrix numericRrefGaussian(
+    NumericMatrix matrix,
+    std::size_t pivotColumnLimit) {
+    const std::size_t rows = matrix.rows();
+    const std::size_t columns = matrix.columns();
+    const std::size_t limit = std::min(columns, pivotColumnLimit);
+    std::size_t pivotRow = 0;
+
+    for (std::size_t column = 0; column < limit && pivotRow < rows; ++column) {
+        std::size_t selected = pivotRow;
+        while (selected < rows && matrix(selected, column).isZero())
+            ++selected;
+        if (selected == rows)
+            continue;
+
+        matrix.swapRows(selected, pivotRow);
+        const Number pivot = matrix(pivotRow, column);
+        for (std::size_t c = 0; c < columns; ++c)
+            matrix(pivotRow, c) /= pivot;
+
+        for (std::size_t row = 0; row < rows; ++row) {
+            if (row == pivotRow || matrix(row, column).isZero())
+                continue;
+            const Number factor = matrix(row, column);
+            matrix(row, column) = Number{BigInt{0}};
+            for (std::size_t c = 0; c < columns; ++c) {
+                if (c == column)
+                    continue;
+                matrix(row, c) -= factor * matrix(pivotRow, c);
+            }
+        }
+        ++pivotRow;
+    }
+    return matrix;
+}
+
+[[nodiscard]] std::size_t numericRank(const NumericMatrix& reduced) {
+    std::size_t rank = 0;
+    for (std::size_t row = 0; row < reduced.rows(); ++row) {
+        bool nonZero = false;
+        for (std::size_t column = 0; column < reduced.columns(); ++column)
+            if (!reduced(row, column).isZero()) {
+                nonZero = true;
+                break;
+            }
+        rank += nonZero ? 1 : 0;
+    }
+    return rank;
+}
+
+[[nodiscard]] std::size_t augmentedColumns(std::size_t columns) {
+    if (columns > std::numeric_limits<std::size_t>::max() / 2)
+        throw std::length_error("Augmented matrix column count exceeds the size_t range");
+    return columns * 2;
+}
+
+[[nodiscard]] MatrixBuffer numericInverseGaussian(const MatrixView& source) {
+    const std::size_t n = source.rows();
+    const std::size_t columns = augmentedColumns(n);
+    NumericMatrix augmented{n, columns};
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t column = 0; column < n; ++column)
+            augmented(row, column) = source(row, column).asNumber();
+        augmented(row, n + row) = Number{BigInt{1}};
+    }
+
+    NumericMatrix reduced = numericRrefGaussian(std::move(augmented), n);
+    for (std::size_t row = 0; row < n; ++row)
+        for (std::size_t column = 0; column < n; ++column) {
+            const Number expected{BigInt{row == column ? 1 : 0}};
+            if (!(reduced(row, column) == expected))
+                throw std::domain_error("Matrix is singular");
+        }
+
+    std::vector<Expr> elements;
+    elements.reserve(n * n);
+    for (std::size_t row = 0; row < n; ++row)
+        for (std::size_t column = 0; column < n; ++column)
+            elements.emplace_back(reduced(row, n + column));
+    return MatrixBuffer{n, n, std::move(elements)};
+}
+
+[[nodiscard]] std::optional<MatrixBuffer> symbolicRref(
+    MatrixBuffer matrix,
+    const ExactMatrixContext& context,
+    std::size_t pivotColumnLimit);
+
+[[nodiscard]] bool allExactRealNumbers(const expression::ArrayExpr& array) noexcept {
+    return std::all_of(array.elements.begin(), array.elements.end(),
+        [](const Expr& item) {
+            return item.isNumber() && item.asNumber().isReal();
+        });
+}
+
+[[nodiscard]] bool allExactNumbers(const expression::ArrayExpr& array) noexcept {
+    return std::all_of(array.elements.begin(), array.elements.end(),
+        [](const Expr& item) { return item.isNumber(); });
+}
+
+[[nodiscard]] Expr bareissSolveLinearOfRealMatrix(
+    const MatrixView& source,
+    const expression::ArrayExpr& rhs) {
+    const std::size_t rows = source.rows();
+    const std::size_t variables = source.columns();
+    if (variables == std::numeric_limits<std::size_t>::max())
+        throw std::length_error("Linear system augmented column count exceeds the size_t range");
+
+    IntegerLift lift = liftRealRows(rows, variables + 1,
+        [&](std::size_t row, std::size_t column) -> const Expr& {
+            return column == variables ? rhs.elements[row] : source(row, column);
+        });
+    auto echelon = bareissEchelon(std::move(lift.matrix), variables);
+    for (std::size_t row = 0; row < rows; ++row) {
+        bool coefficientNonZero = false;
+        for (std::size_t column = 0; column < variables; ++column)
+            if (!echelon.matrix(row, column).isZero()) {
+                coefficientNonZero = true;
+                break;
+            }
+        if (!coefficientNonZero && !echelon.matrix(row, variables).isZero())
+            throw std::domain_error("Linear system is inconsistent");
+    }
+    if (echelon.pivotColumns.size() != variables)
+        throw std::domain_error("Linear system does not have a unique solution");
+
+    NumericMatrix reduced = rrefFromBareiss(std::move(echelon));
+    std::vector<Expr> solution;
+    solution.reserve(variables);
+    for (std::size_t variable = 0; variable < variables; ++variable)
+        solution.emplace_back(reduced(variable, variables));
+    return Expr::array({variables}, std::move(solution));
+}
+
+[[nodiscard]] Expr numericSolveLinearGaussian(
+    const MatrixView& source,
+    const expression::ArrayExpr& rhs) {
+    const std::size_t rows = source.rows();
+    const std::size_t variables = source.columns();
+    if (variables == std::numeric_limits<std::size_t>::max())
+        throw std::length_error("Linear system augmented column count exceeds the size_t range");
+
+    NumericMatrix augmented{rows, variables + 1};
+    for (std::size_t row = 0; row < rows; ++row) {
+        for (std::size_t column = 0; column < variables; ++column)
+            augmented(row, column) = source(row, column).asNumber();
+        augmented(row, variables) = rhs.elements[row].asNumber();
+    }
+    NumericMatrix reduced = numericRrefGaussian(std::move(augmented), variables);
+
+    std::size_t rank = 0;
+    for (std::size_t row = 0; row < rows; ++row) {
+        bool coefficientNonZero = false;
+        for (std::size_t column = 0; column < variables; ++column)
+            if (!reduced(row, column).isZero()) {
+                coefficientNonZero = true;
+                break;
+            }
+        if (coefficientNonZero)
+            ++rank;
+        else if (!reduced(row, variables).isZero())
+            throw std::domain_error("Linear system is inconsistent");
+    }
+    if (rank != variables)
+        throw std::domain_error("Linear system does not have a unique solution");
+
+    std::vector<Expr> solution;
+    solution.reserve(variables);
+    for (std::size_t variable = 0; variable < variables; ++variable)
+        solution.emplace_back(reduced(variable, variables));
+    return Expr::array({variables}, std::move(solution));
+}
+
+[[nodiscard]] std::optional<Expr> symbolicSolveLinear(
+    const MatrixView& source,
+    const expression::ArrayExpr& rhs,
+    const ExactMatrixContext& context) {
+    const std::size_t rows = source.rows();
+    const std::size_t variables = source.columns();
+    if (variables == std::numeric_limits<std::size_t>::max())
+        throw std::length_error("Linear system augmented column count exceeds the size_t range");
+
+    std::vector<Expr> elements;
+    const std::size_t shape[] = {rows, variables + 1};
+    elements.reserve(expression::arrayElementCount(shape));
+    for (std::size_t row = 0; row < rows; ++row) {
+        for (std::size_t column = 0; column < variables; ++column)
+            elements.push_back(source(row, column));
+        elements.push_back(rhs.elements[row]);
+    }
+    auto reduced = symbolicRref(
+        MatrixBuffer{rows, variables + 1, std::move(elements)}, context, variables);
+    if (!reduced)
+        return std::nullopt;
+
+    std::size_t rank = 0;
+    for (std::size_t row = 0; row < rows; ++row) {
+        bool coefficientNonZero = false;
+        bool coefficientUndecidable = false;
+        for (std::size_t column = 0; column < variables; ++column) {
+            const Expr& value = (*reduced)(row, column);
+            if (exactZero(value))
+                continue;
+            if (provablyNonZero(value, context)) {
+                coefficientNonZero = true;
+                break;
+            }
+            coefficientUndecidable = true;
+        }
+        if (coefficientUndecidable && !coefficientNonZero)
+            return std::nullopt;
+        if (coefficientNonZero) {
+            ++rank;
+            continue;
+        }
+
+        const Expr& residual = (*reduced)(row, variables);
+        if (exactZero(residual))
+            continue;
+        if (provablyNonZero(residual, context))
+            throw std::domain_error("Linear system is inconsistent");
+        return std::nullopt;
+    }
+    if (rank != variables)
+        throw std::domain_error("Linear system does not have a unique solution");
+
+    std::vector<Expr> solution;
+    solution.reserve(variables);
+    for (std::size_t variable = 0; variable < variables; ++variable)
+        solution.push_back((*reduced)(variable, variables));
+    return Expr::array({variables}, std::move(solution));
+}
+
+[[nodiscard]] MatrixBuffer minorMatrix(
+    const MatrixBuffer& matrix,
+    std::size_t removedRow,
+    std::size_t removedColumn) {
+    const std::size_t n = matrix.rows();
+    std::vector<Expr> elements;
+    elements.reserve((n - 1) * (n - 1));
+    for (std::size_t row = 0; row < n; ++row) {
+        if (row == removedRow)
+            continue;
+        for (std::size_t column = 0; column < n; ++column)
+            if (column != removedColumn)
+                elements.push_back(matrix(row, column));
+    }
+    return MatrixBuffer{n - 1, n - 1, std::move(elements)};
+}
+
+[[nodiscard]] std::optional<Expr> triangularDeterminant(
+    const MatrixBuffer& matrix,
+    const ExactMatrixContext& context) {
+    const std::size_t n = matrix.rows();
+    bool upper = true;
+    bool lower = true;
+    for (std::size_t row = 0; row < n && (upper || lower); ++row)
+        for (std::size_t column = 0; column < n; ++column) {
+            if (row > column && !exactZero(matrix(row, column)))
+                upper = false;
+            if (row < column && !exactZero(matrix(row, column)))
+                lower = false;
+        }
+    if (!upper && !lower)
+        return std::nullopt;
+
+    Expr result = integer(1);
+    for (std::size_t i = 0; i < n; ++i)
+        result = multiply(std::move(result), matrix(i, i), context);
+    return simplify(std::move(result), context);
+}
+
+[[nodiscard]] std::optional<Expr> symbolicDeterminant(
+    const MatrixBuffer& matrix,
+    const ExactMatrixContext& context,
+    std::size_t& expansionBudget) {
+    const std::size_t n = matrix.rows();
+    if (n == 0)
+        return integer(1);
+    if (n == 1)
+        return matrix(0, 0);
+    if (n == 2)
+        return subtract(
+            multiply(matrix(0, 0), matrix(1, 1), context),
+            multiply(matrix(0, 1), matrix(1, 0), context),
+            context);
+    if (const auto triangular = triangularDeterminant(matrix, context))
+        return triangular;
+
+    // Laplace展開は疎行列には有効だが、一般symbolic行列では階乗級に膨張する。
+    // 全再帰で共有するbudgetを消費し、上限を超える場合は未評価のまま返す。
+    std::size_t expansionRow = 0;
+    std::size_t bestZeros = 0;
+    for (std::size_t row = 0; row < n; ++row) {
+        std::size_t zeros = 0;
+        for (std::size_t column = 0; column < n; ++column)
+            zeros += exactZero(matrix(row, column)) ? 1 : 0;
+        if (zeros > bestZeros) {
+            bestZeros = zeros;
+            expansionRow = row;
+        }
+    }
+
+    Expr result = integer(0);
+    for (std::size_t column = 0; column < n; ++column) {
+        if (exactZero(matrix(expansionRow, column)))
+            continue;
+        if (expansionBudget == 0)
+            return std::nullopt;
+        --expansionBudget;
+
+        const auto minor = symbolicDeterminant(
+            minorMatrix(matrix, expansionRow, column), context, expansionBudget);
+        if (!minor)
+            return std::nullopt;
+        Expr term = multiply(matrix(expansionRow, column), *minor, context);
+        if (((expansionRow + column) & 1U) != 0)
+            term = negate(std::move(term), context);
+        result = add(std::move(result), std::move(term), context);
+    }
+    return simplify(std::move(result), context);
+}
+
+[[nodiscard]] std::optional<MatrixBuffer> symbolicRref(
+    MatrixBuffer matrix,
+    const ExactMatrixContext& context,
+    std::size_t pivotColumnLimit) {
+    const std::size_t rows = matrix.rows();
+    const std::size_t columns = matrix.columns();
+    const std::size_t limit = std::min(columns, pivotColumnLimit);
+    std::size_t pivotRow = 0;
+
+    for (std::size_t column = 0; column < limit && pivotRow < rows; ++column) {
+        std::optional<std::size_t> selected;
+        bool hasUndecidable = false;
+        for (std::size_t row = pivotRow; row < rows; ++row) {
+            if (exactZero(matrix(row, column)))
+                continue;
+            if (provablyNonZero(matrix(row, column), context)) {
+                selected = row;
+                break;
+            }
+            hasUndecidable = true;
+        }
+        if (!selected) {
+            if (hasUndecidable)
+                return std::nullopt;
+            continue;
+        }
+
+        matrix.swapRows(*selected, pivotRow);
+        const Expr pivot = matrix(pivotRow, column);
+        for (std::size_t c = 0; c < columns; ++c)
+            matrix(pivotRow, c) = divide(matrix(pivotRow, c), pivot, context);
+
+        for (std::size_t row = 0; row < rows; ++row) {
+            if (row == pivotRow || exactZero(matrix(row, column)))
+                continue;
+            const Expr factor = matrix(row, column);
+            for (std::size_t c = 0; c < columns; ++c)
+                matrix(row, c) = subtract(
+                    matrix(row, c), multiply(factor, matrix(pivotRow, c), context), context);
+        }
+        ++pivotRow;
+    }
+    return matrix;
+}
+
+[[nodiscard]] std::optional<std::size_t> symbolicRank(
+    const MatrixBuffer& matrix,
+    const ExactMatrixContext& context) {
+    std::size_t rank = 0;
+    for (std::size_t row = 0; row < matrix.rows(); ++row) {
+        bool nonZero = false;
+        bool undecidable = false;
+        for (std::size_t column = 0; column < matrix.columns(); ++column) {
+            const Expr& item = matrix(row, column);
+            if (exactZero(item))
+                continue;
+            if (provablyNonZero(item, context)) {
+                nonZero = true;
+                break;
+            }
+            undecidable = true;
+        }
+        if (nonZero)
+            ++rank;
+        else if (undecidable)
+            return std::nullopt;
+    }
+    return rank;
+}
+
+[[nodiscard]] std::optional<std::vector<std::size_t>> symbolicPivotColumns(
+    const MatrixBuffer& reduced,
+    const ExactMatrixContext& context) {
+    std::vector<std::size_t> pivots;
+    pivots.reserve(std::min(reduced.rows(), reduced.columns()));
+    for (std::size_t row = 0; row < reduced.rows(); ++row) {
+        bool found = false;
+        for (std::size_t column = 0; column < reduced.columns(); ++column) {
+            const Expr& value = reduced(row, column);
+            if (exactZero(value))
+                continue;
+            if (!provablyNonZero(value, context))
+                return std::nullopt;
+            pivots.push_back(column);
+            found = true;
+            break;
+        }
+        if (!found)
+            continue;
+    }
+    return pivots;
+}
+
+[[nodiscard]] std::optional<Expr> symbolicNullSpace(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    auto reduced = symbolicRref(MatrixBuffer{matrix}, context, matrix.columns());
+    if (!reduced)
+        return std::nullopt;
+    const auto pivots = symbolicPivotColumns(*reduced, context);
+    if (!pivots)
+        return std::nullopt;
+
+    const std::size_t variables = matrix.columns();
+    std::vector<bool> isPivot(variables, false);
+    for (const std::size_t column : *pivots)
+        isPivot[column] = true;
+
+    const std::size_t nullity = variables - pivots->size();
+    std::vector<Expr> elements;
+    const std::size_t shape[] = {nullity, variables};
+    elements.reserve(expression::arrayElementCount(shape));
+    for (std::size_t freeColumn = 0; freeColumn < variables; ++freeColumn) {
+        if (isPivot[freeColumn])
+            continue;
+        std::vector<Expr> basis(variables, integer(0));
+        basis[freeColumn] = integer(1);
+        for (std::size_t pivotRow = 0; pivotRow < pivots->size(); ++pivotRow)
+            basis[(*pivots)[pivotRow]] = simplify(
+                negate((*reduced)(pivotRow, freeColumn), context), context);
+        for (Expr& value : basis)
+            elements.push_back(std::move(value));
+    }
+    return Expr::array({nullity, variables}, std::move(elements));
+}
+
+} // namespace
+
+bool allExactNumbers(const MatrixView& matrix) noexcept {
+    return std::all_of(matrix.elements().begin(), matrix.elements().end(),
+        [](const Expr& item) { return item.isNumber(); });
+}
+
+std::optional<Expr> determinant(const MatrixView& matrix, const ExactMatrixContext& context) {
+    if (matrix.rows() != matrix.columns())
+        throw std::invalid_argument("determinant requires a square matrix");
+    if (allExactRealNumbers(matrix))
+        return Expr{bareissDeterminantOfRealMatrix(matrix)};
+    if (allExactNumbers(matrix))
+        return Expr{numericDeterminantGaussian(NumericMatrix{matrix})};
+
+    constexpr std::size_t symbolicExpansionBudget = 512;
+    std::size_t budget = symbolicExpansionBudget;
+    return symbolicDeterminant(MatrixBuffer{matrix}, context, budget);
+}
+
+std::optional<Expr> inverse(const MatrixView& matrix, const ExactMatrixContext& context) {
+    if (matrix.rows() != matrix.columns())
+        throw std::invalid_argument("inverse requires a square matrix");
+    if (matrix.rows() == 0)
+        return MatrixBuffer{matrix}.toExpr();
+    if (allExactRealNumbers(matrix))
+        return bareissInverseOfRealMatrix(matrix).toExpr();
+    if (allExactNumbers(matrix))
+        return numericInverseGaussian(matrix).toExpr();
+
+    constexpr std::size_t symbolicExpansionBudget = 256;
+    std::size_t budget = symbolicExpansionBudget;
+    MatrixBuffer source{matrix};
+    const auto det = symbolicDeterminant(source, context, budget);
+    if (!det)
+        return std::nullopt;
+    if (exactZero(*det))
+        throw std::domain_error("Matrix is singular");
+
+    const std::size_t n = matrix.rows();
+    MatrixBuffer output{n, n, integer(0)};
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t column = 0; column < n; ++column) {
+            const auto minor = symbolicDeterminant(
+                minorMatrix(source, column, row), context, budget);
+            if (!minor)
+                return std::nullopt;
+            Expr cofactor = *minor;
+            if (((row + column) & 1U) != 0)
+                cofactor = negate(std::move(cofactor), context);
+            output(row, column) = divide(std::move(cofactor), *det, context);
+        }
+    }
+    return std::move(output).toExpr();
+}
+
+std::optional<MatrixBuffer> rref(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    if (allExactRealNumbers(matrix))
+        return bareissRrefOfRealMatrix(matrix);
+    if (allExactNumbers(matrix))
+        return numericRrefGaussian(NumericMatrix{matrix}, matrix.columns()).toExprBuffer();
+    return symbolicRref(MatrixBuffer{matrix}, context, matrix.columns());
+}
+
+std::optional<std::size_t> matrixRank(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    if (allExactRealNumbers(matrix))
+        return bareissRankOfRealMatrix(matrix);
+    if (allExactNumbers(matrix))
+        return numericRank(numericRrefGaussian(NumericMatrix{matrix}, matrix.columns()));
+    const auto reduced = symbolicRref(MatrixBuffer{matrix}, context, matrix.columns());
+    if (!reduced)
+        return std::nullopt;
+    return symbolicRank(*reduced, context);
+}
+
+std::optional<Expr> solveLinear(
+    const MatrixView& matrix,
+    const expression::ArrayExpr& rhs,
+    const ExactMatrixContext& context) {
+    if (!rhs.isVector() || rhs.shape[0] != matrix.rows())
+        throw std::invalid_argument("solveLinear right-hand side size does not match matrix rows");
+    if (allExactRealNumbers(matrix) && allExactRealNumbers(rhs))
+        return bareissSolveLinearOfRealMatrix(matrix, rhs);
+    if (allExactNumbers(matrix) && allExactNumbers(rhs))
+        return numericSolveLinearGaussian(matrix, rhs);
+    return symbolicSolveLinear(matrix, rhs, context);
+}
+
+std::optional<Expr> nullSpace(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    if (allExactRealNumbers(matrix))
+        return bareissNullSpaceOfRealMatrix(matrix);
+    if (allExactNumbers(matrix)) {
+        NumericMatrix reduced = numericRrefGaussian(NumericMatrix{matrix}, matrix.columns());
+        const auto pivots = numericPivotColumns(reduced, matrix.columns());
+        return numericNullSpaceBasis(reduced, pivots, matrix.columns());
+    }
+    return symbolicNullSpace(matrix, context);
+}
+
+} // namespace mmcal::linear_algebra

@@ -32,6 +32,11 @@ void runRealIntervalTests(TestRunner& tests) {
     tests.expect(half.isPoint(),
         "RealInterval: exact dyadic rational becomes a point interval");
 
+    const auto negativePoint = RealInterval::point(
+        numeric::BigFloat::fromRational(rational(-3, 8), 16));
+    tests.expect(negativePoint.isPoint() && negativePoint.contains(rational(-3, 8)),
+        "RealInterval: negative point construction is copy/move order independent");
+
     const auto sum = approximation::add(third, half, 10);
     tests.expect(sum.contains(rational(5, 6)),
         "RealInterval: outward addition encloses exact result");

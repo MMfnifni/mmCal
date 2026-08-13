@@ -107,7 +107,7 @@ Here, the `1` in `sin[1]` means **1 radian**. The default angle unit is radians.
 
 For `N[expr,n]`, mmCal confirms that both endpoints of an interval containing the true value round to the same `n`-digit result before returning a `DecimalApproximation`.
 
-A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance (exact input / certified interval), the displayed decimal value as an exact Rational, and an exact Rational enclosure containing the true value. `ComplexDecimalApproximation` similarly retains metadata for the real and imaginary components. `precision`, `accuracy`, and `rationalize` use this metadata directly rather than reparsing the display string and guessing its quality.
+A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance (exact input / certified interval), the displayed decimal value as an exact Rational, and an exact Rational enclosure containing the true value. Certified-interval output may compact a run of trailing zeros to one visible zero without reducing this metadata. `ComplexDecimalApproximation` similarly retains metadata for the real and imaginary components. `precision`, `accuracy`, and `rationalize` use this metadata directly rather than reparsing the display string and guessing its quality.
 
 ```text
 N[sqrt[2],30]
@@ -231,7 +231,7 @@ Out[-1]
 In[1]> fft[{1,2,3}]
 Out[1]> {6, ...}
 In[2]> N[@,30]
-Out[2]> {6, -1.500000000000000000000000000000+0.866025403784...I, ...}
+Out[2]> {6, -1.50+0.866025403784...I, ...}
 ```
 
 Here `N[@,30]` does not merely approximate the stored `Out[1]`; it reevaluates the `fft[...]` from `In[1]` inside a 30-digit approximation context.
@@ -971,54 +971,171 @@ For compatibility, an even number of scalar arguments may also be split into fir
 
 # 17. Array / Vector / Matrix
 
-## 17.1 Array utilities
+## 17.1 Array foundation
+
+At the language level, `{...}` is a general finite brace container rather than a matrix-only literal. When every child has the same shape, the value is automatically promoted to the dense **shape + row-major flat storage** `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` and ragged braces remain general brace values. Matrix operations still accept only dense rectangular Arrays and audit this at their boundary.
 
 ```text
+dimensions[A]
+arrayRank[A]
+length[A]
+at[A,i,...]
+reshape[A,{d1,d2,...}]
 identity[n]
 zeros[rows,cols]
-mget[A,row,col]
 rows[A]
 cols[A]
 diag[A]
 trace[A]
 ```
 
-```text
-identity[2]
--> {{1,0},{0,1}}
+Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar.
 
-trace[{{1,2},{3,4}}]
--> 5
+```text
+dimensions[{{1,2,3},{4,5,6}}] -> {2,3}
+arrayRank[{{1,2},{3,4}}] -> 2
+at[{{1,2},{3,4}},1] -> {3,4}
+at[{{1,2},{3,4}},1,0] -> 3
+reshape[{1,2,3,4},{2,2}] -> {{1,2},{3,4}}
 ```
+
+For a non-rectangular brace, `dimensions` / `arrayRank` report only the rectangular prefix common to every child, while `length` always reports the outer element count. A general brace is valid by itself; a Matrix function given such a non-rectangular value emits a Warning and remains unevaluated.
+
+```text
+dimensions[{{1,2},{3}}] -> {2}
+arrayRank[{{1,2},{3}}] -> 1
+length[{{1,2},{3}}] -> 2
+at[{{1,2},{3}},0] -> {1,2}
+transpose[{{1,2},{3}}] -> Warning + unevaluated
+```
+
+`mget[A,row,col]` is a compatibility alias of `at` and uses the same zero-based indexing.
+
+A brace literal cannot preserve trailing shape information after a leading zero-length dimension. The formatter therefore uses `reshape` only when necessary for round-trip safety.
+
+```text
+zeros[0,3]
+-> reshape[{}, {0, 3}]
+
+dimensions[zeros[0,3]]
+-> {0,3}
+```
+
+If evaluation turns Array elements into Arrays, equal child shapes are flattened into the common representation. Mixed scalar/Array leaves or inconsistent child shapes are TypeErrors.
 
 ## 17.2 Exact-first linear algebra
 
+Canonical API:
+
 ```text
 transpose[A]
-madd[A,B,...]
-matmul[A,B]
+conjugateTranspose[A]
+dot[A,B]
 det[A]
 inverse[A]
 rref[A]
-rank[A]
+matrixRank[A]
+nullSpace[A]
+solveLinear[A,b]
+luDecomposition[A]
+qrDecomposition[A]
+svd[A]
+eigenvalues[A]
+eigenvectors[A]
+eigensystem[A]
+norm[v]
+normalize[v]
+trace[A]
 ```
 
+At Stage 2, `dot` supports rank-1 and rank-2 Arrays.
+
 ```text
-matmul[{{1,2},{3,4}},{{5,6},{7,8}}]
--> {{19,22},{43,50}}
-
-det[{{1,2},{3,4}}]
--> -2
-
-inverse[{{1,2},{3,4}}]
--> {{-2,1},{3/2,-1/2}}
+dot[{1,2,3},{4,5,6}] -> 32
+dot[{{1,2},{3,4}},{5,6}] -> {17,39}
+dot[{5,6},{{1,2},{3,4}}] -> {23,34}
+dot[{{1,2},{3,4}},{{5,6},{7,8}}] -> {{19,22},{43,50}}
 ```
 
-If nonzero symbolic pivots cannot be proven, symbolic rank/pivot routines do not choose pivots arbitrarily.
+Array-by-Array `*` is not matrix multiplication. `*` accepts scalar×Array multiplication; matrix multiplication and vector contraction use explicit `dot`. `+/-` are element-wise for equal shapes.
 
-## 17.3 Vector
+Exact real/Rational matrices clear row denominators and use Bareiss fraction-free elimination on an integer work matrix, avoiding Rational construction at every pivot. Exact complex matrices fall back to the flat `Number` Gaussian backend. Symbolic elimination never guesses a pivot whose nonzero status cannot be proven.
 
 ```text
+det[{{1,2},{3,4}}] -> -2
+inverse[{{1,2},{3,4}}] -> {{-2,1},{3/2,-1/2}}
+rref[{{1,2},{3,4}}] -> {{1,0},{0,1}}
+matrixRank[{{1,2},{2,4}}] -> 1
+nullSpace[{{1,2},{2,4}}] -> {{-2,1}}
+solveLinear[{{2,1},{1,-1}},{5,1}] -> {2,1}
+```
+
+`nullSpace[A]` returns a canonical RREF basis by taking free columns in ascending order and setting each corresponding free variable to one. Its result shape is `{nullity, columns}`; full column rank therefore formats as `reshape[{}, {0,n}]` so the vector dimension of the empty basis is not lost. Exact integer/Rational inputs share the Bareiss forward elimination path, exact complex matrices use the Gaussian fallback, and symbolic matrices produce a basis only when pivot nonzero status is provable.
+
+`solveLinear[A,b]` treats `A` as an m×n matrix and `b` as a length-m vector. It returns a length-n vector only when the solution is unique. The matrix need not be square: a consistent overdetermined system is accepted when it has full column rank. Inconsistent systems and systems with free variables are Domain errors; this function does not invent a parametric solution.
+
+`luDecomposition[A]` currently targets square matrices and returns shape `{3,n,n}` containing `{P,L,U}`, with the convention `P A = L U`. Certified approximate LU uses partial pivoting among provably nonzero candidates, maximizing the certified lower bound of `|pivot|^2`; no epsilon threshold is used. Row pivoting is used, exact Number input remains exact for Rational and complex values, triangular symbolic matrices avoid unnecessary division, and a general symbolic decomposition remains unevaluated when a required pivot cannot be proved nonzero. Prefix indexing extracts each factor.
+
+```text
+lu = luDecomposition[A]
+at[lu,0] -> P
+at[lu,1] -> L
+at[lu,2] -> U
+```
+
+`qrDecomposition[A]` uses reduced Householder QR for rectangular m×n matrices. With `k=min(m,n)` it returns the general brace `{Q,R}` with `Q:m×k`, `R:k×n`, and `A = Q R`. Equal-shape square factors may be optimized internally to a dense Array, but the user representation is the same. Exact real matrices can produce radical exact expressions; general exact QR is limited to 3x3 after measured expression explosion at 4x4, while safe upper-triangular/trapezoidal cases use fast paths. `N[qrDecomposition[A],p]` bypasses exact expansion and dispatches directly to a certified interval Householder backend for both real and complex matrices.
+
+```text
+qr = qrDecomposition[A]
+at[qr,0] -> Q
+at[qr,1] -> R
+```
+
+Householder application also has a column-block kernel that processes multiple columns during one row-major scan. On the current no-BLAS BigFloat/interval backend, measurements at orders 8/16/24 did not show a consistent speedup, so automatic blocking is not enabled; the unblocked-equivalent path remains the default and the block kernel/benchmark are retained for later backend optimization.
+
+`svd[A]` returns reduced `{U,S,V}`. For m×n input, `k=min(m,n)`, `U:m×k`, `S:k×k`, and `V:n×k`. Real input satisfies `A = U S Transpose[V]`; complex input satisfies `A = U S conjugateTranspose[V]`. The general numerical backend deliberately does not form `A^H A`: it uses Householder bidiagonalization followed by one-sided Jacobi column orthogonalization. Candidate factors are returned only after interval checks validate reconstruction residual and `U^H U` / `V^H V` orthogonality more strictly than the requested output digits; otherwise guard digits are increased and the calculation is retried. Exact SVD is restricted to natural closed cases such as exact real diagonal matrices. Singular vectors are not unique inside repeated-singular-value subspaces, so the certificate concerns reconstruction and orthogonality rather than a unique componentwise vector.
+
+`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` handle eigenvalues, eigenvectors, and the paired result for square matrices. Eigenvectors are returned as **columns**, and `eigensystem[A]` returns `{values,vectors}`. The exact path handles diagonal entries of upper-triangular matrices, the standard basis of diagonal matrices, and exact Number 2x2 matrices with distinct eigenvalues. A nondiagonal repeated-root 2x2 matrix is not given duplicated vectors merely to fill a basis. General `N[...]` uses Complex BigFloat Hessenberg reduction followed by implicit shifted QR to obtain a Schur relation `A Q ≈ Q T`; eigenvectors are then recovered from triangular back substitution. The original certified input intervals are used to audit the Schur relation, `A v ≈ λ v` residuals, and Schur-vector unitarity more strictly than the requested display digits, retrying with more guard digits when necessary. For a general non-normal matrix, individual eigenvalue/eigenvector components can be perturbation-sensitive, so mmCal does not claim that every displayed component is a unique componentwise enclosure of a mathematically distinguished exact value; the certificate concerns the computed Schur/eigenpair relations. Near-multiple or defective cases that do not yield a stable independent eigenvector basis remain unevaluated rather than being guessed.
+
+`conjugateTranspose[A]` computes the Hermitian transpose used by complex SVD and complex orthogonality checks. Rank-1 input is conjugated componentwise; rank-2 input is transposed and conjugated.
+
+`norm` is a Hermitian norm for complex vectors.
+
+```text
+norm[{3,4}] -> 5
+norm[{3+4I}] -> 5
+normalize[{3,4}] -> {3/5,4/5}
+```
+
+### Precision-aware `N`
+
+Matrix backends share the same `ApproximationContext` and certified Expr/interval conversion layer as FFT. Therefore calls such as
+
+```text
+N[dot[A,B],100]
+N[det[A],100]
+N[inverse[A],100]
+N[rref[A],100]
+N[solveLinear[A,b],100]
+N[luDecomposition[A],100]
+N[qrDecomposition[A],100]
+N[svd[A],100]
+N[eigenvalues[A],100]
+N[eigensystem[A],100]
+N[norm[v],100]
+```
+
+can pass the requested precision directly to the BigFloat/interval backend instead of first constructing a potentially huge exact intermediate expression. `solveLinear` uses augmented interval elimination and never replaces an unproved pivot or consistency condition with an epsilon guess; dependent overdetermined rows may remain difficult to certify because interval evaluation loses correlation. `matrixRank` and `nullSpace` are discontinuous with respect to rank deficiency, so exact inputs prefer exact elimination. Approximate inputs use no arbitrary floating threshold: results are returned only when the interval backend certifies the pivot structure rather than guessing rank deficiency.
+
+## 17.3 Compatibility Vector / Matrix functions
+
+Legacy names remain available for compatibility.
+
+```text
+madd
+matmul mmul
+rank mrank
+mget
 vadd vsub vscalar
 vdot vcross
 vnorm vnormalize
@@ -1028,11 +1145,7 @@ vreflect vreflect_axis
 vsum
 ```
 
-```text
-vdot[{1,2},{3,4}] -> 11
-vnormalize[{3,4}] -> {3/5,4/5}
-vangle[{1,0},{0,1}] -> Pi/2
-```
+`matmul/mmul/vdot` map to `dot`, `rank/mrank` to `matrixRank`, `vnorm` to `norm`, and `vnormalize` to `normalize`.
 
 ---
 
@@ -1626,7 +1739,7 @@ N[arg[-1],20]
 -> 3.14159265358979323846 Rad
 ```
 
-When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed. The current implementation nevertheless retains `requestedFractionalDigits` separately as metadata.
+When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. For a certified-interval result produced through a fixed requested precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. The requested digit count and certified enclosure remain intact in metadata, so the number of visible zeros is not itself the precision guarantee.
 
 Approximate values are not yet a general Machine/ApproximateReal arithmetic domain. The displayed value, requested digit count, and certified enclosure are stored separately.
 
@@ -1822,18 +1935,19 @@ Therefore a DomainError or random-number consumption in the unselected branch do
 | `unit`, `csgn` | `sign` |
 | `rect` | `polar` |
 | `ave` | `mean` |
-| `mmul` | `matmul` |
+| `matmul`, `mmul`, `vdot` | `dot` |
 | `mtranspose` | `transpose` |
+| `mget` | `at` |
 | `mdet` | `det` |
 | `minverse` | `inverse` |
-| `mrank` | `rank` |
+| `rank`, `mrank` | `matrixRank` |
 | `mtrace` | `trace` |
 | `mrows` | `rows` |
 | `mcols` | `cols` |
 | `mdiag` | `diag` |
-| `vlength` | `vnorm` |
+| `vnorm`, `vlength` | `norm` |
 | `vdistance` | `veuclidean` |
-| `vunit` | `vnormalize` |
+| `vnormalize`, `vunit` | `normalize` |
 
 Aliases are not separate implementations; they resolve to the same `BuiltinId`. Mathematical metadata and Solver rules are therefore not duplicated.
 
@@ -1843,26 +1957,26 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **217 built-in definitions / 199 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **236 registered builtin/alias names / 218 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
 Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
-asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
-ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
+arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
+ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
+det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
-integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,
+integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, matmul, max, mcols,
-mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode,
-mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, percentile, percentrank, perm, polar,
+mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
 pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, rank,
-rationalize, re, real, rect, rem, risingfact, rms, round, rows, rref,
-sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve,
-sqrt, stddev, stddevs, stderr, sum, tan, tanc, tanh, tanhc, trace,
+qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
+sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
+singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, tan, tanc, tanh, tanhc, trace,
 transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
 vsub, vsum, vunit, winsor, winsorR, zeros, zscore
@@ -1882,7 +1996,7 @@ Main `CalcError` categories:
 - Evaluation
 - Internal
 
-When evaluation itself succeeds but an algorithmic built-in cannot complete its work, a Warning is returned separately from the result Expr. This applies to `D`, `solve`, `N`, `rref`, `rank`, and `integrate`, as well as cases where `precision/accuracy/rationalize` retain unsupported input unevaluated.
+When evaluation itself succeeds but an algorithmic built-in cannot complete its work, a Warning is returned separately from the result Expr. This applies to `D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `eigenvalues`, `eigenvectors`, `eigensystem` (including the compatibility alias `rank`), and `integrate`, as well as cases where `precision/accuracy/rationalize` retain unsupported input unevaluated.
 
 Info diagnostics are used for normal state-change notifications. Currently this includes variable and function redefinition notices.
 

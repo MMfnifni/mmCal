@@ -436,6 +436,128 @@ exact FFT自体のsymbolic expression explosionは別問題であり、この変
 
 ---
 
+# 15.6. Array / Matrix Stage 1–2
+
+## flat Array + exact Number backend — 採用
+
+v1.5.2では行列専用のnested containerを増やさず，既存Arrayの`shape + row-major flat storage`を基盤とした。`MatrixView`はArrayをzero-copy参照し，Gaussian / Gauss-Jordan等で書換えが必要な場合だけflat `MatrixBuffer`へ複製する。
+
+exact Number行列ではpivot loopからExpr生成とSimplifier呼出しを外し，`Number`を直接累積・消去する。`dot`も全要素がNumberならcellごとの積和を`Number`だけで処理し，symbolicの場合のみExprを構築する。
+
+一般symbolic `det` / `inverse`はLaplace/adjugate展開の仕事量を共有budgetで制限する。三角行列は次数に依存せず対角積へ落とし，疎行列はbudget内なら処理するが，dense高次行列は階乗級の式を作る前に未評価へ戻す。
+
+## precision-aware certified Matrix — 採用
+
+`N[det[A],p]`等はexact結果を完成してから近似せず，FFTと同じ`ApproximationContext`を受けて`ComplexInterval` backendへ直接dispatchする。expression→interval変換，decimalization，guard-digit増加はFFTと共通化した。
+
+`matrixRank`はexact入力ではexact eliminationを優先する。近似backendではmachine epsilonを用いず、intervalが0を含むがexact zeroでもないpivotは`PrecisionInsufficient`としてguard precisionを増やす。full rank等を非零pivotから証明できる場合は確定するが、近似値だけからrank deficiencyを推測しない。
+
+2026-08-13のRelease / LTO off計測例:
+
+| size | exact `dot` | exact `det` | exact `rref` | `N[det,16]` |
+|---:|---:|---:|---:|---:|
+| 8 | — | 0.283 ms | 0.434 ms | 1.410 ms |
+| 12 | — | 1.290 ms | 2.233 ms | 10.144 ms |
+| 16 | 0.328 ms | 3.735 ms | 5.799 ms | 22.799 ms |
+| 32 | 1.702 ms | — | — | — |
+| 64 | 16.553 ms | — | — | — |
+
+この段階のexact eliminationは通常Gaussian/Gauss-Jordanであり，整数/Rationalの中間分数膨張を抑えるBareiss/fraction-free eliminationはStage 3へ分離した。
+
+# 15.7. Bareiss / fraction-free exact Matrix — 採用
+
+Stage 3ではexact実数行列を行ごとの分母LCMで整数行列へliftし，`IntegerMatrixBuffer`上のBareiss eliminationを共通kernelとして追加した。整数行列はそのまま，Rational行列は各行を非零整数倍してから処理する。
+
+- `det`: Bareissのfraction-free forward eliminationで計算し，Rational入力では行scale積を最後に一度だけ戻す。
+- `rref`: Bareissでinteger echelon formまで進め，backward phaseだけRational正規化する。
+- `matrixRank`: echelonのpivot数だけで決定し，RREF全体を構築しない。
+- `inverse`: `B=D A` として `[B|D]` をfraction-free eliminationし，左側をidentityへ戻した右側を `A^-1` とする。
+- exact complex: `Q(i)`等へ整数liftする専用環をまだ持たないため，従来`Number` Gaussian/Gauss-Jordanをfallbackとして保持する。
+
+pivotは数値安定性のためではなく中間BigInt growthを抑えるため，候補中でbit lengthが小さい非零値を優先する。Bareissの各除算は`BigInt::divmod`で余り0を検証し，fraction-free invariantが壊れた場合は黙ってtruncationしない。
+
+2026-08-13 Release / LTO off、同一benchmark入力でStage 2 Gaussianと比較:
+
+| size | `det` Gaussian | `det` Bareiss | speedup | `rref` Gauss-Jordan | `rref` Bareiss | speedup |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 0.256 ms | 0.047 ms | 5.4x | 0.447 ms | 0.058 ms | 7.7x |
+| 12 | 1.241 ms | 0.109 ms | 11.4x | 2.058 ms | 0.146 ms | 14.1x |
+| 16 | 3.570 ms | 0.385 ms | 9.3x | 5.798 ms | 0.375 ms | 15.5x |
+
+`N[det[...],p]` / `N[inverse[...],p]`等はこのexact Bareiss結果を先に作らず，Stage 2で導入したFFT共通のprecision-aware certified Matrix backendへ直接dispatchする。したがってBareiss採用はexact pathの改善であり，`N`の近似経路を後退させない。
+
+# 15.8. LU / Householder QR — 採用
+
+分解処理は`linear_algebra/decomposition.*`へまとめ，`luDecomposition[A]`はrow-pivoted `P A = L U`，`qrDecomposition[A]`はHouseholder reflectorによる`A = Q R`を実装した。`N[...]`ではexact factorを先に構築せず，FFT/Matrixと共通の`ApproximationContext`からcertified `ComplexInterval` backendへ直接dispatchする。
+
+Householderのapproximate kernelでは複数列を一度のrow-major走査で処理するcolumn-block版も試作した。block=1/8/16/32を複数回Release計測したが，8～24次で差は概ね数%以内かつ最速blockが安定せず，BigFloat/interval演算costが支配的だった。このため既定はblock=1相当とし，block kernelとbenchmarkのみ残した。
+
+2026-08-13 Release / LTO offの代表値:
+
+| size | exact `LU` | `N[LU,16]` | `N[QR,16]` |
+|---:|---:|---:|---:|
+| 8 | 0.290 ms | 1.811 ms | 7.062 ms |
+| 12 | 1.315 ms | 5.355 ms | 21.218 ms |
+| 16 | 3.548 ms | 10.562 ms | 46.718 ms |
+
+一般exact Householder QRはradical式の膨張が速く，同benchmark系統で2×2が約1.2 ms，3×3が約59 ms，4×4では約18秒かつformatted outputが約677 KBまで増えた。したがって一般exact QRは3×3以下へpolicy制限し，上三角行列の`{I,A}` fast pathだけ任意次数を許す。4次以上の一般用途は`N[qrDecomposition[A],p]`を推奨する。
+
+# 15.9. reduced SVD — 採用
+
+数値SVDは条件数を二乗する`A^H A`を形成せず，Householder bidiagonalizationの後にone-sided Jacobiで列を直交化する。実数・複素数で同じprecision-aware policyを使い，候補factorはreconstructionとU/V orthogonalityを区間監査してから返す。exact SVDは自然に閉じるcaseへ限定する。
+
+2026-08-13 Release / LTO offで`N[svd[A],16]`を複数回計測した代表値:
+
+| size | time |
+|---:|---:|
+| 4×4 | 約3.8 ms |
+| 8×8 | 約17.1 ms |
+| 12×12 | 約46.6 ms |
+| 16×16 | 約82.3 ms |
+
+この範囲では急激な悪化はなく，概ね三次成長に沿う。支配costはJacobi反復とBigFloat演算であり，bidiagonalization側だけをcache block化しても寄与率が小さいため，SVD専用block policyは現時点で追加しない。QRのblock kernelは独立benchmarkとして残し，将来backendが変わった時に再測定する。
+
+# 15.10. Eigen / complex Schur — 採用
+
+一般固有値問題は`A^H A`等へ変形せず，Complex BigFloat上でHessenberg reduction → implicit shifted QR → complex Schur形へ進む。固有vectorが必要な場合はSchur三角行列からback substitutionし，Schur vectorを掛け戻す。exact pathは上三角/対角とdistinct-root exact Number 2×2を優先する。
+
+反復停止精度と最終certificateを同じ桁へ置くと行列積で誤差余裕を使い切ることがfixed-seed 3×3で判明したため，内部QR停止精度は表示要求より10桁相当厳しくする。元入力の`ComplexInterval`に対する`A Q-Q T`および`A v-λv`を区間監査し，Schur vectorのunitarityも同時に監視する。非正規行列では固有値・固有vectorのcomponentwise enclosureを無条件には主張せず，Schur/eigenpair relationをcertification境界とする。
+
+2026-08-13 Release / LTO off，random decimal Matrix（[-1,1]，小数10桁相当）:
+
+| size | `N[eigenvalues,16]` | `N[eigensystem,16]` |
+|---:|---:|---:|
+| 4 | 13.4 ms | 14.0 ms |
+| 8 | 68.1 ms | 77.0 ms |
+| 16 | 364.8 ms | 466.3 ms |
+| 32 | 2826 ms | 3658 ms |
+| 64 | 19436 ms | >35 s（計測上限） |
+
+# 15.11. large dense Matrix監査
+
+添付のrandom matrix generatorと同じ「[-1,1]，小数10桁」という入力特性を再現する`--matrix-large <op> <size> [digits]`を`mmCal.Benchmarks`へ追加した。算法benchmarkではparser costを除くため，同じ範囲・10桁量子化をexact RationalとしてC++から直接構築する。PythonとRNG列そのものは一致させず，数値分布と桁幅を合わせる。一方CLI負荷はPython generatorと同じ出力形式を使って別測定する。
+
+32/64次のrepresentative timing:
+
+| op | 32×32 | 64×64 |
+|---|---:|---:|
+| `N[dot,16]` | 167 ms | 1.21 s |
+| `N[det,16]` | 294 ms | 2.96 s |
+| `N[inverse,16]` | 1.22 s | 8.68 s |
+| `N[matrixRank,16]` | 400 ms | 4.16 s |
+| `N[solveLinear,16]` | 549 ms | 5.42 s |
+| `N[nullSpace,16]` | 401 ms | 4.01 s |
+| `N[LU,16]` | 147 ms | 1.41 s |
+| `N[QR,16]` | 1.47 s | 12.88 s |
+| `N[SVD,16]` | 1.40 s | 11.60 s |
+| `N[eigenvalues,16]` | 2.83 s | 19.44 s |
+
+1024×1024では算法より先にrepresentation costが目立つ。C++から直接1,048,576個の10桁Rational Exprを構築したbenchmark processは入力だけで最大RSS約0.69 GB。`transpose`本体は約107 ms，`trace`本体は約60 msだった。Python形式の約14.16 MBテキストをCLIへ渡し`dimensions[...]`だけを評価した測定ではwall約10.9 s，最大RSS約1.99 GBだった。さらに1024次`N[dot,16]`は10秒上限で未完了（最大RSS約0.96 GB），`N[LU,16]`も10秒上限で未完了（最大RSS約1.59 GB）だったため，QR/SVD/Eigenの1024実走はメモリ圧迫を避けて中止した。
+
+64次値から純粋なO(n^3)を仮定した1024次の粗い外挿でも，`N[LU]`約1.6時間，`N[dot]`約1.4時間，`N[det]`約3.4時間，`N[solveLinear]`約6.2時間，`N[inverse]`約9.9時間，`N[SVD]`約13時間，`N[QR]`約15時間，`N[eigenvalues]`約22時間となる。32→64の実測指数をそのまま延長すると約1～21時間程度へ揺れるため，これらは予測値であって1024実測ではない。cache・allocator・guard precision・反復回数により悪化し得る。
+
+結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，現在のmmCalのexact Decimal→Rational→Expr表現とcertified arbitrary-precision dense算法にとってはstress領域である。1024級を実用目標にするなら，算法のblock化より前にcompact numeric Array storage，parser/lowering時のExpr allocation削減，approximate Matrix専用packed storageを検討する必要がある。
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1でVisual Studio solutionへ独立Console projectとして追加した。
@@ -458,6 +580,7 @@ mmCal.Benchmarks
 - decimal parse/toString benchmark
 - high-precision `Pi/exp/log` benchmark
 - exact/certified FFT benchmark + direct/Bluestein crossover
+- fixed-seed certified Matrix invariant（Bareiss / LU / QR / solve / nullSpace / 実・複素SVD / Eigen）
 - fixed-seed certified FFT round-trip invariant
 
 実行例:
@@ -467,6 +590,7 @@ mmCal.Benchmarks
 mmCal.Benchmarks --full
 mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
+mmCal.Benchmarks --matrix-large nsvd 64 16
 ```
 
 threshold変更時は速度だけでなくrandom invariantを先に通す。

@@ -1,17 +1,26 @@
-// 行列・線形代数
+// Arrayを共通表現とするexact-first線形代数の公開builtin層
 #include "linear_algebra.hpp"
 
+#include "approximation/expression_interval.hpp"
 #include "builtins/array_helpers.hpp"
 #include "builtins/exact_operations.hpp"
 #include "error/error_message.hpp"
+#include "expression/array_utils.hpp"
+#include "linear_algebra/approximate_matrix.hpp"
+#include "linear_algebra/decomposition.hpp"
+#include "linear_algebra/eigen.hpp"
+#include "linear_algebra/exact_matrix.hpp"
+#include "linear_algebra/matrix.hpp"
+#include "linear_algebra/svd.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/complex_decimal_approximation.hpp"
+#include "numeric/decimal_approximation.hpp"
+#include "numeric/real_number.hpp"
 #include "numeric/number.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,56 +38,113 @@ using numeric::Number;
     return Expr{Number{BigInt{value}}};
 }
 
-[[nodiscard]] Expr simplify(
-    Expr expression,
+[[nodiscard]] bool allNumbers(const ArrayExpr& array) noexcept {
+    for (const Expr& element : array.elements)
+        if (!element.isNumber())
+            return false;
+    return true;
+}
+
+[[nodiscard]] Expr productTerm(
+    const Expr& lhs,
+    const Expr& rhs,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    return exact::simplify(std::move(expression), registry, mathematics, angles);
+    if (lhs.isNumber() && rhs.isNumber())
+        return Expr{lhs.asNumber() * rhs.asNumber()};
+    return exact::multiply({lhs, rhs}, registry, mathematics, angles);
 }
 
-[[nodiscard]] Expr add(
-    Expr lhs, Expr rhs,
+[[nodiscard]] Expr sumTerms(
+    std::vector<Expr> terms,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    return exact::add({std::move(lhs), std::move(rhs)}, registry, mathematics, angles);
+    if (terms.empty())
+        return integer(0);
+
+    bool numeric = true;
+    Number sum{BigInt{0}};
+    for (const Expr& term : terms) {
+        if (!term.isNumber()) {
+            numeric = false;
+            break;
+        }
+        sum += term.asNumber();
+    }
+    if (numeric)
+        return Expr{std::move(sum)};
+    return exact::add(std::move(terms), registry, mathematics, angles);
 }
 
-[[nodiscard]] Expr subtract(
-    Expr lhs, Expr rhs,
+[[nodiscard]] Expr dotCell(
+    const ArrayExpr& lhs,
+    const ArrayExpr& rhs,
+    std::size_t row,
+    std::size_t column,
+    std::size_t inner,
+    std::size_t lhsColumns,
+    std::size_t rhsColumns,
+    bool numericInputs,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    return exact::subtract(std::move(lhs), std::move(rhs), registry, mathematics, angles);
+    if (numericInputs) {
+        Number sum{BigInt{0}};
+        for (std::size_t k = 0; k < inner; ++k) {
+            const Expr& left = lhs.rank() == 1
+                ? lhs.elements[k]
+                : lhs.elements[row * lhsColumns + k];
+            const Expr& right = rhs.rank() == 1
+                ? rhs.elements[k]
+                : rhs.elements[k * rhsColumns + column];
+            sum += left.asNumber() * right.asNumber();
+        }
+        return Expr{std::move(sum)};
+    }
+
+    std::vector<Expr> terms;
+    terms.reserve(inner);
+    for (std::size_t k = 0; k < inner; ++k) {
+        const Expr& left = lhs.rank() == 1
+            ? lhs.elements[k]
+            : lhs.elements[row * lhsColumns + k];
+        const Expr& right = rhs.rank() == 1
+            ? rhs.elements[k]
+            : rhs.elements[k * rhsColumns + column];
+        terms.push_back(productTerm(left, right, registry, mathematics, angles));
+    }
+    return sumTerms(std::move(terms), registry, mathematics, angles);
 }
 
-[[nodiscard]] Expr multiply(
-    Expr lhs, Expr rhs,
+[[nodiscard]] Expr hermitianNorm(
+    const ArrayExpr& vector,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    return exact::multiply({std::move(lhs), std::move(rhs)}, registry, mathematics, angles);
-}
+    if (vector.elements.empty())
+        return integer(0);
 
-[[nodiscard]] Expr divide(
-    Expr lhs, Expr rhs,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    return exact::divide(std::move(lhs), std::move(rhs), registry, mathematics, angles);
-}
+    if (allNumbers(vector)) {
+        Number sum{BigInt{0}};
+        for (const Expr& element : vector.elements)
+            sum += element.asNumber().conjugate() * element.asNumber();
+        return exact::sqrt(Expr{std::move(sum)}, registry, mathematics, angles);
+    }
 
-[[nodiscard]] Expr negate(
-    Expr value,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    return exact::negate(std::move(value), registry, mathematics, angles);
-}
-
-[[nodiscard]] bool exactZero(const Expr& value) {
-    return value.isNumber() && value.asNumber().isZero();
+    std::vector<Expr> terms;
+    terms.reserve(vector.elements.size());
+    for (const Expr& element : vector.elements) {
+        const mathematics::ValueFacts facts = mathematics::inferValueFacts(
+            element, registry, mathematics);
+        Expr conjugate = facts.isProvablyReal()
+            ? element
+            : exact::call(BuiltinId::Conj, {element}, registry, mathematics, angles);
+        terms.push_back(productTerm(conjugate, element, registry, mathematics, angles));
+    }
+    return exact::sqrt(sumTerms(std::move(terms), registry, mathematics, angles),
+        registry, mathematics, angles);
 }
 
 [[nodiscard]] bool provablyNonZero(
@@ -93,212 +159,11 @@ using numeric::Number;
         || facts.sign == mathematics::RealSign::NonZero;
 }
 
-[[nodiscard]] std::vector<std::vector<Expr>> rowsOf(const ArrayExpr& matrix) {
-    const std::size_t rows = matrix.shape[0];
-    const std::size_t columns = matrix.shape[1];
-    std::vector<std::vector<Expr>> result(rows, std::vector<Expr>{});
-    for (std::size_t r = 0; r < rows; ++r) {
-        result[r].reserve(columns);
-        for (std::size_t c = 0; c < columns; ++c)
-            result[r].push_back(matrix.elements[detail::matrixIndex(r, c, columns)]);
-    }
-    return result;
-}
-
-[[nodiscard]] Expr matrixExpr(const std::vector<std::vector<Expr>>& rows) {
-    const std::size_t rowCount = rows.size();
-    const std::size_t columnCount = rowCount == 0 ? 0 : rows.front().size();
-    std::vector<Expr> elements;
-    elements.reserve(rowCount * columnCount);
-    for (const auto& row : rows) {
-        if (row.size() != columnCount)
-            throw std::logic_error("Internal matrix rows have inconsistent lengths");
-        elements.insert(elements.end(), row.begin(), row.end());
-    }
-    return Expr::array({rowCount, columnCount}, std::move(elements));
-}
-
-[[nodiscard]] bool allNumbers(const std::vector<std::vector<Expr>>& matrix) {
-    for (const auto& row : matrix)
-        for (const Expr& item : row)
-            if (!item.isNumber())
-                return false;
-    return true;
-}
-
-[[nodiscard]] Expr numericDeterminant(std::vector<std::vector<Expr>> matrix) {
-    const std::size_t n = matrix.size();
-    if (n == 0)
-        return integer(1);
-
-    Number determinant{BigInt{1}};
-    bool negative = false;
-    for (std::size_t column = 0; column < n; ++column) {
-        std::size_t pivot = column;
-        while (pivot < n && matrix[pivot][column].asNumber().isZero())
-            ++pivot;
-        if (pivot == n)
-            return integer(0);
-        if (pivot != column) {
-            std::swap(matrix[pivot], matrix[column]);
-            negative = !negative;
-        }
-
-        const Number pivotValue = matrix[column][column].asNumber();
-        determinant *= pivotValue;
-        for (std::size_t row = column + 1; row < n; ++row) {
-            if (matrix[row][column].asNumber().isZero())
-                continue;
-            const Number factor = matrix[row][column].asNumber() / pivotValue;
-            for (std::size_t c = column + 1; c < n; ++c)
-                matrix[row][c] = Expr{matrix[row][c].asNumber() - factor * matrix[column][c].asNumber()};
-            matrix[row][column] = integer(0);
-        }
-    }
-    if (negative)
-        determinant = -determinant;
-    return Expr{std::move(determinant)};
-}
-
-[[nodiscard]] std::vector<std::vector<Expr>> minorMatrix(
-    const std::vector<std::vector<Expr>>& matrix,
-    std::size_t removedRow,
-    std::size_t removedColumn) {
-    std::vector<std::vector<Expr>> result;
-    result.reserve(matrix.size() - 1);
-    for (std::size_t r = 0; r < matrix.size(); ++r) {
-        if (r == removedRow)
-            continue;
-        std::vector<Expr> row;
-        row.reserve(matrix.size() - 1);
-        for (std::size_t c = 0; c < matrix.size(); ++c)
-            if (c != removedColumn)
-                row.push_back(matrix[r][c]);
-        result.push_back(std::move(row));
-    }
-    return result;
-}
-
-[[nodiscard]] Expr determinantOf(
-    const std::vector<std::vector<Expr>>& matrix,
+[[nodiscard]] linear_algebra::ExactMatrixContext exactContext(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const std::size_t n = matrix.size();
-    if (n == 0)
-        return integer(1);
-    if (n == 1)
-        return matrix[0][0];
-    if (allNumbers(matrix))
-        return numericDeterminant(matrix);
-    if (n == 2)
-        return subtract(
-            multiply(matrix[0][0], matrix[1][1], registry, mathematics, angles),
-            multiply(matrix[0][1], matrix[1][0], registry, mathematics, angles),
-            registry, mathematics, angles);
-
-    // Laplace展開では、exact zeroを最も多く含む行を選んで式膨張を抑える。
-    std::size_t expansionRow = 0;
-    std::size_t bestZeros = 0;
-    for (std::size_t r = 0; r < n; ++r) {
-        const std::size_t zeros = static_cast<std::size_t>(std::count_if(
-            matrix[r].begin(), matrix[r].end(), exactZero));
-        if (zeros > bestZeros) {
-            bestZeros = zeros;
-            expansionRow = r;
-        }
-    }
-
-    Expr result = integer(0);
-    for (std::size_t c = 0; c < n; ++c) {
-        if (exactZero(matrix[expansionRow][c]))
-            continue;
-        Expr term = multiply(
-            matrix[expansionRow][c],
-            determinantOf(minorMatrix(matrix, expansionRow, c), registry, mathematics, angles),
-            registry, mathematics, angles);
-        if (((expansionRow + c) & 1U) != 0)
-            term = negate(std::move(term), registry, mathematics, angles);
-        result = add(std::move(result), std::move(term), registry, mathematics, angles);
-    }
-    return simplify(std::move(result), registry, mathematics, angles);
-}
-
-[[nodiscard]] std::optional<std::vector<std::vector<Expr>>> gaussianRref(
-    std::vector<std::vector<Expr>> matrix,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    if (matrix.empty())
-        return matrix;
-    const std::size_t rows = matrix.size();
-    const std::size_t columns = matrix.front().size();
-    std::size_t pivotRow = 0;
-
-    for (std::size_t column = 0; column < columns && pivotRow < rows; ++column) {
-        std::optional<std::size_t> selected;
-        bool hasUndecidable = false;
-        for (std::size_t row = pivotRow; row < rows; ++row) {
-            if (exactZero(matrix[row][column]))
-                continue;
-            if (provablyNonZero(matrix[row][column], registry, mathematics)) {
-                selected = row;
-                break;
-            }
-            hasUndecidable = true;
-        }
-        if (!selected) {
-            if (hasUndecidable)
-                return std::nullopt;
-            continue;
-        }
-
-        if (*selected != pivotRow)
-            std::swap(matrix[*selected], matrix[pivotRow]);
-
-        const Expr pivot = matrix[pivotRow][column];
-        for (std::size_t c = 0; c < columns; ++c)
-            matrix[pivotRow][c] = divide(matrix[pivotRow][c], pivot, registry, mathematics, angles);
-
-        for (std::size_t row = 0; row < rows; ++row) {
-            if (row == pivotRow || exactZero(matrix[row][column]))
-                continue;
-            const Expr factor = matrix[row][column];
-            for (std::size_t c = 0; c < columns; ++c) {
-                matrix[row][c] = subtract(
-                    matrix[row][c],
-                    multiply(factor, matrix[pivotRow][c], registry, mathematics, angles),
-                    registry, mathematics, angles);
-            }
-        }
-        ++pivotRow;
-    }
-    return matrix;
-}
-
-[[nodiscard]] std::optional<std::size_t> rankOfRref(
-    const std::vector<std::vector<Expr>>& matrix,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics) {
-    std::size_t rank = 0;
-    for (const auto& row : matrix) {
-        bool nonZero = false;
-        bool undecidable = false;
-        for (const Expr& item : row) {
-            if (exactZero(item))
-                continue;
-            if (provablyNonZero(item, registry, mathematics)) {
-                nonZero = true;
-                break;
-            }
-            undecidable = true;
-        }
-        if (nonZero)
-            ++rank;
-        else if (undecidable)
-            return std::nullopt;
-    }
-    return rank;
+    return {registry, mathematics, angles};
 }
 
 } // namespace
@@ -306,22 +171,80 @@ using numeric::Number;
 Expr evaluateTranspose(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry&) {
-    if (arguments.size() != 1)
-        detail::arrayTypeError("transpose expects one array");
     const ArrayExpr& array = detail::requireArray(arguments.front(), "transpose");
     if (array.rank() == 1)
         return arguments.front();
     if (array.rank() != 2)
         detail::arrayTypeError("transpose currently supports rank-1 or rank-2 arrays");
 
-    const std::size_t rows = array.shape[0];
-    const std::size_t columns = array.shape[1];
+    linear_algebra::MatrixView matrix{array};
+    if (matrix.size() == 0)
+        return Expr::array({matrix.columns(), matrix.rows()}, {});
+
     std::vector<Expr> elements;
-    elements.reserve(array.elements.size());
-    for (std::size_t c = 0; c < columns; ++c)
-        for (std::size_t r = 0; r < rows; ++r)
-            elements.push_back(array.elements[detail::matrixIndex(r, c, columns)]);
-    return Expr::array({columns, rows}, std::move(elements));
+    elements.reserve(matrix.size());
+    for (std::size_t column = 0; column < matrix.columns(); ++column)
+        for (std::size_t row = 0; row < matrix.rows(); ++row)
+            elements.push_back(matrix(row, column));
+    return Expr::array({matrix.columns(), matrix.rows()}, std::move(elements));
+}
+
+Expr evaluateConjugateTranspose(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireArray(arguments.front(), "conjugateTranspose");
+    if (array.rank() != 1 && array.rank() != 2)
+        detail::arrayTypeError("conjugateTranspose supports rank-1 or rank-2 arrays");
+
+    const auto conjugated = [&](const Expr& value) -> Expr {
+        if (value.isNumber())
+            return Expr{value.asNumber().conjugate()};
+        if (value.isDecimalApproximation())
+            return value;
+        if (value.isComplexDecimalApproximation()) {
+            const auto& complex = value.asComplexDecimalApproximation();
+            const auto& imaginary = complex.imaginary();
+            numeric::DecimalApproximation conjugateImaginary = [&] {
+                if (imaginary.origin() == numeric::ApproximationOrigin::ExactValue)
+                    return numeric::DecimalApproximation::fromReal(
+                        numeric::RealNumber{-imaginary.displayedValue()},
+                        imaginary.requestedFractionalDigits());
+                const auto result = numeric::DecimalApproximation::fromCertifiedInterval(
+                    -imaginary.certifiedUpper(), -imaginary.certifiedLower(),
+                    imaginary.requestedFractionalDigits());
+                if (!result)
+                    throw std::logic_error(
+                        "Conjugating a certified decimal approximation must preserve rounding");
+                return *result;
+            }();
+            return Expr{numeric::ComplexDecimalApproximation::fromComponents(
+                complex.real(), std::move(conjugateImaginary),
+                complex.realExactlyZero(), complex.imaginaryExactlyZero())};
+        }
+        const mathematics::ValueFacts facts = mathematics::inferValueFacts(
+            value, registry, mathematics);
+        if (facts.isProvablyReal())
+            return value;
+        return exact::call(BuiltinId::Conj, {value}, registry, mathematics, angles);
+    };
+
+    if (array.rank() == 1) {
+        std::vector<Expr> output;
+        output.reserve(array.elements.size());
+        for (const Expr& value : array.elements)
+            output.push_back(conjugated(value));
+        return Expr::array(array.shape, std::move(output));
+    }
+
+    linear_algebra::MatrixView matrix{array};
+    std::vector<Expr> output;
+    output.reserve(matrix.size());
+    for (std::size_t column = 0; column < matrix.columns(); ++column)
+        for (std::size_t row = 0; row < matrix.rows(); ++row)
+            output.push_back(conjugated(matrix(row, column)));
+    return Expr::array({matrix.columns(), matrix.rows()}, std::move(output));
 }
 
 Expr evaluateMatrixAdd(
@@ -329,63 +252,70 @@ Expr evaluateMatrixAdd(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() < 2)
-        detail::arrayTypeError("madd expects at least two arrays");
     const ArrayExpr& first = detail::requireArray(arguments.front(), "madd");
-    std::vector<Expr> result = first.elements;
-    for (std::size_t a = 1; a < arguments.size(); ++a) {
-        const ArrayExpr& next = detail::requireArray(arguments[a], "madd");
-        if (next.shape != first.shape)
-            error::throwCalcError(error::CalcErrorType::Domain, "madd requires identical array shapes");
-        for (std::size_t i = 0; i < result.size(); ++i)
-            result[i] = add(result[i], next.elements[i], registry, mathematics, angles);
+    std::vector<Expr> output;
+    output.reserve(first.elements.size());
+
+    for (std::size_t i = 0; i < first.elements.size(); ++i) {
+        std::vector<Expr> terms;
+        terms.reserve(arguments.size());
+        terms.push_back(first.elements[i]);
+        for (std::size_t a = 1; a < arguments.size(); ++a) {
+            const ArrayExpr& next = detail::requireArray(arguments[a], "madd");
+            if (next.shape != first.shape)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "madd requires identical array shapes");
+            terms.push_back(next.elements[i]);
+        }
+        output.push_back(sumTerms(std::move(terms), registry, mathematics, angles));
     }
-    return Expr::array(first.shape, std::move(result));
+    return Expr::array(first.shape, std::move(output));
 }
 
-Expr evaluateMatrixMultiply(
+Expr evaluateDot(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() != 2)
-        detail::arrayTypeError("matmul expects two arrays");
-    const ArrayExpr& lhs = detail::requireArray(arguments[0], "matmul");
-    const ArrayExpr& rhs = detail::requireArray(arguments[1], "matmul");
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateDot(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& lhs = detail::requireArray(arguments[0], "dot");
+    const ArrayExpr& rhs = detail::requireArray(arguments[1], "dot");
     if (lhs.rank() < 1 || lhs.rank() > 2 || rhs.rank() < 1 || rhs.rank() > 2)
-        detail::arrayTypeError("matmul currently supports vectors and matrices");
+        detail::arrayTypeError("dot currently supports vectors and matrices");
 
     const std::size_t lhsRows = lhs.rank() == 1 ? 1 : lhs.shape[0];
     const std::size_t lhsColumns = lhs.rank() == 1 ? lhs.shape[0] : lhs.shape[1];
-    const std::size_t rhsRows = rhs.rank() == 1 ? rhs.shape[0] : rhs.shape[0];
+    const std::size_t rhsRows = rhs.shape[0];
     const std::size_t rhsColumns = rhs.rank() == 1 ? 1 : rhs.shape[1];
     if (lhsColumns != rhsRows)
-        error::throwCalcError(error::CalcErrorType::Domain, "matmul inner dimensions do not agree");
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "dot inner dimensions do not agree");
 
-    const auto lhsAt = [&](std::size_t r, std::size_t c) -> const Expr& {
-        return lhs.rank() == 1 ? lhs.elements[c] : lhs.elements[detail::matrixIndex(r, c, lhsColumns)];
-    };
-    const auto rhsAt = [&](std::size_t r, std::size_t c) -> const Expr& {
-        return rhs.rank() == 1 ? rhs.elements[r] : rhs.elements[detail::matrixIndex(r, c, rhsColumns)];
-    };
+    const bool numericInputs = allNumbers(lhs) && allNumbers(rhs);
 
-    std::vector<Expr> elements;
-    elements.reserve(lhsRows * rhsColumns);
-    for (std::size_t r = 0; r < lhsRows; ++r) {
-        for (std::size_t c = 0; c < rhsColumns; ++c) {
-            Expr sum = integer(0);
-            for (std::size_t k = 0; k < lhsColumns; ++k)
-                sum = add(std::move(sum), multiply(lhsAt(r, k), rhsAt(k, c), registry, mathematics, angles),
-                    registry, mathematics, angles);
-            elements.push_back(std::move(sum));
-        }
+    std::vector<Expr> output;
+    const std::size_t outputShape[] = {lhsRows, rhsColumns};
+    try {
+        output.reserve(expression::arrayElementCount(outputShape));
     }
+    catch (const std::length_error&) {
+        error::throwCalcError(error::CalcErrorType::Overflow,
+            "dot result dimensions overflow the addressable element count");
+    }
+    for (std::size_t row = 0; row < lhsRows; ++row)
+        for (std::size_t column = 0; column < rhsColumns; ++column)
+            output.push_back(dotCell(lhs, rhs, row, column, lhsColumns,
+                lhsColumns, rhsColumns, numericInputs, registry, mathematics, angles));
 
     if (lhs.rank() == 1 && rhs.rank() == 1)
-        return elements.front();
+        return output.front();
     if (lhs.rank() == 1 || rhs.rank() == 1)
-        return Expr::array({lhs.rank() == 1 ? rhsColumns : lhsRows}, std::move(elements));
-    return Expr::array({lhsRows, rhsColumns}, std::move(elements));
+        return Expr::array({lhs.rank() == 1 ? rhsColumns : lhsRows}, std::move(output));
+    return Expr::array({lhsRows, rhsColumns}, std::move(output));
 }
 
 Expr evaluateDeterminant(
@@ -393,12 +323,19 @@ Expr evaluateDeterminant(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() != 1)
-        detail::arrayTypeError("det expects one matrix");
-    const ArrayExpr& matrix = detail::requireMatrix(arguments.front(), "det");
-    if (matrix.shape[0] != matrix.shape[1])
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateDeterminant(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "det");
+    if (array.shape[0] != array.shape[1])
         error::throwCalcError(error::CalcErrorType::Domain, "det requires a square matrix");
-    return determinantOf(rowsOf(matrix), registry, mathematics, angles);
+    const auto result = linear_algebra::determinant(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (!result)
+        return Expr::call(registry.symbol(BuiltinId::Determinant), {arguments.front()});
+    return *result;
 }
 
 Expr evaluateMatrixInverse(
@@ -406,48 +343,20 @@ Expr evaluateMatrixInverse(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() != 1)
-        detail::arrayTypeError("inverse expects one matrix");
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateInverse(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
     const ArrayExpr& array = detail::requireMatrix(arguments.front(), "inverse");
     if (array.shape[0] != array.shape[1])
-        error::throwCalcError(error::CalcErrorType::Domain, "inverse requires a square matrix");
-    const std::size_t n = array.shape[0];
-    if (n == 0)
-        return arguments.front();
-
-    const auto matrix = rowsOf(array);
-    const Expr determinant = determinantOf(matrix, registry, mathematics, angles);
-    if (exactZero(determinant))
-        error::throwCalcError(error::CalcErrorType::Domain, "Matrix is singular");
-
-    // 数値行列はGauss-JordanでO(n^3)。symbolic行列はadjugate/detにして、determinant != 0 というinverse自身の定義域を各Divideへ保持する。
-    if (allNumbers(matrix)) {
-        std::vector<std::vector<Expr>> augmented(n, std::vector<Expr>(2 * n, integer(0)));
-        for (std::size_t r = 0; r < n; ++r) {
-            for (std::size_t c = 0; c < n; ++c)
-                augmented[r][c] = matrix[r][c];
-            augmented[r][n + r] = integer(1);
-        }
-        const auto reduced = gaussianRref(std::move(augmented), registry, mathematics, angles);
-        if (!reduced)
-            error::throwCalcError(error::CalcErrorType::Internal, "Exact numeric inverse pivoting failed");
-        std::vector<std::vector<Expr>> output(n, std::vector<Expr>(n, integer(0)));
-        for (std::size_t r = 0; r < n; ++r)
-            for (std::size_t c = 0; c < n; ++c)
-                output[r][c] = (*reduced)[r][n + c];
-        return matrixExpr(output);
-    }
-
-    std::vector<std::vector<Expr>> output(n, std::vector<Expr>(n, integer(0)));
-    for (std::size_t r = 0; r < n; ++r) {
-        for (std::size_t c = 0; c < n; ++c) {
-            Expr cofactor = determinantOf(minorMatrix(matrix, c, r), registry, mathematics, angles);
-            if (((r + c) & 1U) != 0)
-                cofactor = negate(std::move(cofactor), registry, mathematics, angles);
-            output[r][c] = divide(std::move(cofactor), determinant, registry, mathematics, angles);
-        }
-    }
-    return matrixExpr(output);
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "inverse requires a square matrix");
+    const auto result = linear_algebra::inverse(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (!result)
+        return Expr::call(registry.symbol(BuiltinId::Inverse), {arguments.front()});
+    return *result;
 }
 
 Expr evaluateRref(
@@ -455,13 +364,17 @@ Expr evaluateRref(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() != 1)
-        detail::arrayTypeError("rref expects one matrix");
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateRref(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
     const ArrayExpr& array = detail::requireMatrix(arguments.front(), "rref");
-    const auto reduced = gaussianRref(rowsOf(array), registry, mathematics, angles);
+    const auto reduced = linear_algebra::rref(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
     if (!reduced)
         return Expr::call(registry.symbol(BuiltinId::Rref), {arguments.front()});
-    return matrixExpr(*reduced);
+    return reduced->toExpr();
 }
 
 Expr evaluateMatrixRank(
@@ -469,16 +382,383 @@ Expr evaluateMatrixRank(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (arguments.size() != 1)
-        detail::arrayTypeError("rank expects one matrix");
-    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "rank");
-    const auto reduced = gaussianRref(rowsOf(array), registry, mathematics, angles);
-    if (!reduced)
-        return Expr::call(registry.symbol(BuiltinId::Rank), {arguments.front()});
-    const auto rank = rankOfRref(*reduced, registry, mathematics);
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateMatrixRank(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "matrixRank");
+    const auto rank = linear_algebra::matrixRank(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
     if (!rank)
         return Expr::call(registry.symbol(BuiltinId::Rank), {arguments.front()});
-    return Expr{Number{BigInt::parse(std::to_string(*rank))}};
+    return detail::sizeExpr(*rank);
+}
+
+Expr evaluateSolveLinear(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateSolveLinear(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "solveLinear");
+    const ArrayExpr& rhs = detail::requireVector(arguments[1], "solveLinear");
+    if (rhs.shape[0] != matrix.shape[0])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "solveLinear right-hand side size must match the matrix row count");
+
+    const auto result = linear_algebra::solveLinear(
+        linear_algebra::MatrixView{matrix}, rhs,
+        exactContext(registry, mathematics, angles));
+    if (!result)
+        return Expr::call(registry.symbol(BuiltinId::SolveLinear),
+            {arguments[0], arguments[1]});
+    return *result;
+}
+
+Expr evaluateNullSpace(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "nullSpace");
+    const auto result = linear_algebra::nullSpace(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto approximate = evaluateApproximateNullSpace(
+            arguments, registry, mathematics, angles, *context))
+            return *approximate;
+    return Expr::call(registry.symbol(BuiltinId::NullSpace), {arguments.front()});
+}
+
+Expr evaluateLuDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "luDecomposition");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "luDecomposition currently requires a square matrix");
+    const auto result = linear_algebra::luDecomposition(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::LuDecomposition), {arguments.front()});
+}
+
+Expr evaluateQrDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "qrDecomposition");
+    const auto result = linear_algebra::qrDecomposition(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::QrDecomposition), {arguments.front()});
+}
+
+Expr evaluateSingularValueDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "svd");
+    const auto result = linear_algebra::singularValueDecomposition(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::SingularValueDecomposition), {arguments.front()});
+}
+
+Expr evaluateEigenvalues(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "eigenvalues");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "eigenvalues requires a square matrix");
+    const auto result = linear_algebra::eigenvalues(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::Eigenvalues), {arguments.front()});
+}
+
+Expr evaluateEigenvectors(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "eigenvectors");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "eigenvectors requires a square matrix");
+    const auto result = linear_algebra::eigenvectors(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::Eigenvectors), {arguments.front()});
+}
+
+Expr evaluateEigensystem(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "eigensystem");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "eigensystem requires a square matrix");
+    const auto result = linear_algebra::eigensystem(
+        linear_algebra::MatrixView{array}, exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::Eigensystem), {arguments.front()});
+}
+
+Expr evaluateNorm(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateNorm(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& vector = detail::requireVector(arguments.front(), "norm");
+    return hermitianNorm(vector, registry, mathematics, angles);
+}
+
+Expr evaluateNormalize(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateNormalize(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& vector = detail::requireVector(arguments.front(), "normalize");
+    const Expr norm = hermitianNorm(vector, registry, mathematics, angles);
+    if (norm.isNumber() && norm.asNumber().isZero())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "normalize requires a nonzero vector");
+    if (!provablyNonZero(norm, registry, mathematics))
+        return Expr::call(registry.symbol(BuiltinId::VectorNormalize), {arguments.front()});
+
+    const Expr reciprocal = exact::divide(integer(1), norm, registry, mathematics, angles);
+    std::vector<Expr> output;
+    output.reserve(vector.elements.size());
+    for (const Expr& element : vector.elements)
+        output.push_back(productTerm(element, reciprocal, registry, mathematics, angles));
+    return Expr::array(vector.shape, std::move(output));
+}
+
+Expr evaluateTrace(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (const auto context = approximation::inferredApproximationContext(arguments))
+        if (const auto result = evaluateApproximateTrace(
+            arguments, registry, mathematics, angles, *context))
+            return *result;
+
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "trace");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "trace requires a square matrix");
+    linear_algebra::MatrixView matrix{array};
+    std::vector<Expr> diagonal;
+    diagonal.reserve(matrix.rows());
+    for (std::size_t i = 0; i < matrix.rows(); ++i)
+        diagonal.push_back(matrix(i, i));
+    return sumTerms(std::move(diagonal), registry, mathematics, angles);
+}
+
+std::optional<Expr> evaluateApproximateDot(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateDot(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateDeterminant(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateDeterminant(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateInverse(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateInverse(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateRref(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateRref(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateMatrixRank(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateMatrixRank(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateSolveLinear(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateSolveLinear(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateNullSpace(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateNullSpace(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateLuDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateLuDecomposition(
+        arguments.front().asArray(), registry, mathematics, angles, context);
+}
+
+std::optional<Expr> evaluateApproximateQrDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateQrDecomposition(
+        arguments.front().asArray(), registry, mathematics, angles, context);
+}
+
+std::optional<Expr> evaluateApproximateSingularValueDecomposition(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateSingularValueDecomposition(
+        arguments.front().asArray(), registry, mathematics, angles, context);
+}
+
+std::optional<Expr> evaluateApproximateEigenvalues(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateEigenvalues(
+        arguments.front().asArray(), registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateEigenvectors(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateEigenvectors(
+        arguments.front().asArray(), registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateEigensystem(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray())
+        return std::nullopt;
+    return linear_algebra::approximateEigensystem(
+        arguments.front().asArray(), registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateNorm(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateNorm(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateNormalize(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateNormalize(
+        arguments, registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateTrace(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return linear_algebra::approximateTrace(
+        arguments, registry, mathematics, angles, std::move(context));
 }
 
 } // namespace mmcal::builtins

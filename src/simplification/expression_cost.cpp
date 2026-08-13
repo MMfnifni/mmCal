@@ -32,6 +32,11 @@ ExpressionCost measureExpressionCost(const expression::Expr& expression) {
                 stack.push_back(Entry{element, current.depth + 1});
             continue;
         }
+        if (current.expression.isList()) {
+            for (const auto& element : current.expression.asList().elements)
+                stack.push_back(Entry{element, current.depth + 1});
+            continue;
+        }
 
         ++result.leaves;
     }

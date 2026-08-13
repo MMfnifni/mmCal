@@ -1,5 +1,6 @@
 // 安全な標準式簡約
 #include "simplifier.hpp"
+#include "expression/array_utils.hpp"
 
 #include "expression_ordering.hpp"
 
@@ -1444,6 +1445,10 @@ struct PositiveIntegerPower final {
     case BuiltinId::Correlation:
     case BuiltinId::SpearmanCorrelation:
     case BuiltinId::PercentRank:
+    case BuiltinId::Dimensions:
+    case BuiltinId::ArrayRank:
+    case BuiltinId::ArrayGet:
+    case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
     case BuiltinId::MatrixGet:
@@ -1493,6 +1498,16 @@ struct PositiveIntegerPower final {
     case BuiltinId::Inverse:
     case BuiltinId::Rref:
     case BuiltinId::Rank:
+    case BuiltinId::SolveLinear:
+    case BuiltinId::NullSpace:
+    case BuiltinId::LuDecomposition:
+    case BuiltinId::QrDecomposition:
+    case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::Eigenvalues:
+    case BuiltinId::Eigenvectors:
+    case BuiltinId::Eigensystem:
+    case BuiltinId::ConjugateTranspose:
+    case BuiltinId::Length:
     case BuiltinId::NumericDerivative:
     case BuiltinId::NumericIntegral:
     case BuiltinId::NumericalApproximation:
@@ -1551,7 +1566,8 @@ struct PositiveIntegerPower final {
             continue;
 
         if (!current.childrenDone) {
-            if (!current.expression.isCall() && !current.expression.isArray()) {
+            if (!current.expression.isCall() && !current.expression.isArray()
+                && !current.expression.isList()) {
                 completed.emplace(current.expression.identity(), current.expression);
                 continue;
             }
@@ -1563,8 +1579,14 @@ struct PositiveIntegerPower final {
                     if (completed.find(iterator->identity()) == completed.end())
                         stack.push_back(Frame{*iterator, false});
             }
-            else {
+            else if (current.expression.isArray()) {
                 const auto& elements = current.expression.asArray().elements;
+                for (auto iterator = elements.rbegin(); iterator != elements.rend(); ++iterator)
+                    if (completed.find(iterator->identity()) == completed.end())
+                        stack.push_back(Frame{*iterator, false});
+            }
+            else {
+                const auto& elements = current.expression.asList().elements;
                 for (auto iterator = elements.rbegin(); iterator != elements.rend(); ++iterator)
                     if (completed.find(iterator->identity()) == completed.end())
                         stack.push_back(Frame{*iterator, false});
@@ -1587,6 +1609,13 @@ struct PositiveIntegerPower final {
             for (const Expr& child : current.expression.asArray().elements)
                 elements.push_back(completed.at(child.identity()));
             rebuilt = Expr::array(current.expression.asArray().shape, std::move(elements));
+        }
+        else if (current.expression.isList()) {
+            std::vector<Expr> elements;
+            elements.reserve(current.expression.asList().elements.size());
+            for (const Expr& child : current.expression.asList().elements)
+                elements.push_back(completed.at(child.identity()));
+            rebuilt = expression::braceValue(std::move(elements));
         }
 
         completed.emplace(current.expression.identity(), std::move(rebuilt));

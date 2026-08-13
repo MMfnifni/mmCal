@@ -92,12 +92,21 @@ constexpr BuiltinSpec defaultBuiltins[] = {
 
     // exact-first線形代数。
     fixed(builtins::names::transpose, BuiltinId::Transpose, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::conjugateTranspose, BuiltinId::ConjugateTranspose, 1, ArgumentEvaluation::All, true),
     variadic(builtins::names::matrixAdd, BuiltinId::MatrixAdd, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::matrixMultiply, BuiltinId::MatrixMultiply, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::determinant, BuiltinId::Determinant, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::inverse, BuiltinId::Inverse, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::rref, BuiltinId::Rref, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::rank, BuiltinId::Rank, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::solveLinear, BuiltinId::SolveLinear, 2, ArgumentEvaluation::All, true),
+    fixed(builtins::names::nullSpace, BuiltinId::NullSpace, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::luDecomposition, BuiltinId::LuDecomposition, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::qrDecomposition, BuiltinId::QrDecomposition, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::singularValueDecomposition, BuiltinId::SingularValueDecomposition, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::eigenvalues, BuiltinId::Eigenvalues, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::eigenvectors, BuiltinId::Eigenvectors, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::eigensystem, BuiltinId::Eigensystem, 1, ArgumentEvaluation::All, true),
 
     // 数値解析。binder型は被積分式とiterator変数だけを保持する。
     range(builtins::names::numericDerivative, BuiltinId::NumericDerivative, 3, 4,
@@ -154,10 +163,16 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     variadic(builtins::names::spearmanCorrelation, BuiltinId::SpearmanCorrelation, 2, ArgumentEvaluation::All, true),
     variadic(builtins::names::percentRank, BuiltinId::PercentRank, 2, ArgumentEvaluation::All, true),
 
+    // Array shape・index utility。
+    fixed(builtins::names::dimensions, BuiltinId::Dimensions, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::arrayRank, BuiltinId::ArrayRank, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::length, BuiltinId::Length, 1, ArgumentEvaluation::All, true),
+    variadic(builtins::names::arrayGet, BuiltinId::ArrayGet, 2, ArgumentEvaluation::All, true),
+    fixed(builtins::names::reshape, BuiltinId::Reshape, 2, ArgumentEvaluation::All, true),
+
     // 配列・ベクトル・行列utility。
     fixed(builtins::names::identity, BuiltinId::Identity, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::zeros, BuiltinId::Zeros, 2, ArgumentEvaluation::All, true),
-    fixed(builtins::names::matrixGet, BuiltinId::MatrixGet, 3, ArgumentEvaluation::All, true),
     fixed(builtins::names::trace, BuiltinId::Trace, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::rows, BuiltinId::Rows, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::cols, BuiltinId::Cols, 1, ArgumentEvaluation::All, true),
@@ -165,7 +180,6 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::vectorAdd, BuiltinId::VectorAdd, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::vectorSubtract, BuiltinId::VectorSubtract, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::vectorScale, BuiltinId::VectorScale, 2, ArgumentEvaluation::All, true),
-    fixed(builtins::names::vectorDot, BuiltinId::VectorDot, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::vectorCross, BuiltinId::VectorCross, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::vectorNorm, BuiltinId::VectorNorm, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::vectorManhattan, BuiltinId::VectorManhattan, 2, ArgumentEvaluation::All, true),
@@ -294,18 +308,25 @@ constexpr BuiltinAliasSpec defaultAliases[] = {
     {"unit", BuiltinId::Sign},
     {"csgn", BuiltinId::Sign},
     {"rect", BuiltinId::Polar},
+    {"matmul", BuiltinId::MatrixMultiply},
     {"mmul", BuiltinId::MatrixMultiply},
+    {"vdot", BuiltinId::MatrixMultiply},
+    {"mget", BuiltinId::ArrayGet},
+    {"singularValueDecomposition", BuiltinId::SingularValueDecomposition},
     {"mtranspose", BuiltinId::Transpose},
     {"mdet", BuiltinId::Determinant},
     {"minverse", BuiltinId::Inverse},
+    {"rank", BuiltinId::Rank},
     {"mrank", BuiltinId::Rank},
     {"ave", BuiltinId::Mean},
     {"mtrace", BuiltinId::Trace},
     {"mrows", BuiltinId::Rows},
     {"mcols", BuiltinId::Cols},
     {"mdiag", BuiltinId::Diag},
+    {"vnorm", BuiltinId::VectorNorm},
     {"vlength", BuiltinId::VectorNorm},
     {"vdistance", BuiltinId::VectorEuclidean},
+    {"vnormalize", BuiltinId::VectorNormalize},
     {"vunit", BuiltinId::VectorNormalize},
 
 

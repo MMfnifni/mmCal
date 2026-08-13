@@ -482,7 +482,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"(-8)^(1/3)"},
         "KernelSession: exact principal Power remains symbolic when no simple exact form is implemented");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[(-8)^(1/3), 30]"),
-        std::string{"1.000000000000000000000000000000+1.732050807568877293527446341506I"},
+        std::string{"1.0+1.732050807568877293527446341506I"},
         "KernelSession: non-integer Power uses Exp[w principal Log[z]]");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[2]]"),
         std::string{"1.4142135623730950"},

@@ -75,12 +75,12 @@ vars[1]==>DomainError: vars requires more observations
 stddevs[1]==>DomainError: stddevs requires more observations
 identity[-1]==>TypeError: identity requires a nonnegative machine-size integer
 zeros[-1,2]==>TypeError: zeros requires a nonnegative machine-size integer
-mget[{{1,2},{3,4}},2,2]==>DomainError: mget index is out of range
+mget[{{1,2},{3,4}},2,2]==>DomainError: at index is out of range
 madd[{{1,2}},{{3,4},{5,6}}]==>DomainError: madd requires identical array shapes
-mmul[{{1,2},{3,4}},{{5,6}}]==>DomainError: matmul inner dimensions do not agree
+mmul[{{1,2},{3,4}},{{5,6}}]==>DomainError: dot inner dimensions do not agree
 mdet[{{1,2,3},{4,5,6}}]==>DomainError: det requires a square matrix
 minverse[{{1,2},{2,4}}]==>DomainError: Matrix is singular
-vnormalize[{0,0}]==>DomainError: vnormalize requires a nonzero vector
+vnormalize[{0,0}]==>DomainError: normalize requires a nonzero vector
 vangle[{0,0},{1,0}]==>DomainError: vangle is undefined for the zero vector
 
 # Session / calculus / solver contract boundaries.

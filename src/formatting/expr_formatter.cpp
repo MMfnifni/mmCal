@@ -2,6 +2,7 @@
 #include "expr_formatter.hpp"
 
 #include "builtins/names.hpp"
+#include "expression/array_utils.hpp"
 #include "solver/solution_set.hpp"
 #include "mathematics/predicate.hpp"
 
@@ -356,6 +357,17 @@ void appendArrayDimension(
             appendArrayDimension(output, array, dimension + 1, elementOffset, radix);
     }
 
+    output.push_back('}');
+}
+
+
+void appendShapeLiteral(std::string& output, std::span<const std::size_t> shape) {
+    output.push_back('{');
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        if (i != 0)
+            output += ", ";
+        output += std::to_string(shape[i]);
+    }
     output.push_back('}');
 }
 
@@ -758,9 +770,31 @@ void appendExpr(
         output += expression.asSymbol().name();
         break;
 
-    case ExprKind::Array:
-        appendArrayDimension(output, expression.asArray(), 0, 0, radix);
+    case ExprKind::Array: {
+        const auto& array = expression.asArray();
+        if (expression::braceLiteralPreservesShape(array.shape)) {
+            appendArrayDimension(output, array, 0, 0, radix);
+            break;
+        }
+
+        output += builtins::names::reshape;
+        output += "[{}, ";
+        appendShapeLiteral(output, array.shape);
+        output.push_back(']');
         break;
+    }
+
+    case ExprKind::List: {
+        output.push_back('{');
+        const auto& list = expression.asList();
+        for (std::size_t i = 0; i < list.elements.size(); ++i) {
+            if (i != 0)
+                output += ", ";
+            appendExpr(output, list.elements[i], radix, precedenceLowest);
+        }
+        output.push_back('}');
+        break;
+    }
 
     case ExprKind::Call:
         appendCall(output, expression.asCall(), radix, parentPrecedence);

@@ -6,6 +6,7 @@
 #include "mathematics/value_facts.hpp"
 #include "numeric/integer_algorithms.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <optional>
@@ -52,61 +53,146 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return result;
 }
 
+
+[[nodiscard]] Expr scalarAdd(
+    const std::vector<Expr>& arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    Number sum{BigInt{0}};
+    bool numeric = true;
+    for (const Expr& argument : arguments) {
+        if (!argument.isNumber()) {
+            numeric = false;
+            break;
+        }
+        sum += argument.asNumber();
+    }
+    if (numeric)
+        return numberExpr(std::move(sum));
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Add), arguments);
+}
+
+[[nodiscard]] Expr scalarMultiply(
+    const std::vector<Expr>& arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    Number product{BigInt{1}};
+    bool numeric = true;
+    for (const Expr& argument : arguments) {
+        if (!argument.isNumber()) {
+            numeric = false;
+            break;
+        }
+        product *= argument.asNumber();
+    }
+    if (numeric)
+        return numberExpr(std::move(product));
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Multiply), arguments);
+}
+
+[[noreturn]] void arrayArithmeticError(std::string message) {
+    error::throwCalcError(error::CalcErrorType::Type, std::move(message));
+}
+
 } // namespace
 
 Expr evaluateAdd(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
-    bool allNumeric = true;
-    Number sum{BigInt{0}};
-    for (const Expr& argument : arguments) {
-        if (!argument.isNumber()) {
-            allNumeric = false;
-            break;
-        }
-        sum += argument.asNumber();
+    const bool hasArray = std::any_of(arguments.begin(), arguments.end(),
+        [](const Expr& argument) { return argument.isArray(); });
+    if (!hasArray)
+        return scalarAdd(std::vector<Expr>{arguments.begin(), arguments.end()}, registry);
+
+    for (const Expr& argument : arguments)
+        if (!argument.isArray())
+            arrayArithmeticError("Array addition requires arrays with identical shapes");
+
+    const auto& first = arguments.front().asArray();
+    for (const Expr& argument : arguments)
+        if (argument.asArray().shape != first.shape)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "Array addition requires identical shapes");
+
+    std::vector<Expr> elements;
+    elements.reserve(first.elements.size());
+    for (std::size_t i = 0; i < first.elements.size(); ++i) {
+        std::vector<Expr> terms;
+        terms.reserve(arguments.size());
+        for (const Expr& argument : arguments)
+            terms.push_back(argument.asArray().elements[i]);
+        elements.push_back(scalarAdd(terms, registry));
     }
-
-    if (allNumeric)
-        return numberExpr(std::move(sum));
-
-    // 記号項のflatten、係数収集、0除去は共通Simplifierの責務。
-    return Expr::call(
-        registry.symbol(evaluation::BuiltinId::Add),
-        std::vector<Expr>{arguments.begin(), arguments.end()});
+    return Expr::array(first.shape, std::move(elements));
 }
 
 Expr evaluateSubtract(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
     requireArity(arguments, 2, names::subtract);
-    if (arguments[0].isNumber() && arguments[1].isNumber())
-        return numberExpr(arguments[0].asNumber() - arguments[1].asNumber());
+    const Expr& lhs = arguments[0];
+    const Expr& rhs = arguments[1];
+
+    if (lhs.isArray() || rhs.isArray()) {
+        if (!lhs.isArray() || !rhs.isArray())
+            arrayArithmeticError("Array subtraction requires two arrays with identical shapes");
+        if (lhs.asArray().shape != rhs.asArray().shape)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "Array subtraction requires identical shapes");
+
+        std::vector<Expr> elements;
+        elements.reserve(lhs.asArray().elements.size());
+        for (std::size_t i = 0; i < lhs.asArray().elements.size(); ++i) {
+            const Expr& left = lhs.asArray().elements[i];
+            const Expr& right = rhs.asArray().elements[i];
+            if (left.isNumber() && right.isNumber())
+                elements.emplace_back(left.asNumber() - right.asNumber());
+            else
+                elements.push_back(Expr::call(
+                    registry.symbol(evaluation::BuiltinId::Subtract), {left, right}));
+        }
+        return Expr::array(lhs.asArray().shape, std::move(elements));
+    }
+
+    if (lhs.isNumber() && rhs.isNumber())
+        return numberExpr(lhs.asNumber() - rhs.asNumber());
     return Expr::call(
         registry.symbol(evaluation::BuiltinId::Subtract),
-        {arguments[0], arguments[1]});
+        {lhs, rhs});
 }
 
 Expr evaluateMultiply(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
-    bool allNumeric = true;
-    Number product{BigInt{1}};
-    for (const Expr& argument : arguments) {
-        if (!argument.isNumber()) {
-            allNumeric = false;
-            break;
+    std::size_t arrayCount = 0;
+    std::size_t arrayIndex = 0;
+    for (std::size_t i = 0; i < arguments.size(); ++i)
+        if (arguments[i].isArray()) {
+            ++arrayCount;
+            arrayIndex = i;
         }
-        product *= argument.asNumber();
+
+    if (arrayCount == 0)
+        return scalarMultiply(std::vector<Expr>{arguments.begin(), arguments.end()}, registry);
+    if (arrayCount > 1)
+        arrayArithmeticError(
+            "Array multiplication is scalar-only; use dot[...] for vector or matrix contraction");
+
+    const auto& array = arguments[arrayIndex].asArray();
+    std::vector<Expr> scalarFactors;
+    scalarFactors.reserve(arguments.size() - 1);
+    for (std::size_t i = 0; i < arguments.size(); ++i)
+        if (i != arrayIndex)
+            scalarFactors.push_back(arguments[i]);
+
+    std::vector<Expr> elements;
+    elements.reserve(array.elements.size());
+    for (const Expr& element : array.elements) {
+        std::vector<Expr> factors;
+        factors.reserve(scalarFactors.size() + 1);
+        factors.push_back(element);
+        factors.insert(factors.end(), scalarFactors.begin(), scalarFactors.end());
+        elements.push_back(scalarMultiply(factors, registry));
     }
-
-    if (allNumeric)
-        return numberExpr(std::move(product));
-
-    // 記号因子のflatten、0/1除去、係数整理は共通Simplifierへ集約する。
-    return Expr::call(
-        registry.symbol(evaluation::BuiltinId::Multiply),
-        std::vector<Expr>{arguments.begin(), arguments.end()});
+    return Expr::array(array.shape, std::move(elements));
 }
 
 Expr evaluateDivide(
@@ -214,6 +300,19 @@ Expr evaluateNegate(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
     requireArity(arguments, 1, names::negate);
+    if (arguments.front().isArray()) {
+        const auto& array = arguments.front().asArray();
+        std::vector<Expr> elements;
+        elements.reserve(array.elements.size());
+        for (const Expr& element : array.elements) {
+            if (element.isNumber())
+                elements.emplace_back(-element.asNumber());
+            else
+                elements.push_back(Expr::call(
+                    registry.symbol(evaluation::BuiltinId::Negate), {element}));
+        }
+        return Expr::array(array.shape, std::move(elements));
+    }
     if (arguments.front().isNumber())
         return numberExpr(-arguments.front().asNumber());
     return Expr::call(

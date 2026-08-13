@@ -37,6 +37,12 @@ using expression::Expr;
             key += legacyOrderKey(element) + ';';
         return key;
     }
+    case expression::ExprKind::List: {
+        std::string key{"9:"};
+        for (const Expr& element : expression.asList().elements)
+            key += legacyOrderKey(element) + ';';
+        return key;
+    }
     case expression::ExprKind::Call: {
         std::string key = "7:" + expression.asCall().head.name() + '[';
         for (const Expr& argument : expression.asCall().arguments)
@@ -180,6 +186,11 @@ void appendExpr(std::string& output, const Expr& expression) {
             appendUnsigned(output, dimension);
         appendUnsigned(output, expression.asArray().elements.size());
         for (const Expr& element : expression.asArray().elements)
+            appendExpr(output, element);
+        break;
+    case expression::ExprKind::List:
+        appendUnsigned(output, expression.asList().elements.size());
+        for (const Expr& element : expression.asList().elements)
             appendExpr(output, element);
         break;
     case expression::ExprKind::Call:

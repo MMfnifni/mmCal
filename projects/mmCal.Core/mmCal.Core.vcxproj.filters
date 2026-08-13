@@ -52,6 +52,9 @@
     <Filter Include="src\symbolic">
       <UniqueIdentifier>{6BC6643D-1731-44FB-89CF-2E39D14ADB1C}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\linear_algebra">
+      <UniqueIdentifier>{B3F98AE6-E3F6-4C60-93AE-79F0D4DF3B5C}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\random">
       <UniqueIdentifier>{86F86618-9541-47CA-879F-1125CB840F58}</UniqueIdentifier>
     </Filter>
@@ -387,6 +390,18 @@
     <ClInclude Include="..\..\src\builtins\array_helpers.hpp">
       <Filter>src\builtins</Filter>
     </ClInclude>
+  <ClInclude Include="..\..\src\expression\array_utils.hpp"><Filter>src\expression</Filter></ClInclude>
+  <ClInclude Include="..\..\src\approximation\expression_interval.hpp"><Filter>src\approximation</Filter></ClInclude>
+  <ClInclude Include="..\..\src\builtins\array.hpp"><Filter>src\builtins</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\exact_matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\decomposition.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\complex_point.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\eigen.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\svd.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\approximation\elementary_function.hpp"><Filter>src\approximation</Filter></ClInclude><ClInclude Include="..\..\src\approximation\machine_math.hpp"><Filter>src\approximation</Filter></ClInclude></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp">
@@ -668,5 +683,17 @@
     <ClCompile Include="..\..\src\random\random_engine.cpp">
       <Filter>src\random</Filter>
     </ClCompile>
+  <ClCompile Include="..\..\src\expression\array_utils.cpp"><Filter>src\expression</Filter></ClCompile>
+  <ClCompile Include="..\..\src\approximation\expression_interval.cpp"><Filter>src\approximation</Filter></ClCompile>
+  <ClCompile Include="..\..\src\builtins\array.cpp"><Filter>src\builtins</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\matrix.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\exact_matrix.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\decomposition.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\complex_point.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\eigen.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\svd.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\svd_complex.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\fraction_free_elimination.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\approximate_matrix.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\approximation\machine_math.cpp"><Filter>src\approximation</Filter></ClCompile></ItemGroup>
 </Project>

@@ -219,6 +219,18 @@
     <ClInclude Include="..\..\src\random\random_engine.hpp" />
     <ClInclude Include="..\..\src\builtins\exact_operations.hpp" />
     <ClInclude Include="..\..\src\builtins\array_helpers.hpp" />
+    <ClInclude Include="..\..\src\expression\array_utils.hpp" />
+    <ClInclude Include="..\..\src\approximation\expression_interval.hpp" />
+    <ClInclude Include="..\..\src\builtins\array.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\matrix.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\exact_matrix.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\decomposition.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\complex_point.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\eigen.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\svd.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp" />
   <ClInclude Include="..\..\src\approximation\elementary_function.hpp" /><ClInclude Include="..\..\src\approximation\machine_math.hpp" /></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp" />
@@ -314,6 +326,18 @@
     <ClCompile Include="..\..\src\builtins\random_functions.cpp" />
     <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp" />
     <ClCompile Include="..\..\src\random\random_engine.cpp" />
+    <ClCompile Include="..\..\src\expression\array_utils.cpp" />
+    <ClCompile Include="..\..\src\approximation\expression_interval.cpp" />
+    <ClCompile Include="..\..\src\builtins\array.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\matrix.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\exact_matrix.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\decomposition.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\complex_point.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\eigen.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\svd.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\svd_complex.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\fraction_free_elimination.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\approximate_matrix.cpp" />
   <ClCompile Include="..\..\src\approximation\machine_math.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

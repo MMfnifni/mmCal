@@ -814,6 +814,16 @@ using numeric::Number;
     case BuiltinId::Inverse:
     case BuiltinId::Rref:
     case BuiltinId::Rank:
+    case BuiltinId::SolveLinear:
+    case BuiltinId::NullSpace:
+    case BuiltinId::LuDecomposition:
+    case BuiltinId::QrDecomposition:
+    case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::Eigenvalues:
+    case BuiltinId::Eigenvectors:
+    case BuiltinId::Eigensystem:
+    case BuiltinId::ConjugateTranspose:
+    case BuiltinId::Length:
     case BuiltinId::NumericDerivative:
     case BuiltinId::NumericIntegral:
     case BuiltinId::Precision:
@@ -859,6 +869,10 @@ using numeric::Number;
     case BuiltinId::Correlation:
     case BuiltinId::SpearmanCorrelation:
     case BuiltinId::PercentRank:
+    case BuiltinId::Dimensions:
+    case BuiltinId::ArrayRank:
+    case BuiltinId::ArrayGet:
+    case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
     case BuiltinId::MatrixGet:
@@ -992,6 +1006,7 @@ ValueFacts inferValueFactsImpl(
         case expression::ExprKind::Boolean:
         case expression::ExprKind::String:
         case expression::ExprKind::Array:
+        case expression::ExprKind::List:
         case expression::ExprKind::SolutionSet:
             result = {};
             break;

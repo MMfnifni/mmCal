@@ -428,11 +428,40 @@ solve[exp[x]==2,x,Real]
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.
 
-## 8. Matrices, vectors, and statistics
+## 8. Arrays, matrices, vectors, and statistics
+
+`{...}` is a general finite brace container rather than matrix-only syntax. Values whose children share one shape are automatically optimized to the dense **shape + row-major flat storage** `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` remain general braces. Matrix functions audit rectangularity at their boundary and leave non-rectangular values unevaluated with a Warning. Only empty shapes that cannot be preserved by braces alone are formatted through `reshape`.
 
 ```text
-matmul[{{1,2},{3,4}},{{5,6},{7,8}}]
+dimensions[{{1,2,3},{4,5,6}}]
+-> {2, 3}
+
+arrayRank[{{1,2},{3,4}}]
+-> 2
+
+at[{{1,2},{3,4}},1]
+-> {3, 4}
+
+at[{{1,2},{3,4}},1,0]
+-> 3
+
+reshape[{1,2,3,4},{2,2}]
+-> {{1, 2}, {3, 4}}
+
+zeros[0,3]
+-> reshape[{}, {0, 3}]
+```
+
+Indices are zero-based. `arrayRank[A]` means the number of Array dimensions, while `matrixRank[A]` is the linear-algebra rank.
+
+The canonical basic linear-algebra API is:
+
+```text
+dot[{{1,2},{3,4}},{{5,6},{7,8}}]
 -> {{19, 22}, {43, 50}}
+
+dot[{1,2},{3,4}]
+-> 11
 
 det[{{1,2},{3,4}}]
 -> -2
@@ -443,15 +472,67 @@ inverse[{{1,2},{3,4}}]
 rref[{{1,2},{3,4}}]
 -> {{1, 0}, {0, 1}}
 
-vdot[{1,2},{3,4}]
--> 11
+matrixRank[{{1,2},{2,4}}]
+-> 1
 
-vcross[{1,0,0},{0,1,0}]
--> {0, 0, 1}
+nullSpace[{{1,2},{2,4}}]
+-> {{-2, 1}}
 
-vnorm[{3,4}]
+solveLinear[{{2,1},{1,-1}},{5,1}]
+-> {2, 1}
+
+luDecomposition[{{0,2},{3,4}}]
+-> {{{0,1},{1,0}},{{1,0},{0,1}},{{3,4},{0,2}}}
+
+qrDecomposition[{{3,0},{4,0}}]
+-> {{{-3/5,-4/5},{-4/5,3/5}},{{-5,0},{0,0}}}
+
+svd[{{3,0},{0,4}}]
+-> {{{0,1},{1,0}},{{4,0},{0,3}},{{0,1},{1,0}}}
+
+eigenvalues[{{0,-1},{1,0}}]
+-> {I, -I}
+
+norm[{3+4I}]
 -> 5
 
+normalize[{3,4}]
+-> {3/5, 4/5}
+```
+
+`dot` covers vector-vector, matrix-vector, vector-matrix, and matrix-matrix contraction.
+`A*B` is deliberately not matrix multiplication: ordinary arithmetic supports same-shape Array `+` / `-` and scalar×Array, while matrix multiplication and inner products remain explicit as `dot[A,B]`.
+
+Integer and Rational matrices remain exact rather than being converted to BigFloat. `det`, `rref`, `matrixRank`, `nullSpace`, `inverse`, and `solveLinear` share per-row denominator clearing and Bareiss fraction-free elimination to suppress intermediate Rational growth; exact complex matrices fall back to the `Number` Gaussian backend. `solveLinear[A,b]` returns only unique solutions, including consistent overdetermined systems with full column rank. Inconsistent systems and systems with free variables are Domain errors rather than invented parametric answers. General symbolic determinant/inverse expansion has a work budget: triangular and sufficiently sparse cases are still evaluated, while potentially explosive dense cases remain unevaluated instead of constructing factorial-size expressions. `luDecomposition[A]` returns `{P,L,U}` for square matrices. `qrDecomposition[A]` is a rectangular reduced Householder QR: for m×n input with `k=min[m,n]`, it returns `{Q,R}` with `Q:m×k` and `R:k×n`. `svd[A]` likewise returns rectangular reduced `{U,S,V}`; its general numerical backend avoids forming `A^H A` and instead uses Householder bidiagonalization plus one-sided Jacobi. Factors are extracted with prefix indexing such as `at[result,0]`. General exact QR is limited to 3x3 to prevent expression explosion, while upper-triangular/trapezoidal cases retain an any-size fast path. `eigenvalues`, `eigenvectors`, and `eigensystem` target square matrices: exact triangular/diagonal and distinct-root exact Number 2x2 cases remain exact, while general `N[...]` uses Hessenberg reduction plus implicit shifted complex QR and audits Schur/eigenpair relations against the certified input intervals. Defective or near-multiple cases are not supplied with guessed independent eigenvectors.
+
+Under `N`, matrix operations dispatch directly to a precision-aware backend just like FFT:
+
+```text
+N[det[{{Pi,0},{0,2}}],12]
+-> 6.283185307180
+
+N[inverse[{{Pi,0},{0,2}}],12]
+-> {{0.318309886184, 0}, {0, 0.5}}
+
+N[solveLinear[{{Pi,0},{0,2}},{Pi,4}],12]
+-> {1.0, 2}
+
+N[qrDecomposition[{{1,2},{3,4}}],8]
+-> {{{-0.31622777,-0.94868330},{-0.94868330,0.31622777}},{{-3.16227766,-4.42718872},{0,-0.63245553}}}
+
+N[eigenvalues[{{1,2},{3,4}}],8]
+-> {-0.37228132, 5.37228132}
+```
+
+This avoids first constructing a huge exact result. Requested precision is handled directly with certified BigFloat/interval operations. `solveLinear` likewise tries direct augmented interval elimination and never substitutes an epsilon guess when pivots or consistency cannot be certified; dependent overdetermined rows can be intrinsically difficult to certify because interval evaluation loses correlation. `matrixRank` and `nullSpace` are discontinuous with respect to rank deficiency, so exact inputs use exact elimination first. Approximate inputs still use no arbitrary epsilon: the interval backend returns a result only when the pivot structure is certified rather than guessing rank deficiency.
+
+For `N` output, exact terminating decimals remain compact (`N[1/2,10] -> 0.5`). Certified-interval results compact only redundant runs of trailing zeros while retaining one visible zero, so `1.000000000000 -> 1.0` and `1.500000000000 -> 1.50`. Requested digits and the certified enclosure remain in metadata.
+
+Legacy `matmul` / `mmul` / `vdot`, `rank` / `mrank`, `vnorm`, `vnormalize`, and `mget` remain compatibility aliases.
+
+Statistical operations also retain exact numbers and symbolic expressions whenever possible.
+
+```text
 mean[{1,2,4}]
 -> 7/3
 
@@ -464,9 +545,6 @@ stddev[{1,2,3}]
 corr[{1,2,3},{2,4,6}]
 -> 1
 ```
-
-Matrix and statistical operations also retain exact numbers and symbolic expressions whenever possible.
-`N[{...}]` recursively approximates array elements numerically.
 
 ## 9. FFT and random numbers
 

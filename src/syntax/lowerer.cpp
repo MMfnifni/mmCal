@@ -3,11 +3,13 @@
 
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
+#include "expression/array_utils.hpp"
 #include "numeric/integer_algorithms.hpp"
 
 #include <charconv>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -23,11 +25,6 @@ using numeric::BigInt;
 using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
-
-struct LoweredArray final {
-    std::vector<std::size_t> shape;
-    std::vector<Expr> elements;
-};
 
 [[nodiscard]] Expr integerExpr(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
@@ -421,46 +418,18 @@ Expr Lowerer::lowerArray(
     const ArrayLiteralSyntax& array,
     source::SourceSpan span,
     expression::OriginMap* origins) const {
-    LoweredArray lowered;
-    lowered.shape.push_back(array.elements.size());
-
-    if (array.elements.empty())
-        return Expr::array(std::move(lowered.shape), {});
-
     std::vector<Expr> elements;
     elements.reserve(array.elements.size());
     for (const SyntaxNodePtr& element : array.elements)
         elements.push_back(lowerNode(*element, origins));
 
-    const bool hasArray = elements.front().isArray();
-    for (const Expr& element : elements)
-        if (element.isArray() != hasArray)
-            error::throwCalcError(
-                error::CalcErrorType::Type,
-                "Array literal must be rectangular",
-                span);
-
-    if (!hasArray)
-        return Expr::array(std::move(lowered.shape), std::move(elements));
-
-    const std::vector<std::size_t>& childShape = elements.front().asArray().shape;
-    lowered.shape.insert(lowered.shape.end(), childShape.begin(), childShape.end());
-
-    for (const Expr& element : elements) {
-        const auto& child = element.asArray();
-        if (child.shape != childShape)
-            error::throwCalcError(
-                error::CalcErrorType::Type,
-                "Array literal must be rectangular",
-                span);
-
-        lowered.elements.insert(
-            lowered.elements.end(),
-            child.elements.begin(),
-            child.elements.end());
+    try {
+        // {}は一般brace値。矩形ならdense Arrayへ最適化し，非矩形ならListとして合法に保持する。
+        return expression::braceValue(std::move(elements));
     }
-
-    return Expr::array(std::move(lowered.shape), std::move(lowered.elements));
+    catch (const std::length_error& exception) {
+        error::throwCalcError(error::CalcErrorType::Overflow, exception.what(), span);
+    }
 }
 
 Expr Lowerer::lowerCall(

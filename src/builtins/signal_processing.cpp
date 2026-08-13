@@ -5,12 +5,11 @@
 #include "approximation/certified_evaluator.hpp"
 #include "approximation/certified_trigonometry.hpp"
 #include "approximation/complex_interval.hpp"
+#include "approximation/expression_interval.hpp"
 #include "builtins/exact_operations.hpp"
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
-#include "numeric/complex_decimal_approximation.hpp"
-#include "numeric/decimal_approximation.hpp"
 #include "numeric/number.hpp"
 
 #include <algorithm>
@@ -255,41 +254,6 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 }
 
 [[nodiscard]] Expr vectorExpr(std::vector<Expr> elements);
-
-[[nodiscard]] std::size_t nextGuardDigits(std::size_t current) {
-    const std::size_t growth = std::max<std::size_t>(8, current / 2);
-    if (growth > std::numeric_limits<std::size_t>::max() - current)
-        throw std::overflow_error("Fourier approximation precision is too large");
-    return current + growth;
-}
-
-[[nodiscard]] approximation::RealInterval intervalFromDecimal(
-    const numeric::DecimalApproximation& value,
-    std::size_t precisionBits) {
-    return approximation::RealInterval::fromRationalBounds(
-        value.certifiedLower(), value.certifiedUpper(), precisionBits);
-}
-
-[[nodiscard]] std::optional<approximation::ComplexInterval> approximateInput(
-    const Expr& expression,
-    std::size_t precisionBits,
-    const approximation::CertifiedEvaluator& certified) {
-    if (expression.isDecimalApproximation())
-        return approximation::ComplexInterval::fromReal(
-            intervalFromDecimal(expression.asDecimalApproximation(), precisionBits));
-
-    if (expression.isComplexDecimalApproximation()) {
-        const auto& value = expression.asComplexDecimalApproximation();
-        return approximation::ComplexInterval{
-            intervalFromDecimal(value.real(), precisionBits),
-            intervalFromDecimal(value.imaginary(), precisionBits)};
-    }
-
-    const auto enclosed = certified.enclose(expression, precisionBits);
-    if (!enclosed)
-        return std::nullopt;
-    return enclosed->toComplex();
-}
 
 [[nodiscard]] approximation::ComplexInterval exactComplexRational(
     const Rational& real,
@@ -578,61 +542,6 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return approximateBluesteinTransform(input, inverse, precisionBits);
 }
 
-[[nodiscard]] bool exactZero(const approximation::RealInterval& value) noexcept {
-    return value.isPoint() && value.lower().isZero();
-}
-
-[[nodiscard]] std::optional<Expr> decimalExpression(
-    const approximation::ComplexInterval& value,
-    std::size_t fractionalDigits) {
-    // 区間演算の結果が厳密な一点へ潰れた成分は、従来のN[exact,n]と同じ最小10進表記を使う。
-    // 例えばDFTのDC成分6を6.000...へ不必要に固定桁化しない。
-    if (value.real().isPoint() && value.imaginary().isPoint()) {
-        const auto real = numeric::DecimalApproximation::fromReal(
-            numeric::RealNumber{value.real().lower().toRational()}, fractionalDigits);
-        const auto imaginary = numeric::DecimalApproximation::fromReal(
-            numeric::RealNumber{value.imaginary().lower().toRational()}, fractionalDigits);
-        if (exactZero(value.imaginary()))
-            return Expr{real};
-        return Expr{numeric::ComplexDecimalApproximation::fromComponents(
-            real, imaginary, exactZero(value.real()), false)};
-    }
-
-    const auto real = numeric::DecimalApproximation::fromCertifiedInterval(
-        value.real().lower().toRational(), value.real().upper().toRational(), fractionalDigits);
-    const auto imaginary = numeric::DecimalApproximation::fromCertifiedInterval(
-        value.imaginary().lower().toRational(), value.imaginary().upper().toRational(), fractionalDigits);
-    if (!real || !imaginary)
-        return std::nullopt;
-
-    if (exactZero(value.imaginary()))
-        return Expr{*real};
-    return Expr{numeric::ComplexDecimalApproximation::fromComponents(
-        *real, *imaginary, exactZero(value.real()), false)};
-}
-
-[[nodiscard]] std::optional<approximation::ApproximationContext> inferredApproximationContext(
-    const std::vector<Expr>& input) {
-    std::optional<std::size_t> digits;
-    for (const Expr& value : input) {
-        std::optional<std::size_t> current;
-        if (value.isDecimalApproximation())
-            current = value.asDecimalApproximation().requestedFractionalDigits();
-        else if (value.isComplexDecimalApproximation()) {
-            const auto& complex = value.asComplexDecimalApproximation();
-            current = std::min(
-                complex.real().requestedFractionalDigits(),
-                complex.imaginary().requestedFractionalDigits());
-        }
-
-        if (current)
-            digits = digits ? std::min(*digits, *current) : current;
-    }
-    if (!digits || *digits == 0)
-        return std::nullopt;
-    return approximation::ApproximationContext{*digits};
-}
-
 template <class Transform>
 [[nodiscard]] std::optional<Expr> approximateTransform(
     std::span<const Expr> arguments,
@@ -652,7 +561,7 @@ template <class Transform>
             std::vector<approximation::ComplexInterval> input;
             input.reserve(inputExpressions.size());
             for (const Expr& expression : inputExpressions) {
-                const auto value = approximateInput(expression, bits, certified);
+                const auto value = approximation::encloseComplexExpression(expression, bits, certified);
                 if (!value)
                     return std::nullopt;
                 input.push_back(*value);
@@ -663,7 +572,7 @@ template <class Transform>
             output.reserve(transformed.size());
             bool rounded = true;
             for (const auto& value : transformed) {
-                const auto decimal = decimalExpression(value, context.decimalDigits());
+                const auto decimal = approximation::decimalExpression(value, context.decimalDigits());
                 if (!decimal) {
                     rounded = false;
                     break;
@@ -677,7 +586,7 @@ template <class Transform>
             // 現作業精度では象限や丸めを証明できない。guardを増やして同じ式を再評価する。
         }
 
-        context.setGuardDigits(nextGuardDigits(context.guardDigits()));
+        context.setGuardDigits(approximation::nextGuardDigits(context.guardDigits()));
     }
 }
 
@@ -707,7 +616,7 @@ Expr evaluateDft(
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::dft);
     const std::vector<Expr> input = vectorArgument(arguments.front(), names::dft);
-    if (const auto context = inferredApproximationContext(input))
+    if (const auto context = approximation::inferredApproximationContext(input))
         if (const auto result = evaluateApproximateDft(
             arguments, registry, mathematics, angles, *context))
             return *result;
@@ -722,7 +631,7 @@ Expr evaluateFft(
     FourierTransformCache& cache) {
     requireArity(arguments, 1, names::fft);
     const std::vector<Expr> input = vectorArgument(arguments.front(), names::fft);
-    if (const auto context = inferredApproximationContext(input))
+    if (const auto context = approximation::inferredApproximationContext(input))
         if (const auto result = evaluateApproximateFft(
             arguments, registry, mathematics, angles, *context))
             return *result;
@@ -738,7 +647,7 @@ Expr evaluateIfft(
     FourierTransformCache& cache) {
     requireArity(arguments, 1, names::ifft);
     const std::vector<Expr> input = vectorArgument(arguments.front(), names::ifft);
-    if (const auto context = inferredApproximationContext(input))
+    if (const auto context = approximation::inferredApproximationContext(input))
         if (const auto result = evaluateApproximateIfft(
             arguments, registry, mathematics, angles, *context))
             return *result;

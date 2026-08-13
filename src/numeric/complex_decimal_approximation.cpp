@@ -24,7 +24,7 @@ namespace {
         result.push_back('-');
 
     // exactな1なら従来のNumberと同様に係数を省略する。
-    // certified fixed decimalの1.000...は要求精度を示す情報なので省略しない。
+    // certified interval由来の1.0は近似値であることを示すため係数を省略しない。
     if (magnitude != "1")
         result += magnitude;
     result.push_back('I');

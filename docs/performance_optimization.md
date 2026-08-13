@@ -297,6 +297,128 @@ Exact symbolic FFT expression growth is a separate problem and is intentionally 
 
 ---
 
+# 15.6. Array / Matrix Stage 1–2
+
+## Flat Array + exact Number backend — selected
+
+v1.5.2 keeps matrices on the shared Array `shape + row-major flat storage` representation instead of introducing a separate nested matrix Value. `MatrixView` reads an Array without copying; algorithms that mutate their workspace use a flat `MatrixBuffer`.
+
+For exact Number matrices, pivot loops operate directly on `Number` values without constructing Expr nodes or invoking the Simplifier. Numeric `dot` likewise performs each cell accumulation directly in `Number`; symbolic products are built only when necessary.
+
+General symbolic `det` / `inverse` use a shared expansion-work budget. Triangular matrices take an order-independent diagonal-product fast path and sufficiently sparse cases can still evaluate, while dense higher-order cases remain unevaluated before factorial expression growth occurs.
+
+## Precision-aware certified Matrix — selected
+
+Operations such as `N[det[A],p]` do not first finish an exact determinant. Like FFT, they receive the active `ApproximationContext` and dispatch directly to a `ComplexInterval` backend. Expression-to-interval conversion, decimalization, and guard-digit refinement are shared with the FFT approximation path.
+
+`matrixRank` prefers exact elimination for exact inputs. The approximate backend uses no machine epsilon: an interval that still contains zero triggers guard-precision refinement, and rank deficiency is never inferred merely from a tolerance.
+
+Example Release / LTO-off measurements from 2026-08-13:
+
+| size | exact `dot` | exact `det` | exact `rref` | `N[det,16]` |
+|---:|---:|---:|---:|---:|
+| 8 | — | 0.283 ms | 0.434 ms | 1.410 ms |
+| 12 | — | 1.290 ms | 2.233 ms | 10.144 ms |
+| 16 | 0.328 ms | 3.735 ms | 5.799 ms | 22.799 ms |
+| 32 | 1.702 ms | — | — | — |
+| 64 | 16.553 ms | — | — | — |
+
+This stage intentionally retained ordinary Gaussian/Gauss-Jordan exact elimination; integer/Rational Bareiss elimination was kept as a separate Stage 3 optimization.
+
+# 15.7. Bareiss / fraction-free exact Matrix — selected
+
+Stage 3 lifts exact real matrices to integers by clearing denominators independently per row, then runs a shared Bareiss kernel on `IntegerMatrixBuffer`. Integer inputs require no lift; Rational inputs are scaled only for the elimination workspace.
+
+- `det` uses Bareiss forward elimination and restores the product of row denominator scales once at the end.
+- `rref` remains fraction-free through the forward phase and introduces Rational values only during backward normalization.
+- `matrixRank` uses the number of Bareiss pivots without materializing a full RREF.
+- `inverse` writes `B=D A` and fraction-free eliminates the augmented matrix `[B|D]`, whose reduced right half is `A^-1`.
+- Exact complex matrices retain the previous `Number` Gaussian/Gauss-Jordan fallback until a dedicated exact complex integer-domain representation is justified.
+
+Pivot selection prefers the nonzero candidate with the smallest bit length to limit intermediate BigInt growth. Every Bareiss division is checked with `BigInt::divmod`; a nonzero remainder is treated as an invariant failure rather than silently truncating.
+
+Release / LTO-off measurements on 2026-08-13 using the same benchmark matrices:
+
+| size | Gaussian `det` | Bareiss `det` | speedup | Gauss-Jordan `rref` | Bareiss `rref` | speedup |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 0.256 ms | 0.047 ms | 5.4x | 0.447 ms | 0.058 ms | 7.7x |
+| 12 | 1.241 ms | 0.109 ms | 11.4x | 2.058 ms | 0.146 ms | 14.1x |
+| 16 | 3.570 ms | 0.385 ms | 9.3x | 5.798 ms | 0.375 ms | 15.5x |
+
+`N[det[...],p]`, `N[inverse[...],p]`, and related operations do not build these exact Bareiss results first. They continue to dispatch directly to the precision-aware certified Matrix backend shared with the FFT approximation infrastructure.
+
+# 15.8. LU / Householder QR — selected
+
+Decomposition code is grouped in `linear_algebra/decomposition.*`. `luDecomposition[A]` provides row-pivoted `P A = L U`, while `qrDecomposition[A]` uses Householder reflectors for `A = Q R`. Under `N[...]`, factors are not built exactly first; the active `ApproximationContext` dispatches directly to a certified `ComplexInterval` backend shared with the precision-aware Matrix/FFT infrastructure.
+
+A column-block Householder application kernel was also tested, processing several columns in one row-major sweep. Repeated Release measurements with block sizes 1/8/16/32 on orders 8 through 24 produced only a few percent difference with no stable winning block; BigFloat/interval arithmetic dominated cache effects. The default therefore remains block=1-equivalent, while the block kernel and benchmark are retained for future backend changes.
+
+Representative Release / LTO-off measurements from 2026-08-13:
+
+| size | exact `LU` | `N[LU,16]` | `N[QR,16]` |
+|---:|---:|---:|---:|
+| 8 | 0.290 ms | 1.811 ms | 7.062 ms |
+| 12 | 1.315 ms | 5.355 ms | 21.218 ms |
+| 16 | 3.548 ms | 10.562 ms | 46.718 ms |
+
+General exact Householder QR grows radical expressions rapidly: the same benchmark family measured about 1.2 ms at 2x2 and 59 ms at 3x3, while a 4x4 case took about 18 seconds and formatted to roughly 677 KB. General exact QR is therefore policy-limited to 3x3; only the upper-triangular `{I,A}` fast path remains exact at arbitrary order. General order 4+ use should go through `N[qrDecomposition[A],p]`.
+
+# 15.9. Reduced SVD — selected
+
+The numerical SVD backend deliberately avoids forming `A^H A`, which would square the condition number. It performs Householder bidiagonalization followed by one-sided Jacobi column orthogonalization. Real and complex inputs share the same precision-aware policy; candidate factors are accepted only after interval verification of reconstruction and U/V orthogonality. Exact SVD is limited to natural closed cases.
+
+Release / LTO-off repeated measurements on 2026-08-13 for `N[svd[A],16]`:
+
+| size | time |
+|---:|---:|
+| 4x4 | about 3.8 ms |
+| 8x8 | about 17.1 ms |
+| 12x12 | about 46.6 ms |
+| 16x16 | about 82.3 ms |
+
+The observed range is smooth and consistent with the expected cubic regime at these sizes. The dominant cost is the Jacobi iteration and BigFloat arithmetic. No extra SVD blocking policy is enabled yet: adding a cache block around the smaller bidiagonalization fraction would not justify itself without a measured win. The existing QR block kernel remains benchmarked independently.
+
+# 15.10. Eigen / complex Schur — selected
+
+The general eigenproblem is reduced directly on Complex BigFloat values: Hessenberg reduction → implicit shifted QR → complex Schur form. Eigenvectors, when requested, are recovered by back substitution on the triangular Schur matrix and mapped through the accumulated Schur vectors. The exact path prefers triangular/diagonal matrices and distinct-root exact Number 2x2 cases.
+
+A fixed-seed 3x3 case exposed that using essentially the same precision for QR stopping and the final relation certificate left too little accumulation margin. The internal QR stopping target is therefore ten decimal digits stricter than the requested display precision. The original `ComplexInterval` input is used to audit `A Q-Q T`, `A v-lambda v`, and Schur-vector unitarity. For non-normal matrices, this is a relation certificate rather than an unconditional claim of unique componentwise eigenvalue/eigenvector enclosures.
+
+Release / LTO-off measurements on 2026-08-13 using random decimal matrices in [-1,1] with ten fractional digits:
+
+| size | `N[eigenvalues,16]` | `N[eigensystem,16]` |
+|---:|---:|---:|
+| 4 | 13.4 ms | 14.0 ms |
+| 8 | 68.1 ms | 77.0 ms |
+| 16 | 364.8 ms | 466.3 ms |
+| 32 | 2826 ms | 3658 ms |
+| 64 | 19436 ms | >35 s measurement cap |
+
+# 15.11. Large dense Matrix audit
+
+`mmCal.Benchmarks` now provides `--matrix-large <op> <size> [digits]`. Algorithm timings exclude parser cost by directly constructing exact Rational elements with the same [-1,1] range and ten-decimal granularity as the supplied random-matrix generator; the RNG stream is not intended to be Python-identical. CLI parse/lowering cost is measured separately with the Python text format.
+
+Representative order-32/order-64 results:
+
+| op | 32x32 | 64x64 |
+|---|---:|---:|
+| `N[dot,16]` | 167 ms | 1.21 s |
+| `N[det,16]` | 294 ms | 2.96 s |
+| `N[inverse,16]` | 1.22 s | 8.68 s |
+| `N[matrixRank,16]` | 400 ms | 4.16 s |
+| `N[solveLinear,16]` | 549 ms | 5.42 s |
+| `N[nullSpace,16]` | 401 ms | 4.01 s |
+| `N[LU,16]` | 147 ms | 1.41 s |
+| `N[QR,16]` | 1.47 s | 12.88 s |
+| `N[SVD,16]` | 1.40 s | 11.60 s |
+| `N[eigenvalues,16]` | 2.83 s | 19.44 s |
+
+At 1024x1024, representation cost becomes a primary limit before the cubic algorithms themselves. Direct construction of 1,048,576 ten-decimal Rational Expr elements reached about 0.69 GB maximum RSS; the timed transpose itself took about 107 ms and trace about 60 ms. Parsing roughly 14.16 MB of generator-style text and evaluating only `dimensions[...]` took about 10.9 s wall time and about 1.99 GB maximum RSS. A 1024-order `N[dot,16]` run did not complete within a 10 s cap and reached about 0.96 GB RSS; `N[LU,16]` likewise exceeded 10 s and reached about 1.59 GB. Further 1024 QR/SVD/Eigen runs were stopped to avoid unnecessary memory pressure.
+
+Even a pure cubic extrapolation from order 64 suggests roughly 1.6 h for `N[LU]`, 1.4 h for `N[dot]`, 3.4 h for `N[det]`, 6.2 h for `N[solveLinear]`, 9.9 h for `N[inverse]`, 13 h for `N[SVD]`, 15 h for `N[QR]`, and 22 h for `N[eigenvalues]`. Extrapolating the observed 32→64 exponent instead gives a broad roughly 1–21 h range depending on the operation. These are projections, not 1024 completion measurements, and cache/allocation/guard-precision/iteration effects can make them worse.
+
+A dense order of 1024 is not intrinsically huge in a machine-double + BLAS setting, but it is currently a stress regime for mmCal's exact Decimal→Rational→Expr representation and certified arbitrary-precision dense algorithms. If order-1024 dense work becomes an explicit target, compact numeric Array storage, fewer parser/lowering Expr allocations, and packed approximate-Matrix storage should be considered before more sophisticated blocking.
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1 adds a separate console project to the Visual Studio solution:
@@ -319,6 +441,7 @@ It includes:
 - multiplication/square/division threshold benchmarks;
 - factorial and decimal I/O benchmarks;
 - high-precision `Pi/exp/log` benchmarks;
+- fixed-seed certified Matrix invariants, including Bareiss / LU / QR / solve / nullSpace, real/complex SVD, and Eigen;
 - exact/certified FFT benchmarks and direct/Bluestein crossover measurements;
 - fixed-seed certified FFT round-trip invariants.
 
@@ -329,6 +452,7 @@ mmCal.Benchmarks
 mmCal.Benchmarks --full
 mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
+mmCal.Benchmarks --matrix-large nsvd 64 16
 ```
 
 Correctness checks should run before accepting any new threshold solely because it benchmarks faster.

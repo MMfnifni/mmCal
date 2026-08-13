@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{217},
+    tests.expectEqual(registry.size(), std::size_t{236},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -204,7 +204,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: If is a held source-callable special form");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{199},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{218},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
         && sourceFunctions.contains("cos") && sourceFunctions.contains("tan")
@@ -249,7 +249,8 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("transpose") && sourceFunctions.contains("madd")
         && sourceFunctions.contains("matmul") && sourceFunctions.contains("det")
         && sourceFunctions.contains("inverse") && sourceFunctions.contains("rref")
-        && sourceFunctions.contains("rank") && sourceFunctions.contains("diff")
+        && sourceFunctions.contains("rank") && sourceFunctions.contains("solveLinear")
+        && sourceFunctions.contains("diff")
         && sourceFunctions.contains("nintegrate")
         && sourceFunctions.contains("integrate") && sourceFunctions.contains("limit")
         && sourceFunctions.contains("cbrt") && sourceFunctions.contains("hypot")

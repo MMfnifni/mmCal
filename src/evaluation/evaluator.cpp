@@ -1,6 +1,8 @@
 // 非再帰タスクスタック式評価器
 #include "evaluator.hpp"
 
+#include "expression/array_utils.hpp"
+
 #include "approximation/approximation_context.hpp"
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
@@ -48,6 +50,12 @@ struct BuildArrayTask final {
     const expression::OriginMap* origins = nullptr;
 };
 
+struct BuildListTask final {
+    expression::Expr sourceExpression;
+    std::size_t elementCount = 0;
+    const expression::OriginMap* origins = nullptr;
+};
+
 struct DispatchBuiltinTask final {
     expression::Expr expression;
     const BuiltinDefinition* definition = nullptr;
@@ -87,6 +95,7 @@ using EvaluationTask = std::variant<
     PushResultTask,
     FinishSymbolTask,
     BuildArrayTask,
+    BuildListTask,
     DispatchBuiltinTask,
     IfConditionTask,
     EnterUserFunctionTask,
@@ -112,6 +121,9 @@ Overloaded(Ts...) -> Overloaded<Ts...>;
             return TaskSource{&value.expression, value.origins};
         },
         [](const BuildArrayTask& value) noexcept {
+            return TaskSource{&value.sourceExpression, value.origins};
+        },
+        [](const BuildListTask& value) noexcept {
             return TaskSource{&value.sourceExpression, value.origins};
         },
         [](const DispatchBuiltinTask& value) noexcept {
@@ -471,6 +483,18 @@ expression::Expr Evaluator::evaluateMachine(
                             return;
                         }
 
+                        case expression::ExprKind::List: {
+                            const expression::ListExpr& list = current.expression.asList();
+                            tasks.emplace_back(BuildListTask{
+                                current.expression,
+                                list.elements.size(),
+                                current.origins
+                            });
+                            for (auto iterator = list.elements.rbegin(); iterator != list.elements.rend(); ++iterator)
+                                tasks.emplace_back(EvaluateTask{*iterator, current.origins, current.depth + 1});
+                            return;
+                        }
+
                         case expression::ExprKind::Call: {
                             const expression::CallExpr& call = current.expression.asCall();
                             if (const BuiltinDefinition* definition = registry_.find(call.head)) {
@@ -592,7 +616,11 @@ expression::Expr Evaluator::evaluateMachine(
                     },
                     [&](const BuildArrayTask& current) {
                         std::vector<expression::Expr> elements = takeResults(results, current.elementCount);
-                        results.push_back(expression::Expr::array(current.shape, std::move(elements)));
+                        results.push_back(expression::rebuildEvaluatedArray(current.shape, std::move(elements)));
+                    },
+                    [&](const BuildListTask& current) {
+                        std::vector<expression::Expr> elements = takeResults(results, current.elementCount);
+                        results.push_back(expression::braceValue(std::move(elements)));
                     },
                     [&](const DispatchBuiltinTask& current) {
                         const expression::CallExpr& call = current.expression.asCall();
@@ -786,6 +814,11 @@ expression::Expr Evaluator::evaluateMachine(
                 error::throwCalcError(error::CalcErrorType::Domain, exception.what());
             }
             catch (const std::overflow_error& exception) {
+                if (const auto origin = findOrigin(source))
+                    error::throwCalcError(error::CalcErrorType::Overflow, exception.what(), *origin);
+                error::throwCalcError(error::CalcErrorType::Overflow, exception.what());
+            }
+            catch (const std::length_error& exception) {
                 if (const auto origin = findOrigin(source))
                     error::throwCalcError(error::CalcErrorType::Overflow, exception.what(), *origin);
                 error::throwCalcError(error::CalcErrorType::Overflow, exception.what());
@@ -1111,6 +1144,14 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             for (const expression::Expr& element : array.elements)
                 elements.push_back(approximate(element));
             return expression::Expr::array(array.shape, std::move(elements));
+        }
+        if (current.isList()) {
+            const auto& list = current.asList();
+            std::vector<expression::Expr> elements;
+            elements.reserve(list.elements.size());
+            for (const expression::Expr& element : list.elements)
+                elements.push_back(approximate(element));
+            return expression::braceValue(std::move(elements));
         }
 
         // UnitAppliedは単位文字列そのものを数値化せず、値の部分だけへNを作用させる。

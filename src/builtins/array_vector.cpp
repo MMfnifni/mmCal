@@ -32,40 +32,6 @@ using numeric::Number;
 
 [[nodiscard]] Expr integer(std::int64_t value) { return Expr{Number{BigInt{value}}}; }
 
-[[nodiscard]] std::optional<std::size_t> exactIndex(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal()
-        || !expression.asNumber().asReal().isInteger())
-        return std::nullopt;
-    const BigInt& value = expression.asNumber().asReal().asInteger();
-    if (value.isNegative())
-        return std::nullopt;
-    const std::string text = value.toString();
-    std::size_t result = 0;
-    const auto converted = std::from_chars(text.data(), text.data() + text.size(), result);
-    if (converted.ec != std::errc{} || converted.ptr != text.data() + text.size())
-        return std::nullopt;
-    return result;
-}
-
-[[nodiscard]] std::size_t requireSize(const Expr& expression, std::string_view name) {
-    const auto value = exactIndex(expression);
-    if (!value)
-        detail::arrayTypeError(std::string{name} + " requires a nonnegative machine-size integer");
-    return *value;
-}
-
-[[nodiscard]] std::size_t checkedElementCount(
-    std::size_t rows, std::size_t cols, std::string_view name) {
-    if (rows != 0 && cols > std::numeric_limits<std::size_t>::max() / rows)
-        error::throwCalcError(error::CalcErrorType::Overflow,
-            std::string{name} + " matrix dimensions overflow the addressable element count");
-    return rows * cols;
-}
-
-[[nodiscard]] Expr sizeExpr(std::size_t value) {
-    return Expr{Number{BigInt::parse(std::to_string(value))}};
-}
-
 void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view name) {
     if (a.shape[0] != b.shape[0])
         error::throwCalcError(error::CalcErrorType::Domain,
@@ -162,8 +128,9 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
 } // namespace
 
 Expr evaluateIdentity(std::span<const Expr> arguments) {
-    const std::size_t n = requireSize(arguments[0], "identity");
-    const std::size_t count = checkedElementCount(n, n, "identity");
+    const std::size_t n = detail::requireSize(arguments[0], "identity");
+    const std::size_t shape[] = {n, n};
+    const std::size_t count = expression::arrayElementCount(shape);
     std::vector<Expr> elements;
     elements.reserve(count);
     for (std::size_t r = 0; r < n; ++r)
@@ -173,44 +140,30 @@ Expr evaluateIdentity(std::span<const Expr> arguments) {
 }
 
 Expr evaluateZeros(std::span<const Expr> arguments) {
-    const std::size_t rows = requireSize(arguments[0], "zeros");
-    const std::size_t cols = requireSize(arguments[1], "zeros");
-    const std::size_t count = checkedElementCount(rows, cols, "zeros");
+    const std::size_t rows = detail::requireSize(arguments[0], "zeros");
+    const std::size_t cols = detail::requireSize(arguments[1], "zeros");
+    const std::size_t shape[] = {rows, cols};
+    const std::size_t count = expression::arrayElementCount(shape);
     return Expr::array({rows, cols}, std::vector<Expr>(count, integer(0)));
 }
 
 Expr evaluateMatrixGet(std::span<const Expr> arguments) {
     const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "mget");
-    const std::size_t row = requireSize(arguments[1], "mget");
-    const std::size_t col = requireSize(arguments[2], "mget");
+    const std::size_t row = detail::requireSize(arguments[1], "mget");
+    const std::size_t col = detail::requireSize(arguments[2], "mget");
     if (row >= matrix.shape[0] || col >= matrix.shape[1])
         error::throwCalcError(error::CalcErrorType::Domain, "mget index is out of range");
     return matrix.elements[row * matrix.shape[1] + col];
 }
 
-Expr evaluateTrace(
-    std::span<const Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "trace");
-    if (matrix.shape[0] != matrix.shape[1])
-        error::throwCalcError(error::CalcErrorType::Domain, "trace requires a square matrix");
-    std::vector<Expr> diagonal;
-    diagonal.reserve(matrix.shape[0]);
-    for (std::size_t i = 0; i < matrix.shape[0]; ++i)
-        diagonal.push_back(matrix.elements[i * matrix.shape[1] + i]);
-    return exact::add(std::move(diagonal), registry, mathematics, angles);
-}
-
 Expr evaluateRows(std::span<const Expr> arguments) {
     const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "rows");
-    return sizeExpr(matrix.shape[0]);
+    return detail::sizeExpr(matrix.shape[0]);
 }
 
 Expr evaluateCols(std::span<const Expr> arguments) {
     const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "cols");
-    return sizeExpr(matrix.shape[1]);
+    return detail::sizeExpr(matrix.shape[1]);
 }
 
 Expr evaluateDiag(std::span<const Expr> arguments) {

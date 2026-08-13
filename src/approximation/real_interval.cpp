@@ -32,7 +32,11 @@ RealInterval::RealInterval(BigFloat lower, BigFloat upper)
 }
 
 RealInterval RealInterval::point(BigFloat value) {
-    return RealInterval{value, std::move(value)};
+    // 同一objectを同一初期化式でcopy/moveしない。MSVCを含め評価順の差に依存せず、
+    // point intervalは必ず同一の2端点から構築する。
+    BigFloat lower = value;
+    BigFloat upper = value;
+    return RealInterval{std::move(lower), std::move(upper)};
 }
 
 RealInterval RealInterval::fromRational(

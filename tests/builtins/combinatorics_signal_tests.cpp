@@ -75,10 +75,10 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
         std::string{"{a c, a d+b c, b d}"},
         "convolution supports symbolic coefficients");
     tests.expectEqual(eval(session, "N[dft[{1,2,3}],12]"),
-        std::string{"{6, -1.500000000000+0.866025403784I, -1.500000000000-0.866025403784I}"},
+        std::string{"{6, -1.50+0.866025403784I, -1.50-0.866025403784I}"},
         "N recursively approximates exact transform arrays");
     tests.expectEqual(eval(session, "N[fft[{1,2,3}],12]"),
-        std::string{"{6, -1.500000000000+0.866025403784I, -1.500000000000-0.866025403784I}"},
+        std::string{"{6, -1.50+0.866025403784I, -1.50-0.866025403784I}"},
         "N pushes requested precision into the FFT backend before exact expansion");
     tests.expectEqual(eval(session, "fft[N[{1,2,3,4},12]]"),
         std::string{"{10, -2+2I, -2, -2-2I}"},

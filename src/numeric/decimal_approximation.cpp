@@ -88,6 +88,29 @@ struct FixedDecimal final {
     bool exact = false;
 };
 
+// certified区間由来の固定桁表示では，要求桁まで並んだ末尾0をすべて見せる必要はない。
+// ただし近似値であることと，最後に観測された非零桁より一段下まで保証があることを
+// 視覚的に残すため，末尾0が複数ある場合は1個だけ保持する。
+// exact値由来の有限小数はfromReal側で必要最小桁表示のままとする。
+[[nodiscard]] std::size_t compactCertifiedDecimal(std::string& text) {
+    const std::size_t point = text.find('.');
+    if (point == std::string::npos)
+        return 0;
+
+    const std::size_t fractionalDigits = text.size() - point - 1;
+    std::size_t trailingZeros = 0;
+    while (trailingZeros < fractionalDigits
+        && text[text.size() - 1 - trailingZeros] == '0')
+        ++trailingZeros;
+
+    if (trailingZeros <= 1)
+        return fractionalDigits;
+
+    const std::size_t removed = trailingZeros - 1;
+    text.erase(text.size() - removed);
+    return fractionalDigits - removed;
+}
+
 [[nodiscard]] FixedDecimal roundFixed(
     const Rational& rational,
     std::size_t fractionalDigits) {
@@ -265,13 +288,17 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedInterval(
 
     // 区間両端が同じ丸め結果を持つため、その間にある真値も必ず同じ結果になる。
     // 値自体が厳密に10進有限であるとは限らないので、certified interval由来は常に「丸められた近似値」として扱う。
+    // 内部保証は要求桁数のまま保持し，表示だけ末尾0を1桁まで圧縮する。
+    std::string text = lowerRounded.text;
+    const Rational displayed = exactDecimalValue(text);
+    const std::size_t displayedFractionalDigits = compactCertifiedDecimal(text);
     return DecimalApproximation{
-        lowerRounded.text,
-        fractionalDigits,
+        std::move(text),
+        displayedFractionalDigits,
         fractionalDigits,
         true,
         ApproximationOrigin::CertifiedInterval,
-        exactDecimalValue(lowerRounded.text),
+        displayed,
         lower,
         upper
     };

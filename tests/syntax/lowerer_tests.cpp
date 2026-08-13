@@ -163,9 +163,8 @@ void runLowererTests(TestRunner& tests) {
     tests.expectEqual(lowerAndFormat("{{1, 2}, {3, 4}}"), std::string{"{{1, 2}, {3, 4}}"},
         "rectangular array shape is inferred");
 
-    tests.expectThrows<error::CalcError>(
-        [] { static_cast<void>(lower("{1, {2, 3}}")); },
-        "lowerer rejects ragged array");
+    tests.expectEqual(lowerAndFormat("{1, {2, 3}}"), std::string{"{1, {2, 3}}"},
+        "lowerer preserves a non-rectangular brace value");
     tests.expectThrows<error::CalcError>(
         [] { static_cast<void>(lower("2#102")); },
         "lowerer rejects a digit outside the radix");

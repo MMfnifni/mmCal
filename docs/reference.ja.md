@@ -107,7 +107,7 @@ gamma[1/3]
 
 `N[expr,n]`では、真値を含む区間の両端が同じn桁丸めへ入ることを確認してから`DecimalApproximation`を返す。
 
-現在の`DecimalApproximation`は表示文字列だけではなく、要求桁数、由来（exact入力 / certified interval）、表示10進値そのもののexact Rational、真値を含むexact Rational enclosureを保持する。`ComplexDecimalApproximation`も実部・虚部のmetadataを保持する。`precision/accuracy/rationalize`はこのmetadataを直接使い、表示文字列を再parseして精度を推測しない。
+現在の`DecimalApproximation`は表示文字列だけではなく、要求桁数、由来（exact入力 / certified interval）、表示10進値そのもののexact Rational、真値を含むexact Rational enclosureを保持する。certified interval由来では連続する末尾0を表示上1個まで圧縮しても，このmetadataは要求桁数のまま保持する。`ComplexDecimalApproximation`も実部・虚部のmetadataを保持する。`precision/accuracy/rationalize`はこのmetadataを直接使い、表示文字列を再parseして精度を推測しない。
 
 ```text
 N[sqrt[2],30]
@@ -231,7 +231,7 @@ Out[-1]
 In[1]> fft[{1,2,3}]
 Out[1]> {6, ...}
 In[2]> N[@,30]
-Out[2]> {6, -1.500000000000000000000000000000+0.866025403784...I, ...}
+Out[2]> {6, -1.50+0.866025403784...I, ...}
 ```
 
 上の`N[@,30]`では，`Out[1]`を後から30桁化するのではなく，`In[1]`の`fft[...]`を30桁のapproximation contextで再評価できる。
@@ -971,54 +971,172 @@ corr[{1,2,3},{2,4,6}] -> 1
 
 # 17. Array / Vector / Matrix
 
-## 17.1 Array utility
+## 17.1 Array基盤
+
+Arrayはrankごとに別Value型を増やさず、**shape + row-major flat storage**の共通表現を使う。
+公開リテラルは従来どおり `{...}` / `{{...},...}` とし、Matrix演算へ渡せるArrayは常にdense rectangularである。
 
 ```text
+dimensions[A]
+arrayRank[A]
+length[A]
+at[A,i,...]
+reshape[A,{d1,d2,...}]
 identity[n]
 zeros[rows,cols]
-mget[A,row,col]
 rows[A]
 cols[A]
 diag[A]
 trace[A]
 ```
 
-```text
-identity[2]
--> {{1,0},{0,1}}
+indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。
 
-trace[{{1,2},{3,4}}]
--> 5
+```text
+dimensions[{{1,2,3},{4,5,6}}] -> {2,3}
+arrayRank[{{1,2},{3,4}}] -> 2
+at[{{1,2},{3,4}},1] -> {3,4}
+at[{{1,2},{3,4}},1,0] -> 3
+reshape[{1,2,3,4},{2,2}] -> {{1,2},{3,4}}
 ```
+
+`{...}`はユーザー意味論として一般の有限brace containerである。child shapeが全て一致する矩形値は内部でdense `ArrayExpr`へ自動昇格し，`{{1,2},{3}}`や分解結果の`{Q,R}`のようにshapeが揃わない値は一般braceのまま保持する。一般brace自体は正常な値であり，Matrix函数へ渡した時点で矩形性監査が入り，非矩形ならWarningを出して未評価保持する。`dimensions` / `arrayRank`は非矩形値では全childに共通するrectangular prefixだけを返す。
+
+```text
+dimensions[{{1,2},{3}}] -> {2}
+arrayRank[{{1,2},{3}}] -> 1
+length[{{1,2},{3}}] -> 2
+at[{{1,2},{3}},0] -> {1,2}
+transpose[{{1,2},{3}}] -> Warning + unevaluated
+```
+
+`mget[A,row,col]` は互換aliasとして `at` と同じ0始まりindexを使う。
+
+先頭側に0長次元を持つArrayはbrace literalだけではshapeを復元できないため、Formatterは必要な場合だけ `reshape` を使う。
+
+```text
+zeros[0,3]
+-> reshape[{}, {0, 3}]
+
+dimensions[zeros[0,3]]
+-> {0,3}
+```
+
+評価後にArray要素がArrayへ変わる場合も、同一shapeなら自動的に一段flattenして共通Arrayへ正規化する。scalar/Array混在またはchild shape不一致はTypeError。
 
 ## 17.2 exact-first線形代数
 
+canonical API:
+
 ```text
 transpose[A]
-madd[A,B,...]
-matmul[A,B]
+conjugateTranspose[A]
+dot[A,B]
 det[A]
 inverse[A]
 rref[A]
-rank[A]
+matrixRank[A]
+nullSpace[A]
+solveLinear[A,b]
+luDecomposition[A]
+qrDecomposition[A]
+svd[A]
+eigenvalues[A]
+eigenvectors[A]
+eigensystem[A]
+norm[v]
+normalize[v]
+trace[A]
 ```
 
+`dot` はStage 2ではrank-1/rank-2を扱う。
+
 ```text
-matmul[{{1,2},{3,4}},{{5,6},{7,8}}]
--> {{19,22},{43,50}}
-
-det[{{1,2},{3,4}}]
--> -2
-
-inverse[{{1,2},{3,4}}]
--> {{-2,1},{3/2,-1/2}}
+dot[{1,2,3},{4,5,6}] -> 32
+dot[{{1,2},{3,4}},{5,6}] -> {17,39}
+dot[{5,6},{{1,2},{3,4}}] -> {23,34}
+dot[{{1,2},{3,4}},{{5,6},{7,8}}] -> {{19,22},{43,50}}
 ```
 
-symbolic rank/pivotの非零性を証明できない場合、勝手にpivotを選ばない。
+Array同士の `*` は行列積にしない。`*` はscalar×Arrayだけを許し、行列積・vector contractionは明示的に `dot` を使う。同shapeの `+/-` はelement-wise。
 
-## 17.3 Vector
+exact実数/Rational行列は各行の分母を払って整数行列へliftし、Bareiss fraction-free eliminationを使う。これによりpivotごとのRational生成を避ける。exact complexはflat `Number` Gaussian backendへfallbackする。symbolic行列は非零性を証明できないpivotを勝手に選ばない。
 
 ```text
+det[{{1,2},{3,4}}] -> -2
+inverse[{{1,2},{3,4}}] -> {{-2,1},{3/2,-1/2}}
+rref[{{1,2},{3,4}}] -> {{1,0},{0,1}}
+matrixRank[{{1,2},{2,4}}] -> 1
+nullSpace[{{1,2},{2,4}}] -> {{-2,1}}
+solveLinear[{{2,1},{1,-1}},{5,1}] -> {2,1}
+```
+
+`nullSpace[A]`はRREFのfree columnを昇順に取り，各free variableを1としたcanonical basisを返す。返り値shapeは `{nullity, columns}` であり，full column rankでは `reshape[{}, {0,n}]` として空basisのvector次元を保持する。exact整数/RationalではBareiss forward eliminationを共有し，exact complexはGaussian fallback，symbolicではpivotの非零性を証明できる場合だけbasisを構成する。
+
+`solveLinear[A,b]` は `A` を m×n 行列、`b` を長さmのvectorとして扱う。一意解が存在すれば長さnのvectorを返す。正方行列に限定せず、整合した過剰決定系もfull column rankなら解ける。不整合系、または自由変数が残る系はDomain error。一般parametric solutionはこの函数では捏造しない。
+
+`luDecomposition[A]` は現在正方行列を対象とし，shape `{3,n,n}` の `{P,L,U}` を返す。規約は `P A = L U`。certified approximate LUでは，非零を証明できた候補のうち`|pivot|^2`の区間下限が最大の行を選ぶpartial pivotingを使い，epsilon判定は行わない。row pivotingを行い，exact NumberではRational/complexをexactに保持する。三角symbolic行列は不要な除算を行わずそのまま分解でき，非零性を証明できないpivotが必要な一般symbolic行列は未評価に留める。factorはprefix indexingで取り出せる。
+
+```text
+lu = luDecomposition[A]
+at[lu,0] -> P
+at[lu,1] -> L
+at[lu,2] -> U
+```
+
+`qrDecomposition[A]` はHouseholder reflectorを使うreduced QRで，矩形m×nにも対応する。`k=min(m,n)`として `Q:m×k`，`R:k×n` を一般brace `{Q,R}` で返し，規約は `A = Q R`。factor shapeが同じ正方caseでは内部的にdense Arrayへ自動最適化されるが，ユーザー構文は同じ`{Q,R}`である。exact実数行列の一般Householder展開はexpression growthを避けるため3×3以下に制限し，安全な上三角/上台形caseはfast pathを使う。`N[qrDecomposition[A],p]`はexact QRを先に展開せず，実/複素ともcertified interval Householder backendへ直接入る。
+
+```text
+qr = qrDecomposition[A]
+at[qr,0] -> Q
+at[qr,1] -> R
+```
+
+Householder適用には複数列を一度のrow-major走査で処理できるcolumn-block kernelも実装している。ただし外部BLASを使わない現backendでは8/16/24次の実測で一貫した高速化が得られなかったため，自動block化は採用せずunblocked相当を既定とする。block kernelとbenchmarkは今後のBigFloat/Matrix backend最適化用に残す。
+
+`svd[A]`はreduced SVDを `{U,S,V}` で返す。m×n入力に対して`k=min(m,n)`，`U:m×k`，`S:k×k`，`V:n×k`。実数なら `A = U S Transpose[V]`，複素数なら `A = U S conjugateTranspose[V]`。一般数値backendは条件数を二乗する`A^H A`を形成せず，Householder bidiagonalizationの後にone-sided Jacobiで列を直交化する。候補factorはreconstruction residualと`U^H U` / `V^H V`の直交性を区間演算で要求表示桁より厳しく監査し，証明できなければguard digitsを増やして再試行する。exact SVDは自然に閉じる実対角等へ限定する。重複特異値の部分空間ではsingular vector basisは一意ではないため，componentごとの「唯一の真値」を主張せず，再構成・直交性を保証する。
+
+`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` は正方行列の固有値・固有vector・組を扱う。`eigenvectors`の各**列**が対応する固有vectorであり，`eigensystem[A]`は `{values,vectors}` を返す。exact pathは上三角行列の対角固有値，対角行列の標準基底，およびdistinct eigenvalueを持つexact Number 2×2を明示処理する。重根を持つ非対角2×2では不足する固有vectorを複製せず未評価に留める。一般行列の `N[...]` はComplex BigFloat Hessenberg reduction + implicit shifted QRからSchur形 `A Q ≈ Q T` を求め，Schur三角行列からback substitutionで固有vectorを構成する。元入力のcertified intervalに対するSchur relationと `A v ≈ λ v` residual，およびSchur vectorのunitarityを要求表示桁より厳しく区間監査し，証明できなければguard digitsを増やして再試行する。一般非正規行列では固有値・固有vectorは摂動に敏感であり，返した各componentが唯一の真値を個別区間包含するとは主張しない。保証対象は計算されたSchur/eigenpair relationである。近接重根・defective caseで独立固有vectorを安定に構成できない場合，`eigenvectors` / `eigensystem`は推測せず未評価に留める。
+
+`conjugateTranspose[A]`はHermitian transposeであり，complex SVDの`V^H`や複素直交性の検証に使う。rank-1では成分の共役だけを行い，rank-2では転置と共役を同時に行う。
+
+`norm` は複素vectorに対してHermitian normを使う。
+
+```text
+norm[{3,4}] -> 5
+norm[{3+4I}] -> 5
+normalize[{3,4}] -> {3/5,4/5}
+```
+
+### precision-aware `N`
+
+FFTと同じ `ApproximationContext` / certified interval変換を共有する。したがって例えば
+
+```text
+N[dot[A,B],100]
+N[det[A],100]
+N[inverse[A],100]
+N[rref[A],100]
+N[solveLinear[A,b],100]
+N[luDecomposition[A],100]
+N[qrDecomposition[A],100]
+N[svd[A],100]
+N[eigenvalues[A],100]
+N[eigensystem[A],100]
+N[norm[v],100]
+```
+
+は、巨大なexact中間式を完成させてから近似するのではなく、対応するBigFloat/interval backendへ要求精度を渡して直接評価できる。`solveLinear`はaugmented interval eliminationでpivotと整合性を証明し、証明不能なcaseをepsilonで補わない。依存した過剰決定系ではinterval相関の消失により直接証明できない場合がある。`matrixRank`と`nullSpace`はrank deficiencyに依存する不連続演算なので，exact入力ではexact eliminationを優先する。近似入力では浮動小数の任意thresholdを使わず、区間からpivot構造を証明できる場合だけ結果を返し，rank deficiencyを推測しない。
+
+## 17.3 互換Vector / Matrix函数
+
+従来名は互換のため維持する。
+
+```text
+madd
+matmul mmul
+rank mrank
+mget
 vadd vsub vscalar
 vdot vcross
 vnorm vnormalize
@@ -1028,11 +1146,7 @@ vreflect vreflect_axis
 vsum
 ```
 
-```text
-vdot[{1,2},{3,4}] -> 11
-vnormalize[{3,4}] -> {3/5,4/5}
-vangle[{1,0},{0,1}] -> Pi/2
-```
+`matmul/mmul/vdot` は `dot`、`rank/mrank` は `matrixRank`、`vnorm` は `norm`、`vnormalize` は `normalize` へ束ねる。
 
 ---
 
@@ -1643,7 +1757,7 @@ N[arg[-1],20]
 -> 3.14159265358979323846 Rad
 ```
 
-exact Rationalが有限10進になる場合、表示は必要以上に0埋めしない。ただし現在は`requestedFractionalDigits`を別metadataとして保持する。
+exact Rationalが有限10進になる場合、表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の固定桁結果では，要求桁まで並んだ末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数とcertified enclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
 
 近似値は現在まだ一般の四則演算用Machine/ApproximateReal domainではない。表示値・要求桁・certified enclosureを別々に保持する。
 
@@ -1839,18 +1953,19 @@ if[condition,trueExpr,falseExpr]
 | `unit`, `csgn` | `sign` |
 | `rect` | `polar` |
 | `ave` | `mean` |
-| `mmul` | `matmul` |
+| `matmul`, `mmul`, `vdot` | `dot` |
 | `mtranspose` | `transpose` |
+| `mget` | `at` |
 | `mdet` | `det` |
 | `minverse` | `inverse` |
-| `mrank` | `rank` |
+| `rank`, `mrank` | `matrixRank` |
 | `mtrace` | `trace` |
 | `mrows` | `rows` |
 | `mcols` | `cols` |
 | `mdiag` | `diag` |
-| `vlength` | `vnorm` |
+| `vnorm`, `vlength` | `norm` |
 | `vdistance` | `veuclidean` |
-| `vunit` | `vnormalize` |
+| `vnormalize`, `vunit` | `normalize` |
 
 aliasは別実装ではなく同一`BuiltinId`へ束ねる。数学metadataやSolver規則を二重管理しない。
 
@@ -1860,26 +1975,26 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現行開発版では **217 builtin definitions / 199 source-callable names**。内部headはsource-callable数に含めない。
+現行開発版では **builtin/alias登録名236個 / sourceから呼出可能な名前218個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
 Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
-asin, asinh, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
-ceil, choice, cis, collect, cols, comb, conj, convolve, corr, corrspearman,
+arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
+ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, element, erf, erfc, exp, expand, expc,
+det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
-integrate, inverse, iqr, kurtp, kurts, lcm, lgamma, limit, ln, log,
+integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, matmul, max, mcols,
-mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode,
-mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, percentile, percentrank, perm, polar,
+mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
 pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, rank,
-rationalize, re, real, rect, rem, risingfact, rms, round, rows, rref,
-sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve,
-sqrt, stddev, stddevs, stderr, sum, tan, tanc, tanh, tanhc, trace,
+qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
+sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
+singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, tan, tanc, tanh, tanhc, trace,
 transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
 vsub, vsum, vunit, winsor, winsorR, zeros, zscore
@@ -1899,7 +2014,7 @@ vsub, vsum, vunit, winsor, winsorR, zeros, zscore
 - Evaluation
 - Internal
 
-評価自体は成功したがalgorithmic builtinが処理を完了できない場合は、結果Exprと別にWarningを返す。`D`, `solve`, `N`, `rref`, `rank`, `integrate`に加え、`precision/accuracy/rationalize`が対象外入力を未評価保持する場合もWarningになる。
+評価自体は成功したがalgorithmic builtinが処理を完了できない場合は、結果Exprと別にWarningを返す。`D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `eigenvalues`, `eigenvectors`, `eigensystem`（互換alias `rank`を含む）, `integrate`に加え、`precision/accuracy/rationalize`が対象外入力を未評価保持する場合もWarningになる。
 
 正常な状態変更の補足にはInfo diagnosticを使う。現在は変数・函数の再定義通知が対象。
 
@@ -1964,7 +2079,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 - `digamma`, `trigamma`, `zeta`, `ibeta`
 - `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
-- advanced LU/QR/SVD/eigen/condition number/least squares
+- advanced SVD/eigen/condition number/least squares
 - `hilbert`（旧仕様の名称再確認）
 - `fma`, `clamp`, `proj`
 - 工学函数、財務函数、単位変換

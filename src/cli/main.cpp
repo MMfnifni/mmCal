@@ -5,6 +5,7 @@
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "expression/array_utils.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
 #include "../../version.h"
@@ -130,6 +131,14 @@ void updateConsoleTitle(
         for (const Expr& element : array.elements)
             elements.push_back(fixedApproximation(element, digits, session));
         return Expr::array(array.shape, std::move(elements));
+    }
+    if (expression.isList()) {
+        const auto& list = expression.asList();
+        std::vector<Expr> elements;
+        elements.reserve(list.elements.size());
+        for (const Expr& element : list.elements)
+            elements.push_back(fixedApproximation(element, digits, session));
+        return mmcal::expression::braceValue(std::move(elements));
     }
 
     if (expression.isCall()) {

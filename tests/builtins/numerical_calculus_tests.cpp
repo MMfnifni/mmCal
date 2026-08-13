@@ -27,22 +27,22 @@ error::CalcError evalError(kernel::KernelSession& session, std::string_view sour
 
 void runNumericalCalculusTests(TestRunner& tests) {
     kernel::KernelSession session;
-    tests.expectEqual(eval(session, "diff[x^2,x,3]"), std::string{"6.0000000000000000"},
+    tests.expectEqual(eval(session, "diff[x^2,x,3]"), std::string{"6.0"},
         "Numerical calculus: diff reuses symbolic D and certified point evaluation");
     tests.expectEqual(eval(session, "diff[sin[x],x,0,20]"),
-        std::string{"1.00000000000000000000"},
+        std::string{"1.0"},
         "Numerical calculus: diff respects default radian semantics");
     tests.expectEqual(eval(session, "diff[asin[x],x,0,20]"),
-        std::string{"1.00000000000000000000"},
+        std::string{"1.0"},
         "Numerical calculus: inverse trig derivative is radian-scaled by default");
     tests.expectEqual(eval(session, "nintegrate[x^2,{x,0,1},12]"),
         std::string{"0.333333333333"},
         "Numerical calculus: polynomial integral is certified");
     tests.expectEqual(eval(session, "nintegrate[sin[x],{x,0,Pi},12]"),
-        std::string{"2.000000000000"},
+        std::string{"2.0"},
         "Numerical calculus: integration uses radian trigonometry by default");
     tests.expectEqual(eval(session, "nintegrate[cos[x],{x,0,Pi/2},12]"),
-        std::string{"1.000000000000"},
+        std::string{"1.0"},
         "Numerical calculus: cosine radian integral is certified");
     tests.expectEqual(eval(session, "nintegrate[sin[x Deg],{x,0,180},12]"),
         std::string{"114.591559026165"},
@@ -62,18 +62,18 @@ void runNumericalCalculusTests(TestRunner& tests) {
         std::string{"4.934802200545"},
         "Numerical calculus: certified transcendental bounds are normalized to a rational parameter interval");
     tests.expectEqual(eval(session, "nintegrate[2*x,{x,0,sqrt[2]},12]"),
-        std::string{"2.000000000000"},
+        std::string{"2.0"},
         "Numerical calculus: certified radical bounds are supported");
 
     static_cast<void>(session.evaluate("x := 100"));
     tests.expectEqual(eval(session, "nintegrate[x,{x,0,1},12]"),
-        std::string{"0.500000000000"},
+        std::string{"0.50"},
         "Numerical calculus: iterator variable is held even when it has a global value");
 
     static_cast<void>(session.evaluate("lo := 0"));
     static_cast<void>(session.evaluate("hi := 1"));
     tests.expectEqual(eval(session, "nintegrate[x,{x,lo,hi},12]"),
-        std::string{"0.500000000000"},
+        std::string{"0.50"},
         "Numerical calculus: iterator bounds are normally evaluated");
 
     tests.expectEqual(eval(session, "integrate[x^2,{x,0,1}]"),

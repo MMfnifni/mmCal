@@ -8,6 +8,7 @@
 #include "builtins/aggregate.hpp"
 #include "builtins/statistics.hpp"
 #include "builtins/signal_processing.hpp"
+#include "builtins/array.hpp"
 #include "builtins/array_vector.hpp"
 #include "builtins/comparison.hpp"
 #include "builtins/combinatorics.hpp"
@@ -43,6 +44,48 @@
 namespace mmcal::evaluation {
 namespace {
 
+[[nodiscard]] bool requiresRectangularArray(BuiltinId id) noexcept {
+    switch (id) {
+    case BuiltinId::Transpose:
+    case BuiltinId::ConjugateTranspose:
+    case BuiltinId::MatrixAdd:
+    case BuiltinId::MatrixMultiply:
+    case BuiltinId::Determinant:
+    case BuiltinId::Inverse:
+    case BuiltinId::Rref:
+    case BuiltinId::Rank:
+    case BuiltinId::SolveLinear:
+    case BuiltinId::NullSpace:
+    case BuiltinId::LuDecomposition:
+    case BuiltinId::QrDecomposition:
+    case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::Eigenvalues:
+    case BuiltinId::Eigenvectors:
+    case BuiltinId::Eigensystem:
+    case BuiltinId::Trace:
+    case BuiltinId::Rows:
+    case BuiltinId::Cols:
+    case BuiltinId::Diag:
+    case BuiltinId::VectorAdd:
+    case BuiltinId::VectorSubtract:
+    case BuiltinId::VectorScale:
+    case BuiltinId::VectorDot:
+    case BuiltinId::VectorCross:
+    case BuiltinId::VectorNorm:
+    case BuiltinId::VectorManhattan:
+    case BuiltinId::VectorEuclidean:
+    case BuiltinId::VectorNormalize:
+    case BuiltinId::VectorProject:
+    case BuiltinId::VectorAngle:
+    case BuiltinId::VectorReflect:
+    case BuiltinId::VectorReflectAxis:
+    case BuiltinId::VectorSum:
+        return true;
+    default:
+        return false;
+    }
+}
+
 [[nodiscard]] bool containsBuiltinCall(
     const expression::Expr& root,
     const expression::Symbol& head) {
@@ -59,6 +102,10 @@ namespace {
         }
         else if (current->isArray()) {
             for (const expression::Expr& element : current->asArray().elements)
+                pending.push_back(&element);
+        }
+        else if (current->isList()) {
+            for (const expression::Expr& element : current->asList().elements)
                 pending.push_back(&element);
         }
     }
@@ -82,6 +129,18 @@ expression::Expr Evaluator::dispatchBuiltin(
     const BuiltinDefinition& definition,
     const expression::CallExpr& call,
     std::span<const expression::Expr> arguments) {
+    if (requiresRectangularArray(definition.id)) {
+        const bool nonRectangular = std::any_of(arguments.begin(), arguments.end(),
+            [](const expression::Expr& value) { return value.isList(); });
+        if (nonRectangular) {
+            emitWarning("Array::nonRectangular",
+                std::string{definition.name()}
+                    + " requires a rectangular dense array; the brace value remains unevaluated");
+            return expression::Expr::call(call.head,
+                std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+        }
+    }
+
     switch (definition.id) {
     case BuiltinId::Add:
         return builtins::evaluateAdd(arguments, registry_);
@@ -287,15 +346,34 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateConvolution(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Transpose:
         return builtins::evaluateTranspose(arguments, registry_);
+    case BuiltinId::ConjugateTranspose:
+        return builtins::evaluateConjugateTranspose(
+            arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::MatrixAdd:
         return builtins::evaluateMatrixAdd(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::MatrixMultiply:
-        return builtins::evaluateMatrixMultiply(arguments, registry_, mathematics_, angleSemantics_);
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateDot(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        return builtins::evaluateDot(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Determinant:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateDeterminant(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateDeterminant(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Inverse:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateInverse(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateMatrixInverse(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Rref: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateRref(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         expression::Expr result = builtins::evaluateRref(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Rref)))
@@ -304,11 +382,117 @@ expression::Expr Evaluator::dispatchBuiltin(
         return result;
     }
     case BuiltinId::Rank: {
+        // rankは不連続量なので、exact入力ではまずexact eliminationを優先する。
+        // exactに決まらない場合だけcertified intervalへ降ろし、epsilon判定は導入しない。
         expression::Expr result = builtins::evaluateMatrixRank(
             arguments, registry_, mathematics_, angleSemantics_);
-        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Rank)))
-            emitWarning("rank::unevaluated",
-                "rank could not determine the symbolic pivots; the expression remains unevaluated");
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Rank))) {
+            if (const auto* approximation = currentApproximationContext())
+                if (const auto approximateResult = builtins::evaluateApproximateMatrixRank(
+                    arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                    return *approximateResult;
+            emitWarning("matrixRank::unevaluated",
+                "matrixRank could not determine the symbolic pivots; the expression remains unevaluated");
+        }
+        return result;
+    }
+    case BuiltinId::SolveLinear: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateSolveLinear(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateSolveLinear(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::SolveLinear)))
+            emitWarning("solveLinear::unevaluated",
+                "solveLinear could not determine the symbolic pivots; the expression remains unevaluated");
+        return result;
+    }
+    case BuiltinId::NullSpace: {
+        // nullSpaceもrankと同じくrank deficiencyに依存する不連続量なので，
+        // exact入力ではまずexact eliminationを優先する。未解決時だけcertified intervalへ降ろす。
+        expression::Expr result = builtins::evaluateNullSpace(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::NullSpace))) {
+            if (const auto* approximation = currentApproximationContext())
+                if (const auto approximateResult = builtins::evaluateApproximateNullSpace(
+                    arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                    return *approximateResult;
+            emitWarning("nullSpace::unevaluated",
+                "nullSpace could not certify the pivot structure; the expression remains unevaluated");
+        }
+        return result;
+    }
+    case BuiltinId::LuDecomposition: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateLuDecomposition(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateLuDecomposition(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::LuDecomposition)))
+            emitWarning("luDecomposition::unevaluated",
+                "luDecomposition could not prove a required symbolic pivot nonzero; the expression remains unevaluated");
+        return result;
+    }
+    case BuiltinId::QrDecomposition: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateQrDecomposition(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateQrDecomposition(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::QrDecomposition)))
+            emitWarning("qrDecomposition::unevaluated",
+                "qrDecomposition exact Householder expansion is unavailable for this matrix; use N[...] for the certified numerical backend");
+        return result;
+    }
+    case BuiltinId::SingularValueDecomposition: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateSingularValueDecomposition(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateSingularValueDecomposition(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::SingularValueDecomposition)))
+            emitWarning("svd::unevaluated",
+                "svd exact form is only emitted for natural exact cases; use N[...] for the numerical SVD backend");
+        return result;
+    }
+    case BuiltinId::Eigenvalues: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateEigenvalues(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateEigenvalues(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigenvalues)))
+            emitWarning("eigenvalues::unevaluated",
+                "eigenvalues exact form is unavailable for this matrix; use N[...] for the numerical Schur backend");
+        return result;
+    }
+    case BuiltinId::Eigenvectors: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateEigenvectors(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateEigenvectors(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigenvectors)))
+            emitWarning("eigenvectors::unevaluated",
+                "eigenvectors exact form is only emitted for natural exact cases; use N[...] for the numerical Schur backend");
+        return result;
+    }
+    case BuiltinId::Eigensystem: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateEigensystem(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateEigensystem(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigensystem)))
+            emitWarning("eigensystem::unevaluated",
+                "eigensystem exact form is only emitted for natural exact cases; use N[...] for the numerical Schur backend");
         return result;
     }
     case BuiltinId::NumericDerivative:
@@ -375,6 +559,16 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::SpearmanCorrelation:
     case BuiltinId::PercentRank:
         return builtins::evaluateStatistic(definition.id, arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::Dimensions:
+        return builtins::evaluateDimensions(arguments);
+    case BuiltinId::ArrayRank:
+        return builtins::evaluateArrayRank(arguments);
+    case BuiltinId::Length:
+        return builtins::evaluateLength(arguments);
+    case BuiltinId::ArrayGet:
+        return builtins::evaluateArrayGet(arguments);
+    case BuiltinId::Reshape:
+        return builtins::evaluateReshape(arguments);
     case BuiltinId::Identity:
         return builtins::evaluateIdentity(arguments);
     case BuiltinId::Zeros:
@@ -382,6 +576,10 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::MatrixGet:
         return builtins::evaluateMatrixGet(arguments);
     case BuiltinId::Trace:
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateTrace(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
         return builtins::evaluateTrace(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Rows:
         return builtins::evaluateRows(arguments);
@@ -396,17 +594,25 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::VectorScale:
         return builtins::evaluateVectorScale(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorDot:
-        return builtins::evaluateVectorDot(arguments, registry_, mathematics_, angleSemantics_);
+        return builtins::evaluateDot(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorCross:
         return builtins::evaluateVectorCross(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorNorm:
-        return builtins::evaluateVectorNorm(arguments, registry_, mathematics_, angleSemantics_);
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateNorm(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        return builtins::evaluateNorm(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorManhattan:
         return builtins::evaluateVectorManhattan(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorEuclidean:
         return builtins::evaluateVectorEuclidean(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorNormalize:
-        return builtins::evaluateVectorNormalize(arguments, registry_, mathematics_, angleSemantics_);
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateNormalize(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        return builtins::evaluateNormalize(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorProject:
         return builtins::evaluateVectorProject(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorAngle:

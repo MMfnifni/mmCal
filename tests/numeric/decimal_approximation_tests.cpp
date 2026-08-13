@@ -76,6 +76,35 @@ void runDecimalApproximationTests(TestRunner& tests) {
         && certifiedStable->text() == std::string_view{"0.333"},
         "DecimalApproximation: certifies a whole interval with one rounded result");
 
+    const auto certifiedTrailingZeros = DecimalApproximation::fromCertifiedInterval(
+        Rational{BigInt{149999999}, BigInt{100000000}},
+        Rational{BigInt{150000001}, BigInt{100000000}},
+        6);
+    tests.expect(certifiedTrailingZeros.has_value()
+        && certifiedTrailingZeros->text() == std::string_view{"1.50"}
+        && certifiedTrailingZeros->fractionalDigits() == 2
+        && certifiedTrailingZeros->requestedFractionalDigits() == 6,
+        "DecimalApproximation: certified display compacts redundant trailing zeros but retains one lower-order zero");
+
+    const auto certifiedSignificantTrailingZero = DecimalApproximation::fromCertifiedInterval(
+        Rational{BigInt{122999999}, BigInt{100000000}},
+        Rational{BigInt{123000001}, BigInt{100000000}},
+        6);
+    tests.expect(certifiedSignificantTrailingZero.has_value()
+        && certifiedSignificantTrailingZero->text() == std::string_view{"1.230"}
+        && certifiedSignificantTrailingZero->fractionalDigits() == 3
+        && certifiedSignificantTrailingZero->requestedFractionalDigits() == 6,
+        "DecimalApproximation: certified display retains one zero below the last observed nonzero digit");
+
+    const auto certifiedInteger = DecimalApproximation::fromCertifiedInterval(
+        Rational{BigInt{99999999}, BigInt{100000000}},
+        Rational{BigInt{100000001}, BigInt{100000000}},
+        6);
+    tests.expect(certifiedInteger.has_value()
+        && certifiedInteger->text() == std::string_view{"1.0"}
+        && certifiedInteger->requestedFractionalDigits() == 6,
+        "DecimalApproximation: certified integer-like output keeps one fractional zero");
+
     const auto certifiedUnstable = DecimalApproximation::fromCertifiedInterval(
         Rational{BigInt{3334}, BigInt{10000}},
         Rational{BigInt{3336}, BigInt{10000}},

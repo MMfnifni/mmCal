@@ -52,7 +52,23 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 任意精度作業値と区間演算を使い、必要桁が保証できる数値近似を生成する。`Pi`はbinary-splitting Chudnovsky，`exp/log`はbinary splittingと保証付きrange reduction，巨大Radianの三角函数はPi保証区間によるargument reductionを使う。深すぎるASTはOSのstack overflowへ到達する前に拒否する。
 
-v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく、明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず、`ComplexInterval`上のradix-2/Bluestein backendへ降りる。
+v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく、明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず、`ComplexInterval`上のradix-2/Bluestein backendへ降りる。Matrixでも同じ`ApproximationContext`を使い，expression→certified interval変換，decimalization，guard-digit refinementを共通helperへ集約する。表示ではexact有限小数を不要に0埋めせず，certified fixed-digit結果の末尾0列は1桁だけ残して圧縮する。要求桁数とcertified enclosureは`DecimalApproximation` metadataへ保持し，表示上の0の個数を保証桁数の代用にはしない。
+
+### `linear_algebra`
+
+rank-2 Array上の線形代数algorithmをbuiltin dispatchから分離する。`MatrixView`は`ArrayExpr`のrow-major storageをzero-copyで参照し，書換えが必要なalgorithmだけ`MatrixBuffer`へ複製する。exact Number行列はpivot loop内でExpr/Simplifierを使わない専用backend，`N`配下ではBigFloat/`ComplexInterval`系のcertified backendへ分岐する。
+
+ユーザー構文の`{...}`は一般の有限brace containerとする。child shapeが一致する矩形値は`braceValue` / `Expr::array`境界で`shape + flat elements`のdense `ArrayExpr`へ自動最適化し，shapeが異なる`{Q,R}`やragged値は`ListExpr`として保持する。Matrix algorithmは`ArrayExpr`だけを受け取り，Evaluator dispatchの矩形性監査で`ListExpr`をWarning + 未評価へ戻す。zero-length dimensionはdense Arrayのshapeとして保持する。`dimensions`は一般braceに対して全childに共通するrectangular prefixを返し，`length` / `at`はArray/List双方を扱う。
+
+一般symbolic `det` / `inverse`はexact-firstを維持する一方，無制限Laplace/adjugate展開は行わない。三角行列fast pathと共有展開budgetにより，式爆発が見込まれる場合は未評価式へ戻す。
+
+分解系のLU / QRは`linear_algebra/decomposition.*`へ集約する。`luDecomposition`は正方行列でrow-pivoted `P A = L U`（certified approximateでは非零候補の|pivot|保証下限を比較するpartial pivoting），`qrDecomposition`は矩形を含むreduced Householder QRとして`k=min(m,n)`，`Q:m×k`，`R:k×n`を返す。公開結果は一般brace `{P,L,U}` / `{Q,R}`であり，同shapeなら内部dense Array，異shapeならList表現になる。`at[result,i]`でfactorを切り出す。`N[...]`ではexact分解を構築せずcertified `ComplexInterval` backendへ直接dispatchする。Householder適用にはcolumn-block kernelも持つが，no-BLASのBigFloat/interval backendではblock=8/16/32の実測優位が一貫しなかったため既定はunblocked相当とし，benchmarkだけ常設する。
+
+SVDは`linear_algebra/svd.*`へ分離し，reduced `{U,S,V}`を返す。一般数値backendは`A^H A`を形成せず，Householder bidiagonalization + one-sided JacobiをBigFloat中心値で行い，元入力のcertified intervalと候補factorからreconstruction residualおよび`U^H U` / `V^H V` orthogonalityを区間監査する。実数・複素数双方を扱い，複素点演算は`linear_algebra/complex_point.*`へ共通化する。監査が要求桁を満たさなければguard digitsを増やして再試行し，exact SVDは自然に閉じるcaseだけを返す。重複特異値ではvector basisが一意でないため，componentwiseな唯一性ではなく再構成・直交性を保証対象とする。
+
+Eigenは`linear_algebra/eigen.*`へ分離する。exact pathは上三角行列の対角固有値，対角行列の標準基底，distinct-root exact Number 2×2を扱い，一般数値pathはComplex BigFloat上でHessenberg reduction → implicit shifted QR → complex Schur形へ進む。Schur vectorを蓄積し，固有vectorは上三角Schur行列からback substitutionして列として返す。停止精度は出力桁より十分厳しく設定し，元入力の`ComplexInterval`に対して`A Q-Q T`および`A v-λv`をinterval演算で監査する。一般非正規行列では固有量のcomponentwise enclosureを安易に主張せず，Schur/eigenpair relationをcertificate境界とする。重根・defective/near-defective caseで安定な独立固有vectorを作れない場合は未評価へ戻す。
+
+Stage 3ではexact実数（整数/Rational）行列を行ごとの分母LCMで整数行列へliftし，`IntegerMatrixBuffer`上のBareiss fraction-free eliminationへdispatchする。分母除去は共通`liftRealRows` helperへ集約し，`det`はBareissの最終pivotから復元，`rref` / `matrixRank` / `nullSpace`はfraction-free forward eliminationを共有する。`nullSpace`はfree columnを昇順に選ぶRREF basisを構成し，full column rankでもshape `{0,n}` を保持する。`inverse`は `B=D A` に対するaugmented matrix `[B|D]`，`solveLinear[A,b]`は `[A|b]` を同じkernelへ渡し，後者ではpivot候補を係数列だけに制限して整合性と一意性を判定する。これにより中間Rational生成をpivot loopからほぼ排除する。exact複素行列は現在も`Number` Gaussian backendへfallbackする。`N[solveLinear[...],p]`はexact解を先に構築せず，certified interval augmented eliminationを直接試す。一方`matrixRank` / `nullSpace`はrank deficiencyに不連続なので，exact入力ではexact pivot structureを優先し，近似入力ではintervalでpivot構造を証明できる場合だけ結果を確定する。
 
 ### `evaluation`
 
@@ -102,9 +118,9 @@ Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参�
 
 `mmCal.Benchmarks`は通常の回帰testとは分離したConsole projectである。`mmCal.Core`へだけ依存し，次を担当する。
 
-- 固定seedの巨大BigInt商余り・10進round-trip等のランダム正当性試験
+- 固定seedの巨大BigInt商余り・10進round-trip・exact/certified Matrix・FFT等のランダム正当性試験
 - Karatsuba / Toom-3 / Burnikel–Ziegler等のthreshold sweep
-- factorial，decimal conversion，高精度`Pi/exp/log`等の速度比較
+- factorial，decimal conversion，高精度`Pi/exp/log`，exact/certified Matrix，FFT等の速度比較
 - `--full`による大規模case，`--random-only` / `--benchmark-only`による用途分離
 
 性能測定をUnit testのPASS/FAIL時間へ混ぜず，算法選定の根拠を再現可能に残すことが目的である。採用・棄却履歴は`performance_optimization.ja.md`を参照する。

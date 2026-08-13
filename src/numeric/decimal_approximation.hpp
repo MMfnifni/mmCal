@@ -30,6 +30,7 @@ public:
 
     // 真値が [lower, upper] に含まれることが別途証明されている場合に使う。
     // 両端を同じ桁数へ丸めた結果が一致したときだけ、その10進表現を確定値として返す。
+    // 要求桁数はmetadataに保持し，表示上は連続する末尾0を1個まで圧縮する。
     [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedInterval(
         const Rational& lower,
         const Rational& upper,

@@ -2,6 +2,7 @@
 #include "expr.hpp"
 
 #include "solver/solution_set.hpp"
+#include "array_utils.hpp"
 
 #include <limits>
 #include <stdexcept>
@@ -9,28 +10,6 @@
 #include <variant>
 
 namespace mmcal::expression {
-namespace {
-
-[[nodiscard]] std::size_t elementCount(std::span<const std::size_t> shape) {
-    if (shape.empty())
-        throw std::invalid_argument("Array shape must contain at least one dimension");
-
-    std::size_t count = 1;
-
-    for (const std::size_t dimension : shape) {
-        if (dimension == 0)
-            return 0;
-
-        if (count > std::numeric_limits<std::size_t>::max() / dimension)
-            throw std::length_error("Array element count exceeds the size_t range");
-
-        count *= dimension;
-    }
-
-    return count;
-}
-
-} // namespace
 
 struct Expr::Node final {
     using Value = std::variant<
@@ -41,6 +20,7 @@ struct Expr::Node final {
         std::string,
         Symbol,
         ArrayExpr,
+        ListExpr,
         CallExpr,
         std::shared_ptr<const solver::SolutionSet>>;
 
@@ -79,11 +59,50 @@ Expr Expr::solutionSet(solver::SolutionSet value) {
 Expr Expr::array(
     std::vector<std::size_t> shape,
     std::vector<Expr> elements) {
-    if (elementCount(shape) != elements.size())
+    if (arrayElementCount(shape) != elements.size())
         throw std::invalid_argument("Array shape does not match the element count");
+    if (!elements.empty()) {
+        for (const Expr& element : elements)
+            if (element.isList())
+                throw std::invalid_argument("Dense Array cannot contain a non-rectangular brace value");
 
+        const bool nested = elements.front().isArray();
+        for (const Expr& element : elements)
+            if (element.isArray() != nested)
+                throw std::invalid_argument("Array elements must have a uniform rank and shape");
+
+        if (nested) {
+            const std::vector<std::size_t> childShape = elements.front().asArray().shape;
+            std::size_t flattenedCount = 0;
+            for (const Expr& element : elements) {
+                const ArrayExpr& child = element.asArray();
+                if (child.shape != childShape)
+                    throw std::invalid_argument("Array child shapes must be identical");
+                if (flattenedCount > std::numeric_limits<std::size_t>::max() - child.elements.size())
+                    throw std::length_error("Array element count exceeds the size_t range");
+                flattenedCount += child.elements.size();
+            }
+
+            shape.insert(shape.end(), childShape.begin(), childShape.end());
+            std::vector<Expr> flattened;
+            flattened.reserve(flattenedCount);
+            for (const Expr& element : elements) {
+                const ArrayExpr& child = element.asArray();
+                flattened.insert(flattened.end(), child.elements.begin(), child.elements.end());
+            }
+            elements = std::move(flattened);
+        }
+    }
+
+    if (arrayElementCount(shape) != elements.size())
+        throw std::invalid_argument("Normalized array shape does not match the element count");
     ArrayExpr array{std::move(shape), std::move(elements)};
     return Expr{std::make_shared<Node>(Node::Value{std::move(array)})};
+}
+
+Expr Expr::list(std::vector<Expr> elements) {
+    ListExpr list{std::move(elements)};
+    return Expr{std::make_shared<Node>(Node::Value{std::move(list)})};
 }
 
 Expr Expr::call(Symbol head, std::vector<Expr> arguments) {
@@ -121,6 +140,10 @@ bool Expr::isSymbol() const noexcept {
 
 bool Expr::isArray() const noexcept {
     return kind() == ExprKind::Array;
+}
+
+bool Expr::isList() const noexcept {
+    return kind() == ExprKind::List;
 }
 
 bool Expr::isCall() const noexcept {
@@ -180,6 +203,13 @@ const ArrayExpr& Expr::asArray() const {
     return std::get<ArrayExpr>(node_->value);
 }
 
+const ListExpr& Expr::asList() const {
+    if (!isList())
+        throw std::logic_error("Expr does not contain a list");
+
+    return std::get<ListExpr>(node_->value);
+}
+
 const CallExpr& Expr::asCall() const {
     if (!isCall())
         throw std::logic_error("Expr does not contain a function call");
@@ -214,6 +244,33 @@ std::size_t ArrayExpr::rank() const noexcept {
 
 std::size_t ArrayExpr::size() const noexcept {
     return elements.size();
+}
+
+std::size_t ArrayExpr::extent(std::size_t dimension) const {
+    if (dimension >= shape.size())
+        throw std::out_of_range("Array dimension is out of range");
+    return shape[dimension];
+}
+
+std::size_t ArrayExpr::flatIndex(std::span<const std::size_t> indices) const {
+    if (indices.size() != shape.size())
+        throw std::invalid_argument("Array index rank does not match the array rank");
+
+    std::size_t index = 0;
+    for (std::size_t dimension = 0; dimension < shape.size(); ++dimension) {
+        if (indices[dimension] >= shape[dimension])
+            throw std::out_of_range("Array index is out of range");
+        index = index * shape[dimension] + indices[dimension];
+    }
+    return index;
+}
+
+bool ArrayExpr::isVector() const noexcept {
+    return rank() == 1;
+}
+
+bool ArrayExpr::isMatrix() const noexcept {
+    return rank() == 2;
 }
 
 } // namespace mmcal::expression

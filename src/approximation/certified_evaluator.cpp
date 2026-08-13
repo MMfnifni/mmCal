@@ -65,6 +65,11 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
             for (const Expr& element : elements)
                 pending.push_back(Pending{&element, current.depth + 1});
         }
+        else if (current.expression->isList()) {
+            const auto& elements = current.expression->asList().elements;
+            for (const Expr& element : elements)
+                pending.push_back(Pending{&element, current.depth + 1});
+        }
     }
     return false;
 }
@@ -1376,6 +1381,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Correlation:
     case BuiltinId::SpearmanCorrelation:
     case BuiltinId::PercentRank:
+    case BuiltinId::Dimensions:
+    case BuiltinId::ArrayRank:
+    case BuiltinId::ArrayGet:
+    case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
     case BuiltinId::MatrixGet:
@@ -1426,6 +1435,16 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Inverse:
     case BuiltinId::Rref:
     case BuiltinId::Rank:
+    case BuiltinId::SolveLinear:
+    case BuiltinId::NullSpace:
+    case BuiltinId::LuDecomposition:
+    case BuiltinId::QrDecomposition:
+    case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::Eigenvalues:
+    case BuiltinId::Eigenvectors:
+    case BuiltinId::Eigensystem:
+    case BuiltinId::ConjugateTranspose:
+    case BuiltinId::Length:
     case BuiltinId::NumericDerivative:
     case BuiltinId::NumericIntegral:
     case BuiltinId::NumericalApproximation:

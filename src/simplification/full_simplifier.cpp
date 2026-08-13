@@ -1,5 +1,6 @@
 // 候補探索型FullSimplify
 #include "full_simplifier.hpp"
+#include "expression/array_utils.hpp"
 
 #include "expression_cost.hpp"
 #include "mathematics/predicate.hpp"
@@ -183,6 +184,14 @@ using expression::Expr;
             elements.push_back(proofTrigPowerRewrite(element, context, changed));
         current = Expr::array(array.shape, std::move(elements));
     }
+    else if (expression.isList()) {
+        const auto& list = expression.asList();
+        std::vector<Expr> elements;
+        elements.reserve(list.elements.size());
+        for (const Expr& element : list.elements)
+            elements.push_back(proofTrigPowerRewrite(element, context, changed));
+        current = expression::braceValue(std::move(elements));
+    }
 
     // 明示角度単位が現在の既定角度と同じなら、同じsession意味論では完全に同値。
     // Fresnel微分は常にRadを明示するため、default Radのintegrandとのderivative-backで
@@ -334,6 +343,10 @@ using expression::Expr;
             for (const Expr& element : current.asArray().elements)
                 pending.push_back(element);
         }
+        else if (current.isList()) {
+            for (const Expr& element : current.asList().elements)
+                pending.push_back(element);
+        }
     }
     return variables;
 }
@@ -404,6 +417,19 @@ using expression::Expr;
                 std::vector<Expr> elements = array.elements;
                 elements[i] = replacement;
                 result.push_back(Expr::array(array.shape, std::move(elements)));
+            }
+        }
+    }
+    else if (expression.isList()) {
+        const auto& list = expression.asList();
+        for (std::size_t i = 0; i < list.elements.size(); ++i) {
+            const std::vector<Expr> transformed = rootVariants(list.elements[i], context);
+            for (const Expr& replacement : transformed) {
+                if (replacement == list.elements[i])
+                    continue;
+                std::vector<Expr> elements = list.elements;
+                elements[i] = replacement;
+                result.push_back(expression::braceValue(std::move(elements)));
             }
         }
     }
