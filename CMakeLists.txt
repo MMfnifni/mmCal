@@ -19,7 +19,9 @@ add_executable(mmCal src/cli/main.cpp)
 target_link_libraries(mmCal PRIVATE mmCal.Core)
 target_include_directories(mmCal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-add_executable(mmCal.Benchmarks EXCLUDE_FROM_ALL benchmarks/benchmark_main.cpp)
+add_executable(mmCal.Benchmarks EXCLUDE_FROM_ALL
+    benchmarks/benchmark_main.cpp
+    benchmarks/random_expression_fuzzer.cpp)
 target_link_libraries(mmCal.Benchmarks PRIVATE mmCal.Core)
 target_include_directories(mmCal.Benchmarks PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

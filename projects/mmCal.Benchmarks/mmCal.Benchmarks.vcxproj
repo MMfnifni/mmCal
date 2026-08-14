@@ -40,7 +40,13 @@
     <ClCompile><WarningLevel>Level4</WarningLevel><FunctionLevelLinking>true</FunctionLevelLinking><IntrinsicFunctions>true</IntrinsicFunctions><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalIncludeDirectories>$(SolutionDir)src;$(SolutionDir)benchmarks;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><MultiProcessorCompilation>true</MultiProcessorCompilation><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><FavorSizeOrSpeed>Speed</FavorSizeOrSpeed></ClCompile>
     <Link><SubSystem>Console</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>true</GenerateDebugInformation><ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="..\..\benchmarks\benchmark_main.cpp" /></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\benchmarks\benchmark_main.cpp" />
+    <ClCompile Include="..\..\benchmarks\random_expression_fuzzer.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\benchmarks\random_expression_fuzzer.hpp" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\mmCal.Core\mmCal.Core.vcxproj"><Project>{1235F143-3617-4AE1-A986-4B6BC83DEFDB}</Project><ReferenceOutputAssembly>false</ReferenceOutputAssembly></ProjectReference>
   </ItemGroup>

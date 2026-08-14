@@ -146,6 +146,10 @@ void runLowererTests(TestRunner& tests) {
         "constant followed by parentheses is multiplication");
     tests.expectEqual(lowerAndFormat("x(x+1)"), std::string{"x*(x+1)"},
         "formatter makes identifier/group multiplication explicit");
+    tests.expectEqual(lowerAndFormat("(x^2)^3"), std::string{"(x^2)^3"},
+        "formatter preserves left-nested Power associativity");
+    tests.expectEqual(lowerAndFormat("x^(2^3)"), std::string{"x^2^3"},
+        "formatter uses the parser's right-associative Power notation");
     tests.expectEqual(lowerAndFormat("f[2]"), std::string{"f[2]"},
         "square bracket syntax lowers to a function call");
     tests.expectEqual(lowerAndFormat("f[x]:=x+1"), std::string{"f[x]:=x+1"},

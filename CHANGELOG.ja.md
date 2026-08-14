@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### 開発・検証基盤
+
+- `mmCal.Benchmarks --random-expressions`へgrammar-awareなsemantic expression fuzzerを追加
+- `--loop`ではcase数を制限せず連続実行し，最初のFAILを検出した時点でshrinking・seed/case再現情報を表示して即停止する
+- 各caseはmaster seedと1-based case番号から独立生成され，`--seed N --case M`だけで該当caseを直接再現できる
+- 生成depthは浅い式を主体にしつつ稀に深い式を混ぜる重み付き分布とし，既定`--max-depth 16`の範囲でcaseごとに変化する
+- 初期invariantとしてexact formatter round-trip，`fullSimplify`値保存，`expand`/`factor`の多項式値保存，double transpose，`det[A]==det[transpose[A]]`を検証
+- generatorは合法なexact算術・多項式・小行列を主体とし，ランダムなTypeErrorをFAILとして量産しないsemantic fuzzingを優先
+- `--threads N`を追加し，workerごとに独立`KernelSession`を持つcase-level parallel fuzzingへ対応。master seed + case番号による再現性はthread数に依存しない
+- `--nostop-loop`を追加。通常`--loop`は最初のFAILで停止する一方，`--nostop-loop`はFAILをshrinking・表示した後も継続する
+- nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
+- Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
+- exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善
+- 正のexact integer冪`(c*a)^n`ではexact numeric係数`c`だけを安全に冪乗して外へ出し，`(861(1-x)^64)^3 -> 638277381(1-x)^192`までcanonical化。一般複素指数への積の冪分配は行わない
+
 ## v1.5.2 — 2026-08-13
 
 v1.5.2は，v1.5.1までのexact-first数値基盤を維持しつつ，記号微積分・特殊函数・precision-aware評価・Array/線形代数をまとめて拡張したrelease。正式化時点でinternal `2027 / 2027 PASS`，black-box `1504 / 1504 PASS`。`mmCal.Benchmarks --random-only`のBigInt / special-function / Matrix / FFT fixed-seed invariantもPASS。

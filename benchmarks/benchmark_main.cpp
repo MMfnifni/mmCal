@@ -17,6 +17,7 @@
 #include "numeric/rational.hpp"
 #include "numeric/number.hpp"
 #include "symbols/symbol_table.hpp"
+#include "random_expression_fuzzer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1527,7 +1528,9 @@ void printUsage() {
         << "  --random-only    run invariant checks only\n"
         << "  --benchmark-only run timings only\n"
         << "  --matrix-large <op> <size> [digits]\n"
-        << "    op: transpose trace ndot det ndet ninv rref rank nrank nsolve nnull lu nlu nqr nsvd neigen neigensystem\n";
+        << "    op: transpose trace ndot det ndet ninv rref rank nrank nsolve nnull lu nlu nqr nsvd neigen neigensystem\n"
+        << "  --random-expressions [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--max-depth N] [--report-every N]\n"
+        << "    grammar-aware semantic fuzzer; --loop stops on the first FAIL, --nostop-loop reports FAILs and continues\n";
 }
 
 } // namespace
@@ -1539,6 +1542,12 @@ int main(int argc, char** argv) {
     std::optional<std::string> largeMatrixOperation;
     std::size_t largeMatrixSize = 0;
     std::size_t largeMatrixDigits = 16;
+    bool randomExpressions = false;
+    mmcal::benchmarks::RandomExpressionFuzzerOptions expressionOptions;
+    expressionOptions.seed = static_cast<std::uint64_t>(
+        std::chrono::high_resolution_clock::now().time_since_epoch().count())
+        ^ (static_cast<std::uint64_t>(std::random_device{}()) << 32)
+        ^ static_cast<std::uint64_t>(std::random_device{}());
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg{argv[i]};
         if (arg == "--full")
@@ -1556,6 +1565,65 @@ int main(int argc, char** argv) {
             largeMatrixSize = static_cast<std::size_t>(std::stoull(argv[++i]));
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 largeMatrixDigits = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--random-expressions")
+            randomExpressions = true;
+        else if (arg == "--loop") {
+            expressionOptions.loop = true;
+            randomExpressions = true;
+        }
+        else if (arg == "--nostop-loop") {
+            expressionOptions.loop = true;
+            expressionOptions.noStopLoop = true;
+            randomExpressions = true;
+        }
+        else if (arg == "--threads") {
+            randomExpressions = true;
+            if (i + 1 >= argc) {
+                std::cerr << "--threads requires N\n";
+                return 2;
+            }
+            expressionOptions.threads = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--seed") {
+            randomExpressions = true;
+            if (i + 1 >= argc) {
+                std::cerr << "--seed requires N\n";
+                return 2;
+            }
+            expressionOptions.seed = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--case") {
+            if (i + 1 >= argc) {
+                std::cerr << "--case requires N\n";
+                return 2;
+            }
+            expressionOptions.singleCase = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            randomExpressions = true;
+        }
+        else if (arg == "--cases") {
+            randomExpressions = true;
+            if (i + 1 >= argc) {
+                std::cerr << "--cases requires N\n";
+                return 2;
+            }
+            expressionOptions.cases = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--max-depth") {
+            randomExpressions = true;
+            if (i + 1 >= argc) {
+                std::cerr << "--max-depth requires N\n";
+                return 2;
+            }
+            expressionOptions.maxDepth = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--report-every") {
+            randomExpressions = true;
+            if (i + 1 >= argc) {
+                std::cerr << "--report-every requires N\n";
+                return 2;
+            }
+            expressionOptions.reportEvery = static_cast<std::uint64_t>(std::stoull(argv[++i]));
         }
         else if (arg == "--help" || arg == "-h") {
             printUsage();
@@ -1576,6 +1644,30 @@ int main(int argc, char** argv) {
     if (largeMatrixOperation) {
         runLargeMatrixBenchmark(*largeMatrixOperation, largeMatrixSize, largeMatrixDigits);
         return 0;
+    }
+
+    if (randomExpressions) {
+        if (expressionOptions.maxDepth == 0) {
+            std::cerr << "--max-depth must be at least 1\n";
+            return 2;
+        }
+        if (expressionOptions.threads == 0) {
+            std::cerr << "--threads must be at least 1\n";
+            return 2;
+        }
+        if (expressionOptions.noStopLoop && expressionOptions.singleCase) {
+            std::cerr << "--nostop-loop cannot be combined with --case\n";
+            return 2;
+        }
+        if (expressionOptions.singleCase && *expressionOptions.singleCase == 0) {
+            std::cerr << "--case is 1-based and must be at least 1\n";
+            return 2;
+        }
+        if (!expressionOptions.loop && !expressionOptions.singleCase && expressionOptions.cases == 0) {
+            std::cerr << "--cases must be at least 1\n";
+            return 2;
+        }
+        return mmcal::benchmarks::runRandomExpressionFuzzer(expressionOptions) ? 0 : 1;
     }
 
     if (!benchmarkOnly) {

@@ -86,6 +86,27 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: Simplify knows the Pythagorean trigonometric identity");
     tests.expectEqual(evaluateAndFormat(session, "simplify[sin[x]^2 + cos[x]^2]"), std::string{"1"},
         "KernelSession: Pythagorean identity works for a free symbolic angle");
+    kernel::KernelSession nestedPowerSession;
+    tests.expectEqual(evaluateAndFormat(
+        nestedPowerSession, "simplify[(((((x+5))^3)^4)^3)^4]"),
+        std::string{"(5+x)^144"},
+        "KernelSession: simplify flattens nested positive exact integer powers");
+    tests.expectEqual(evaluateAndFormat(
+        nestedPowerSession,
+        "expand[(((((x+5))^3)^4)^3)^4]==expand[(x+5)^144]"),
+        std::string{"True"},
+        "KernelSession: expand sees the canonical flattened nested Power");
+
+    tests.expectEqual(evaluateAndFormat(
+        nestedPowerSession,
+        "simplify[((((7*((5)^3-2))+(2+-2))*((((1-x))^4)^4)^4))^3]"),
+        std::string{"638277381(1-x)^192"},
+        "KernelSession: positive integer Power extracts and evaluates an exact product coefficient");
+    tests.expectEqual(evaluateAndFormat(
+        nestedPowerSession,
+        "simplify[(2*x)^3]"),
+        std::string{"8x^3"},
+        "KernelSession: exact numeric product coefficient is powered without branch assumptions");
 
 
     kernel::KernelSession elementarySession;

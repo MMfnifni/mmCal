@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Development and validation
+
+- Added a grammar-aware semantic expression fuzzer to `mmCal.Benchmarks --random-expressions`.
+- `--loop` runs without a case limit and stops immediately on the first FAIL after shrinking the expression and printing seed/case reproduction information.
+- Every case is derived independently from the master seed and a 1-based case index, so `--seed N --case M` reproduces the exact case directly.
+- Expression depth uses a weighted distribution: shallow expressions dominate, while deeper cases are sampled occasionally up to the configurable `--max-depth` (16 by default).
+- Initial invariants cover exact formatter round-trip stability, value preservation by `fullSimplify`, polynomial value preservation by `expand`/`factor`, double transpose, and `det[A] == det[transpose[A]]`.
+- The generator focuses on semantically valid exact arithmetic, polynomials, and small matrices instead of flooding the run with random TypeErrors.
+- Added `--threads N` for case-level parallel fuzzing with one independent `KernelSession` per worker; master-seed + case replay remains independent of thread count.
+- Added `--nostop-loop`; normal `--loop` stops on the first FAIL, while `--nostop-loop` shrinks/reports failures and continues.
+- Canonicalize nested positive exact integer powers with the branch-safe rule `(a^m)^n -> a^(mn)` in the normal Simplifier, fixing random-fuzzer `expand`/`factor` invariant failures.
+- Formatter now preserves left-nested Power associativity as `(a^b)^c` while retaining right-associative `a^b^c` notation.
+- Fold consecutive exact-rational subtraction constants so nested powers of `x-1-3` normalize to `(x-4)^144`.
+- For positive exact-integer powers `(c*a)^n`, safely raise only the exact numeric coefficient `c` and extract it, allowing `(861(1-x)^64)^3 -> 638277381(1-x)^192` without applying product-power distribution to general complex exponents.
+
 ## v1.5.2 — 2026-08-13
 
 v1.5.2 preserves the exact-first numerical foundation of v1.5.1 while substantially expanding symbolic calculus, special functions, precision-aware evaluation, Arrays, and linear algebra. Release state: internal `2027 / 2027 PASS`, black-box `1504 / 1504 PASS`; fixed-seed BigInt, special-function, Matrix, and FFT invariants in `mmCal.Benchmarks --random-only` also pass.

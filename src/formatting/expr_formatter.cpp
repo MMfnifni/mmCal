@@ -641,7 +641,18 @@ void appendCall(
     }
 
     if (head == builtins::names::power && call.arguments.size() == 2) {
-        appendBinaryCall(output, call, "^", precedencePower, radix, parentPrecedence, false);
+        const bool parenthesize = precedencePower < parentPrecedence;
+        if (parenthesize)
+            output.push_back('(');
+
+        // ^ は右結合である。左operandがPowerなら括弧を残し，
+        // ((a^b)^c) を a^b^c と誤って右結合表示しない。
+        appendExpr(output, call.arguments[0], radix, precedencePower + 1);
+        output.push_back('^');
+        appendExpr(output, call.arguments[1], radix, precedencePower);
+
+        if (parenthesize)
+            output.push_back(')');
         return;
     }
 

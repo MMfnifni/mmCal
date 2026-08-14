@@ -60,6 +60,15 @@ using numeric::RealNumber;
     return expression.asNumber().asReal().toRational();
 }
 
+[[nodiscard]] std::optional<BigInt> positiveExactInteger(const Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal())
+        return std::nullopt;
+    const RealNumber& real = expression.asNumber().asReal();
+    if (!real.isInteger() || real.isNegative() || real.isZero())
+        return std::nullopt;
+    return real.asInteger();
+}
+
 [[nodiscard]] bool isMathematicalConstant(
     const Expr& expression,
     const mathematics::MathRegistry& mathematics,
@@ -730,6 +739,17 @@ struct PositiveIntegerPower final {
             return Expr::call(
                 context.builtins.symbol(BuiltinId::Add),
                 {arguments[0], Expr{-arguments[1].asNumber()}});
+        // (a-b)-c でb,cがexact Rationalなら定数項だけを先に畳む。
+        // subtraction自体のdomainは変わらないためsymbolicなaにも安全に適用できる。
+        if (isHead(arguments[0], context.builtins, BuiltinId::Subtract)
+            && arguments[0].asCall().arguments.size() == 2) {
+            const auto& inner = arguments[0].asCall().arguments;
+            const auto innerConstant = exactRealRational(inner[1]);
+            const auto outerConstant = exactRealRational(arguments[1]);
+            if (innerConstant && outerConstant)
+                return Expr::call(context.builtins.symbol(BuiltinId::Subtract), {
+                    inner[0], Expr{Number{*innerConstant + *outerConstant}}});
+        }
         if (isHead(arguments[1], context.builtins, BuiltinId::Negate)
             && arguments[1].asCall().arguments.size() == 1)
             return Expr::call(
@@ -830,6 +850,48 @@ struct PositiveIntegerPower final {
                 if (exponent.isNegative())
                     value = Number{BigInt{1}} / value;
                 return Expr{std::move(value)};
+            }
+        }
+        // (a^m)^n=a^(mn) はm,nが正のexact integerなら複素数全体で安全。
+        // 一般複素指数には拡張せず，Powerのbranch semanticsを保持する。
+        if (const auto outerExponent = positiveExactInteger(arguments[1]); outerExponent
+            && isHead(arguments[0], context.builtins, BuiltinId::Power)
+            && arguments[0].asCall().arguments.size() == 2) {
+            const auto& innerArguments = arguments[0].asCall().arguments;
+            if (const auto innerExponent = positiveExactInteger(innerArguments[1])) {
+                const BigInt combined = *innerExponent * *outerExponent;
+                return Expr::call(context.builtins.symbol(BuiltinId::Power), {
+                    innerArguments[0], Expr{Number{combined}}});
+            }
+        }
+        // (c*a)^n でnが正のexact integerなら、exact numeric係数cだけを外へ出す。
+        // (ab)^z=a^z b^z を一般複素指数へ拡張せず、式サイズも増やさない限定形。
+        // 例: (861(1-x)^64)^3 -> 638277381((1-x)^64)^3 -> 638277381(1-x)^192。
+        if (const auto outerExponent = positiveExactInteger(arguments[1]); outerExponent
+            && isHead(arguments[0], context.builtins, BuiltinId::Multiply)) {
+            const auto& factors = arguments[0].asCall().arguments;
+            Number coefficient{BigInt{1}};
+            std::vector<Expr> symbolicFactors;
+            symbolicFactors.reserve(factors.size());
+            for (const Expr& factor : factors) {
+                if (factor.isNumber())
+                    coefficient *= factor.asNumber();
+                else
+                    symbolicFactors.push_back(factor);
+            }
+
+            if (!(coefficient == Number{BigInt{1}}) && !symbolicFactors.empty()) {
+                Expr symbolicBase = productFromFactors(
+                    std::move(symbolicFactors), context.builtins);
+                Expr coefficientPower = Expr::call(
+                    context.builtins.symbol(BuiltinId::Power),
+                    {Expr{coefficient}, arguments[1]});
+                Expr symbolicPower = Expr::call(
+                    context.builtins.symbol(BuiltinId::Power),
+                    {std::move(symbolicBase), arguments[1]});
+                return Expr::call(
+                    context.builtins.symbol(BuiltinId::Multiply),
+                    {std::move(coefficientPower), std::move(symbolicPower)});
             }
         }
         if (isExactReal(arguments[1], 1))
