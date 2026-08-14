@@ -334,10 +334,10 @@ struct Failure final {
 
     try {
         if (testCase.invariant == Invariant::ExactRoundTrip) {
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr original = evaluate(session, source);
             const std::string formatted = mmcal::formatting::formatExpr(original);
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr reparsed = evaluate(session, formatted);
             const std::string reformatted = mmcal::formatting::formatExpr(reparsed);
             if (formatted != reformatted)
@@ -346,9 +346,9 @@ struct Failure final {
         }
 
         if (testCase.invariant == Invariant::FullSimplifyPreservesValue) {
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr original = evaluate(session, source);
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr simplified = evaluate(session, "fullSimplify[" + source + "]");
             if (!(original == simplified))
                 return Failure{"fullSimplify changed an exact numeric value",
@@ -359,7 +359,7 @@ struct Failure final {
 
         if (testCase.invariant == Invariant::ExpandPreservesPolynomial
             || testCase.invariant == Invariant::FactorPreservesPolynomial) {
-            session.reset();
+            session.resetForIndependentEvaluation();
             const std::string transformedSource = testCase.invariant == Invariant::ExpandPreservesPolynomial
                 ? "expand[" + source + "]"
                 : "factor[expand[" + source + "]]";
@@ -368,9 +368,9 @@ struct Failure final {
 
             const std::string originalAtPoint = replaceSymbolX(source, testCase.substitution);
             const std::string transformedAtPoint = replaceSymbolX(transformedText, testCase.substitution);
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr lhs = evaluate(session, originalAtPoint);
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr rhs = evaluate(session, transformedAtPoint);
             if (!(lhs == rhs))
                 return Failure{
@@ -383,9 +383,9 @@ struct Failure final {
         }
 
         if (testCase.invariant == Invariant::DoubleTranspose) {
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr original = evaluate(session, source);
-            session.reset();
+            session.resetForIndependentEvaluation();
             const Expr transformed = evaluate(session, "transpose[transpose[" + source + "]]" );
             if (!(original == transformed))
                 return Failure{"transpose[transpose[A]] != A",
@@ -394,9 +394,9 @@ struct Failure final {
             return std::nullopt;
         }
 
-        session.reset();
+        session.resetForIndependentEvaluation();
         const Expr lhs = evaluate(session, "det[" + source + "]");
-        session.reset();
+        session.resetForIndependentEvaluation();
         const Expr rhs = evaluate(session, "det[transpose[" + source + "]]" );
         if (!(lhs == rhs))
             return Failure{"det[A] != det[transpose[A]]",

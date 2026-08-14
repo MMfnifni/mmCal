@@ -7,53 +7,56 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
-#include <variant>
 
 namespace mmcal::expression {
 
-struct Expr::Node final {
-    using Value = std::variant<
-        numeric::Number,
-        numeric::DecimalApproximation,
-        numeric::ComplexDecimalApproximation,
-        bool,
-        std::string,
-        Symbol,
-        ArrayExpr,
-        ListExpr,
-        CallExpr,
-        std::shared_ptr<const solver::SolutionSet>>;
+struct Expr::Node {
+    explicit Node(ExprKind kind) noexcept
+        : kind(kind) {}
 
-    explicit Node(Value value)
-        : value(std::move(value)) {}
+    ExprKind kind;
+};
+
+template <ExprKind Kind, class Value>
+struct Expr::TypedNode final : Node {
+    explicit TypedNode(Value value)
+        : Node(Kind), value(std::move(value)) {}
 
     Value value;
 };
 
 Expr::Expr(numeric::Number number)
-    : node_(std::make_shared<Node>(Node::Value{std::move(number)})) {}
+    : node_(std::make_shared<TypedNode<ExprKind::Number, numeric::Number>>(
+        std::move(number))) {}
 
 Expr::Expr(numeric::DecimalApproximation decimalApproximation)
-    : node_(std::make_shared<Node>(Node::Value{std::move(decimalApproximation)})) {}
+    : node_(std::make_shared<TypedNode<
+        ExprKind::DecimalApproximation, numeric::DecimalApproximation>>(
+        std::move(decimalApproximation))) {}
 
 Expr::Expr(numeric::ComplexDecimalApproximation complexDecimalApproximation)
-    : node_(std::make_shared<Node>(Node::Value{std::move(complexDecimalApproximation)})) {}
+    : node_(std::make_shared<TypedNode<
+        ExprKind::ComplexDecimalApproximation, numeric::ComplexDecimalApproximation>>(
+        std::move(complexDecimalApproximation))) {}
 
 Expr::Expr(bool boolean)
-    : node_(std::make_shared<Node>(Node::Value{boolean})) {}
+    : node_(std::make_shared<TypedNode<ExprKind::Boolean, bool>>(boolean)) {}
 
 Expr::Expr(std::string string)
-    : node_(std::make_shared<Node>(Node::Value{std::move(string)})) {}
+    : node_(std::make_shared<TypedNode<ExprKind::String, std::string>>(
+        std::move(string))) {}
 
 Expr::Expr(Symbol symbol)
-    : node_(std::make_shared<Node>(Node::Value{std::move(symbol)})) {}
+    : node_(std::make_shared<TypedNode<ExprKind::Symbol, Symbol>>(
+        std::move(symbol))) {}
 
 Expr::Expr(std::shared_ptr<const Node> node)
     : node_(std::move(node)) {}
 
 Expr Expr::solutionSet(solver::SolutionSet value) {
-    return Expr{std::make_shared<Node>(Node::Value{
-        std::make_shared<const solver::SolutionSet>(std::move(value))})};
+    return Expr{std::make_shared<TypedNode<
+        ExprKind::SolutionSet, std::shared_ptr<const solver::SolutionSet>>>(
+        std::make_shared<const solver::SolutionSet>(std::move(value)))};
 }
 
 Expr Expr::array(
@@ -97,21 +100,24 @@ Expr Expr::array(
     if (arrayElementCount(shape) != elements.size())
         throw std::invalid_argument("Normalized array shape does not match the element count");
     ArrayExpr array{std::move(shape), std::move(elements)};
-    return Expr{std::make_shared<Node>(Node::Value{std::move(array)})};
+    return Expr{std::make_shared<TypedNode<ExprKind::Array, ArrayExpr>>(
+        std::move(array))};
 }
 
 Expr Expr::list(std::vector<Expr> elements) {
     ListExpr list{std::move(elements)};
-    return Expr{std::make_shared<Node>(Node::Value{std::move(list)})};
+    return Expr{std::make_shared<TypedNode<ExprKind::List, ListExpr>>(
+        std::move(list))};
 }
 
 Expr Expr::call(Symbol head, std::vector<Expr> arguments) {
     CallExpr call{std::move(head), std::move(arguments)};
-    return Expr{std::make_shared<Node>(Node::Value{std::move(call)})};
+    return Expr{std::make_shared<TypedNode<ExprKind::Call, CallExpr>>(
+        std::move(call))};
 }
 
 ExprKind Expr::kind() const noexcept {
-    return static_cast<ExprKind>(node_->value.index());
+    return node_->kind;
 }
 
 bool Expr::isNumber() const noexcept {
@@ -158,70 +164,73 @@ const numeric::Number& Expr::asNumber() const {
     if (!isNumber())
         throw std::logic_error("Expr does not contain a number");
 
-    return std::get<numeric::Number>(node_->value);
+    return static_cast<const TypedNode<ExprKind::Number, numeric::Number>&>(*node_).value;
 }
 
 const numeric::DecimalApproximation& Expr::asDecimalApproximation() const {
     if (!isDecimalApproximation())
         throw std::logic_error("Expr does not contain a decimal approximation");
 
-    return std::get<numeric::DecimalApproximation>(node_->value);
+    return static_cast<const TypedNode<
+        ExprKind::DecimalApproximation, numeric::DecimalApproximation>&>(*node_).value;
 }
 
 const numeric::ComplexDecimalApproximation& Expr::asComplexDecimalApproximation() const {
     if (!isComplexDecimalApproximation())
         throw std::logic_error("Expr does not contain a complex decimal approximation");
 
-    return std::get<numeric::ComplexDecimalApproximation>(node_->value);
+    return static_cast<const TypedNode<
+        ExprKind::ComplexDecimalApproximation, numeric::ComplexDecimalApproximation>&>(*node_).value;
 }
 
 bool Expr::asBoolean() const {
     if (!isBoolean())
         throw std::logic_error("Expr does not contain a boolean");
 
-    return std::get<bool>(node_->value);
+    return static_cast<const TypedNode<ExprKind::Boolean, bool>&>(*node_).value;
 }
 
 const std::string& Expr::asString() const {
     if (!isString())
         throw std::logic_error("Expr does not contain a string");
 
-    return std::get<std::string>(node_->value);
+    return static_cast<const TypedNode<ExprKind::String, std::string>&>(*node_).value;
 }
 
 const Symbol& Expr::asSymbol() const {
     if (!isSymbol())
         throw std::logic_error("Expr does not contain a symbol");
 
-    return std::get<Symbol>(node_->value);
+    return static_cast<const TypedNode<ExprKind::Symbol, Symbol>&>(*node_).value;
 }
 
 const ArrayExpr& Expr::asArray() const {
     if (!isArray())
         throw std::logic_error("Expr does not contain an array");
 
-    return std::get<ArrayExpr>(node_->value);
+    return static_cast<const TypedNode<ExprKind::Array, ArrayExpr>&>(*node_).value;
 }
 
 const ListExpr& Expr::asList() const {
     if (!isList())
         throw std::logic_error("Expr does not contain a list");
 
-    return std::get<ListExpr>(node_->value);
+    return static_cast<const TypedNode<ExprKind::List, ListExpr>&>(*node_).value;
 }
 
 const CallExpr& Expr::asCall() const {
     if (!isCall())
         throw std::logic_error("Expr does not contain a function call");
 
-    return std::get<CallExpr>(node_->value);
+    return static_cast<const TypedNode<ExprKind::Call, CallExpr>&>(*node_).value;
 }
 
 const solver::SolutionSet& Expr::asSolutionSet() const {
     if (!isSolutionSet())
         throw std::logic_error("Expr does not contain a solution set");
 
-    return *std::get<std::shared_ptr<const solver::SolutionSet>>(node_->value);
+    return *static_cast<const TypedNode<
+        ExprKind::SolutionSet, std::shared_ptr<const solver::SolutionSet>>&>(*node_).value;
 }
 
 const void* Expr::identity() const noexcept {
@@ -233,9 +242,31 @@ bool Expr::operator==(const Expr& rhs) const {
         return true;
     if (kind() != rhs.kind())
         return false;
-    if (isSolutionSet())
+
+    switch (kind()) {
+    case ExprKind::Number:
+        return asNumber() == rhs.asNumber();
+    case ExprKind::DecimalApproximation:
+        return asDecimalApproximation() == rhs.asDecimalApproximation();
+    case ExprKind::ComplexDecimalApproximation:
+        return asComplexDecimalApproximation() == rhs.asComplexDecimalApproximation();
+    case ExprKind::Boolean:
+        return asBoolean() == rhs.asBoolean();
+    case ExprKind::String:
+        return asString() == rhs.asString();
+    case ExprKind::Symbol:
+        return asSymbol() == rhs.asSymbol();
+    case ExprKind::Array:
+        return asArray() == rhs.asArray();
+    case ExprKind::List:
+        return asList() == rhs.asList();
+    case ExprKind::Call:
+        return asCall() == rhs.asCall();
+    case ExprKind::SolutionSet:
         return asSolutionSet() == rhs.asSolutionSet();
-    return node_->value == rhs.node_->value;
+    }
+
+    return false;
 }
 
 std::size_t ArrayExpr::rank() const noexcept {

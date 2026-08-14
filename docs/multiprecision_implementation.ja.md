@@ -2147,7 +2147,7 @@ std::vector<std::uint32_t> limbs_;
 
 ## 39.4 x86-64 GCCでの参考`sizeof`
 
-以下はv1.5.2 sourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。
+以下はv1.5.2正式版時点のsourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。Unreleasedのtyped-node化後もnumeric型と`Expr` handle自体のサイズは同じだが，`Expr::Node`には全kind共通の544 B payloadを持たなくなった。
 
 | 型 | `sizeof`参考値 | 主な理由 |
 |---|---:|---|
@@ -2160,15 +2160,15 @@ std::vector<std::uint32_t> limbs_;
 | `DecimalApproximation` | 248 B | text + metadata + Rational bounds |
 | `ComplexDecimalApproximation` | 536 B | real/imag approximate metadata |
 | `Expr` handle | 16 B | `shared_ptr` |
-| `Expr::Node::Value`相当variant | 544 B | 最大alternativeをinline保持 |
+| `Expr::Node::Value`相当variant（v1.5.2正式版） | 544 B | 最大alternativeをinline保持。Unreleasedで廃止 |
 
 ここから重要なことが分かる。
 
 **「BigIntが符号1bitのために1 limb損している」ことは問題ではない。小さい数でも汎用C++ objectを何層も通る固定費の方が桁違いに大きい。**
 
-## 39.5 `Expr::Node`が巨大dense Arrayで本丸になる理由
+## 39.5 `Expr::Node` typed-node化
 
-現在の`Expr::Node`は，
+v1.5.2正式版の`Expr::Node`は，
 
 ```cpp
 std::variant<
@@ -2184,36 +2184,60 @@ std::variant<
     std::shared_ptr<const SolutionSet>>
 ```
 
-をinline保持する。`std::variant`は最大alternativeを入れられるだけの領域を全Nodeへ確保するため，小整数`1`のNodeでも`ComplexDecimalApproximation`級の箱を払う。
+をinline保持していた。`std::variant`は最大alternativeを入れられる領域を全Nodeへ確保するため，小整数`1`のNodeでも`ComplexDecimalApproximation`級の箱を払っていた。
 
-v1.5.2の1024×1024 dense Matrix監査では，添付形式と同等の10桁Rational Exprを1,048,576個C++から直接構築しただけで最大RSS約0.69 GB，約14.16 MBのテキストをCLIでparseし`dimensions[...]`を求めるだけでは最大RSS約1.99 GBだった。
-
-このため次版ToDoでは，算法block化より前に，
-
-1. `Expr::Node`をkind別typed nodeへ分離し巨大variant固定費を除去する。
-2. BigUInt / BigIntへsmall-object optimizationを検討する。
-3. numeric Array / approximate Matrixへpacked storageを検討する。
-4. 巨大brace literalのparser/lowering allocationを削減する。
-
-という順を候補にしている。
-
-これは多倍長算術の意味論を変える最適化ではなく，**同じ値をもっと薄い器へ入れる**ためのrepresentation refactorである。
-
-## 39.6 なぜBigUInt SBOを先にやらないのか
-
-small-object optimizationで1～2 limb整数のheap allocationを消す価値は高い。しかし1024² Matrixの現状では，1要素あたり数byte～数十byteを節約する前に，数百byte級の`Expr::Node`固定費がある。
-
-したがって費用対効果としては，
+Unreleasedでは公開`Expr` APIを変えず，内部を次の形へ単独refactorした。
 
 ```text
-Expr Node fixed cost
+Expr
+  -> shared_ptr<const Node>
+       Node { ExprKind kind }
+         -> TypedNode<Number>
+         -> TypedNode<DecimalApproximation>
+         -> TypedNode<ComplexDecimalApproximation>
+         -> TypedNode<Boolean>
+         -> TypedNode<String>
+         -> TypedNode<Symbol>
+         -> TypedNode<ArrayExpr>
+         -> TypedNode<ListExpr>
+         -> TypedNode<CallExpr>
+         -> TypedNode<SolutionSet pointer>
+```
+
+`kind()` / `asNumber()` / `asArray()` / `asCall()`等の公開interface，`shared_ptr`によるimmutable ownership，`identity()`のnode identity，structural `operator==`は維持した。従来の`ExprKind` enum順序と`variant.index()`の暗黙結合もなくなった。
+
+同一x86-64 GCC，Release，LTO offで`mmCal.Benchmarks --matrix-large transpose 1024 16`を旧variant版とtyped-node版で比較した結果：
+
+| representation | 最大RSS | `transpose`本体 |
+|---|---:|---:|
+| v1.5.2形式の巨大variant Node | 693312 KiB（約677.1 MiB） | 181.7 ms |
+| Unreleased typed node | 299668 KiB（約292.6 MiB） | 157.4 ms |
+
+最大RSSは約384.4 MiB，**56.8%削減**した。timingは単発測定なので性能保証とはしないが，memoryについては当初想定どおり`Expr::Node`固定費が主要因だったことを強く裏付ける。
+
+v1.5.2監査で記録したCLI parse + `dimensions[...]`の約1.99 GBはまだ再測定していない。parser/lowering自身の一時allocationも含むため，typed-nodeだけで同率に減るとは仮定しない。
+
+次のrepresentation候補は，
+
+1. BigUInt / BigInt small-object optimization
+2. numeric Array / approximate Matrix packed storage
+3. 巨大brace literalのparser/lowering allocation削減
+
+の順に**別々に**測定する。これは多倍長算術の意味論を変える最適化ではなく，同じ値をより薄い器へ入れるrepresentation refactorである。
+
+## 39.6 なぜBigUInt SBOをtyped-nodeの次に行うのか
+
+small-object optimizationで1～2 limb整数のheap allocationを消す価値は高い。v1.5.2監査では，その前に数百byte級の`Expr::Node`固定費が存在したためtyped-nodeを先行した。実測でその固定費を約56.8%のRSS削減として切り離せたため，次はsmall BigInt allocationを単独benchmarkできる。
+
+```text
+typed Expr Node          完了
     ↓
-small BigInt allocation
+small BigInt allocation  次候補
     ↓
 packed numeric Array
 ```
 
-の順に単独benchmarkする方が原因を切り分けやすい。
+一括変更せず，段階ごとに全regressionとRSSを固定して原因を切り分ける。
 
 ## 39.7 CertifiedEvaluatorの深さ制限
 
@@ -2351,16 +2375,17 @@ Gamma / erf等を5000～10000桁まで振り，逐次級数やinterval object生
 
 ## 42.5 representation最適化
 
-v1.5.2の大行列監査で，算術algorithmよりrepresentation固定費が先に壁になる領域が確認された。次の候補は，
+v1.5.2の大行列監査で，算術algorithmよりrepresentation固定費が先に壁になる領域が確認された。Unreleasedでは第一段階の`Expr::Node` kind別typed-node化を完了し，1024×1024 Rational Matrixで最大RSS約56.8%削減を確認した。
 
-- `Expr::Node`巨大variantのkind別typed node化，
+残る候補は，
+
 - BigUInt / BigInt small-object optimization，
 - numeric Array / approximate Matrix packed storage，
 - 巨大brace parser/loweringのallocation削減，
 
 である。
 
-これらは一括で変更しない。まずNodeだけ，次にBigInt SBOだけ，というように全regressionとRSS benchmarkを固定して採否を測る。
+これらも一括で変更しない。次はBigInt SBOだけ，その次はpacked storageだけ，というように全regressionとRSS benchmarkを固定して採否を測る。
 
 # 43. 実装上の強み
 
@@ -2596,19 +2621,21 @@ certified decimal result
 
 性能面では，schoolbook/Karatsuba/Toom-3，専用square，Knuth/Burnikel–Ziegler，10進divide-and-conquer，Chudnovsky，binary-splitting exp/logまで入り，単純な「自作BigInt」の域はかなり越えている。
 
-一方，v1.5.2の1024 dense Matrix監査で，次のbottleneckは算術algorithmだけではなく**representation**であることも明確になった。特に`Expr::Node`の巨大variant固定費は，small BigIntの符号やlimbより影響が大きい。
+v1.5.2の1024 dense Matrix監査では，次のbottleneckが算術algorithmだけではなく**representation**であることも明確になった。そこでUnreleasedの第一段階として`Expr::Node`の巨大variant固定費をkind別typed nodeへ分離した。同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`では最大RSSが`693312 KiB`から`299668 KiB`へ低下し，約384.4 MiB / **56.8%削減**した。公開`Expr` API，node identity，structural equalityは維持している。
 
-したがって次段の性能改善では，
+この結果，次のrepresentation課題はsmall BigIntのheap allocation，numeric Array / approximate Matrixのpacked storage，巨大braceのparse/lowering一時allocationである。したがって次段の性能改善でも，
 
 ```text
 意味論を変えない
     ↓
-器を薄くする
+器を一層ずつ薄くする
+    ↓
+各段階を単独benchmarkする
     ↓
 その後に算法をさらに高度化する
 ```
 
-という順が合理的である。
+という順が合理的である。typed-node，BigUInt SBO，packed Arrayを同時に変更せず，どの層がRSS・allocation・cache localityへ効いたかを分離して判断する。
 
 mmCalが守るべき核心は，最後まで次の3点である。
 

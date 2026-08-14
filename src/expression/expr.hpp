@@ -80,6 +80,9 @@ public:
 
 private:
     struct Node;
+    template <ExprKind Kind, class Value>
+    struct TypedNode;
+
     std::shared_ptr<const Node> node_;
 
     explicit Expr(std::shared_ptr<const Node> node);

@@ -428,6 +428,8 @@ Python generatorとRNG列そのものを一致させる目的でもない。**�
 
 巨大Matrixでtime outした結果を「算法が壊れた」と即断しない。現在はExpr / Rational objectの固定費，parser / lowering，allocationも重要な性能要因である。
 
+Unreleasedのtyped-node化では，同一GCC Release/LTO-offの`--matrix-large transpose 1024 16`で旧variant版`693312 KiB`→typed-node版`299668 KiB`となり，最大RSSを約56.8%削減した。今後のstorage refactorも同じく，一つずつ変更してこの負荷でRSSを再測定する。
+
 ---
 
 # 7. Random Expression Fuzzer
@@ -494,6 +496,10 @@ mmCal.Benchmarks --random-expressions --loop --threads 8
 `--threads N`は**case単位のthroughput並列化**である。1個のSVDや1個の式評価を内部でN thread化するoptionではない。各workerは独立した`KernelSession`を所有し，mutableな履歴・定義・diagnostic stateを共有しない。
 
 各caseはmaster seed + 1-based case番号から独立生成されるため，thread schedulingや`--threads`値が変わっても，同じseed/case番号は同じ式を生成する。FAIL再現時は`--case`を使えばよく，通常1 threadで直接再現される。
+
+worker内ではcase間・比較評価間に`KernelSession::resetForIndependentEvaluation()`を使用する。これは定義・履歴・input/output history・diagnostic・入力番号を初期化するが，通常`reset()`と異なりentropy reseedを行わない。そのため長時間loopで履歴vectorがcase数に比例して成長せず，既存のRNG streamも不用意に変更しない。現generatorはrandom builtinを生成しないため，random builtinを将来追加する場合はcase seedからの明示seed policyを別途定める。
+
+参考として，同一Release/LTO-off build，`--threads 8 --seed 1234`で有限実行した最大RSSは100,000 caseで`48136 KiB`，200,000 caseで`51364 KiB`だった。case数を2倍にしても履歴保持に相当する線形増加は見られない。これは長時間`--loop`の完全な定常性証明ではないため，overnight burn-inでは引き続きprocess RSSを監視する。
 
 ## 7.4 FAIL時
 

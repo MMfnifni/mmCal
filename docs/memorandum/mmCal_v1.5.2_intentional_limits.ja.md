@@ -25,11 +25,13 @@
 | finite cases | 10000 | `--cases`で変更可能 |
 | `--loop` | case数上限なし | 最初のFAILで停止 |
 
-### 注意: 現行loopの履歴蓄積
+### loopのsession状態
 
-現実装は1個の`KernelSession`を全caseで再利用する。そのため，成功したevaluationの`history_` / `inputHistory_` / `outputHistory_`が長時間loopで蓄積する。これは意図したstress条件ではなく，overnight burn-in前に解消すべき実装上の問題である。
+Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比較評価間に`resetForIndependentEvaluation()`を呼ぶ。これは`history_` / `inputHistory_` / `outputHistory_` / diagnostic / 定義 / `inputCount_`を初期化する一方，角度設定とRNG streamを保持する。通常の`reset()`は同じtransient resetの後にentropy reseedするため，fuzzerだけが不必要なreseedingを避けられる。
 
-単なる`clearHistory()`では`inputCount_`が増え続けるため不十分。fuzzer case終了時にtransient session stateを完全に戻す専用処理，またはworkerごとのsessionをcase単位でresetする設計が望ましい。
+したがって，旧実装で問題だった「`clearHistory()`しても`inputCount_`が増え続け，次回`evaluate()`が巨大vectorへresizeする」経路は解消済みである。参考測定では同一Release/LTO-off build，`--threads 8 --seed 1234`で100,000 caseの最大RSSが`48136 KiB`，200,000 caseが`51364 KiB`であり，case数に比例する履歴蓄積は見られなかった。overnight burn-inではallocator high-water等を含め，process RSSの定常性を引き続き監視する。
+
+現generatorはrandom builtinを生成しない。将来これを追加する場合は，case番号からrandom builtin用seedも明示的に導出し，thread schedulingから再現性を分離する。
 
 ## 2. 評価・簡約・式木
 

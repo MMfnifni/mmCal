@@ -68,7 +68,7 @@ SVDは`linear_algebra/svd.*`へ分離し，reduced `{U,S,V}`を返す。一般�
 
 Eigenは`linear_algebra/eigen.*`へ分離する。exact pathは上三角行列の対角固有値，対角行列の標準基底，distinct-root exact Number 2×2を扱い，一般数値pathはComplex BigFloat上でHessenberg reduction → implicit shifted QR → complex Schur形へ進む。Schur vectorを蓄積し，固有vectorは上三角Schur行列からback substitutionして列として返す。停止精度は出力桁より十分厳しく設定し，元入力の`ComplexInterval`に対して`A Q-Q T`および`A v-λv`をinterval演算で監査する。一般非正規行列では固有量のcomponentwise enclosureを安易に主張せず，Schur/eigenpair relationをcertificate境界とする。重根・defective/near-defective caseで安定な独立固有vectorを作れない場合は未評価へ戻す。
 
-v1.5.2の1024×1024 dense Matrix監査では，算法より先に`Expr::Node` / Rational / parse-loweringの固定費がmemory bottleneckになることを確認した。次版の性能refactorでは，公開`Expr` APIを維持したkind別typed node化，BigUInt/BigInt small-object optimization，numeric Array / approximate Matrixのpacked storageを**別段階で**測定する。これらはv1.5.2の意味論には含めず，機能変更と混ぜない。
+v1.5.2の1024×1024 dense Matrix監査では，算法より先に`Expr::Node` / Rational / parse-loweringの固定費がmemory bottleneckになることを確認した。Unreleasedでは第一段階として，公開`Expr` APIを維持したまま`Expr::Node`の巨大`std::variant`を`ExprKind` header + kind別typed payloadへ分離した。node identityとstructural equalityも維持する。同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`測定では最大RSSが`693312 KiB`から`299668 KiB`へ約56.8%低下した。BigUInt/BigInt small-object optimization，numeric Array / approximate Matrixのpacked storage，parse/lowering allocation削減は引き続き**別段階で**測定し，機能変更と混ぜない。
 
 Stage 3ではexact実数（整数/Rational）行列を行ごとの分母LCMで整数行列へliftし，`IntegerMatrixBuffer`上のBareiss fraction-free eliminationへdispatchする。分母除去は共通`liftRealRows` helperへ集約し，`det`はBareissの最終pivotから復元，`rref` / `matrixRank` / `nullSpace`はfraction-free forward eliminationを共有する。`nullSpace`はfree columnを昇順に選ぶRREF basisを構成し，full column rankでもshape `{0,n}` を保持する。`inverse`は `B=D A` に対するaugmented matrix `[B|D]`，`solveLinear[A,b]`は `[A|b]` を同じkernelへ渡し，後者ではpivot候補を係数列だけに制限して整合性と一意性を判定する。これにより中間Rational生成をpivot loopからほぼ排除する。exact複素行列は現在も`Number` Gaussian backendへfallbackする。`N[solveLinear[...],p]`はexact解を先に構築せず，certified interval augmented eliminationを直接試す。一方`matrixRank` / `nullSpace`はrank deficiencyに不連続なので，exact入力ではexact pivot structureを優先し，近似入力ではintervalでpivot構造を証明できる場合だけ結果を確定する。
 
@@ -78,7 +78,7 @@ Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参�
 
 ### `kernel`
 
-1セッションのユーザー定義、履歴、角度設定、乱数状態、Warning/Infoを所有する。
+1セッションのユーザー定義、履歴、角度設定、乱数状態、Warning/Infoを所有する。通常の`reset()`はRNGをentropy reseedする一方，benchmark/fuzzer等で独立評価を連続実行する用途には`resetForIndependentEvaluation()`を使い，定義・履歴・入力番号・diagnosticだけを初期化してRNG streamと角度設定を保持する。
 
 ### `cli`
 
@@ -121,6 +121,7 @@ Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参�
 `mmCal.Benchmarks`は通常の回帰testとは分離したConsole projectである。`mmCal.Core`へだけ依存し，次を担当する。
 
 - 固定seedの巨大BigInt商余り・10進round-trip・exact/certified Matrix・FFT等のランダム正当性試験
+- grammar-aware semantic Random Expression Fuzzer。caseごとに再現可能なseedを持ち，各workerの`KernelSession`を独立resetして長時間探索する
 - Karatsuba / Toom-3 / Burnikel–Ziegler等のthreshold sweep
 - factorial，decimal conversion，高精度`Pi/exp/log`，exact/certified Matrix，FFT等の速度比較
 - `--full`による大規模case，`--random-only` / `--benchmark-only`による用途分離

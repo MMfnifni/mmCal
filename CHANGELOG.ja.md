@@ -12,6 +12,9 @@
 - generatorは合法なexact算術・多項式・小行列を主体とし，ランダムなTypeErrorをFAILとして量産しないsemantic fuzzingを優先
 - `--threads N`を追加し，workerごとに独立`KernelSession`を持つcase-level parallel fuzzingへ対応。master seed + case番号による再現性はthread数に依存しない
 - `--nostop-loop`を追加。通常`--loop`は最初のFAILで停止する一方，`--nostop-loop`はFAILをshrinking・表示した後も継続する
+- fuzzerのcase間初期化を`KernelSession::resetForIndependentEvaluation()`へ分離し，定義・履歴・入力番号・diagnosticを破棄しつつRNG streamと角度設定を保持。長時間loopでsession履歴を蓄積せず，`reset()`のentropy reseedも回避
+- `Expr::Node`の最大payload依存`std::variant`を廃止し，`ExprKind` header + kind別typed payloadへ単独refactor。公開`Expr` API，node identity，structural equalityは維持
+- 同一GCC Release/LTO-offの`--matrix-large transpose 1024 16`で最大RSSを旧variant版`693312 KiB`（約677.1 MiB）からtyped-node版`299668 KiB`（約292.6 MiB）へ削減し，約56.8% / 384.4 MiB削減を確認
 - nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
 - Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
 - exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善

@@ -12,6 +12,9 @@
 - The generator focuses on semantically valid exact arithmetic, polynomials, and small matrices instead of flooding the run with random TypeErrors.
 - Added `--threads N` for case-level parallel fuzzing with one independent `KernelSession` per worker; master-seed + case replay remains independent of thread count.
 - Added `--nostop-loop`; normal `--loop` stops on the first FAIL, while `--nostop-loop` shrinks/reports failures and continues.
+- Split fuzzer case isolation into `KernelSession::resetForIndependentEvaluation()`, which clears definitions, histories, input numbering, and diagnostics while preserving the RNG stream and angle settings; long-running loops no longer accumulate session history and no longer entropy-reseed on every reset.
+- Replaced the maximum-payload-sized `Expr::Node` `std::variant` with an `ExprKind` header plus kind-specific typed payload nodes as a standalone representation refactor; the public `Expr` API, node identity, and structural equality are preserved.
+- In the same GCC Release/LTO-off `--matrix-large transpose 1024 16` run, maximum RSS fell from `693312 KiB` (~677.1 MiB) with the legacy variant node to `299668 KiB` (~292.6 MiB) with typed nodes, a reduction of about 56.8% / 384.4 MiB.
 - Canonicalize nested positive exact integer powers with the branch-safe rule `(a^m)^n -> a^(mn)` in the normal Simplifier, fixing random-fuzzer `expand`/`factor` invariant failures.
 - Formatter now preserves left-nested Power associativity as `(a^b)^c` while retaining right-associative `a^b^c` notation.
 - Fold consecutive exact-rational subtraction constants so nested powers of `x-1-3` normalize to `(x-4)^144`.

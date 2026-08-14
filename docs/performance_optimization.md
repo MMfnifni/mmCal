@@ -415,6 +415,8 @@ Representative order-32/order-64 results:
 
 At 1024x1024, representation cost becomes a primary limit before the cubic algorithms themselves. Direct construction of 1,048,576 ten-decimal Rational Expr elements reached about 0.69 GB maximum RSS; the timed transpose itself took about 107 ms and trace about 60 ms. Parsing roughly 14.16 MB of generator-style text and evaluating only `dimensions[...]` took about 10.9 s wall time and about 1.99 GB maximum RSS. A 1024-order `N[dot,16]` run did not complete within a 10 s cap and reached about 0.96 GB RSS; `N[LU,16]` likewise exceeded 10 s and reached about 1.59 GB. Further 1024 QR/SVD/Eigen runs were stopped to avoid unnecessary memory pressure.
 
+After the Unreleased `Expr::Node` typed-node refactor, an apples-to-apples x86-64 GCC Release/LTO-off rerun of `--matrix-large transpose 1024 16` measured `693312 KiB` (~677.1 MiB) maximum RSS for the legacy variant source and `299668 KiB` (~292.6 MiB) for the typed-node source: about 384.4 MiB / **56.8% less RSS**. The one-shot transpose timing changed from 181.7 ms to 157.4 ms, but timing noise is not the adoption criterion; the memory reduction plus unchanged regression semantics are. The earlier 1.99 GB CLI parse + `dimensions` measurement also includes parser/lowering temporaries and has not yet been remeasured after typed nodes.
+
 Even a pure cubic extrapolation from order 64 suggests roughly 1.6 h for `N[LU]`, 1.4 h for `N[dot]`, 3.4 h for `N[det]`, 6.2 h for `N[solveLinear]`, 9.9 h for `N[inverse]`, 13 h for `N[SVD]`, 15 h for `N[QR]`, and 22 h for `N[eigenvalues]`. Extrapolating the observed 32→64 exponent instead gives a broad roughly 1–21 h range depending on the operation. These are projections, not 1024 completion measurements, and cache/allocation/guard-precision/iteration effects can make them worse.
 
 A dense order of 1024 is not intrinsically huge in a machine-double + BLAS setting, but it is currently a stress regime for mmCal's exact Decimal→Rational→Expr representation and certified arbitrary-precision dense algorithms. If order-1024 dense work becomes an explicit target, compact numeric Array storage, fewer parser/lowering Expr allocations, and packed approximate-Matrix storage should be considered before more sophisticated blocking.
@@ -476,16 +478,17 @@ Correctness checks should run before accepting any new threshold solely because 
 
 # 18. Next candidates
 
-1. Replace the large fixed-size `Expr::Node` `std::variant` payload with kind-specific typed nodes and remeasure order-1024 dense Matrix RSS.
-2. Benchmark BigUInt / BigInt small-object optimization independently to determine whether removing heap allocation for small integers pays off.
-3. Investigate compact packed storage for numeric Arrays / approximate Matrices and reduce temporary allocation while parsing/lowering huge braces.
-4. Remeasure blocked LU / QR only after the storage work changes the cost balance.
-5. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
-6. Lehmer GCD.
-7. bit-burst / AGM logarithm backends.
-8. 5,000–10,000-digit benchmark coverage for Gamma, erf, and other special functions.
-9. A Cyclotomic exact FFT backend.
+The `Expr::Node` typed-node refactor is adopted in Unreleased. It was kept as a standalone public-API-preserving change, passed the regression/fuzzer checks, and reduced order-1024 Matrix RSS by about 56.8% in the same-environment comparison above.
 
-Items 1–3 specifically target the representation bottleneck exposed by the v1.5.2 order-1024 audit. The `Expr::Node` change should be a standalone refactor with the public `Expr` API and full regression corpus frozen, rather than being mixed with unrelated performance work.
+1. Benchmark BigUInt / BigInt small-object optimization independently to determine whether removing heap allocation for small integers pays off.
+2. Investigate compact packed storage for numeric Arrays / approximate Matrices and reduce temporary allocation while parsing/lowering huge braces.
+3. Remeasure blocked LU / QR only after the storage work changes the cost balance.
+4. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
+5. Lehmer GCD.
+6. bit-burst / AGM logarithm backends.
+7. 5,000–10,000-digit benchmark coverage for Gamma, erf, and other special functions.
+8. A Cyclotomic exact FFT backend.
+
+With the largest per-node fixed cost removed, the next representation experiment should be BigUInt SBO as another isolated change. Packed Array storage should remain a separate step so RSS, allocation count, and locality effects stay attributable.
 
 Future changes should continue to record both adoption and rejection rationale in this document.

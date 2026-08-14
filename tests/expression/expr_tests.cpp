@@ -84,7 +84,13 @@ void runExprTests(TestRunner& tests) {
         "(-8)^(1/3)",
         "Formatter: parenthesizes signed and rational Power operands for round-trip safety");
 
-    tests.expect(x == Expr{Symbol{"x"}}, "Expr: compares equal expression nodes");
+    const Expr xCopy = x;
+    const Expr xIndependent{Symbol{"x"}};
+    tests.expect(xCopy.identity() == x.identity(),
+        "Expr: copied handles preserve node identity");
+    tests.expect(xIndependent.identity() != x.identity(),
+        "Expr: independently constructed equal expressions keep distinct node identity");
+    tests.expect(x == xIndependent, "Expr: compares equal expression nodes structurally");
     tests.expect(!(x == Expr{Symbol{"y"}}), "Expr: distinguishes different symbols");
     tests.expect(matrix == Expr::array(
         {2, 2},

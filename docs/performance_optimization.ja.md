@@ -554,6 +554,8 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 
 1024×1024では算法より先にrepresentation costが目立つ。C++から直接1,048,576個の10桁Rational Exprを構築したbenchmark processは入力だけで最大RSS約0.69 GB。`transpose`本体は約107 ms，`trace`本体は約60 msだった。Python形式の約14.16 MBテキストをCLIへ渡し`dimensions[...]`だけを評価した測定ではwall約10.9 s，最大RSS約1.99 GBだった。さらに1024次`N[dot,16]`は10秒上限で未完了（最大RSS約0.96 GB），`N[LU,16]`も10秒上限で未完了（最大RSS約1.59 GB）だったため，QR/SVD/Eigenの1024実走はメモリ圧迫を避けて中止した。
 
+Unreleasedの`Expr::Node` typed-node refactor後，同一x86-64 GCC / Release / LTO offで旧variant sourceと新sourceを同じ`--matrix-large transpose 1024 16`へ掛けて再比較した。旧variant版は最大RSS `693312 KiB`（約677.1 MiB），typed-node版は`299668 KiB`（約292.6 MiB）で，約384.4 MiB / **56.8%削減**。単発`transpose` timingは181.7 ms→157.4 msだったが，timingはnoiseを含むため採用根拠はRSS削減と全regression維持を主とする。CLI parse + `dimensions`の1.99 GB測定はparser/lowering一時allocationも含むため，typed-node後の再測定を別課題とする。
+
 64次値から純粋なO(n^3)を仮定した1024次の粗い外挿でも，`N[LU]`約1.6時間，`N[dot]`約1.4時間，`N[det]`約3.4時間，`N[solveLinear]`約6.2時間，`N[inverse]`約9.9時間，`N[SVD]`約13時間，`N[QR]`約15時間，`N[eigenvalues]`約22時間となる。32→64の実測指数をそのまま延長すると約1～21時間程度へ揺れるため，これらは予測値であって1024実測ではない。cache・allocator・guard precision・反復回数により悪化し得る。
 
 結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，現在のmmCalのexact Decimal→Rational→Expr表現とcertified arbitrary-precision dense算法にとってはstress領域である。1024級を実用目標にするなら，算法のblock化より前にcompact numeric Array storage，parser/lowering時のExpr allocation削減，approximate Matrix専用packed storageを検討する必要がある。
@@ -614,18 +616,19 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 
 # 18. 次の候補
 
-優先度は次のように考える。
+`Expr::Node` typed-node化はUnreleasedで採用済み。公開APIを維持した単独refactorとしてinternal regressionとrandom fuzzerを通し，同一環境の1024 MatrixでRSS約56.8%削減を確認した。
 
-1. `Expr::Node`の巨大`std::variant`固定費をkind別typed nodeへ分離し，1024 dense MatrixのRSSを再測定
-2. BigUInt / BigIntのsmall-object optimizationを単独benchmarkし，小整数のheap allocation削減効果を確認
-3. numeric Array / approximate Matrixのcompact packed storageと巨大brace parse/loweringのallocation削減
-4. 上記storage改善後にblocked LU / QR等を再測定
-5. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
-6. Lehmer GCD
-7. `log`のbit-burst / AGM backend
-8. Gamma / erf等の5000～10000桁横断benchmark
-9. exact FFTのCyclotomic backend
+次の優先度は次のように考える。
 
-特に1～3はv1.5.2の1024×1024監査で見つかったrepresentation bottleneckを対象とする。`Expr::Node`変更は他の性能変更と混ぜず，公開`Expr` APIと全regressionを固定した単独refactorとして採否を測る。
+1. BigUInt / BigIntのsmall-object optimizationを単独benchmarkし，小整数のheap allocation削減効果を確認
+2. numeric Array / approximate Matrixのcompact packed storageと巨大brace parse/loweringのallocation削減
+3. 上記storage改善後にblocked LU / QR等を再測定
+4. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
+5. Lehmer GCD
+6. `log`のbit-burst / AGM backend
+7. Gamma / erf等の5000～10000桁横断benchmark
+8. exact FFTのCyclotomic backend
+
+typed-nodeで最大の固定費を一段外せたため，次はBigUInt SBOを同じく単独変更として測る。packed Arrayまで同時に入れず，どの層がRSS・allocation・cache localityへ効いたかを分離する。
 
 採用時にはこの文書へ「なぜ採用したか」「なぜ前案を棄却したか」「どのbenchmarkで判断したか」を追記する。

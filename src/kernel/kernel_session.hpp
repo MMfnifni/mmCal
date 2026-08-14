@@ -38,6 +38,8 @@ public:
     [[nodiscard]] bool clearRequested() const noexcept;
     void clearHistory() noexcept;
     void clearDefinitions();
+    // 独立評価用に定義・履歴・入力番号等だけを戻し，角度設定とRNG streamは保持する。
+    void resetForIndependentEvaluation();
     void reset();
 
     [[nodiscard]] const evaluation::Environment& environment() const noexcept;

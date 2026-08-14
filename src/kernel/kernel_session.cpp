@@ -174,14 +174,18 @@ void KernelSession::clearDefinitions() {
     resetKnownNames();
 }
 
-void KernelSession::reset() {
+void KernelSession::resetForIndependentEvaluation() {
     clearDefinitions();
     clearHistory();
-    evaluator_.reseedRandomFromEntropy();
     inputCount_ = 0;
     exitRequested_ = false;
     clearRequested_ = false;
     definitionsChanged_ = false;
+}
+
+void KernelSession::reset() {
+    resetForIndependentEvaluation();
+    evaluator_.reseedRandomFromEntropy();
 }
 
 const evaluation::Environment& KernelSession::environment() const noexcept {

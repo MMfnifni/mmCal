@@ -1063,6 +1063,26 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(session.evaluationDepthLimit(), std::size_t{2048},
         "KernelSession: forwards evaluation depth limit");
 
+    kernel::KernelSession independentReset;
+    kernel::KernelSession randomControl;
+    tests.expectEqual(evaluateAndFormat(independentReset, "randSeed[424242]"), std::string{"424242"},
+        "KernelSession: independent reset test seeds the random stream");
+    tests.expectEqual(evaluateAndFormat(randomControl, "randSeed[424242]"), std::string{"424242"},
+        "KernelSession: independent reset control uses the same random seed");
+    tests.expectEqual(evaluateAndFormat(independentReset, "rand[]"), evaluateAndFormat(randomControl, "rand[]"),
+        "KernelSession: seeded streams agree before independent reset");
+    tests.expectEqual(evaluateAndFormat(independentReset, "temporary:=17"), std::string{"17"},
+        "KernelSession: independent reset test creates a temporary definition");
+    independentReset.resetForIndependentEvaluation();
+    tests.expectEqual(independentReset.historySize(), std::size_t{0},
+        "KernelSession: independent reset clears history");
+    tests.expectEqual(independentReset.inputCount(), std::size_t{0},
+        "KernelSession: independent reset clears input numbering");
+    tests.expectEqual(evaluateAndFormat(independentReset, "temporary"), std::string{"temporary"},
+        "KernelSession: independent reset clears definitions");
+    tests.expectEqual(evaluateAndFormat(independentReset, "rand[]"), evaluateAndFormat(randomControl, "rand[]"),
+        "KernelSession: independent reset preserves the deterministic random stream");
+
     session.reset();
     tests.expectEqual(session.historySize(), std::size_t{0},
         "KernelSession: reset clears history");
