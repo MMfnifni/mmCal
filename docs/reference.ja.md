@@ -1840,6 +1840,83 @@ rationalize[N[1/3,20],0]
 
 mmCalではソースの`0.1`自体が最初から`1/10`なので、`rationalize[0.1]`は単に`1/10`のままである。Arrayや式内部のDecimalApproximationも再帰的にRational化する。
 
+## 25.4 `explain[value]`
+
+評価済みの値が**既に保持している情報だけ**を構造化して返す軽量introspection函数。対象を改めて`det` / `matrixRank` / LU / Eigen等へ掛けたり，Generic Arrayを全走査して性質を推論したりはしない。したがって`explain`自体のために高価な数学計算は開始しない。
+
+```text
+explain[{{1,2},{3,4}}]
+-> {{"Kind","Array"},
+    {"Domain","Integer"},
+    {"Exactness","Exact"},
+    {"ArrayRank",2},
+    {"Dimensions",{2,2}},
+    {"ElementCount",4},
+    {"Rectangular",True},
+    {"Empty",False},
+    {"Matrix",True},
+    {"Square",True},
+    {"Order",2}}
+```
+
+通常の引数評価を先に行うため，`explain[1+2]`は`3`を説明する。履歴結果もそのまま対象にできる。
+
+```text
+explain[Out[25]]
+explain[%]
+```
+
+返値はbrace構文で表示されるproperty/value pair列。`Dimensions`や`Enclosure`の値自体がArray/braceになり得るため，内部表現はdense `ArrayExpr`ではなく一般`ListExpr`を用いる。表示上は`{{"Kind",...},{...}}`であり，情報を文字列へ潰さない。
+
+`Exactness`はbooleanではなく分類値を返す。現在の主な値は`"Exact"` / `"CertifiedApproximation"` / `"Unknown"`。近似値を単に`Exact=False`とは表現しない。
+
+組込み数学定数・予約symbolは一般の未知symbolへ落とさない。`Pi/E/Phi`はMathRegistryに既に登録された数学metadataをO(1)で参照し，`Infinity`等はSymbolRegistryの予約意味を用いる。
+
+```text
+explain[Pi]
+-> {{"Kind","Constant"},
+    {"Domain","Real"},
+    {"Exactness","Exact"},
+    {"Name","Pi"},
+    {"Real",True},
+    {"Positive",True},
+    {"Irrational",True},
+    {"ArithmeticClass","Transcendental"}}
+
+explain[Infinity]
+-> {{"Kind","Constant"},
+    {"Domain","ExtendedReal"},
+    {"Exactness","Exact"},
+    {"Name","Infinity"},
+    {"Infinite",True},
+    {"Finite",False},
+    {"Sign","Positive"}}
+```
+
+`I`は通常評価でexact complex `Number`へloweringされるため，`explain[I]`は入力tokenではなく評価後の複素数値を説明する。
+
+certified decimal approximationでは，要求小数桁数と真値を含むexact Rational enclosureを直接確認できる。
+
+```text
+explain[N[Pi,20]]
+-> {{"Kind","DecimalApproximation"},
+    {"Domain","Real"},
+    {"Exactness","CertifiedApproximation"},
+    {"RequestedFractionalDigits",20},
+    ...
+    {"Enclosure",{lower,upper}}}
+```
+
+Arrayではstorage metadataからO(1)で分かる`Domain` / `Exactness`と，shapeからほぼ無料で分かる`ArrayRank` / `Dimensions` / `ElementCount` / `Vector` / `Matrix` / `Square` / `Order` / `Empty`を返す。`det`，数学的`matrixRank`，invertibility，eigenvalue等は返さない。必要なら既存函数を明示的に呼ぶ。
+
+整数では符号・zero・`BitLength`を返す。10進桁数は巨大整数で10進変換を必要とするため，軽量性を優先して自動計算しない。Rationalでは分子・分母のbit長を返す。
+
+```text
+explain[value,"internal"]
+```
+
+は開発・性能調査用で，`Representation`，Arrayの`Storage` / `Contiguous` / `StoredExpressions`，近似値の`ApproximationOrigin`等を追加する。**`"internal"`のproperty名・値は互換性保証対象ではない。** 未知modeはerrorとし，将来高コストな`"full"`相当を暗黙に実行しない。
+
 ---
 
 # 26. 乱数
@@ -1988,7 +2065,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-mmCal v1.5.2では **builtin/alias登録名236個 / sourceから呼出可能な名前218個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名237個 / sourceから呼出可能な名前219個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1996,7 +2073,7 @@ Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, expand, expc,
+det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,

@@ -381,6 +381,9 @@
     <ClInclude Include="..\..\src\builtins\approximation_utilities.hpp">
       <Filter>src\builtins</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\builtins\explain.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\random\random_engine.hpp">
       <Filter>src\random</Filter>
     </ClInclude>
@@ -678,6 +681,9 @@
       <Filter>src\builtins</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\explain.cpp">
       <Filter>src\builtins</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\random\random_engine.cpp">

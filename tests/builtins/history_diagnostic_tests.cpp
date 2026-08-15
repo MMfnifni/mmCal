@@ -80,6 +80,12 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expect(history.outputHistory(beforeClear + 1) != nullptr,
         "Out absolute index follows the preserved input counter after clearHistory");
 
+    kernel::KernelSession explainHistory;
+    static_cast<void>(eval(explainHistory, "2+3"));
+    tests.expectEqual(eval(explainHistory, "explain[Out[1]]"),
+        std::string{"{{\"Kind\", \"Number\"}, {\"Domain\", \"Integer\"}, {\"Exactness\", \"Exact\"}, {\"Zero\", False}, {\"Sign\", \"Positive\"}, {\"BitLength\", 3}}"},
+        "explain inspects the already evaluated Out value");
+
     kernel::KernelSession warnings;
     static_cast<void>(warnings.evaluate("D[abs[x],x]"));
     tests.expect(hasWarning(warnings, "D::unevaluated"),
@@ -108,6 +114,13 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
             "exact approximation retains point enclosure and requested digits");
     }
 
+    tests.expectEqual(eval(warnings, "explain[{{1,2},{3,4}}]"),
+        std::string{"{{\"Kind\", \"Array\"}, {\"Domain\", \"Integer\"}, {\"Exactness\", \"Exact\"}, {\"ArrayRank\", 2}, {\"Dimensions\", {2, 2}}, {\"ElementCount\", 4}, {\"Rectangular\", True}, {\"Empty\", False}, {\"Matrix\", True}, {\"Square\", True}, {\"Order\", 2}}"},
+        "explain reports zero-cost Array shape metadata");
+    tests.expectEqual(eval(warnings, "explain[{{1,2,3},{4,5,6}},\"internal\"]"),
+        std::string{"{{\"Kind\", \"Array\"}, {\"Domain\", \"Integer\"}, {\"Exactness\", \"Exact\"}, {\"ArrayRank\", 2}, {\"Dimensions\", {2, 3}}, {\"ElementCount\", 6}, {\"Rectangular\", True}, {\"Empty\", False}, {\"Matrix\", True}, {\"Square\", False}, {\"Representation\", \"ArrayExpr\"}, {\"Storage\", \"Integer\"}, {\"Contiguous\", True}, {\"StoredExpressions\", False}}"},
+        "explain internal exposes representation metadata without scanning the Array");
+
     const auto piApprox = warnings.evaluate("N[Pi,20]");
     tests.expect(piApprox.isDecimalApproximation(),
         "N Pi produces a certified decimal approximation");
@@ -118,6 +131,20 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
             && value.requestedFractionalDigits() == 20,
             "certified approximation retains its enclosure metadata");
     }
+
+    tests.expectEqual(eval(warnings, "explain[Pi]"),
+        std::string{"{{\"Kind\", \"Constant\"}, {\"Domain\", \"Real\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"Pi\"}, {\"Real\", True}, {\"Positive\", True}, {\"Irrational\", True}, {\"ArithmeticClass\", \"Transcendental\"}}"},
+        "explain uses MathRegistry metadata for Pi");
+    tests.expectEqual(eval(warnings, "explain[Infinity]"),
+        std::string{"{{\"Kind\", \"Constant\"}, {\"Domain\", \"ExtendedReal\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"Infinity\"}, {\"Infinite\", True}, {\"Finite\", False}, {\"Sign\", \"Positive\"}}"},
+        "explain uses predefined-symbol metadata for Infinity");
+
+    const std::string piExplain = eval(warnings, "explain[N[Pi,20]]");
+    tests.expect(piExplain.find("{\"Exactness\", \"CertifiedApproximation\"}") != std::string::npos
+        && piExplain.find("{\"Enclosure\", {") != std::string::npos,
+        "explain exposes certified approximation classification and enclosure");
+    tests.expect(evalError(warnings, "explain[1,\"full\"]").type() == error::CalcErrorType::Domain,
+        "explain rejects unknown modes instead of silently changing cost semantics");
 }
 
 } // namespace mmcal::tests

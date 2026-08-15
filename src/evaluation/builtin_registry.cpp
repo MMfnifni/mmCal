@@ -266,6 +266,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
         ArgumentEvaluation::HoldFirst, true),
     fixed(builtins::names::precision, BuiltinId::Precision, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::accuracy, BuiltinId::Accuracy, 1, ArgumentEvaluation::All, true),
+    range(builtins::names::explain, BuiltinId::Explain, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::rationalize, BuiltinId::Rationalize, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::simplify, BuiltinId::Simplify, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::fullSimplify, BuiltinId::FullSimplify, 1, 2, ArgumentEvaluation::All, true),

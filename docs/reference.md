@@ -1824,6 +1824,66 @@ rationalize[N[1/3,20],0]
 
 Because the source literal `0.1` is already parsed as exact `1/10` in mmCal, `rationalize[0.1]` simply remains `1/10`. `DecimalApproximation` values nested inside Arrays or expressions are also rationalized recursively.
 
+## 25.4 `explain[value]`
+
+A lightweight introspection function that returns only information **already carried by the evaluated value**. It does not run `det`, mathematical `matrixRank`, LU, Eigen, or other derived computations, and it does not scan a Generic Array merely to infer additional properties.
+
+```text
+explain[{{1,2},{3,4}}]
+-> {{"Kind","Array"},
+    {"Domain","Integer"},
+    {"Exactness","Exact"},
+    {"ArrayRank",2},
+    {"Dimensions",{2,2}},
+    {"ElementCount",4},
+    {"Rectangular",True},
+    {"Empty",False},
+    {"Matrix",True},
+    {"Square",True},
+    {"Order",2}}
+```
+
+Arguments are evaluated normally before introspection, so `explain[1+2]` describes `3`. History outputs can be inspected directly with `explain[Out[n]]` or `explain[%]`.
+
+The result is displayed as a brace sequence of property/value pairs. Because values such as `Dimensions` and `Enclosure` may themselves be Arrays or brace values, the internal result is a general `ListExpr` rather than a dense `ArrayExpr`; the structured values are not flattened into strings.
+
+`Exactness` is a classification rather than a boolean. Current principal values are `"Exact"`, `"CertifiedApproximation"`, and `"Unknown"`.
+
+Built-in mathematical constants and predefined symbols are not collapsed into ordinary unknown symbols. `Pi/E/Phi` use the mathematical metadata already registered in MathRegistry, while values such as `Infinity` use their predefined SymbolRegistry semantics; both are O(1) lookups.
+
+```text
+explain[Pi]
+-> {{"Kind","Constant"},
+    {"Domain","Real"},
+    {"Exactness","Exact"},
+    {"Name","Pi"},
+    {"Real",True},
+    {"Positive",True},
+    {"Irrational",True},
+    {"ArithmeticClass","Transcendental"}}
+
+explain[Infinity]
+-> {{"Kind","Constant"},
+    {"Domain","ExtendedReal"},
+    {"Exactness","Exact"},
+    {"Name","Infinity"},
+    {"Infinite",True},
+    {"Finite",False},
+    {"Sign","Positive"}}
+```
+
+`I` is lowered by normal evaluation to an exact complex `Number`, so `explain[I]` describes the evaluated complex value rather than the input token.
+
+Certified decimal approximations expose the requested fractional digits and the exact Rational enclosure containing the true value. Arrays expose O(1) storage-domain/exactness metadata plus essentially free shape properties such as `ArrayRank`, `Dimensions`, `ElementCount`, `Vector`, `Matrix`, `Square`, `Order`, and `Empty`. Determinant, mathematical rank, invertibility, eigenvalues, and similar derived properties are intentionally omitted.
+
+Integers expose sign, zero, and `BitLength`. Decimal digit count is not computed automatically because huge integers would require decimal conversion; Rationals instead expose numerator/denominator bit lengths.
+
+```text
+explain[value,"internal"]
+```
+
+adds development/performance diagnostics such as `Representation`, Array `Storage` / `Contiguous` / `StoredExpressions`, and approximation `ApproximationOrigin`. **`"internal"` property names and values are not a compatibility-stable API.** Unknown modes are errors; no hidden expensive `"full"` mode is executed.
+
 ---
 
 # 26. Random numbers
@@ -1972,7 +2032,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-mmCal v1.5.2 contains **236 registered builtin/alias names / 218 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **237 registered builtin/alias names / 219 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -1980,7 +2040,7 @@ Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, expand, expc,
+det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,

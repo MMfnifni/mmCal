@@ -14,6 +14,7 @@
 #include "builtins/combinatorics.hpp"
 #include "builtins/discrete_math.hpp"
 #include "builtins/elementary_utilities.hpp"
+#include "builtins/explain.hpp"
 #include "builtins/complex_functions.hpp"
 #include "builtins/hyperbolic.hpp"
 #include "builtins/linear_algebra.hpp"
@@ -740,6 +741,8 @@ expression::Expr Evaluator::dispatchBuiltin(
             "precision could not determine the guaranteed precision; the expression remains unevaluated");
         return expression::Expr::call(call.head, {arguments.front()});
     }
+    case BuiltinId::Explain:
+        return builtins::evaluateExplain(arguments, symbolRegistry_, mathematics_);
     case BuiltinId::Accuracy: {
         const auto* infinity = symbolRegistry_.find("Infinity");
         if (!infinity)

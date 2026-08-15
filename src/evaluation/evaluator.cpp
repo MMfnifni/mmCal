@@ -662,6 +662,7 @@ expression::Expr Evaluator::evaluateMachine(
                             && current.definition->id != BuiltinId::History
                             && current.definition->id != BuiltinId::InputHistory
                             && current.definition->id != BuiltinId::OutputHistory
+                            && current.definition->id != BuiltinId::Explain
                             && current.definition->id != BuiltinId::Exit
                             && current.definition->id != BuiltinId::Clear
                             && current.definition->id != BuiltinId::Definitions

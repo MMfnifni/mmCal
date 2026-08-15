@@ -828,6 +828,7 @@ using numeric::Number;
     case BuiltinId::NumericIntegral:
     case BuiltinId::Precision:
     case BuiltinId::Accuracy:
+    case BuiltinId::Explain:
     case BuiltinId::Rationalize:
     case BuiltinId::GeneralizedBinomial:
     case BuiltinId::FallingFactorial:

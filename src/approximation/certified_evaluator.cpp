@@ -1449,6 +1449,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::NumericalApproximation:
     case BuiltinId::Precision:
     case BuiltinId::Accuracy:
+    case BuiltinId::Explain:
     case BuiltinId::Rationalize:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:

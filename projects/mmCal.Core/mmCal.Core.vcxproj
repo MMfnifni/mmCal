@@ -216,6 +216,7 @@
     <ClInclude Include="..\..\src\builtins\special_functions.hpp" />
     <ClInclude Include="..\..\src\builtins\random_functions.hpp" />
     <ClInclude Include="..\..\src\builtins\approximation_utilities.hpp" />
+    <ClInclude Include="..\..\src\builtins\explain.hpp" />
     <ClInclude Include="..\..\src\random\random_engine.hpp" />
     <ClInclude Include="..\..\src\builtins\exact_operations.hpp" />
     <ClInclude Include="..\..\src\builtins\array_helpers.hpp" />
@@ -325,6 +326,7 @@
     <ClCompile Include="..\..\src\builtins\special_functions.cpp" />
     <ClCompile Include="..\..\src\builtins\random_functions.cpp" />
     <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp" />
+    <ClCompile Include="..\..\src\builtins\explain.cpp" />
     <ClCompile Include="..\..\src\random\random_engine.cpp" />
     <ClCompile Include="..\..\src\expression\array_utils.cpp" />
     <ClCompile Include="..\..\src\approximation\expression_interval.cpp" />

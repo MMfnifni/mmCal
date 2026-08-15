@@ -199,6 +199,7 @@ enum class BuiltinId {
     NumericalApproximation,
     Precision,
     Accuracy,
+    Explain,
     Rationalize,
     Simplify,
     FullSimplify,

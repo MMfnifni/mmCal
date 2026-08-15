@@ -187,6 +187,7 @@ inline constexpr std::string_view exp = "exp";
 inline constexpr std::string_view numericalApproximation = "N";
 inline constexpr std::string_view precision = "precision";
 inline constexpr std::string_view accuracy = "accuracy";
+inline constexpr std::string_view explain = "explain";
 inline constexpr std::string_view rationalize = "rationalize";
 inline constexpr std::string_view simplify = "simplify";
 inline constexpr std::string_view fullSimplify = "fullSimplify";
