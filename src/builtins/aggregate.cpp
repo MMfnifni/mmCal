@@ -29,7 +29,7 @@ using numeric::Number;
     std::string_view name,
     bool allowEmpty) {
     if (arguments.size() == 1 && arguments.front().isArray())
-        return arguments.front().asArray().elements;
+        return arguments.front().asArray().materialize();
 
     if (!allowEmpty && arguments.empty())
         error::throwCalcError(error::CalcErrorType::Type,

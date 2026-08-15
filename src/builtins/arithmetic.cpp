@@ -112,13 +112,25 @@ Expr evaluateAdd(
             error::throwCalcError(error::CalcErrorType::Domain,
                 "Array addition requires identical shapes");
 
+    const bool allExact = std::all_of(arguments.begin(), arguments.end(),
+        [](const Expr& argument) { return argument.asArray().hasExactNumberStorage(); });
+    if (allExact) {
+        std::vector<Number> values(first.size(), Number{BigInt{0}});
+        for (const Expr& argument : arguments) {
+            const auto& array = argument.asArray();
+            for (std::size_t i = 0; i < values.size(); ++i)
+                values[i] += array.exactNumber(i);
+        }
+        return Expr::numberArray(first.shape, std::move(values));
+    }
+
     std::vector<Expr> elements;
-    elements.reserve(first.elements.size());
-    for (std::size_t i = 0; i < first.elements.size(); ++i) {
+    elements.reserve(first.size());
+    for (std::size_t i = 0; i < first.size(); ++i) {
         std::vector<Expr> terms;
         terms.reserve(arguments.size());
         for (const Expr& argument : arguments)
-            terms.push_back(argument.asArray().elements[i]);
+            terms.push_back(argument.asArray().element(i));
         elements.push_back(scalarAdd(terms, registry));
     }
     return Expr::array(first.shape, std::move(elements));
@@ -138,11 +150,19 @@ Expr evaluateSubtract(
             error::throwCalcError(error::CalcErrorType::Domain,
                 "Array subtraction requires identical shapes");
 
+        if (lhs.asArray().hasExactNumberStorage() && rhs.asArray().hasExactNumberStorage()) {
+            std::vector<Number> values;
+            values.reserve(lhs.asArray().size());
+            for (std::size_t i = 0; i < lhs.asArray().size(); ++i)
+                values.push_back(lhs.asArray().exactNumber(i) - rhs.asArray().exactNumber(i));
+            return Expr::numberArray(lhs.asArray().shape, std::move(values));
+        }
+
         std::vector<Expr> elements;
-        elements.reserve(lhs.asArray().elements.size());
-        for (std::size_t i = 0; i < lhs.asArray().elements.size(); ++i) {
-            const Expr& left = lhs.asArray().elements[i];
-            const Expr& right = rhs.asArray().elements[i];
+        elements.reserve(lhs.asArray().size());
+        for (std::size_t i = 0; i < lhs.asArray().size(); ++i) {
+            const Expr left = lhs.asArray().element(i);
+            const Expr right = rhs.asArray().element(i);
             if (left.isNumber() && right.isNumber())
                 elements.emplace_back(left.asNumber() - right.asNumber());
             else
@@ -183,9 +203,23 @@ Expr evaluateMultiply(
         if (i != arrayIndex)
             scalarFactors.push_back(arguments[i]);
 
+    if (array.hasExactNumberStorage()
+        && std::all_of(scalarFactors.begin(), scalarFactors.end(),
+            [](const Expr& value) { return value.isNumber(); })) {
+        Number scalar{BigInt{1}};
+        for (const Expr& factor : scalarFactors)
+            scalar *= factor.asNumber();
+        std::vector<Number> values;
+        values.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i)
+            values.push_back(array.exactNumber(i) * scalar);
+        return Expr::numberArray(array.shape, std::move(values));
+    }
+
     std::vector<Expr> elements;
-    elements.reserve(array.elements.size());
-    for (const Expr& element : array.elements) {
+    elements.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr element = array.element(i);
         std::vector<Expr> factors;
         factors.reserve(scalarFactors.size() + 1);
         factors.push_back(element);
@@ -302,9 +336,17 @@ Expr evaluateNegate(
     requireArity(arguments, 1, names::negate);
     if (arguments.front().isArray()) {
         const auto& array = arguments.front().asArray();
+        if (array.hasExactNumberStorage()) {
+            std::vector<Number> values;
+            values.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i)
+                values.push_back(-array.exactNumber(i));
+            return Expr::numberArray(array.shape, std::move(values));
+        }
         std::vector<Expr> elements;
-        elements.reserve(array.elements.size());
-        for (const Expr& element : array.elements) {
+        elements.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const Expr element = array.element(i);
             if (element.isNumber())
                 elements.emplace_back(-element.asNumber());
             else

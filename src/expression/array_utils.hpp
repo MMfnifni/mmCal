@@ -17,6 +17,14 @@ namespace mmcal::expression {
     std::vector<std::size_t> outerShape,
     std::vector<Expr> evaluatedElements);
 
+
+// packed ArrayのExpr pageだけを評価した結果で再構築する。scalar結果だけなら未変更pageを共有し，
+// child Array/Listが返った場合だけ従来のflatten規則へfallbackする。
+[[nodiscard]] Expr rebuildEvaluatedArray(
+    const ArrayExpr& source,
+    std::span<const std::size_t> replacedIndices,
+    std::vector<Expr> evaluatedElements);
+
 // {}の一般構築。矩形かつ同shapeならdense Arrayへ正規化し，そうでなければListとして保持する。
 [[nodiscard]] Expr braceValue(std::vector<Expr> elements);
 

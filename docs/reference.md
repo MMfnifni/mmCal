@@ -172,7 +172,7 @@ Using the legacy parenthesized form such as `sin(x)` on a known function name is
 {{1,2},{3,4}}
 ```
 
-Internally, arrays are represented as `ArrayExpr` values containing shape information and flattened elements.
+Internally, dense values use `ArrayExpr`. In Unreleased builds, numeric values may live in immutable packed pages while shape/offset/strides form a separate layout, allowing transpose and some reshape/slice operations to share the backing storage. This is an implementation detail and does not create new user-visible Array types.
 
 ## 4.3 Variables and user-defined functions
 
@@ -985,7 +985,7 @@ For compatibility, an even number of scalar arguments may also be split into fir
 
 ## 17.1 Array foundation
 
-At the language level, `{...}` is a general finite brace container rather than a matrix-only literal. When every child has the same shape, the value is automatically promoted to the dense **shape + row-major flat storage** `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` and ragged braces remain general brace values. Matrix operations still accept only dense rectangular Arrays and audit this at their boundary.
+At the language level, `{...}` is a general finite brace container rather than a matrix-only literal. When every child has the same shape, the value is automatically promoted to a dense `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` and ragged braces remain general brace values. Numeric dense Arrays may internally use shared packed Integer / Rational / Number pages and strided views, but those storage choices are not user-visible types. Matrix operations still accept only dense rectangular Arrays and audit this at their boundary.
 
 ```text
 dimensions[A]

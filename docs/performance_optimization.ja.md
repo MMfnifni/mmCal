@@ -440,7 +440,7 @@ exact FFT自体のsymbolic expression explosionは別問題であり、この変
 
 ## flat Array + exact Number backend — 採用
 
-v1.5.2では行列専用のnested containerを増やさず，既存Arrayの`shape + row-major flat storage`を基盤とした。`MatrixView`はArrayをzero-copy参照し，Gaussian / Gauss-Jordan等で書換えが必要な場合だけflat `MatrixBuffer`へ複製する。
+v1.5.2では行列専用のnested containerを増やさず，既存Arrayの`shape + row-major flat storage`を基盤とした。`MatrixView`はArrayをzero-copy参照し，Gaussian / Gauss-Jordan等で書換えが必要な場合だけflat `MatrixBuffer`へ複製する。これはv1.5.2 release時点の設計であり，Unreleasedではpersistent Arrayのphysical storageをimmutable paged backing + stride viewへ置換している。
 
 exact Number行列ではpivot loopからExpr生成とSimplifier呼出しを外し，`Number`を直接累積・消去する。`dot`も全要素がNumberならcellごとの積和を`Number`だけで処理し，symbolicの場合のみExprを構築する。
 
@@ -554,11 +554,19 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 
 1024×1024では算法より先にrepresentation costが目立つ。C++から直接1,048,576個の10桁Rational Exprを構築したbenchmark processは入力だけで最大RSS約0.69 GB。`transpose`本体は約107 ms，`trace`本体は約60 msだった。Python形式の約14.16 MBテキストをCLIへ渡し`dimensions[...]`だけを評価した測定ではwall約10.9 s，最大RSS約1.99 GBだった。さらに1024次`N[dot,16]`は10秒上限で未完了（最大RSS約0.96 GB），`N[LU,16]`も10秒上限で未完了（最大RSS約1.59 GB）だったため，QR/SVD/Eigenの1024実走はメモリ圧迫を避けて中止した。
 
-Unreleasedの`Expr::Node` typed-node refactor後，同一x86-64 GCC / Release / LTO offで旧variant sourceと新sourceを同じ`--matrix-large transpose 1024 16`へ掛けて再比較した。旧variant版は最大RSS `693312 KiB`（約677.1 MiB），typed-node版は`299668 KiB`（約292.6 MiB）で，約384.4 MiB / **56.8%削減**。単発`transpose` timingは181.7 ms→157.4 msだったが，timingはnoiseを含むため採用根拠はRSS削減と全regression維持を主とする。CLI parse + `dimensions`の1.99 GB測定はparser/lowering一時allocationも含むため，typed-node後の再測定を別課題とする。
+Unreleasedの`Expr::Node` typed-node refactor後，同一x86-64 GCC / Release / LTO offで旧variant sourceと新sourceを同じ`--matrix-large transpose 1024 16`へ掛けて再比較した。旧variant版は最大RSS `693312 KiB`（約677.1 MiB），typed-node版は`299668 KiB`（約292.6 MiB）で，約384.4 MiB / **56.8%削減**。単発`transpose` timingは181.7 ms→157.4 msだったが，timingはnoiseを含むため採用根拠はRSS削減と全regression維持を主とする。
+
+第二段階ではpersistent `ArrayExpr`をfixed-size immutable pageへpackedし，shape / offset / stridesをbackingから分離した。最初に試した単一`vector<Rational>`方式は保存時のRSSは下がるものの，transposeでRational/BigIntを100万要素deep copyし，1024×1024 direct-packed transposeが約650～675 msへ退行したため棄却した。採用版は1024要素pageを`shared_ptr<const page>`で共有し，transposeをstride交換だけのview生成にした。
+
+`ArrayBuilder`はpromotionを現在page内だけへ限定する。完成済みpageは不変なので，大規模Arrayの末尾にsymbolic値が出ても全量Generic化しない。1,048,576要素の最後だけ`x`にした専用測定はall-integer版とほぼ同じ約0.30 s / 約69.8 MiBで，最後のpageだけGenericだった。また矩形brace Lowererはleafを単一builderへ直接流し，numeric literalを一度`Expr` nodeへ包んでからpackする二重表現を避けた。
+
+現`--matrix-large transpose 1024 16`はbenchmark fixtureも`ArrayBuilder`からexact Rationalを直接構築し，最大RSS `136576 KiB`（約133.4 MiB），transpose本体約0.059 ms。`trace 1024`は最大RSS約133.5 MiB，trace本体約10.95 msだった。P1 typed-nodeの292.6 MiBからさらに減っているが，fixture construction pathも同時に現実装へ合わせているため，この差はpersistent storage + builderの総合改善であって単一変更A/Bではない。
+
+CLI側では13.63 MBの1024×1024・10桁decimal literalを`dimensions[...]`へ入力した測定がwall約4.55 s，最大RSS `441564 KiB`（約431 MiB）だった。v1.5.2監査の約14.16 MB / 10.9 s / 1.99 GBとは入力textが完全同一ではないため厳密比較ではないが，parse後段のExpr allocation削減が大きく効いていることを示す。
 
 64次値から純粋なO(n^3)を仮定した1024次の粗い外挿でも，`N[LU]`約1.6時間，`N[dot]`約1.4時間，`N[det]`約3.4時間，`N[solveLinear]`約6.2時間，`N[inverse]`約9.9時間，`N[SVD]`約13時間，`N[QR]`約15時間，`N[eigenvalues]`約22時間となる。32→64の実測指数をそのまま延長すると約1～21時間程度へ揺れるため，これらは予測値であって1024実測ではない。cache・allocator・guard precision・反復回数により悪化し得る。
 
-結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，現在のmmCalのexact Decimal→Rational→Expr表現とcertified arbitrary-precision dense算法にとってはstress領域である。1024級を実用目標にするなら，算法のblock化より前にcompact numeric Array storage，parser/lowering時のExpr allocation削減，approximate Matrix専用packed storageを検討する必要がある。
+結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，mmCalのcertified arbitrary-precision dense算法にとっては依然stress領域である。一方，persistent exact Arrayのrepresentation固定費はtyped-node + paged packed backing + direct builderで大きく下がった。approximate SVD/Eigen等には既に連続working bufferがあるため，次はstorage改善後のcost balanceでblock化・threadingを再評価する。
 
 # 16. `mmCal.Benchmarks`
 
@@ -620,15 +628,15 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 
 次の優先度は次のように考える。
 
-1. BigUInt / BigIntのsmall-object optimizationを単独benchmarkし，小整数のheap allocation削減効果を確認
-2. numeric Array / approximate Matrixのcompact packed storageと巨大brace parse/loweringのallocation削減
-3. 上記storage改善後にblocked LU / QR等を再測定
-4. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
-5. Lehmer GCD
-6. `log`のbit-burst / AGM backend
-7. Gamma / erf等の5000～10000桁横断benchmark
+1. paged packed storage導入後のcost balanceでblocked LU / QR等を再測定
+2. pure numeric working kernelだけを対象にthreading thresholdを検討
+3. parser AST側の巨大brace temporaryを必要に応じて追加監査
+4. BigUInt / BigInt SBOは保守性を損なわないstorage abstractionとして独立benchmarkし，複雑さに見合う場合だけ採用
+5. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
+6. Lehmer GCD
+7. `log`のbit-burst / AGM backend
 8. exact FFTのCyclotomic backend
 
-typed-nodeで最大の固定費を一段外せたため，次はBigUInt SBOを同じく単独変更として測る。packed Arrayまで同時に入れず，どの層がRSS・allocation・cache localityへ効いたかを分離する。
+Arrayについては，単一flat packed vectorを棄却し，immutable paged backing + stride viewを採用した。approximate Matrix algorithmは既存の専用連続working bufferを維持し，persistent Array storageと無理に統合しない。BigUInt SBOは今回明示的に見送る。
 
 採用時にはこの文書へ「なぜ採用したか」「なぜ前案を棄却したか」「どのbenchmarkで判断したか」を追記する。

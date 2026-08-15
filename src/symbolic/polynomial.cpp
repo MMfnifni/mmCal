@@ -412,8 +412,9 @@ using numeric::Rational;
             for (const Expr& argument : current.asCall().arguments)
                 pending.push_back(argument);
         }
-        else if (current.isArray()) {
-            for (const Expr& element : current.asArray().elements)
+        else if (current.isArray()
+            && current.asArray().storageKind() == expression::ArrayStorageKind::Generic) {
+            for (const Expr& element : current.asArray().storedExpressions())
                 pending.push_back(element);
         }
     }
@@ -1184,8 +1185,9 @@ std::vector<expression::Symbol> collectSymbols(const Expr& expression) {
             continue;
         }
         if (current.isArray()) {
-            for (const Expr& element : current.asArray().elements)
-                stack.push_back(element);
+            if (current.asArray().storageKind() == expression::ArrayStorageKind::Generic)
+                for (const Expr& element : current.asArray().storedExpressions())
+                    stack.push_back(element);
             continue;
         }
         if (current.isCall())

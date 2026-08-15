@@ -89,24 +89,24 @@ namespace {
 [[nodiscard]] bool containsBuiltinCall(
     const expression::Expr& root,
     const expression::Symbol& head) {
-    std::vector<const expression::Expr*> pending{&root};
+    std::vector<expression::Expr> pending{root};
     while (!pending.empty()) {
-        const expression::Expr* current = pending.back();
+        expression::Expr current = std::move(pending.back());
         pending.pop_back();
-        if (current->isCall()) {
-            const auto& call = current->asCall();
+        if (current.isCall()) {
+            const auto& call = current.asCall();
             if (call.head.sameIdentity(head))
                 return true;
             for (const expression::Expr& argument : call.arguments)
-                pending.push_back(&argument);
+                pending.push_back(argument);
         }
-        else if (current->isArray()) {
-            for (const expression::Expr& element : current->asArray().elements)
-                pending.push_back(&element);
+        else if (current.isArray()) {
+            for (const expression::Expr& element : current.asArray().storedExpressions())
+                pending.push_back(element);
         }
-        else if (current->isList()) {
-            for (const expression::Expr& element : current->asList().elements)
-                pending.push_back(&element);
+        else if (current.isList()) {
+            for (const expression::Expr& element : current.asList().elements)
+                pending.push_back(element);
         }
     }
     return false;
@@ -170,22 +170,24 @@ expression::Expr Evaluator::dispatchBuiltin(
             }
             else if (arguments[i].isArray()) {
                 const auto& spec = arguments[i].asArray();
-                if (spec.shape.size() != 1 || spec.shape[0] != 2 || spec.elements.size() != 2
-                    || !spec.elements[0].isSymbol() || !spec.elements[1].isNumber()
-                    || !spec.elements[1].asNumber().isReal()
-                    || !spec.elements[1].asNumber().asReal().isInteger()) {
+                const expression::Expr specVariable = spec.size() > 0 ? spec.element(0) : arguments[i];
+                const expression::Expr specOrder = spec.size() > 1 ? spec.element(1) : arguments[i];
+                if (spec.shape.size() != 1 || spec.shape[0] != 2 || spec.size() != 2
+                    || !specVariable.isSymbol() || !specOrder.isNumber()
+                    || !specOrder.asNumber().isReal()
+                    || !specOrder.asNumber().asReal().isInteger()) {
                     error::throwCalcError(error::CalcErrorType::Type,
                         "D derivative specification must be a symbol or {symbol, nonnegative integer}");
                 }
                 const auto parsed = numeric::tryToUint64(
-                    spec.elements[1].asNumber().asReal().asInteger());
+                    specOrder.asNumber().asReal().asInteger());
                 if (!parsed)
                     error::throwCalcError(error::CalcErrorType::Domain,
                         "D derivative order must be a nonnegative integer that fits in uint64");
                 if (*parsed > 4096)
                     error::throwCalcError(error::CalcErrorType::Overflow,
                         "D derivative order is too large");
-                variable = spec.elements[0].asSymbol();
+                variable = specVariable.asSymbol();
                 order = *parsed;
             }
             else {
@@ -784,7 +786,9 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments[1].isSymbol())
             variables.push_back(arguments[1].asSymbol());
         else if (arguments[1].isArray() && arguments[1].asArray().rank() == 1) {
-            for (const expression::Expr& item : arguments[1].asArray().elements) {
+            const auto& array = arguments[1].asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                const expression::Expr item = array.element(i);
                 if (!item.isSymbol())
                     error::throwCalcError(
                         error::CalcErrorType::Type,
@@ -809,7 +813,9 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments[1].isSymbol())
             variables.push_back(arguments[1].asSymbol());
         else if (arguments[1].isArray() && arguments[1].asArray().rank() == 1) {
-            for (const expression::Expr& item : arguments[1].asArray().elements) {
+            const auto& array = arguments[1].asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                const expression::Expr item = array.element(i);
                 if (!item.isSymbol())
                     error::throwCalcError(
                         error::CalcErrorType::Type,
@@ -848,9 +854,7 @@ expression::Expr Evaluator::dispatchBuiltin(
 
             std::vector<expression::Expr> equations;
             if (arguments[0].isArray() && arguments[0].asArray().rank() == 1)
-                equations.assign(
-                    arguments[0].asArray().elements.begin(),
-                    arguments[0].asArray().elements.end());
+                equations = arguments[0].asArray().materialize();
             else
                 equations.push_back(arguments[0]);
 

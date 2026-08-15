@@ -137,11 +137,11 @@ Expr evaluateChoice(
         const auto& array = arguments.front().asArray();
         if (array.rank() != 1)
             error::throwCalcError(error::CalcErrorType::Type, "choice array must have rank 1");
-        if (array.elements.empty())
+        if (array.empty())
             error::throwCalcError(error::CalcErrorType::Domain, "choice requires a non-empty array");
-        const BigInt index = engine.uniformBelow(BigInt::parse(std::to_string(array.elements.size())));
+        const BigInt index = engine.uniformBelow(BigInt::parse(std::to_string(array.size())));
         const auto converted = numeric::tryToUint64(index);
-        return array.elements[static_cast<std::size_t>(*converted)];
+        return array.element(static_cast<std::size_t>(*converted));
     }
 
     if (arguments.empty())

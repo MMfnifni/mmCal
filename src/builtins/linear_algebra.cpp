@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,10 +40,11 @@ using numeric::Number;
 }
 
 [[nodiscard]] bool allNumbers(const ArrayExpr& array) noexcept {
-    for (const Expr& element : array.elements)
-        if (!element.isNumber())
-            return false;
-    return true;
+    return array.hasExactNumberStorage();
+}
+
+[[nodiscard]] Expr transposeArray(const ArrayExpr& array) {
+    return Expr::array(array.transposed());
 }
 
 [[nodiscard]] Expr productTerm(
@@ -93,13 +95,13 @@ using numeric::Number;
     if (numericInputs) {
         Number sum{BigInt{0}};
         for (std::size_t k = 0; k < inner; ++k) {
-            const Expr& left = lhs.rank() == 1
-                ? lhs.elements[k]
-                : lhs.elements[row * lhsColumns + k];
-            const Expr& right = rhs.rank() == 1
-                ? rhs.elements[k]
-                : rhs.elements[k * rhsColumns + column];
-            sum += left.asNumber() * right.asNumber();
+            const Number left = lhs.exactNumber(lhs.rank() == 1
+                ? k
+                : row * lhsColumns + k);
+            const Number right = rhs.exactNumber(rhs.rank() == 1
+                ? k
+                : k * rhsColumns + column);
+            sum += left * right;
         }
         return Expr{std::move(sum)};
     }
@@ -107,12 +109,12 @@ using numeric::Number;
     std::vector<Expr> terms;
     terms.reserve(inner);
     for (std::size_t k = 0; k < inner; ++k) {
-        const Expr& left = lhs.rank() == 1
-            ? lhs.elements[k]
-            : lhs.elements[row * lhsColumns + k];
-        const Expr& right = rhs.rank() == 1
-            ? rhs.elements[k]
-            : rhs.elements[k * rhsColumns + column];
+        const Expr left = lhs.element(lhs.rank() == 1
+            ? k
+            : row * lhsColumns + k);
+        const Expr right = rhs.element(rhs.rank() == 1
+            ? k
+            : k * rhsColumns + column);
         terms.push_back(productTerm(left, right, registry, mathematics, angles));
     }
     return sumTerms(std::move(terms), registry, mathematics, angles);
@@ -123,19 +125,22 @@ using numeric::Number;
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (vector.elements.empty())
+    if (vector.empty())
         return integer(0);
 
     if (allNumbers(vector)) {
         Number sum{BigInt{0}};
-        for (const Expr& element : vector.elements)
-            sum += element.asNumber().conjugate() * element.asNumber();
+        for (std::size_t i = 0; i < vector.size(); ++i) {
+            const Number element = vector.exactNumber(i);
+            sum += element.conjugate() * element;
+        }
         return exact::sqrt(Expr{std::move(sum)}, registry, mathematics, angles);
     }
 
     std::vector<Expr> terms;
-    terms.reserve(vector.elements.size());
-    for (const Expr& element : vector.elements) {
+    terms.reserve(vector.size());
+    for (std::size_t i = 0; i < vector.size(); ++i) {
+        const Expr element = vector.element(i);
         const mathematics::ValueFacts facts = mathematics::inferValueFacts(
             element, registry, mathematics);
         Expr conjugate = facts.isProvablyReal()
@@ -180,13 +185,7 @@ Expr evaluateTranspose(
     linear_algebra::MatrixView matrix{array};
     if (matrix.size() == 0)
         return Expr::array({matrix.columns(), matrix.rows()}, {});
-
-    std::vector<Expr> elements;
-    elements.reserve(matrix.size());
-    for (std::size_t column = 0; column < matrix.columns(); ++column)
-        for (std::size_t row = 0; row < matrix.rows(); ++row)
-            elements.push_back(matrix(row, column));
-    return Expr::array({matrix.columns(), matrix.rows()}, std::move(elements));
+    return transposeArray(array);
 }
 
 Expr evaluateConjugateTranspose(
@@ -232,9 +231,9 @@ Expr evaluateConjugateTranspose(
 
     if (array.rank() == 1) {
         std::vector<Expr> output;
-        output.reserve(array.elements.size());
-        for (const Expr& value : array.elements)
-            output.push_back(conjugated(value));
+        output.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i)
+            output.push_back(conjugated(array.element(i)));
         return Expr::array(array.shape, std::move(output));
     }
 
@@ -253,19 +252,35 @@ Expr evaluateMatrixAdd(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     const ArrayExpr& first = detail::requireArray(arguments.front(), "madd");
-    std::vector<Expr> output;
-    output.reserve(first.elements.size());
 
-    for (std::size_t i = 0; i < first.elements.size(); ++i) {
+    bool allExact = first.hasExactNumberStorage();
+    for (std::size_t a = 1; a < arguments.size(); ++a) {
+        const ArrayExpr& next = detail::requireArray(arguments[a], "madd");
+        if (next.shape != first.shape)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "madd requires identical array shapes");
+        allExact = allExact && next.hasExactNumberStorage();
+    }
+    if (allExact) {
+        std::vector<Number> values(first.size(), Number{BigInt{0}});
+        for (const Expr& argument : arguments) {
+            const ArrayExpr& array = argument.asArray();
+            for (std::size_t i = 0; i < values.size(); ++i)
+                values[i] += array.exactNumber(i);
+        }
+        return Expr::numberArray(first.shape, std::move(values));
+    }
+
+    std::vector<Expr> output;
+    output.reserve(first.size());
+
+    for (std::size_t i = 0; i < first.size(); ++i) {
         std::vector<Expr> terms;
         terms.reserve(arguments.size());
-        terms.push_back(first.elements[i]);
+        terms.push_back(first.element(i));
         for (std::size_t a = 1; a < arguments.size(); ++a) {
             const ArrayExpr& next = detail::requireArray(arguments[a], "madd");
-            if (next.shape != first.shape)
-                error::throwCalcError(error::CalcErrorType::Domain,
-                    "madd requires identical array shapes");
-            terms.push_back(next.elements[i]);
+            terms.push_back(next.element(i));
         }
         output.push_back(sumTerms(std::move(terms), registry, mathematics, angles));
     }
@@ -296,20 +311,48 @@ Expr evaluateDot(
             "dot inner dimensions do not agree");
 
     const bool numericInputs = allNumbers(lhs) && allNumbers(rhs);
-
-    std::vector<Expr> output;
     const std::size_t outputShape[] = {lhsRows, rhsColumns};
+    std::size_t outputSize = 0;
     try {
-        output.reserve(expression::arrayElementCount(outputShape));
+        outputSize = expression::arrayElementCount(outputShape);
     }
     catch (const std::length_error&) {
         error::throwCalcError(error::CalcErrorType::Overflow,
             "dot result dimensions overflow the addressable element count");
     }
+
+    if (numericInputs) {
+        std::vector<Number> output;
+        output.reserve(outputSize);
+        for (std::size_t row = 0; row < lhsRows; ++row) {
+            for (std::size_t column = 0; column < rhsColumns; ++column) {
+                Number sum{BigInt{0}};
+                for (std::size_t k = 0; k < lhsColumns; ++k) {
+                    const Number left = lhs.exactNumber(lhs.rank() == 1
+                        ? k
+                        : row * lhsColumns + k);
+                    const Number right = rhs.exactNumber(rhs.rank() == 1
+                        ? k
+                        : k * rhsColumns + column);
+                    sum += left * right;
+                }
+                output.push_back(std::move(sum));
+            }
+        }
+        if (lhs.rank() == 1 && rhs.rank() == 1)
+            return Expr{std::move(output.front())};
+        if (lhs.rank() == 1 || rhs.rank() == 1)
+            return Expr::numberArray(
+                {lhs.rank() == 1 ? rhsColumns : lhsRows}, std::move(output));
+        return Expr::numberArray({lhsRows, rhsColumns}, std::move(output));
+    }
+
+    std::vector<Expr> output;
+    output.reserve(outputSize);
     for (std::size_t row = 0; row < lhsRows; ++row)
         for (std::size_t column = 0; column < rhsColumns; ++column)
             output.push_back(dotCell(lhs, rhs, row, column, lhsColumns,
-                lhsColumns, rhsColumns, numericInputs, registry, mathematics, angles));
+                lhsColumns, rhsColumns, false, registry, mathematics, angles));
 
     if (lhs.rank() == 1 && rhs.rank() == 1)
         return output.front();
@@ -561,9 +604,11 @@ Expr evaluateNormalize(
 
     const Expr reciprocal = exact::divide(integer(1), norm, registry, mathematics, angles);
     std::vector<Expr> output;
-    output.reserve(vector.elements.size());
-    for (const Expr& element : vector.elements)
+    output.reserve(vector.size());
+    for (std::size_t i = 0; i < vector.size(); ++i) {
+        const Expr element = vector.element(i);
         output.push_back(productTerm(element, reciprocal, registry, mathematics, angles));
+    }
     return Expr::array(vector.shape, std::move(output));
 }
 

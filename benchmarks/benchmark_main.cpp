@@ -227,7 +227,7 @@ struct FourierFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateFft(
             arguments, fixture.registry, fixture.mathematics, fixture.angles, fixture.cache);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -250,7 +250,7 @@ struct FourierFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -273,7 +273,7 @@ struct FourierFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -294,17 +294,17 @@ struct MatrixFixture final {
 };
 
 [[nodiscard]] mmcal::expression::Expr matrixInput(std::size_t size, unsigned salt) {
-    std::vector<mmcal::expression::Expr> values;
-    values.reserve(size * size);
+    mmcal::expression::ArrayBuilder builder;
+    builder.reserve(size * size);
     for (std::size_t row = 0; row < size; ++row) {
         for (std::size_t column = 0; column < size; ++column) {
             const std::int64_t value = row == column
                 ? static_cast<std::int64_t>(4 * size + 1 + salt % 3)
                 : static_cast<std::int64_t>((row * 17 + column * 29 + salt) % 5) - 2;
-            values.emplace_back(mmcal::numeric::Number{BigInt{value}});
+            builder.append(BigInt{value});
         }
     }
-    return mmcal::expression::Expr::array({size, size}, std::move(values));
+    return mmcal::expression::Expr::array(builder.finish({size, size}));
 }
 
 [[nodiscard]] mmcal::expression::Expr randomDecimalMatrix(
@@ -315,12 +315,11 @@ struct MatrixFixture final {
     constexpr std::int64_t scale = 10000000000LL;
     std::mt19937_64 rng{seed};
     std::uniform_int_distribution<std::int64_t> distribution{-scale, scale};
-    std::vector<mmcal::expression::Expr> values;
-    values.reserve(size * size);
+    mmcal::expression::ArrayBuilder builder;
+    builder.reserve(size * size);
     for (std::size_t i = 0; i < size * size; ++i)
-        values.emplace_back(mmcal::numeric::Number{Rational{
-            BigInt{distribution(rng)}, BigInt{scale}}});
-    return mmcal::expression::Expr::array({size, size}, std::move(values));
+        builder.append(Rational{BigInt{distribution(rng)}, BigInt{scale}});
+    return mmcal::expression::Expr::array(builder.finish({size, size}));
 }
 
 
@@ -333,7 +332,7 @@ struct MatrixFixture final {
     for (std::size_t row = 0; row < size; ++row) {
         Rational sum{BigInt{0}};
         for (std::size_t column = 0; column < size; ++column)
-            sum += array.elements[row * size + column].asNumber().realPart().toRational();
+            sum += array.exactNumber(row * size + column).realPart().toRational();
         values.emplace_back(mmcal::numeric::Number{std::move(sum)});
     }
     return mmcal::expression::Expr::array({size}, std::move(values));
@@ -349,7 +348,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateDot(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -383,7 +382,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateRref(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -412,7 +411,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateSolveLinear(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -430,11 +429,11 @@ struct MatrixFixture final {
 
     for (std::size_t row = 0; row < rows; ++row) {
         for (std::size_t column = 0; column < columns; ++column)
-            values.push_back(array.elements[row * columns + column]);
+            values.push_back(array.element(row * columns + column));
 
-        const auto first = array.elements[row * columns].asNumber();
+        const auto first = array.exactNumber(row * columns);
         const auto second = columns > 1
-            ? array.elements[row * columns + 1].asNumber()
+            ? array.exactNumber(row * columns + 1)
             : mmcal::numeric::Number{};
         values.emplace_back(first + mmcal::numeric::Number{BigInt{2}} * second);
     }
@@ -450,7 +449,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateNullSpace(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -467,7 +466,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateLuDecomposition(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -484,7 +483,7 @@ struct MatrixFixture final {
     for (int i = 0; i < iterations; ++i) {
         const auto result = mmcal::builtins::evaluateQrDecomposition(
             arguments, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum += result.asArray().elements.size();
+        checksum += result.asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -505,7 +504,7 @@ struct MatrixFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -526,7 +525,7 @@ struct MatrixFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -548,7 +547,7 @@ struct MatrixFixture final {
         if (!result)
             std::abort();
         checksum += result->isArray()
-            ? result->asArray().elements.size()
+            ? result->asArray().size()
             : result->asList().elements.size();
     }
     const auto end = Clock::now();
@@ -570,7 +569,7 @@ struct MatrixFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -591,7 +590,7 @@ struct MatrixFixture final {
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
             std::abort();
-        checksum += result->isArray() ? result->asArray().elements.size() : result->asList().elements.size();
+        checksum += result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -611,7 +610,7 @@ struct MatrixFixture final {
             mmcal::approximation::ApproximationContext{digits}, blockColumns);
         if (!result)
             std::abort();
-        checksum += result->asArray().elements.size();
+        checksum += result->asArray().size();
     }
     const auto end = Clock::now();
     if (checksum == 0)
@@ -700,12 +699,12 @@ struct MatrixFixture final {
     const std::size_t rows = array.shape[0];
     const std::size_t columns = array.shape[1];
     std::vector<mmcal::expression::Expr> values;
-    values.reserve(array.elements.size());
+    values.reserve(array.size());
 
     for (std::size_t row = 0; row < rows; ++row)
         for (std::size_t column = 0; column < columns; ++column) {
-            const auto rational = array.elements[row * columns + column]
-                .asNumber().asReal().toRational();
+            const auto rational = array.exactNumber(row * columns + column)
+                .asReal().toRational();
             const BigInt denominator = BigInt{static_cast<std::int64_t>((row + 2) * (column + 3))};
             values.emplace_back(mmcal::numeric::Number{Rational{
                 rational.numerator(), rational.denominator() * denominator}});
@@ -720,11 +719,11 @@ struct MatrixFixture final {
     const std::size_t size = matrix.asArray().shape[0];
     for (std::size_t row = 0; row < size; ++row)
         for (std::size_t column = 0; column < size; ++column) {
-            const auto& value = matrix.asArray().elements[row * size + column];
-            if (!value.isNumber())
+            const auto& array = matrix.asArray();
+            if (!array.hasExactNumberStorage())
                 return false;
             const mmcal::numeric::Number expected{BigInt{row == column ? 1 : 0}};
-            if (!(value.asNumber() == expected))
+            if (!(array.exactNumber(row * size + column) == expected))
                 return false;
         }
     return true;
@@ -733,8 +732,11 @@ struct MatrixFixture final {
 [[nodiscard]] bool isExactZeroVector(const mmcal::expression::Expr& vector) {
     if (!vector.isArray() || !vector.asArray().isVector())
         return false;
-    for (const auto& value : vector.asArray().elements)
-        if (!value.isNumber() || !value.asNumber().isZero())
+    const auto& array = vector.asArray();
+    if (!array.hasExactNumberStorage())
+        return false;
+    for (std::size_t i = 0; i < array.size(); ++i)
+        if (!array.exactNumber(i).isZero())
             return false;
     return true;
 }
@@ -754,7 +756,7 @@ struct MatrixFixture final {
         std::vector<mmcal::expression::Expr> vectorElements;
         vectorElements.reserve(variables);
         for (std::size_t column = 0; column < variables; ++column)
-            vectorElements.push_back(basisArray.elements[row * variables + column]);
+            vectorElements.push_back(basisArray.element(row * variables + column));
         const auto vector = mmcal::expression::Expr::array({variables}, std::move(vectorElements));
         const std::array<mmcal::expression::Expr, 2> arguments{matrix, vector};
         if (!isExactZeroVector(mmcal::builtins::evaluateDot(
@@ -772,9 +774,8 @@ struct MatrixFixture final {
     const std::size_t rows = array.shape[1];
     const std::size_t columns = array.shape[2];
     const std::size_t factorSize = rows * columns;
-    const auto begin = array.elements.begin() + static_cast<std::ptrdiff_t>(factor * factorSize);
-    std::vector<mmcal::expression::Expr> values(begin, begin + static_cast<std::ptrdiff_t>(factorSize));
-    return mmcal::expression::Expr::array({rows, columns}, std::move(values));
+    return mmcal::expression::Expr::array(
+        array.sliced({rows, columns}, factor * factorSize, factorSize));
 }
 
 [[nodiscard]] bool approximateContainsNumber(
@@ -807,10 +808,12 @@ struct MatrixFixture final {
     if (!approximate.isArray() || !exact.isArray()
         || approximate.asArray().shape != exact.asArray().shape)
         return false;
-    const auto& lhs = approximate.asArray().elements;
-    const auto& rhs = exact.asArray().elements;
+    const auto& lhs = approximate.asArray();
+    const auto& rhs = exact.asArray();
+    if (!rhs.hasExactNumberStorage())
+        return false;
     for (std::size_t i = 0; i < lhs.size(); ++i) {
-        if (!rhs[i].isNumber() || !approximateContainsNumber(lhs[i], rhs[i].asNumber()))
+        if (!approximateContainsNumber(lhs.element(i), rhs.exactNumber(i)))
             return false;
     }
     return true;
@@ -857,21 +860,21 @@ struct DisplayedComplex final {
     auto absoluteRational = [](const Rational& x) { return x < Rational{BigInt{0}} ? -x : x; };
 
     for (std::size_t column = 0; column < size; ++column) {
-        const auto lambda = displayedComplex(lambdas.elements[column]);
+        const auto lambda = displayedComplex(lambdas.element(column));
         if (!lambda)
             return false;
         for (std::size_t row = 0; row < size; ++row) {
             DisplayedComplex av{Rational{BigInt{0}}, Rational{BigInt{0}}};
             for (std::size_t k = 0; k < size; ++k) {
-                const auto aik = displayedComplex(a.elements[row * size + k]);
-                const auto vk = displayedComplex(v.elements[k * size + column]);
+                const auto aik = displayedComplex(a.element(row * size + k));
+                const auto vk = displayedComplex(v.element(k * size + column));
                 if (!aik || !vk)
                     return false;
                 const DisplayedComplex product = multiplyDisplayed(*aik, *vk);
                 av.real += product.real;
                 av.imaginary += product.imaginary;
             }
-            const auto vr = displayedComplex(v.elements[row * size + column]);
+            const auto vr = displayedComplex(v.element(row * size + column));
             if (!vr)
                 return false;
             const DisplayedComplex lv = multiplyDisplayed(*lambda, *vr);
@@ -1117,10 +1120,10 @@ struct DisplayedComplex final {
             solveArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!approximateSolution || !approximateSolution->isArray()
-            || approximateSolution->asArray().elements.size() != size)
+            || approximateSolution->asArray().size() != size)
             return false;
         for (std::size_t i = 0; i < size; ++i)
-            if (!approximateContainsInteger(approximateSolution->asArray().elements[i],
+            if (!approximateContainsInteger(approximateSolution->asArray().element(i),
                     Rational{BigInt{static_cast<std::int64_t>(i + 1)}}))
                 return false;
 
@@ -1162,11 +1165,11 @@ struct DisplayedComplex final {
         const auto roundTrip = mmcal::builtins::evaluateApproximateIfft(
             inverseArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
-        if (!roundTrip || roundTrip->asArray().elements.size() != n)
+        if (!roundTrip || roundTrip->asArray().size() != n)
             return false;
 
         for (std::size_t i = 0; i < n; ++i)
-            if (!approximateContainsInteger(roundTrip->asArray().elements[i], expected[i]))
+            if (!approximateContainsInteger(roundTrip->asArray().element(i), expected[i]))
                 return false;
     }
     return true;
@@ -1280,7 +1283,7 @@ struct DisplayedComplex final {
 
     if (operation == "transpose") {
         const auto result = mmcal::builtins::evaluateTranspose(unary, fixture.registry);
-        checksum = result.asArray().elements.size();
+        checksum = result.asArray().size();
     }
     else if (operation == "trace") {
         const auto result = mmcal::builtins::evaluateTrace(
@@ -1292,7 +1295,7 @@ struct DisplayedComplex final {
             binary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->asArray().elements.size();
+        checksum = result->asArray().size();
     }
     else if (operation == "det") {
         const auto result = mmcal::builtins::evaluateDeterminant(
@@ -1311,7 +1314,7 @@ struct DisplayedComplex final {
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->asArray().elements.size();
+        checksum = result->asArray().size();
     }
     else if (operation == "nrank") {
         const auto result = mmcal::builtins::evaluateApproximateMatrixRank(
@@ -1325,7 +1328,7 @@ struct DisplayedComplex final {
             linearSystem, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->asArray().elements.size();
+        checksum = result->asArray().size();
     }
     else if (operation == "nnull") {
         const auto result = mmcal::builtins::evaluateApproximateNullSpace(
@@ -1337,7 +1340,7 @@ struct DisplayedComplex final {
     else if (operation == "rref") {
         const auto result = mmcal::builtins::evaluateRref(
             unary, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum = result.asArray().elements.size();
+        checksum = result.asArray().size();
     }
     else if (operation == "rank") {
         const auto result = mmcal::builtins::evaluateMatrixRank(
@@ -1347,42 +1350,42 @@ struct DisplayedComplex final {
     else if (operation == "lu") {
         const auto result = mmcal::builtins::evaluateLuDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles);
-        checksum = result.isArray() ? result.asArray().elements.size() : result.asList().elements.size();
+        checksum = result.isArray() ? result.asArray().size() : result.asList().elements.size();
     }
     else if (operation == "nlu") {
         const auto result = mmcal::builtins::evaluateApproximateLuDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->isArray() ? result->asArray().elements.size() : result->asList().elements.size();
+        checksum = result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     else if (operation == "nqr") {
         const auto result = mmcal::builtins::evaluateApproximateQrDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->isArray() ? result->asArray().elements.size() : result->asList().elements.size();
+        checksum = result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     else if (operation == "nsvd") {
         const auto result = mmcal::builtins::evaluateApproximateSingularValueDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->isArray() ? result->asArray().elements.size() : result->asList().elements.size();
+        checksum = result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     else if (operation == "neigen") {
         const auto result = mmcal::builtins::evaluateApproximateEigenvalues(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->asArray().elements.size();
+        checksum = result->asArray().size();
     }
     else if (operation == "neigensystem") {
         const auto result = mmcal::builtins::evaluateApproximateEigensystem(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result) std::abort();
-        checksum = result->isArray() ? result->asArray().elements.size() : result->asList().elements.size();
+        checksum = result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     else {
         throw std::invalid_argument("Unknown large matrix operation");

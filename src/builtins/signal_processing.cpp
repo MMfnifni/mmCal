@@ -49,7 +49,7 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         error::throwCalcError(
             error::CalcErrorType::Type,
             std::string{name} + " requires a rank-1 array");
-    return expression.asArray().elements;
+    return expression.asArray().materialize();
 }
 
 [[nodiscard]] Expr zero() {

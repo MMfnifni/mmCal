@@ -87,6 +87,7 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 | complex SVD Jacobi sweeps | `max(32, 10*n+20)` | 同上 |
 | Eigen QR sweeps without deflation | `max(256, 96*n)` | 収束しないcaseで無限反復しない |
 | dense Matrix dimension hard max | なし | `size_t`/allocation overflow検査のみ。1024級は現状practical stress regime |
+| `ArrayExpr` packed page容量 | 1024要素 | Unreleased内部実装policy。Arrayのdimension/element hard maxではなく，builder promotion costを最大1 pageへ制限する単位 |
 
 ## 6. `N` / numerical display / certified backend
 

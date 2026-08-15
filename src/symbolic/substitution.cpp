@@ -23,11 +23,19 @@ expression::Expr substituteSymbol(
     }
 
     if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        const auto entries = array.expressionEntries();
+        if (entries.empty())
+            return expression;
+        std::vector<std::size_t> indices;
         std::vector<expression::Expr> elements;
-        elements.reserve(expression.asArray().elements.size());
-        for (const expression::Expr& element : expression.asArray().elements)
-            elements.push_back(substituteSymbol(element, variable, value));
-        return expression::Expr::array(expression.asArray().shape, std::move(elements));
+        indices.reserve(entries.size());
+        elements.reserve(entries.size());
+        for (const auto& entry : entries) {
+            indices.push_back(entry.index);
+            elements.push_back(substituteSymbol(entry.expression, variable, value));
+        }
+        return expression::Expr::array(array.replacedExpressions(indices, std::move(elements)));
     }
 
     if (expression.isList()) {

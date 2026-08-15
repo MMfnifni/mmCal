@@ -45,8 +45,7 @@ struct FinishSymbolTask final {
 
 struct BuildArrayTask final {
     expression::Expr sourceExpression;
-    std::vector<std::size_t> shape;
-    std::size_t elementCount = 0;
+    std::vector<std::size_t> expressionIndices;
     const expression::OriginMap* origins = nullptr;
 };
 
@@ -164,10 +163,9 @@ void scheduleIteratorSpecArgument(
         return;
     }
 
-    tasks.emplace_back(BuildArrayTask{argument, spec->shape, spec->elements.size(), origins});
-    tasks.emplace_back(EvaluateTask{spec->elements[2], origins, depth});
-    tasks.emplace_back(EvaluateTask{spec->elements[1], origins, depth});
-    tasks.emplace_back(PushResultTask{spec->elements[0]});
+    tasks.emplace_back(BuildArrayTask{argument, {1, 2}, origins});
+    tasks.emplace_back(EvaluateTask{spec->element(2), origins, depth});
+    tasks.emplace_back(EvaluateTask{spec->element(1), origins, depth});
 }
 
 [[nodiscard]] std::vector<expression::Expr> takeResults(
@@ -472,14 +470,21 @@ expression::Expr Evaluator::evaluateMachine(
 
                         case expression::ExprKind::Array: {
                             const expression::ArrayExpr& array = current.expression.asArray();
+                            const auto entries = array.expressionEntries();
+                            if (entries.empty()) {
+                                results.push_back(current.expression);
+                                return;
+                            }
+
+                            std::vector<std::size_t> indices;
+                            indices.reserve(entries.size());
+                            for (const auto& entry : entries)
+                                indices.push_back(entry.index);
                             tasks.emplace_back(BuildArrayTask{
-                                current.expression,
-                                array.shape,
-                                array.elements.size(),
-                                current.origins
-                            });
-                            for (auto iterator = array.elements.rbegin(); iterator != array.elements.rend(); ++iterator)
-                                tasks.emplace_back(EvaluateTask{*iterator, current.origins, current.depth + 1});
+                                current.expression, std::move(indices), current.origins});
+                            for (auto iterator = entries.rbegin(); iterator != entries.rend(); ++iterator)
+                                tasks.emplace_back(EvaluateTask{
+                                    iterator->expression, current.origins, current.depth + 1});
                             return;
                         }
 
@@ -615,8 +620,12 @@ expression::Expr Evaluator::evaluateMachine(
                         resolvingSymbols_.pop_back();
                     },
                     [&](const BuildArrayTask& current) {
-                        std::vector<expression::Expr> elements = takeResults(results, current.elementCount);
-                        results.push_back(expression::rebuildEvaluatedArray(current.shape, std::move(elements)));
+                        std::vector<expression::Expr> elements = takeResults(
+                            results, current.expressionIndices.size());
+                        results.push_back(expression::rebuildEvaluatedArray(
+                            current.sourceExpression.asArray(),
+                            current.expressionIndices,
+                            std::move(elements)));
                     },
                     [&](const BuildListTask& current) {
                         std::vector<expression::Expr> elements = takeResults(results, current.elementCount);
@@ -1139,10 +1148,27 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
 
         if (current.isArray()) {
             const auto& array = current.asArray();
+            if (array.storageKind() == expression::ArrayStorageKind::DecimalApproximation) {
+                std::vector<numeric::DecimalApproximation> values;
+                values.reserve(array.size());
+                for (std::size_t i = 0; i < array.size(); ++i)
+                    values.push_back(reduceApproximationDigits(array.decimalAt(i), fractionalDigits));
+                return expression::Expr::decimalArray(array.shape, std::move(values));
+            }
+            if (array.storageKind() == expression::ArrayStorageKind::ComplexDecimalApproximation) {
+                std::vector<numeric::ComplexDecimalApproximation> values;
+                values.reserve(array.size());
+                for (std::size_t i = 0; i < array.size(); ++i) {
+                    const expression::Expr reduced = reduceApproximationDigits(
+                        array.complexDecimalAt(i), fractionalDigits);
+                    values.push_back(reduced.asComplexDecimalApproximation());
+                }
+                return expression::Expr::complexDecimalArray(array.shape, std::move(values));
+            }
             std::vector<expression::Expr> elements;
-            elements.reserve(array.elements.size());
-            for (const expression::Expr& element : array.elements)
-                elements.push_back(approximate(element));
+            elements.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i)
+                elements.push_back(approximate(array.element(i)));
             return expression::Expr::array(array.shape, std::move(elements));
         }
         if (current.isList()) {

@@ -426,9 +426,13 @@ Python generatorとRNG列そのものを一致させる目的でもない。**�
 
 の順に段階的に上げ，process memoryも同時に監視することを推奨する。
 
-巨大Matrixでtime outした結果を「算法が壊れた」と即断しない。現在はExpr / Rational objectの固定費，parser / lowering，allocationも重要な性能要因である。
+巨大Matrixでtime outした結果を「算法が壊れた」と即断しない。現在は多倍長算術，parser / lowering，allocation，working precisionも重要な性能要因である。
 
-Unreleasedのtyped-node化では，同一GCC Release/LTO-offの`--matrix-large transpose 1024 16`で旧variant版`693312 KiB`→typed-node版`299668 KiB`となり，最大RSSを約56.8%削減した。今後のstorage refactorも同じく，一つずつ変更してこの負荷でRSSを再測定する。
+Unreleasedの第一段階typed-node化では，同一GCC Release/LTO-offの`--matrix-large transpose 1024 16`で旧variant版`693312 KiB`→typed-node版`299668 KiB`となり，最大RSSを約56.8%削減した。第二段階では`ArrayExpr`を固定1024要素のimmutable packed page + shape/offset/stridesへ移行し，benchmark fixtureも`ArrayBuilder`からexact Rationalを直接構築する。これにより同負荷は最大RSS約`136576 KiB`（133.4 MiB），transpose本体約0.059 msとなった。transposeはデータcopyではなくlayout view生成なので，旧実装のtranspose timingと算法量そのものが異なる点に注意する。
+
+`ArrayBuilder`はpromotionを現在page内へ限定する。1,048,576要素の最後だけsymbolic値にした専用測定でもall-integer版とほぼ同じ約0.30 s / 約69.8 MiBで，先行pageはInteger packedのまま，最終pageだけGenericとなった。これは「最後の1要素で全ArrayをGenericへ作り直す」実装を避けるための設計である。
+
+巨大text inputは別測定する。13.63 MBの1024×1024・10桁decimal literalをCLIへ渡して`dimensions[...]`だけを評価した現Unreleased測定は約4.55 s / 最大RSS `441564 KiB`（431 MiB）。v1.5.2文書の約14.16 MB / 10.9 s / 1.99 GBとは入力textが完全同一ではないため厳密なA/B値には使わない。
 
 ---
 

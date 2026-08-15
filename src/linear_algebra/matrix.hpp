@@ -15,9 +15,9 @@ public:
     [[nodiscard]] std::size_t rows() const noexcept;
     [[nodiscard]] std::size_t columns() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
-    [[nodiscard]] const expression::Expr& operator()(
-        std::size_t row, std::size_t column) const noexcept;
-    [[nodiscard]] const std::vector<expression::Expr>& elements() const noexcept;
+    [[nodiscard]] expression::Expr operator()(
+        std::size_t row, std::size_t column) const;
+    [[nodiscard]] const expression::ArrayExpr& array() const noexcept;
 
 private:
     const expression::ArrayExpr* array_ = nullptr;

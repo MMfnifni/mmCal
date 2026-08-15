@@ -140,8 +140,9 @@ using numeric::Rational;
             for (const Expr& argument : current.asCall().arguments)
                 pending.push_back(argument);
         }
-        else if (current.isArray()) {
-            for (const Expr& element : current.asArray().elements)
+        else if (current.isArray()
+            && current.asArray().storageKind() == expression::ArrayStorageKind::Generic) {
+            for (const Expr& element : current.asArray().storedExpressions())
                 pending.push_back(element);
         }
         else if (current.isList()) {
@@ -244,12 +245,17 @@ using numeric::Rational;
         return integer(0);
 
     if (expression.isArray()) {
-        std::vector<Expr> elements;
-        elements.reserve(expression.asArray().elements.size());
-        for (const Expr& element : expression.asArray().elements)
-            elements.push_back(derivativeCore(
-                element, variable, builtins, mathematics, angles));
-        return Expr::array(expression.asArray().shape, std::move(elements));
+        const auto& array = expression.asArray();
+        expression::ArrayBuilder builder;
+        builder.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            if (array.storedKindAt(i) == expression::ArrayStorageKind::Generic)
+                builder.append(derivativeCore(
+                    array.expressionAt(i), variable, builtins, mathematics, angles));
+            else
+                builder.append(numeric::BigInt{0});
+        }
+        return Expr::array(builder.finish(array.shape));
     }
     if (expression.isList()) {
         std::vector<Expr> elements;

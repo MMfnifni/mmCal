@@ -89,8 +89,9 @@ private:
     std::size_t precisionBits,
     const approximation::CertifiedEvaluator& certified) {
     std::vector<ComplexInterval> values;
-    values.reserve(array.elements.size());
-    for (const Expr& element : array.elements) {
+    values.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr element = array.element(i);
         const auto enclosed = approximation::encloseComplexExpression(
             element, precisionBits, certified);
         if (!enclosed)
@@ -362,7 +363,7 @@ std::optional<Expr> approximateInverse(
             throw std::domain_error("Matrix is singular");
 
         std::vector<ComplexInterval> output;
-        output.reserve(source.elements.size());
+        output.reserve(source.size());
         for (std::size_t row = 0; row < n; ++row)
             for (std::size_t column = 0; column < n; ++column)
                 output.push_back(reduced.matrix(row, n + column));
@@ -390,7 +391,7 @@ std::optional<Expr> approximateRref(
         const RrefResult reduced = intervalRref(std::move(*matrix), bits, source.shape[1]);
 
         std::vector<ComplexInterval> output;
-        output.reserve(source.elements.size());
+        output.reserve(source.size());
         for (std::size_t row = 0; row < reduced.matrix.rows(); ++row)
             for (std::size_t column = 0; column < reduced.matrix.columns(); ++column)
                 output.push_back(reduced.matrix(row, column));

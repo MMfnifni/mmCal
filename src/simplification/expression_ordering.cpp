@@ -33,8 +33,8 @@ using expression::Expr;
         for (const std::size_t dimension : expression.asArray().shape)
             key += std::to_string(dimension) + ',';
         key.push_back(':');
-        for (const Expr& element : expression.asArray().elements)
-            key += legacyOrderKey(element) + ';';
+        for (std::size_t i = 0; i < expression.asArray().size(); ++i)
+            key += legacyOrderKey(expression.asArray().element(i)) + ';';
         return key;
     }
     case expression::ExprKind::List: {
@@ -184,9 +184,9 @@ void appendExpr(std::string& output, const Expr& expression) {
         appendUnsigned(output, expression.asArray().shape.size());
         for (const std::size_t dimension : expression.asArray().shape)
             appendUnsigned(output, dimension);
-        appendUnsigned(output, expression.asArray().elements.size());
-        for (const Expr& element : expression.asArray().elements)
-            appendExpr(output, element);
+        appendUnsigned(output, expression.asArray().size());
+        for (std::size_t i = 0; i < expression.asArray().size(); ++i)
+            appendExpr(output, expression.asArray().element(i));
         break;
     case expression::ExprKind::List:
         appendUnsigned(output, expression.asList().elements.size());

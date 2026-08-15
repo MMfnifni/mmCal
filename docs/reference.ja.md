@@ -169,7 +169,7 @@ f[x]
 {{1,2},{3,4}}
 ```
 
-内部ではshapeとflatten済みelementsを持つ`ArrayExpr`。
+内部ではdense `ArrayExpr`として扱う。Unreleased実装ではnumeric値をimmutableなpacked pageへ保持し，shape / offset / stridesを別に持つため，transposeや一部reshape/sliceはbackingを共有できる。これは内部最適化であり，ユーザーからは通常のArrayとして見える。
 
 ## 4.3 変数・ユーザー函数
 
@@ -982,8 +982,8 @@ corr[{1,2,3},{2,4,6}] -> 1
 
 ## 17.1 Array基盤
 
-Arrayはrankごとに別Value型を増やさず、**shape + row-major flat storage**の共通表現を使う。
-公開リテラルは従来どおり `{...}` / `{{...},...}` とし、Matrix演算へ渡せるArrayは常にdense rectangularである。
+Arrayはrankごとに別Value型を増やさず，共通のdense `ArrayExpr`を使う。Unreleasedではphysical storageをimmutable packed page，logical layoutをshape / offset / stridesへ分離している。
+公開リテラルは従来どおり `{...}` / `{{...},...}` とし，Matrix演算へ渡せるArrayは常にdense rectangularである。
 
 ```text
 dimensions[A]
@@ -1009,7 +1009,7 @@ at[{{1,2},{3,4}},1,0] -> 3
 reshape[{1,2,3,4},{2,2}] -> {{1,2},{3,4}}
 ```
 
-`{...}`はユーザー意味論として一般の有限brace containerである。child shapeが全て一致する矩形値は内部でdense `ArrayExpr`へ自動昇格し，`{{1,2},{3}}`や分解結果の`{Q,R}`のようにshapeが揃わない値は一般braceのまま保持する。一般brace自体は正常な値であり，Matrix函数へ渡した時点で矩形性監査が入り，非矩形ならWarningを出して未評価保持する。`dimensions` / `arrayRank`は非矩形値では全childに共通するrectangular prefixだけを返す。
+`{...}`はユーザー意味論として一般の有限brace containerである。child shapeが全て一致する矩形値は内部でdense `ArrayExpr`へ自動昇格し，`{{1,2},{3}}`や分解結果の`{Q,R}`のようにshapeが揃わない値は一般braceのまま保持する。numeric dense Arrayは内部でInteger / Rational / Number等のpacked pageを共有する場合があるが，storage種別はユーザー意味論へ露出しない。一般brace自体は正常な値であり，Matrix函数へ渡した時点で矩形性監査が入り，非矩形ならWarningを出して未評価保持する。`dimensions` / `arrayRank`は非矩形値では全childに共通するrectangular prefixだけを返す。
 
 ```text
 dimensions[{{1,2},{3}}] -> {2}

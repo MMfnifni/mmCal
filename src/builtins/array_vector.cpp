@@ -42,9 +42,13 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const ArrayExpr& vector,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
-    for (const Expr& item : vector.elements)
+    if (vector.hasExactRealStorage())
+        return true;
+    for (std::size_t i = 0; i < vector.size(); ++i) {
+        const Expr item = vector.element(i);
         if (!mathematics::inferValueFacts(item, registry, mathematics).isProvablyReal())
             return false;
+    }
     return true;
 }
 
@@ -59,10 +63,16 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireSameLength(a, b, "vdot");
+    if (a.hasExactNumberStorage() && b.hasExactNumberStorage()) {
+        Number result{BigInt{0}};
+        for (std::size_t i = 0; i < a.size(); ++i)
+            result += a.exactNumber(i) * b.exactNumber(i);
+        return Expr{std::move(result)};
+    }
     std::vector<Expr> terms;
-    terms.reserve(a.elements.size());
-    for (std::size_t i = 0; i < a.elements.size(); ++i)
-        terms.push_back(exact::multiply({a.elements[i], b.elements[i]}, registry, mathematics, angles));
+    terms.reserve(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+        terms.push_back(exact::multiply({a.element(i), b.element(i)}, registry, mathematics, angles));
     return exact::add(std::move(terms), registry, mathematics, angles);
 }
 
@@ -72,11 +82,13 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     if (!provablyRealVector(vector, registry, mathematics))
-        return Expr::call(registry.symbol(BuiltinId::VectorNorm), {vectorExpr(vector.elements)});
+        return Expr::call(registry.symbol(BuiltinId::VectorNorm), {vectorExpr(vector.materialize())});
     std::vector<Expr> squares;
-    squares.reserve(vector.elements.size());
-    for (const Expr& item : vector.elements)
+    squares.reserve(vector.size());
+    for (std::size_t i = 0; i < vector.size(); ++i) {
+        const Expr item = vector.element(i);
         squares.push_back(exact::multiply({item, item}, registry, mathematics, angles));
+    }
     return exact::sqrt(exact::add(std::move(squares), registry, mathematics, angles),
         registry, mathematics, angles);
 }
@@ -87,10 +99,17 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireSameLength(a, b, "vector distance");
+    if (a.hasExactNumberStorage() && b.hasExactNumberStorage()) {
+        std::vector<Number> values;
+        values.reserve(a.size());
+        for (std::size_t i = 0; i < a.size(); ++i)
+            values.push_back(a.exactNumber(i) - b.exactNumber(i));
+        return Expr::numberArray({a.size()}, std::move(values));
+    }
     std::vector<Expr> result;
-    result.reserve(a.elements.size());
-    for (std::size_t i = 0; i < a.elements.size(); ++i)
-        result.push_back(exact::subtract(a.elements[i], b.elements[i], registry, mathematics, angles));
+    result.reserve(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+        result.push_back(exact::subtract(a.element(i), b.element(i), registry, mathematics, angles));
     return vectorExpr(std::move(result));
 }
 
@@ -99,10 +118,19 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
+    if (vector.hasExactNumberStorage() && scale.isNumber()) {
+        std::vector<Number> values;
+        values.reserve(vector.size());
+        for (std::size_t i = 0; i < vector.size(); ++i)
+            values.push_back(vector.exactNumber(i) * scale.asNumber());
+        return Expr::numberArray({vector.size()}, std::move(values));
+    }
     std::vector<Expr> result;
-    result.reserve(vector.elements.size());
-    for (const Expr& item : vector.elements)
+    result.reserve(vector.size());
+    for (std::size_t i = 0; i < vector.size(); ++i) {
+        const Expr item = vector.element(i);
         result.push_back(exact::multiply({item, scale}, registry, mathematics, angles));
+    }
     return vectorExpr(std::move(result));
 }
 
@@ -115,7 +143,7 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     if (!provablyRealVector(a, registry, mathematics)
         || !provablyRealVector(b, registry, mathematics))
         return Expr::call(registry.symbol(BuiltinId::VectorProject),
-            {vectorExpr(a.elements), vectorExpr(b.elements)});
+            {vectorExpr(a.materialize()), vectorExpr(b.materialize())});
     Expr denominator = dot(b, b, registry, mathematics, angles);
     if (denominator.isNumber() && denominator.asNumber().isZero())
         error::throwCalcError(error::CalcErrorType::Domain,
@@ -131,12 +159,12 @@ Expr evaluateIdentity(std::span<const Expr> arguments) {
     const std::size_t n = detail::requireSize(arguments[0], "identity");
     const std::size_t shape[] = {n, n};
     const std::size_t count = expression::arrayElementCount(shape);
-    std::vector<Expr> elements;
+    std::vector<BigInt> elements;
     elements.reserve(count);
     for (std::size_t r = 0; r < n; ++r)
         for (std::size_t c = 0; c < n; ++c)
-            elements.push_back(integer(r == c ? 1 : 0));
-    return Expr::array({n, n}, std::move(elements));
+            elements.emplace_back(r == c ? 1 : 0);
+    return Expr::integerArray({n, n}, std::move(elements));
 }
 
 Expr evaluateZeros(std::span<const Expr> arguments) {
@@ -144,7 +172,7 @@ Expr evaluateZeros(std::span<const Expr> arguments) {
     const std::size_t cols = detail::requireSize(arguments[1], "zeros");
     const std::size_t shape[] = {rows, cols};
     const std::size_t count = expression::arrayElementCount(shape);
-    return Expr::array({rows, cols}, std::vector<Expr>(count, integer(0)));
+    return Expr::integerArray({rows, cols}, std::vector<BigInt>(count, BigInt{0}));
 }
 
 Expr evaluateMatrixGet(std::span<const Expr> arguments) {
@@ -153,7 +181,7 @@ Expr evaluateMatrixGet(std::span<const Expr> arguments) {
     const std::size_t col = detail::requireSize(arguments[2], "mget");
     if (row >= matrix.shape[0] || col >= matrix.shape[1])
         error::throwCalcError(error::CalcErrorType::Domain, "mget index is out of range");
-    return matrix.elements[row * matrix.shape[1] + col];
+    return matrix.element(row * matrix.shape[1] + col);
 }
 
 Expr evaluateRows(std::span<const Expr> arguments) {
@@ -172,7 +200,7 @@ Expr evaluateDiag(std::span<const Expr> arguments) {
     std::vector<Expr> diagonal;
     diagonal.reserve(count);
     for (std::size_t i = 0; i < count; ++i)
-        diagonal.push_back(matrix.elements[i * matrix.shape[1] + i]);
+        diagonal.push_back(matrix.element(i * matrix.shape[1] + i));
     return vectorExpr(std::move(diagonal));
 }
 
@@ -184,10 +212,17 @@ Expr evaluateVectorAdd(
     const ArrayExpr& a = detail::requireVector(arguments[0], "vadd");
     const ArrayExpr& b = detail::requireVector(arguments[1], "vadd");
     requireSameLength(a, b, "vadd");
+    if (a.hasExactNumberStorage() && b.hasExactNumberStorage()) {
+        std::vector<Number> values;
+        values.reserve(a.size());
+        for (std::size_t i = 0; i < a.size(); ++i)
+            values.push_back(a.exactNumber(i) + b.exactNumber(i));
+        return Expr::numberArray({a.size()}, std::move(values));
+    }
     std::vector<Expr> result;
-    result.reserve(a.elements.size());
-    for (std::size_t i = 0; i < a.elements.size(); ++i)
-        result.push_back(exact::add({a.elements[i], b.elements[i]}, registry, mathematics, angles));
+    result.reserve(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
+        result.push_back(exact::add({a.element(i), b.element(i)}, registry, mathematics, angles));
     return vectorExpr(std::move(result));
 }
 
@@ -229,12 +264,12 @@ Expr evaluateVectorCross(
     if (a.shape[0] != 3 || b.shape[0] != 3)
         error::throwCalcError(error::CalcErrorType::Domain, "vcross requires two 3D vectors");
     return vectorExpr({
-        exact::subtract(exact::multiply({a.elements[1], b.elements[2]}, registry, mathematics, angles),
-            exact::multiply({a.elements[2], b.elements[1]}, registry, mathematics, angles), registry, mathematics, angles),
-        exact::subtract(exact::multiply({a.elements[2], b.elements[0]}, registry, mathematics, angles),
-            exact::multiply({a.elements[0], b.elements[2]}, registry, mathematics, angles), registry, mathematics, angles),
-        exact::subtract(exact::multiply({a.elements[0], b.elements[1]}, registry, mathematics, angles),
-            exact::multiply({a.elements[1], b.elements[0]}, registry, mathematics, angles), registry, mathematics, angles)
+        exact::subtract(exact::multiply({a.element(1), b.element(2)}, registry, mathematics, angles),
+            exact::multiply({a.element(2), b.element(1)}, registry, mathematics, angles), registry, mathematics, angles),
+        exact::subtract(exact::multiply({a.element(2), b.element(0)}, registry, mathematics, angles),
+            exact::multiply({a.element(0), b.element(2)}, registry, mathematics, angles), registry, mathematics, angles),
+        exact::subtract(exact::multiply({a.element(0), b.element(1)}, registry, mathematics, angles),
+            exact::multiply({a.element(1), b.element(0)}, registry, mathematics, angles), registry, mathematics, angles)
     });
 }
 
@@ -257,10 +292,10 @@ Expr evaluateVectorManhattan(
     if (!provablyRealVector(a, registry, mathematics) || !provablyRealVector(b, registry, mathematics))
         return Expr::call(registry.symbol(BuiltinId::VectorManhattan), {arguments[0], arguments[1]});
     std::vector<Expr> terms;
-    terms.reserve(a.elements.size());
-    for (std::size_t i = 0; i < a.elements.size(); ++i)
+    terms.reserve(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i)
         terms.push_back(exact::call(BuiltinId::Abs,
-            {exact::subtract(a.elements[i], b.elements[i], registry, mathematics, angles)},
+            {exact::subtract(a.element(i), b.element(i), registry, mathematics, angles)},
             registry, mathematics, angles));
     return exact::add(std::move(terms), registry, mathematics, angles);
 }
@@ -352,7 +387,7 @@ Expr evaluateVectorSum(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     const ArrayExpr& vector = detail::requireVector(arguments[0], "vsum");
-    return exact::add(vector.elements, registry, mathematics, angles);
+    return exact::add(vector.materialize(), registry, mathematics, angles);
 }
 
 } // namespace mmcal::builtins

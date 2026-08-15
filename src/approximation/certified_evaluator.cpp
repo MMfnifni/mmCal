@@ -43,32 +43,31 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
 
 [[nodiscard]] bool exceedsCertifiedExpressionDepth(const Expr& root) {
     struct Pending final {
-        const Expr* expression = nullptr;
+        Expr expression;
         std::size_t depth = 0;
     };
 
     std::vector<Pending> pending;
-    pending.push_back(Pending{&root, 1});
+    pending.push_back(Pending{root, 1});
     while (!pending.empty()) {
-        const Pending current = pending.back();
+        Pending current = std::move(pending.back());
         pending.pop_back();
         if (current.depth > maximumCertifiedExpressionDepth)
             return true;
 
-        if (current.expression->isCall()) {
-            const auto& arguments = current.expression->asCall().arguments;
+        if (current.expression.isCall()) {
+            const auto& arguments = current.expression.asCall().arguments;
             for (const Expr& argument : arguments)
-                pending.push_back(Pending{&argument, current.depth + 1});
+                pending.push_back(Pending{argument, current.depth + 1});
         }
-        else if (current.expression->isArray()) {
-            const auto& elements = current.expression->asArray().elements;
-            for (const Expr& element : elements)
-                pending.push_back(Pending{&element, current.depth + 1});
+        else if (current.expression.isArray()) {
+            for (const Expr& element : current.expression.asArray().storedExpressions())
+                pending.push_back(Pending{element, current.depth + 1});
         }
-        else if (current.expression->isList()) {
-            const auto& elements = current.expression->asList().elements;
+        else if (current.expression.isList()) {
+            const auto& elements = current.expression.asList().elements;
             for (const Expr& element : elements)
-                pending.push_back(Pending{&element, current.depth + 1});
+                pending.push_back(Pending{element, current.depth + 1});
         }
     }
     return false;

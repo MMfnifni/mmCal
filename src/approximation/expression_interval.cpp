@@ -46,9 +46,33 @@ void collectApproximationDigits(
         if (currentDigits && *currentDigits != 0)
             digits = digits ? std::min(*digits, *currentDigits) : currentDigits;
 
-        if (current.isArray())
-            for (const expression::Expr& element : current.asArray().elements)
-                pending.push_back(&element);
+        if (current.isArray()) {
+            const auto& array = current.asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                switch (array.storedKindAt(i)) {
+                case expression::ArrayStorageKind::DecimalApproximation: {
+                    const auto valueDigits = array.decimalAt(i).requestedFractionalDigits();
+                    if (valueDigits != 0)
+                        digits = digits ? std::min(*digits, valueDigits) : valueDigits;
+                    break;
+                }
+                case expression::ArrayStorageKind::ComplexDecimalApproximation: {
+                    const auto& value = array.complexDecimalAt(i);
+                    const auto valueDigits = std::min(
+                        value.real().requestedFractionalDigits(),
+                        value.imaginary().requestedFractionalDigits());
+                    if (valueDigits != 0)
+                        digits = digits ? std::min(*digits, valueDigits) : valueDigits;
+                    break;
+                }
+                case expression::ArrayStorageKind::Generic:
+                    pending.push_back(&array.expressionAt(i));
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
         else if (current.isList())
             for (const expression::Expr& element : current.asList().elements)
                 pending.push_back(&element);

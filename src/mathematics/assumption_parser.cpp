@@ -69,8 +69,9 @@ void appendAssumptions(
             error::throwCalcError(
                 error::CalcErrorType::Type,
                 "Assumptions array must be one-dimensional");
-        for (const Expr& item : expression.asArray().elements)
-            appendAssumptions(item, result, builtins, mathematics);
+        const auto& array = expression.asArray();
+        for (std::size_t i = 0; i < array.size(); ++i)
+            appendAssumptions(array.element(i), result, builtins, mathematics);
         return;
     }
 

@@ -24,16 +24,16 @@ std::size_t MatrixView::columns() const noexcept {
 }
 
 std::size_t MatrixView::size() const noexcept {
-    return array_->elements.size();
+    return array_->size();
 }
 
-const expression::Expr& MatrixView::operator()(
-    std::size_t row, std::size_t column) const noexcept {
-    return array_->elements[row * columns() + column];
+expression::Expr MatrixView::operator()(
+    std::size_t row, std::size_t column) const {
+    return array_->element(row * columns() + column);
 }
 
-const std::vector<expression::Expr>& MatrixView::elements() const noexcept {
-    return array_->elements;
+const expression::ArrayExpr& MatrixView::array() const noexcept {
+    return *array_;
 }
 
 MatrixBuffer::MatrixBuffer(
@@ -46,7 +46,7 @@ MatrixBuffer::MatrixBuffer(
 }
 
 MatrixBuffer::MatrixBuffer(const MatrixView& source)
-    : rows_(source.rows()), columns_(source.columns()), elements_(source.elements()) {}
+    : rows_(source.rows()), columns_(source.columns()), elements_(source.array().materialize()) {}
 
 MatrixBuffer::MatrixBuffer(
     std::size_t rows,

@@ -52,7 +52,7 @@ public:
     explicit NumberMatrix(const MatrixView& source)
         : NumberMatrix(source.rows(), source.columns()) {
         for (std::size_t i = 0; i < values_.size(); ++i)
-            values_[i] = source.elements()[i].asNumber();
+            values_[i] = source.array().exactNumber(i);
     }
 
     [[nodiscard]] std::size_t rows() const noexcept { return rows_; }
@@ -79,10 +79,7 @@ private:
 };
 
 [[nodiscard]] bool allExactRealNumbers(const MatrixView& matrix) noexcept {
-    return std::all_of(matrix.elements().begin(), matrix.elements().end(),
-        [](const Expr& value) {
-            return value.isNumber() && value.asNumber().isReal();
-        });
+    return matrix.array().hasExactRealStorage();
 }
 
 [[nodiscard]] Expr packedNumberMatrices(
@@ -423,8 +420,9 @@ private:
     std::size_t bits,
     const approximation::CertifiedEvaluator& certified) {
     std::vector<ComplexInterval> values;
-    values.reserve(array.elements.size());
-    for (const Expr& element : array.elements) {
+    values.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr element = array.element(i);
         const auto value = approximation::encloseComplexExpression(element, bits, certified);
         if (!value)
             return std::nullopt;

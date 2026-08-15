@@ -1,5 +1,6 @@
 // Array shapeと評価後flattenの共通処理
 #include "array_utils.hpp"
+#include <algorithm>
 
 #include <limits>
 #include <stdexcept>
@@ -27,6 +28,25 @@ Expr rebuildEvaluatedArray(
     std::vector<Expr> evaluatedElements) {
     // Expr::arrayをArray生成の唯一の正規化境界とし、Evaluator固有の別規則を持たない。
     return Expr::array(std::move(outerShape), std::move(evaluatedElements));
+}
+
+Expr rebuildEvaluatedArray(
+    const ArrayExpr& source,
+    std::span<const std::size_t> replacedIndices,
+    std::vector<Expr> evaluatedElements) {
+    if (replacedIndices.size() != evaluatedElements.size())
+        throw std::invalid_argument("Array evaluation replacement count does not match");
+
+    const bool changesShape = std::any_of(
+        evaluatedElements.begin(), evaluatedElements.end(),
+        [](const Expr& value) { return value.isArray() || value.isList(); });
+    if (!changesShape)
+        return Expr::array(source.replacedExpressions(replacedIndices, std::move(evaluatedElements)));
+
+    std::vector<Expr> materialized = source.materialize();
+    for (std::size_t i = 0; i < replacedIndices.size(); ++i)
+        materialized[replacedIndices[i]] = std::move(evaluatedElements[i]);
+    return Expr::array(source.shape, std::move(materialized));
 }
 
 Expr braceValue(std::vector<Expr> elements) {

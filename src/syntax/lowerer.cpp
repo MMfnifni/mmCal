@@ -71,7 +71,7 @@ using numeric::RealNumber;
     return exponent;
 }
 
-[[nodiscard]] Expr exactDecimal(std::string_view text, source::SourceSpan span) {
+[[nodiscard]] Number exactDecimal(std::string_view text, source::SourceSpan span) {
     const std::size_t exponentMark = text.find_first_of("eE");
     const std::string_view mantissa = text.substr(0, exponentMark);
 
@@ -116,10 +116,83 @@ using numeric::RealNumber;
         denominatorPower -= exponent;
 
     if (denominatorPower == 0)
-        return Expr{Number{std::move(numerator)}};
+        return Number{std::move(numerator)};
 
     const BigInt denominator = numeric::pow(BigInt{10}, denominatorPower);
-    return Expr{Number{Rational{std::move(numerator), denominator}}};
+    return Number{Rational{std::move(numerator), denominator}};
+}
+
+[[nodiscard]] Number parseNumberLiteral(
+    const NumberLiteralSyntax& number,
+    source::SourceSpan span) {
+    const std::string_view text = number.text;
+
+    try {
+        const std::size_t radixMark = text.find('#');
+        if (radixMark != std::string_view::npos) {
+            const unsigned radix = parseRadix(text.substr(0, radixMark), span);
+            const std::string_view digits = text.substr(radixMark + 1);
+            if (digits.find('.') == std::string_view::npos)
+                return Number{BigInt::parse(digits, radix)};
+            return Number{Rational::parse(digits, radix)};
+        }
+
+        if (text.size() > 2 && text[0] == '0') {
+            unsigned radix = 0;
+            switch (text[1]) {
+            case 'b':
+            case 'B': radix = 2; break;
+            case 'o':
+            case 'O': radix = 8; break;
+            case 'x':
+            case 'X': radix = 16; break;
+            default: break;
+            }
+            if (radix != 0)
+                return Number{BigInt::parse(text.substr(2), radix)};
+        }
+        return exactDecimal(text, span);
+    }
+    catch (const error::CalcError&) {
+        throw;
+    }
+    catch (const std::overflow_error& exception) {
+        error::throwCalcError(error::CalcErrorType::Overflow, exception.what(), span);
+    }
+    catch (const std::exception& exception) {
+        error::throwCalcError(error::CalcErrorType::Syntax, exception.what(), span);
+    }
+}
+
+// 構文上矩形なbraceだけを先に判定する。leafの意味評価は行わない。
+[[nodiscard]] bool rectangularArrayShape(
+    const ArrayLiteralSyntax& array,
+    std::vector<std::size_t>& shape) {
+    shape = {array.elements.size()};
+    if (array.elements.empty())
+        return true;
+
+    const auto* firstChild = std::get_if<ArrayLiteralSyntax>(&array.elements.front()->data);
+    if (!firstChild) {
+        for (std::size_t i = 1; i < array.elements.size(); ++i)
+            if (std::holds_alternative<ArrayLiteralSyntax>(array.elements[i]->data))
+                return false;
+        return true;
+    }
+
+    std::vector<std::size_t> childShape;
+    if (!rectangularArrayShape(*firstChild, childShape))
+        return false;
+    for (std::size_t i = 1; i < array.elements.size(); ++i) {
+        const auto* child = std::get_if<ArrayLiteralSyntax>(&array.elements[i]->data);
+        if (!child)
+            return false;
+        std::vector<std::size_t> currentShape;
+        if (!rectangularArrayShape(*child, currentShape) || currentShape != childShape)
+            return false;
+    }
+    shape.insert(shape.end(), childShape.begin(), childShape.end());
+    return true;
 }
 
 [[nodiscard]] std::string decodeString(
@@ -336,52 +409,7 @@ Expr Lowerer::lowerNode(
 Expr Lowerer::lowerNumber(
     const NumberLiteralSyntax& number,
     source::SourceSpan span) const {
-    const std::string_view text = number.text;
-
-    try {
-        const std::size_t radixMark = text.find('#');
-        if (radixMark != std::string_view::npos) {
-            const unsigned radix = parseRadix(text.substr(0, radixMark), span);
-            const std::string_view digits = text.substr(radixMark + 1);
-            if (digits.find('.') == std::string_view::npos)
-                return Expr{Number{BigInt::parse(digits, radix)}};
-            return Expr{Number{Rational::parse(digits, radix)}};
-        }
-
-        if (text.size() > 2 && text[0] == '0') {
-            unsigned radix = 0;
-            switch (text[1]) {
-            case 'b':
-            case 'B':
-                radix = 2;
-                break;
-            case 'o':
-            case 'O':
-                radix = 8;
-                break;
-            case 'x':
-            case 'X':
-                radix = 16;
-                break;
-            default:
-                break;
-            }
-
-            if (radix != 0)
-                return Expr{Number{BigInt::parse(text.substr(2), radix)}};
-        }
-
-        return exactDecimal(text, span);
-    }
-    catch (const error::CalcError&) {
-        throw;
-    }
-    catch (const std::overflow_error& exception) {
-        error::throwCalcError(error::CalcErrorType::Overflow, exception.what(), span);
-    }
-    catch (const std::exception& exception) {
-        error::throwCalcError(error::CalcErrorType::Syntax, exception.what(), span);
-    }
+    return Expr{parseNumberLiteral(number, span)};
 }
 
 Expr Lowerer::lowerString(
@@ -418,13 +446,36 @@ Expr Lowerer::lowerArray(
     const ArrayLiteralSyntax& array,
     source::SourceSpan span,
     expression::OriginMap* origins) const {
-    std::vector<Expr> elements;
-    elements.reserve(array.elements.size());
-    for (const SyntaxNodePtr& element : array.elements)
-        elements.push_back(lowerNode(*element, origins));
-
     try {
-        // {}は一般brace値。矩形ならdense Arrayへ最適化し，非矩形ならListとして合法に保持する。
+        std::vector<std::size_t> shape;
+        if (rectangularArrayShape(array, shape)) {
+            expression::ArrayBuilder builder;
+            builder.reserve(expression::arrayElementCount(shape));
+
+            const auto appendLeaves = [&](auto&& self, const ArrayLiteralSyntax& current) -> void {
+                for (const SyntaxNodePtr& element : current.elements) {
+                    if (const auto* child = std::get_if<ArrayLiteralSyntax>(&element->data)) {
+                        self(self, *child);
+                        continue;
+                    }
+                    // 数値literalはExpr nodeを経由せずpacked pageへ直接入れる。
+                    if (const auto* number = std::get_if<NumberLiteralSyntax>(&element->data)) {
+                        builder.append(parseNumberLiteral(*number, element->span));
+                        continue;
+                    }
+                    builder.append(lowerNode(*element, origins));
+                }
+            };
+            appendLeaves(appendLeaves, array);
+            return Expr::array(builder.finish(std::move(shape)));
+        }
+
+        std::vector<Expr> elements;
+        elements.reserve(array.elements.size());
+        for (const SyntaxNodePtr& element : array.elements)
+            elements.push_back(lowerNode(*element, origins));
+
+        // ragged / scalar-Array混在は従来どおり一般brace Listとして保持する。
         return expression::braceValue(std::move(elements));
     }
     catch (const std::length_error& exception) {

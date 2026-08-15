@@ -351,8 +351,28 @@ void appendArrayDimension(
 
         const std::size_t elementOffset = offset + i * blockSize;
 
-        if (dimension + 1 == array.shape.size())
-            appendExpr(output, array.elements[elementOffset], radix, precedenceLowest);
+        if (dimension + 1 == array.shape.size()) {
+            switch (array.storedKindAt(elementOffset)) {
+            case expression::ArrayStorageKind::Integer:
+                output += array.integerAt(elementOffset).toString(radix);
+                break;
+            case expression::ArrayStorageKind::Rational:
+                output += array.rationalAt(elementOffset).toString(radix);
+                break;
+            case expression::ArrayStorageKind::Number:
+                appendNumber(output, array.numberAt(elementOffset), radix, precedenceLowest);
+                break;
+            case expression::ArrayStorageKind::DecimalApproximation:
+                output += array.decimalAt(elementOffset).text();
+                break;
+            case expression::ArrayStorageKind::ComplexDecimalApproximation:
+                output += array.complexDecimalAt(elementOffset).text();
+                break;
+            case expression::ArrayStorageKind::Generic:
+                appendExpr(output, array.expressionAt(elementOffset), radix, precedenceLowest);
+                break;
+            }
+        }
         else
             appendArrayDimension(output, array, dimension + 1, elementOffset, radix);
     }

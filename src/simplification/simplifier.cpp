@@ -1628,8 +1628,10 @@ struct PositiveIntegerPower final {
             continue;
 
         if (!current.childrenDone) {
-            if (!current.expression.isCall() && !current.expression.isArray()
-                && !current.expression.isList()) {
+            if ((!current.expression.isCall() && !current.expression.isArray()
+                    && !current.expression.isList())
+                || (current.expression.isArray()
+                    && !current.expression.asArray().hasStoredExpressions())) {
                 completed.emplace(current.expression.identity(), current.expression);
                 continue;
             }
@@ -1642,7 +1644,7 @@ struct PositiveIntegerPower final {
                         stack.push_back(Frame{*iterator, false});
             }
             else if (current.expression.isArray()) {
-                const auto& elements = current.expression.asArray().elements;
+                const auto elements = current.expression.asArray().storedExpressions();
                 for (auto iterator = elements.rbegin(); iterator != elements.rend(); ++iterator)
                     if (completed.find(iterator->identity()) == completed.end())
                         stack.push_back(Frame{*iterator, false});
@@ -1666,11 +1668,17 @@ struct PositiveIntegerPower final {
             rebuilt = localRewrite(rebuilt, context);
         }
         else if (current.expression.isArray()) {
+            const auto& array = current.expression.asArray();
+            const auto entries = array.expressionEntries();
+            std::vector<std::size_t> indices;
             std::vector<Expr> elements;
-            elements.reserve(current.expression.asArray().elements.size());
-            for (const Expr& child : current.expression.asArray().elements)
-                elements.push_back(completed.at(child.identity()));
-            rebuilt = Expr::array(current.expression.asArray().shape, std::move(elements));
+            indices.reserve(entries.size());
+            elements.reserve(entries.size());
+            for (const auto& entry : entries) {
+                indices.push_back(entry.index);
+                elements.push_back(completed.at(entry.expression.identity()));
+            }
+            rebuilt = Expr::array(array.replacedExpressions(indices, std::move(elements)));
         }
         else if (current.expression.isList()) {
             std::vector<Expr> elements;

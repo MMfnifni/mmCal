@@ -15,6 +15,12 @@
 - fuzzerのcase間初期化を`KernelSession::resetForIndependentEvaluation()`へ分離し，定義・履歴・入力番号・diagnosticを破棄しつつRNG streamと角度設定を保持。長時間loopでsession履歴を蓄積せず，`reset()`のentropy reseedも回避
 - `Expr::Node`の最大payload依存`std::variant`を廃止し，`ExprKind` header + kind別typed payloadへ単独refactor。公開`Expr` API，node identity，structural equalityは維持
 - 同一GCC Release/LTO-offの`--matrix-large transpose 1024 16`で最大RSSを旧variant版`693312 KiB`（約677.1 MiB）からtyped-node版`299668 KiB`（約292.6 MiB）へ削減し，約56.8% / 384.4 MiB削減を確認
+- dense `ArrayExpr`の永続表現を固定1024要素pageのimmutable shared backingへ変更し，Integer / Rational / Number / DecimalApproximation / ComplexDecimalApproximation / Genericをpage単位でpacked保持。Array全体は従来どおり単一の`ExprKind::Array`として扱う
+- `ArrayBuilder`はpromotionを現在page内だけへ限定し，完成済みpageを再構築しない。100万要素の末尾にsymbolic値が現れてもGeneric化するのは最後の最大1024要素だけで，既存packed pageは共有したまま保持
+- `ArrayExpr`へshape / offset / stridesのimmutable viewを導入し，`transpose`はbackingを複製せずshape/stride交換だけで実行。contiguous `reshape`とprefix sliceも可能な範囲でbackingを共有
+- 矩形brace literalはLowererから単一`ArrayBuilder`へleafを直接流し，numeric literalでは要素ごとの`Expr` nodeを先に構築しない。ragged braceは従来どおり一般`ListExpr`へlowering
+- naiveな単一`vector<Rational>` packed案は，transposeで100万個のRational/BigIntをdeep copyして約650–675 msとなるため棄却。shared paged backing + view方式では`--matrix-large transpose 1024 16`が約0.059 ms，最大RSS約133.4 MiB。13.63 MBの1024×1024 decimal literalをCLIで`dimensions[...]`した測定は約4.55 s / 431 MiB
+- BigUInt / BigInt SBOは今回混ぜず，保守性と単独benchmark可能性を優先して見送り
 - nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
 - Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
 - exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善

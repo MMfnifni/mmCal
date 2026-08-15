@@ -440,8 +440,9 @@ struct PointSvd final {
     std::size_t bits,
     const approximation::CertifiedEvaluator& certified) {
     std::vector<RealInterval> values;
-    values.reserve(array.elements.size());
-    for (const Expr& element : array.elements) {
+    values.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr element = array.element(i);
         const auto enclosed = approximation::encloseComplexExpression(element, bits, certified);
         if (!enclosed || !enclosed->isProvablyReal())
             return std::nullopt;
@@ -621,7 +622,7 @@ private:
 [[nodiscard]] bool exactRealDiagonal(const MatrixView& matrix) {
     for (std::size_t row = 0; row < matrix.rows(); ++row)
         for (std::size_t column = 0; column < matrix.columns(); ++column) {
-            const Expr& value = matrix(row, column);
+            const Expr value = matrix(row, column);
             if (!value.isNumber() || !value.asNumber().isReal())
                 return false;
             if (row != column && !value.asNumber().isZero())
@@ -645,7 +646,7 @@ private:
 
     for (std::size_t outputColumn = 0; outputColumn < k; ++outputColumn) {
         const std::size_t sourceColumn = order[outputColumn];
-        const Number& diagonal = matrix(sourceColumn, sourceColumn).asNumber();
+        const Number diagonal = matrix(sourceColumn, sourceColumn).asNumber();
         const bool negative = diagonal.asReal().isNegative();
         Number singular = negative ? -diagonal : diagonal;
         Number sign = negative ? Number{BigInt{-1}} : Number{BigInt{1}};

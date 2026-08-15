@@ -28,8 +28,15 @@ ExpressionCost measureExpressionCost(const expression::Expr& expression) {
             continue;
         }
         if (current.expression.isArray()) {
-            for (const auto& element : current.expression.asArray().elements)
-                stack.push_back(Entry{element, current.depth + 1});
+            const auto& array = current.expression.asArray();
+            const auto entries = array.expressionEntries();
+            const std::size_t packedLeaves = array.size() - entries.size();
+            result.nodes += packedLeaves;
+            result.leaves += packedLeaves;
+            if (!array.empty())
+                result.depth = std::max(result.depth, current.depth + 1);
+            for (const auto& entry : entries)
+                stack.push_back(Entry{entry.expression, current.depth + 1});
             continue;
         }
         if (current.expression.isList()) {

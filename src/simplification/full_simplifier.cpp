@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -178,11 +179,18 @@ using expression::Expr;
     }
     else if (expression.isArray()) {
         const auto& array = expression.asArray();
-        std::vector<Expr> elements;
-        elements.reserve(array.elements.size());
-        for (const Expr& element : array.elements)
-            elements.push_back(proofTrigPowerRewrite(element, context, changed));
-        current = Expr::array(array.shape, std::move(elements));
+        const auto entries = array.expressionEntries();
+        if (!entries.empty()) {
+            std::vector<std::size_t> indices;
+            std::vector<Expr> elements;
+            indices.reserve(entries.size());
+            elements.reserve(entries.size());
+            for (const auto& entry : entries) {
+                indices.push_back(entry.index);
+                elements.push_back(proofTrigPowerRewrite(entry.expression, context, changed));
+            }
+            current = Expr::array(array.replacedExpressions(indices, std::move(elements)));
+        }
     }
     else if (expression.isList()) {
         const auto& list = expression.asList();
@@ -339,8 +347,9 @@ using expression::Expr;
             for (const Expr& argument : current.asCall().arguments)
                 pending.push_back(argument);
         }
-        else if (current.isArray()) {
-            for (const Expr& element : current.asArray().elements)
+        else if (current.isArray()
+            && current.asArray().storageKind() == expression::ArrayStorageKind::Generic) {
+            for (const Expr& element : current.asArray().storedExpressions())
                 pending.push_back(element);
         }
         else if (current.isList()) {
@@ -409,14 +418,14 @@ using expression::Expr;
     }
     else if (expression.isArray()) {
         const auto& array = expression.asArray();
-        for (std::size_t i = 0; i < array.elements.size(); ++i) {
-            const std::vector<Expr> transformed = rootVariants(array.elements[i], context);
+        for (const auto& entry : array.expressionEntries()) {
+            const std::vector<Expr> transformed = rootVariants(entry.expression, context);
             for (const Expr& replacement : transformed) {
-                if (replacement == array.elements[i])
+                if (replacement == entry.expression)
                     continue;
-                std::vector<Expr> elements = array.elements;
-                elements[i] = replacement;
-                result.push_back(Expr::array(array.shape, std::move(elements)));
+                const std::size_t index = entry.index;
+                result.push_back(Expr::array(array.replacedExpressions(
+                    std::span<const std::size_t>{&index, 1}, {replacement})));
             }
         }
     }

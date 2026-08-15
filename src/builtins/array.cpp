@@ -31,13 +31,13 @@ using expression::Expr;
     const Expr& expression,
     std::string_view name) {
     const ArrayExpr& shape = detail::requireVector(expression, name);
-    if (shape.elements.empty())
+    if (shape.empty())
         detail::arrayTypeError(std::string{name} + " shape must contain at least one dimension");
 
     std::vector<std::size_t> dimensions;
-    dimensions.reserve(shape.elements.size());
-    for (const Expr& item : shape.elements)
-        dimensions.push_back(detail::requireSize(item, name));
+    dimensions.reserve(shape.size());
+    for (std::size_t i = 0; i < shape.size(); ++i)
+        dimensions.push_back(detail::requireSize(shape.element(i), name));
     return dimensions;
 }
 
@@ -98,7 +98,7 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
             error::throwCalcError(error::CalcErrorType::Domain, "at index is out of range");
 
     if (indices.size() == array.rank())
-        return array.elements[array.flatIndex(indices)];
+        return array.element(array.flatIndex(indices));
 
     // row-major Arrayではprefix indexで選ばれるsubarrayは常に連続領域。
     std::size_t prefix = 0;
@@ -109,10 +109,7 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
         array.shape.begin() + static_cast<std::ptrdiff_t>(indices.size()), array.shape.end());
     const std::size_t sliceSize = expression::arrayElementCount(shape);
     const std::size_t offset = prefix * sliceSize;
-    std::vector<Expr> elements(
-        array.elements.begin() + static_cast<std::ptrdiff_t>(offset),
-        array.elements.begin() + static_cast<std::ptrdiff_t>(offset + sliceSize));
-    return Expr::array(std::move(shape), std::move(elements));
+    return Expr::array(array.sliced(std::move(shape), offset, sliceSize));
 }
 
 Expr evaluateReshape(std::span<const Expr> arguments) {
@@ -128,11 +125,11 @@ Expr evaluateReshape(std::span<const Expr> arguments) {
             "reshape dimensions overflow the addressable element count");
     }
 
-    if (count != array.elements.size())
+    if (count != array.size())
         error::throwCalcError(error::CalcErrorType::Domain,
             "reshape requires the same total element count");
 
-    return Expr::array(std::move(shape), array.elements);
+    return Expr::array(array.reshaped(std::move(shape)));
 }
 
 } // namespace mmcal::builtins

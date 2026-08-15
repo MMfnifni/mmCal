@@ -301,7 +301,7 @@ Exact symbolic FFT expression growth is a separate problem and is intentionally 
 
 ## Flat Array + exact Number backend — selected
 
-v1.5.2 keeps matrices on the shared Array `shape + row-major flat storage` representation instead of introducing a separate nested matrix Value. `MatrixView` reads an Array without copying; algorithms that mutate their workspace use a flat `MatrixBuffer`.
+v1.5.2 keeps matrices on the shared Array `shape + row-major flat storage` representation instead of introducing a separate nested matrix Value. `MatrixView` reads an Array without copying; algorithms that mutate their workspace use a flat `MatrixBuffer`. This describes the v1.5.2 release representation; Unreleased replaces the persistent physical storage with immutable paged backing plus strided views.
 
 For exact Number matrices, pivot loops operate directly on `Number` values without constructing Expr nodes or invoking the Simplifier. Numeric `dot` likewise performs each cell accumulation directly in `Number`; symbolic products are built only when necessary.
 
@@ -415,11 +415,19 @@ Representative order-32/order-64 results:
 
 At 1024x1024, representation cost becomes a primary limit before the cubic algorithms themselves. Direct construction of 1,048,576 ten-decimal Rational Expr elements reached about 0.69 GB maximum RSS; the timed transpose itself took about 107 ms and trace about 60 ms. Parsing roughly 14.16 MB of generator-style text and evaluating only `dimensions[...]` took about 10.9 s wall time and about 1.99 GB maximum RSS. A 1024-order `N[dot,16]` run did not complete within a 10 s cap and reached about 0.96 GB RSS; `N[LU,16]` likewise exceeded 10 s and reached about 1.59 GB. Further 1024 QR/SVD/Eigen runs were stopped to avoid unnecessary memory pressure.
 
-After the Unreleased `Expr::Node` typed-node refactor, an apples-to-apples x86-64 GCC Release/LTO-off rerun of `--matrix-large transpose 1024 16` measured `693312 KiB` (~677.1 MiB) maximum RSS for the legacy variant source and `299668 KiB` (~292.6 MiB) for the typed-node source: about 384.4 MiB / **56.8% less RSS**. The one-shot transpose timing changed from 181.7 ms to 157.4 ms, but timing noise is not the adoption criterion; the memory reduction plus unchanged regression semantics are. The earlier 1.99 GB CLI parse + `dimensions` measurement also includes parser/lowering temporaries and has not yet been remeasured after typed nodes.
+After the Unreleased `Expr::Node` typed-node refactor, an apples-to-apples x86-64 GCC Release/LTO-off rerun of `--matrix-large transpose 1024 16` measured `693312 KiB` (~677.1 MiB) maximum RSS for the legacy variant source and `299668 KiB` (~292.6 MiB) for the typed-node source: about 384.4 MiB / **56.8% less RSS**. The one-shot transpose timing changed from 181.7 ms to 157.4 ms, but timing noise is not the adoption criterion; the memory reduction plus unchanged regression semantics are.
+
+The second representation stage packs persistent `ArrayExpr` values into fixed immutable pages and separates shape/offset/strides from the backing. A first naive single-`vector<Rational>` design reduced storage overhead but made transpose deep-copy one million Rational/BigInt values; direct-packed order-1024 transpose took roughly 650–675 ms, so that design was rejected. The adopted design shares immutable 1024-element pages and makes transpose a stride-only view operation.
+
+`ArrayBuilder` promotes only the current page. Completed pages are immutable, so a symbolic value near the end of a huge numeric Array does not force the preceding data through a Generic-Expr rebuild. A dedicated 1,048,576-element test with only the final value changed to `x` was essentially identical to the all-integer case at about 0.30 s / 69.8 MiB, with only the final page becoming Generic. Rectangular brace lowering also streams numeric leaves directly into one builder instead of first allocating an Expr node for every scalar.
+
+With the benchmark fixture likewise constructing exact Rationals directly through `ArrayBuilder`, `--matrix-large transpose 1024 16` now measured `136576 KiB` (~133.4 MiB) maximum RSS and about 0.059 ms for the transpose view itself. `trace 1024` measured about 133.5 MiB and 10.95 ms for trace. Because the fixture construction path is intentionally part of the new representation work, the 292.6→133.4 MiB change is an end-to-end storage+builder improvement rather than the same kind of single-change A/B used for typed nodes.
+
+A 13.63 MB 1024x1024 ten-decimal literal fed through the CLI and evaluated only as `dimensions[...]` measured about 4.55 s wall time and `441564 KiB` (~431 MiB) maximum RSS. The older 14.16 MB / 10.9 s / 1.99 GB measurement did not use byte-identical input, so this is not presented as a strict A/B comparison, but it confirms that avoiding per-scalar Expr allocation in lowering materially reduces the post-parse representation cost.
 
 Even a pure cubic extrapolation from order 64 suggests roughly 1.6 h for `N[LU]`, 1.4 h for `N[dot]`, 3.4 h for `N[det]`, 6.2 h for `N[solveLinear]`, 9.9 h for `N[inverse]`, 13 h for `N[SVD]`, 15 h for `N[QR]`, and 22 h for `N[eigenvalues]`. Extrapolating the observed 32→64 exponent instead gives a broad roughly 1–21 h range depending on the operation. These are projections, not 1024 completion measurements, and cache/allocation/guard-precision/iteration effects can make them worse.
 
-A dense order of 1024 is not intrinsically huge in a machine-double + BLAS setting, but it is currently a stress regime for mmCal's exact Decimal→Rational→Expr representation and certified arbitrary-precision dense algorithms. If order-1024 dense work becomes an explicit target, compact numeric Array storage, fewer parser/lowering Expr allocations, and packed approximate-Matrix storage should be considered before more sophisticated blocking.
+A dense order of 1024 is not intrinsically huge in a machine-double + BLAS setting, but it remains a stress regime for mmCal's certified arbitrary-precision dense algorithms. Persistent exact-Array representation cost is now substantially lower after typed nodes, paged packed backing, and direct builder lowering. Approximate SVD/Eigen paths already use dedicated contiguous working buffers, so blocking and selective threading should now be remeasured against the new storage balance instead of introducing another persistent-matrix type first.
 
 # 16. `mmCal.Benchmarks`
 
@@ -480,15 +488,15 @@ Correctness checks should run before accepting any new threshold solely because 
 
 The `Expr::Node` typed-node refactor is adopted in Unreleased. It was kept as a standalone public-API-preserving change, passed the regression/fuzzer checks, and reduced order-1024 Matrix RSS by about 56.8% in the same-environment comparison above.
 
-1. Benchmark BigUInt / BigInt small-object optimization independently to determine whether removing heap allocation for small integers pays off.
-2. Investigate compact packed storage for numeric Arrays / approximate Matrices and reduce temporary allocation while parsing/lowering huge braces.
-3. Remeasure blocked LU / QR only after the storage work changes the cost balance.
-4. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
-5. Lehmer GCD.
-6. bit-burst / AGM logarithm backends.
-7. 5,000–10,000-digit benchmark coverage for Gamma, erf, and other special functions.
+1. Remeasure blocked LU / QR against the new paged packed Array cost balance.
+2. Evaluate threading thresholds only for pure numeric working kernels.
+3. Audit parser-AST temporary allocation for huge braces if it remains material.
+4. Keep BigUInt / BigInt SBO as an isolated experiment and adopt it only if the complexity can be confined to a storage abstraction.
+5. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
+6. Lehmer GCD.
+7. bit-burst / AGM logarithm backends.
 8. A Cyclotomic exact FFT backend.
 
-With the largest per-node fixed cost removed, the next representation experiment should be BigUInt SBO as another isolated change. Packed Array storage should remain a separate step so RSS, allocation count, and locality effects stay attributable.
+The naive flat packed-Array design is rejected; immutable paged backing plus stride views is adopted. Approximate Matrix algorithms keep their existing dedicated contiguous working buffers rather than forcing persistent Array storage and algorithm temporaries into one type. BigUInt SBO is explicitly deferred for now.
 
 Future changes should continue to record both adoption and rejection rationale in this document.

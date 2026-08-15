@@ -100,8 +100,9 @@ void parseSpec(
             error::throwCalcError(
                 error::CalcErrorType::Type,
                 "solve constraints must be a one-dimensional array");
-        for (const Expr& item : spec.asArray().elements)
-            parseSpec(item, result, builtins, mathematics, angles);
+        const auto& array = spec.asArray();
+        for (std::size_t i = 0; i < array.size(); ++i)
+            parseSpec(array.element(i), result, builtins, mathematics, angles);
         return;
     }
 
@@ -162,11 +163,19 @@ void parseSpec(
         return Expr::call(expression.asCall().head, std::move(arguments));
     }
     if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        const auto entries = array.expressionEntries();
+        if (entries.empty())
+            return expression;
+        std::vector<std::size_t> indices;
         std::vector<Expr> elements;
-        elements.reserve(expression.asArray().elements.size());
-        for (const Expr& element : expression.asArray().elements)
-            elements.push_back(substituteExpr(element, bindings));
-        return Expr::array(expression.asArray().shape, std::move(elements));
+        indices.reserve(entries.size());
+        elements.reserve(entries.size());
+        for (const auto& entry : entries) {
+            indices.push_back(entry.index);
+            elements.push_back(substituteExpr(entry.expression, bindings));
+        }
+        return Expr::array(array.replacedExpressions(indices, std::move(elements)));
     }
     return expression;
 }

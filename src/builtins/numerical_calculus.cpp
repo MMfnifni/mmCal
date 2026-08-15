@@ -143,7 +143,7 @@ constexpr std::size_t newtonCotesDegree = 8;
                 return true;
     }
     if (expression.isArray())
-        for (const Expr& element : expression.asArray().elements)
+        for (const Expr& element : expression.asArray().storedExpressions())
             if (containsDerivativeCall(element, registry))
                 return true;
     return false;

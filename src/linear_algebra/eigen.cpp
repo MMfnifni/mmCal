@@ -75,7 +75,7 @@ constexpr std::size_t maximumPrecisionRetries = 10;
 [[nodiscard]] bool isUpperTriangular(const MatrixView& matrix) {
     for (std::size_t row = 1; row < matrix.rows(); ++row)
         for (std::size_t column = 0; column < row; ++column) {
-            const Expr& value = matrix(row, column);
+            const Expr value = matrix(row, column);
             if (!value.isNumber() || !value.asNumber().isZero())
                 return false;
         }
@@ -87,7 +87,7 @@ constexpr std::size_t maximumPrecisionRetries = 10;
         for (std::size_t column = 0; column < matrix.columns(); ++column) {
             if (row == column)
                 continue;
-            const Expr& value = matrix(row, column);
+            const Expr value = matrix(row, column);
             if (!value.isNumber() || !value.asNumber().isZero())
                 return false;
         }
@@ -127,11 +127,7 @@ constexpr std::size_t maximumPrecisionRetries = 10;
 }
 
 [[nodiscard]] bool allNumbers(const MatrixView& matrix) {
-    for (std::size_t row = 0; row < matrix.rows(); ++row)
-        for (std::size_t column = 0; column < matrix.columns(); ++column)
-            if (!matrix(row, column).isNumber())
-                return false;
-    return true;
+    return matrix.array().hasExactNumberStorage();
 }
 
 [[nodiscard]] std::optional<Expr> exactTwoByTwoEigenvectors(
@@ -140,8 +136,10 @@ constexpr std::size_t maximumPrecisionRetries = 10;
     if (!allNumbers(matrix))
         return std::nullopt;
     const Expr values = exactTwoByTwoEigenvalues(matrix, context);
-    const auto& lambdas = values.asArray().elements;
-    if (lambdas[0] == lambdas[1])
+    const auto& lambdas = values.asArray();
+    const Expr lambda0 = lambdas.element(0);
+    const Expr lambda1 = lambdas.element(1);
+    if (lambda0 == lambda1)
         return std::nullopt;
 
     const bool useUpper = !matrix(0, 1).asNumber().isZero();
@@ -155,12 +153,12 @@ constexpr std::size_t maximumPrecisionRetries = 10;
         const Expr b = matrix(0, 1);
         result.push_back(b);
         result.push_back(b);
-        result.push_back(subtract(lambdas[0], matrix(0, 0), context));
-        result.push_back(subtract(lambdas[1], matrix(0, 0), context));
+        result.push_back(subtract(lambda0, matrix(0, 0), context));
+        result.push_back(subtract(lambda1, matrix(0, 0), context));
     }
     else {
-        result.push_back(subtract(lambdas[0], matrix(1, 1), context));
-        result.push_back(subtract(lambdas[1], matrix(1, 1), context));
+        result.push_back(subtract(lambda0, matrix(1, 1), context));
+        result.push_back(subtract(lambda1, matrix(1, 1), context));
         const Expr c = matrix(1, 0);
         result.push_back(c);
         result.push_back(c);
@@ -488,8 +486,9 @@ struct SchurResult final {
     std::size_t bits,
     const approximation::CertifiedEvaluator& certified) {
     std::vector<ComplexInterval> values;
-    values.reserve(array.elements.size());
-    for (const Expr& element : array.elements) {
+    values.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr element = array.element(i);
         const auto enclosed = approximation::encloseComplexExpression(element, bits, certified);
         if (!enclosed)
             return std::nullopt;

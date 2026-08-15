@@ -21,7 +21,7 @@ struct RangeIteratorSpec final {
         return nullptr;
 
     const expression::ArrayExpr& array = expression.asArray();
-    if (array.shape.size() != 1 || array.shape[0] != 3 || array.elements.size() != 3)
+    if (array.shape.size() != 1 || array.shape[0] != 3 || array.size() != 3)
         return nullptr;
     return &array;
 }
@@ -29,13 +29,17 @@ struct RangeIteratorSpec final {
 [[nodiscard]] inline std::optional<RangeIteratorSpec> parseRangeIteratorSpec(
     const expression::Expr& expression) {
     const expression::ArrayExpr* array = rangeIteratorArray(expression);
-    if (!array || !array->elements[0].isSymbol())
+    if (!array)
+        return std::nullopt;
+
+    const expression::Expr variable = array->element(0);
+    if (!variable.isSymbol())
         return std::nullopt;
 
     return RangeIteratorSpec{
-        array->elements[0].asSymbol(),
-        array->elements[1],
-        array->elements[2]
+        variable.asSymbol(),
+        array->element(1),
+        array->element(2)
     };
 }
 

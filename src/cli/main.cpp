@@ -127,9 +127,9 @@ void updateConsoleTitle(
     if (expression.isArray()) {
         const auto& array = expression.asArray();
         std::vector<Expr> elements;
-        elements.reserve(array.elements.size());
-        for (const Expr& element : array.elements)
-            elements.push_back(fixedApproximation(element, digits, session));
+        elements.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i)
+            elements.push_back(fixedApproximation(array.element(i), digits, session));
         return Expr::array(array.shape, std::move(elements));
     }
     if (expression.isList()) {

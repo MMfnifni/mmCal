@@ -463,8 +463,9 @@ struct ComplexPointSvd final {
     std::size_t bits,
     const approximation::CertifiedEvaluator& certified) {
     std::vector<ComplexInterval> result;
-    result.reserve(source.elements.size());
-    for (const Expr& element : source.elements) {
+    result.reserve(source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        const Expr element = source.element(i);
         const auto enclosed = approximation::encloseComplexExpression(element, bits, certified);
         if (!enclosed)
             return std::nullopt;

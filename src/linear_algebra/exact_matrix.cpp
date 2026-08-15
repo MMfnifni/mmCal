@@ -86,7 +86,7 @@ public:
     explicit NumericMatrix(const MatrixView& matrix)
         : NumericMatrix(matrix.rows(), matrix.columns()) {
         for (std::size_t i = 0; i < values_.size(); ++i)
-            values_[i] = matrix.elements()[i].asNumber();
+            values_[i] = matrix.array().exactNumber(i);
     }
 
     [[nodiscard]] std::size_t rows() const noexcept { return rows_; }
@@ -127,30 +127,27 @@ struct IntegerLift final {
 };
 
 [[nodiscard]] bool allExactRealNumbers(const MatrixView& matrix) noexcept {
-    return std::all_of(matrix.elements().begin(), matrix.elements().end(),
-        [](const Expr& item) {
-            return item.isNumber() && item.asNumber().isReal();
-        });
+    return matrix.array().hasExactRealStorage();
 }
 
-template <class ElementAt>
+template <class RationalAt>
 [[nodiscard]] IntegerLift liftRealRows(
     std::size_t rows,
     std::size_t columns,
-    ElementAt&& elementAt) {
+    RationalAt&& rationalAt) {
     IntegerMatrixBuffer lifted{rows, columns};
     std::vector<BigInt> rowScales(rows, BigInt{1});
 
     for (std::size_t row = 0; row < rows; ++row) {
         BigInt scale{1};
         for (std::size_t column = 0; column < columns; ++column) {
-            const auto rational = elementAt(row, column).asNumber().asReal().toRational();
+            const auto rational = rationalAt(row, column);
             scale = numeric::lcm(scale, rational.denominator());
         }
         rowScales[row] = scale;
 
         for (std::size_t column = 0; column < columns; ++column) {
-            const auto rational = elementAt(row, column).asNumber().asReal().toRational();
+            const auto rational = rationalAt(row, column);
             lifted(row, column) = rational.numerator()
                 * (scale / rational.denominator());
         }
@@ -160,8 +157,9 @@ template <class ElementAt>
 
 [[nodiscard]] IntegerLift liftRealMatrix(const MatrixView& source) {
     return liftRealRows(source.rows(), source.columns(),
-        [&](std::size_t row, std::size_t column) -> const Expr& {
-            return source(row, column);
+        [&](std::size_t row, std::size_t column) {
+            return source.array().exactNumber(row * source.columns() + column)
+                .asReal().toRational();
         });
 }
 
@@ -414,15 +412,11 @@ template <class ElementAt>
     std::size_t pivotColumnLimit);
 
 [[nodiscard]] bool allExactRealNumbers(const expression::ArrayExpr& array) noexcept {
-    return std::all_of(array.elements.begin(), array.elements.end(),
-        [](const Expr& item) {
-            return item.isNumber() && item.asNumber().isReal();
-        });
+    return array.hasExactRealStorage();
 }
 
 [[nodiscard]] bool allExactNumbers(const expression::ArrayExpr& array) noexcept {
-    return std::all_of(array.elements.begin(), array.elements.end(),
-        [](const Expr& item) { return item.isNumber(); });
+    return array.hasExactNumberStorage();
 }
 
 [[nodiscard]] Expr bareissSolveLinearOfRealMatrix(
@@ -434,8 +428,10 @@ template <class ElementAt>
         throw std::length_error("Linear system augmented column count exceeds the size_t range");
 
     IntegerLift lift = liftRealRows(rows, variables + 1,
-        [&](std::size_t row, std::size_t column) -> const Expr& {
-            return column == variables ? rhs.elements[row] : source(row, column);
+        [&](std::size_t row, std::size_t column) {
+            return column == variables
+                ? rhs.exactNumber(row).asReal().toRational()
+                : source.array().exactNumber(row * variables + column).asReal().toRational();
         });
     auto echelon = bareissEchelon(std::move(lift.matrix), variables);
     for (std::size_t row = 0; row < rows; ++row) {
@@ -471,7 +467,7 @@ template <class ElementAt>
     for (std::size_t row = 0; row < rows; ++row) {
         for (std::size_t column = 0; column < variables; ++column)
             augmented(row, column) = source(row, column).asNumber();
-        augmented(row, variables) = rhs.elements[row].asNumber();
+        augmented(row, variables) = rhs.exactNumber(row);
     }
     NumericMatrix reduced = numericRrefGaussian(std::move(augmented), variables);
 
@@ -513,7 +509,7 @@ template <class ElementAt>
     for (std::size_t row = 0; row < rows; ++row) {
         for (std::size_t column = 0; column < variables; ++column)
             elements.push_back(source(row, column));
-        elements.push_back(rhs.elements[row]);
+        elements.push_back(rhs.element(row));
     }
     auto reduced = symbolicRref(
         MatrixBuffer{rows, variables + 1, std::move(elements)}, context, variables);
@@ -777,8 +773,7 @@ template <class ElementAt>
 } // namespace
 
 bool allExactNumbers(const MatrixView& matrix) noexcept {
-    return std::all_of(matrix.elements().begin(), matrix.elements().end(),
-        [](const Expr& item) { return item.isNumber(); });
+    return matrix.array().hasExactNumberStorage();
 }
 
 std::optional<Expr> determinant(const MatrixView& matrix, const ExactMatrixContext& context) {

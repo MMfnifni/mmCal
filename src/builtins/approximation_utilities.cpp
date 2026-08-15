@@ -118,9 +118,17 @@ using numeric::RealNumber;
         if (current.isCall())
             for (const Expr& argument : current.asCall().arguments)
                 stack.push_back(argument);
-        else if (current.isArray())
-            for (const Expr& element : current.asArray().elements)
-                stack.push_back(element);
+        else if (current.isArray()) {
+            const auto& array = current.asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                const auto kind = array.storedKindAt(i);
+                if (kind == expression::ArrayStorageKind::DecimalApproximation
+                    || kind == expression::ArrayStorageKind::ComplexDecimalApproximation)
+                    return true;
+                if (kind == expression::ArrayStorageKind::Generic)
+                    stack.push_back(array.expressionAt(i));
+            }
+        }
         else if (current.isList())
             for (const Expr& element : current.asList().elements)
                 stack.push_back(element);
@@ -236,14 +244,36 @@ using numeric::RealNumber;
     }
     if (value.isArray()) {
         const auto& array = value.asArray();
-        std::vector<Expr> elements;
-        elements.reserve(array.elements.size());
-        for (const Expr& element : array.elements)
+        if (array.hasExactNumberStorage())
+            return value;
+        if (array.storageKind() == expression::ArrayStorageKind::DecimalApproximation) {
+            std::vector<Rational> elements;
+            elements.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i)
+                elements.push_back(rationalizeDecimal(array.decimalAt(i), tolerance));
+            return Expr::rationalArray(array.shape, std::move(elements));
+        }
+        if (array.storageKind() == expression::ArrayStorageKind::ComplexDecimalApproximation) {
+            std::vector<Number> elements;
+            elements.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                const auto& element = array.complexDecimalAt(i);
+                const Rational real = rationalizeDecimal(element.real(), tolerance);
+                const Rational imaginary = rationalizeDecimal(element.imaginary(), tolerance);
+                elements.push_back(Number::complex(RealNumber{real}, RealNumber{imaginary}));
+            }
+            return Expr::numberArray(array.shape, std::move(elements));
+        }
+        expression::ArrayBuilder builder;
+        builder.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const Expr element = array.element(i);
             if (const auto rationalized = rationalizeValue(element, tolerance))
-                elements.push_back(*rationalized);
+                builder.append(*rationalized);
             else
-                elements.push_back(element);
-        return Expr::array(array.shape, std::move(elements));
+                builder.append(element);
+        }
+        return Expr::array(builder.finish(array.shape));
     }
     if (value.isList()) {
         const auto& list = value.asList();

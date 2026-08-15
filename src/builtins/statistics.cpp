@@ -54,10 +54,10 @@ void requireExactRealData(std::span<const Expr> values, std::string_view name) {
         if (array.rank() != 1)
             error::throwCalcError(error::CalcErrorType::Type,
                 std::string{name} + " requires a rank-1 array");
-        if (array.elements.size() < minimumCount)
+        if (array.size() < minimumCount)
             error::throwCalcError(error::CalcErrorType::Domain,
                 std::string{name} + " requires more observations");
-        return array.elements;
+        return array.materialize();
     }
 
     if (arguments.size() < minimumCount)
@@ -79,10 +79,10 @@ void requireExactRealData(std::span<const Expr> values, std::string_view name) {
         if (array.rank() != 1)
             error::throwCalcError(error::CalcErrorType::Type,
                 std::string{name} + " requires a rank-1 data array");
-        if (array.elements.size() < minimumCount)
+        if (array.size() < minimumCount)
             error::throwCalcError(error::CalcErrorType::Domain,
                 std::string{name} + " requires more observations");
-        return array.elements;
+        return array.materialize();
     }
 
     if (arguments.size() - 1 < minimumCount)
@@ -111,10 +111,10 @@ struct PairedData final {
         if (x.rank() != 1 || y.rank() != 1)
             error::throwCalcError(error::CalcErrorType::Type,
                 std::string{name} + " requires rank-1 arrays");
-        if (x.elements.size() != y.elements.size() || x.elements.empty())
+        if (x.size() != y.size() || x.empty())
             error::throwCalcError(error::CalcErrorType::Domain,
                 std::string{name} + " requires equal non-empty sample lengths");
-        return {x.elements, y.elements};
+        return {x.materialize(), y.materialize()};
     }
 
     if (arguments.size() < 2 || arguments.size() % 2 != 0)
