@@ -725,8 +725,8 @@ struct SchurResult final {
 [[nodiscard]] std::optional<Expr> decimalPoint(const ComplexPoint& value, std::size_t digits) {
     const Rational real = value.real.toRational();
     const Rational imaginary = value.imaginary.toRational();
-    const auto realDecimal = numeric::DecimalApproximation::fromCertifiedInterval(real, real, digits);
-    const auto imaginaryDecimal = numeric::DecimalApproximation::fromCertifiedInterval(imaginary, imaginary, digits);
+    const auto realDecimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(real, real, digits);
+    const auto imaginaryDecimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(imaginary, imaginary, digits);
     if (!realDecimal || !imaginaryDecimal)
         return std::nullopt;
     if (imaginary.isZero())

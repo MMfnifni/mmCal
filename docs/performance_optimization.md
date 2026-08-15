@@ -276,7 +276,7 @@ first built the complete exact Fourier expression and only then approximated its
 
 `N` now holds its first argument, resolves the requested precision first, and keeps a precision context active while evaluating the child expression. FFT consumes that context and performs the transform directly on certified `ComplexInterval`/BigFloat endpoints. Ordinary exact `fft[...]` is unchanged, and no machine `double` backend is introduced.
 
-Representative benchmark in the same GCC Release environment at 16 fractional digits:
+Representative benchmark in the same GCC Release environment, measured under the older `N` semantics at 16 fractional digits:
 
 ```text
 32 points   exact ~11.6 ms   certified ~2.7 ms

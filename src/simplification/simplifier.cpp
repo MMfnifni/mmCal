@@ -93,6 +93,28 @@ void sortCanonical(std::vector<Expr>& expressions) {
         expressions[i] = std::move(keyed[i].second);
 }
 
+[[nodiscard]] bool containsInfinity(const Expr& expression) {
+    if (expression.isSymbol())
+        return expression.asSymbol().view() == "Infinity";
+    if (expression.isCall()) {
+        for (const Expr& argument : expression.asCall().arguments)
+            if (containsInfinity(argument))
+                return true;
+    }
+    else if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        for (std::size_t i = 0; i < array.size(); ++i)
+            if (containsInfinity(array.element(i)))
+                return true;
+    }
+    else if (expression.isList()) {
+        for (const Expr& element : expression.asList().elements)
+            if (containsInfinity(element))
+                return true;
+    }
+    return false;
+}
+
 template <typename Visitor>
 void visitSignedAddTerms(
     const Expr& expression,
@@ -232,6 +254,13 @@ struct TrigSquare final {
 
     for (const Expr& term : terms) {
         LinearTerm linear = extractLinearTerm(term, builtins);
+        // Infinityは現在extended-real sentinelであり，通常symbolのように
+        // c*x + d*xとして係数相殺すると Infinity-Infinity -> 0 を捏造する。
+        // 拡張実数算術を完全実装するまではatomic termとして保持する。
+        if (containsInfinity(linear.atom)) {
+            groups.push_back(Group{std::move(linear.atom), std::move(linear.coefficient)});
+            continue;
+        }
         const std::string key = expressionOrderKey(linear.atom);
         auto found = groupByKey.find(key);
         if (found != groupByKey.end() && groups[found->second].atom == linear.atom) {
@@ -399,7 +428,9 @@ void collectProductParts(
     const evaluation::BuiltinRegistry& builtins) {
     // denominatorを含まない0積は従来どおり0へ畳み込む。
     // 0*(1/x) のように明示的な分母を含む場合だけholeを失わない形を保持する。
-    if (parts.coefficient.isZero() && parts.denominator.empty())
+    const bool hasInfinityFactor = std::any_of(
+        parts.numerator.begin(), parts.numerator.end(), containsInfinity);
+    if (parts.coefficient.isZero() && parts.denominator.empty() && !hasInfinityFactor)
         return integerExpr(0);
 
     // exact real係数は整数の分子・分母へ分解し、記号分母と同じDivideへ集約する。
@@ -729,7 +760,7 @@ struct PositiveIntegerPower final {
             return Expr{arguments[0].asNumber() - arguments[1].asNumber()};
         if (isExactReal(arguments[1], 0))
             return arguments[0];
-        if (arguments[0] == arguments[1])
+        if (arguments[0] == arguments[1] && !containsInfinity(arguments[0]))
             return integerExpr(0);
         if (isExactReal(arguments[0], 0))
             return Expr::call(

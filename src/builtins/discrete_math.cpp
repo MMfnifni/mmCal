@@ -121,7 +121,9 @@ enum class IntegralRoundingOperation {
     const approximation::CertifiedEvaluator evaluator{registry, mathematics, angles};
     for (std::size_t bits = 64; bits <= 4096; bits *= 2) {
         try {
-            const auto enclosed = evaluator.enclose(expression, bits);
+            const auto enclosed = evaluator.enclose(
+                expression, bits,
+                approximation::CertifiedEvaluator::EnclosureKind::Information);
             if (!enclosed)
                 return std::nullopt;
 
@@ -210,7 +212,9 @@ enum class IntegralRoundingOperation {
     const approximation::CertifiedEvaluator evaluator{registry, mathematics, angles};
     for (std::size_t bits = 64; bits <= 4096; bits *= 2) {
         try {
-            const auto enclosed = evaluator.enclose(expression, bits);
+            const auto enclosed = evaluator.enclose(
+                expression, bits,
+                approximation::CertifiedEvaluator::EnclosureKind::Information);
             if (!enclosed)
                 return std::nullopt;
             if (!enclosed->isReal())

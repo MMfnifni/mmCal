@@ -1716,7 +1716,7 @@ imaginary == exact [0,0]
 
 # 30. 10進要求桁から2進作業精度への変換
 
-`N[...,n]` の `n` は10進小数部桁数。
+`N[...,p]` の `p` は有効10進桁数(significant decimal digits)である。固定小数点以下桁数は`:fix` / `--fix`の表示側だけが扱う。
 
 内部 `BigFloat` は2進precisionなので変換が必要。
 
@@ -1787,7 +1787,7 @@ guard += growth
 
 重要なのは，guard桁数そのものを「正しさの証拠」にしていないこと。
 
-最終条件は**保証区間の両端が要求桁へ同じ10進丸め結果を持つこと**である。
+最終条件は**保証区間の両端が要求有効桁へ同じ10進丸め結果を持つこと**である。
 
 ---
 
@@ -1800,7 +1800,8 @@ guard += growth
 ```text
 text                      表示文字列
 fractionalDigits          実際の小数部桁数
-requestedFractionalDigits 要求桁数
+requestedFractionalDigits 固定小数表示系で要求された小数部桁数（`:fix`等）
+requestedSignificantDigits `N`系で要求された有効10進桁数
 rounded                   表示値がCertifiedEnclosureに対して丸められたか
 origin                    ExactValue / CertifiedInterval
 displayedValue            表示10進値そのもののexact Rational
@@ -1848,13 +1849,13 @@ CertifiedEnclosure ⊆ InformationEnclosure
 
 を不変条件とする。
 
-`N[x,n]`で10進近似を生成するときは，表示値`d`に対して
+非zeroの`N[x,p]`で10進近似を生成するときは，表示値`d`の10進指数を`e=floor(log10(|d|))`として
 
 ```text
-[d - 0.5*10^-n, d + 0.5*10^-n]
+[d - 0.5*10^(e-p+1), d + 0.5*10^(e-p+1)]
 ```
 
-をInformationEnclosureへ少なくとも含める。CertifiedEnclosureが内部guard桁によってこれより狭くても，その隠れた桁を後続計算でAccuracyとして回収しない。CertifiedEnclosure自体がこの丸め区間より外まで広い場合は，双方のhullをInformationEnclosureとする。
+をInformationEnclosureへ少なくとも含める。したがって同じ`p`でも絶対幅は値のscaleに追従する。zero-centered approximationは相対Precisionを持てないため，伝播したInformationEnclosureそのものからabsolute Accuracyを保持する。CertifiedEnclosureが内部guard桁によってこれより狭くても，その隠れた桁を後続計算でAccuracyとして回収しない。CertifiedEnclosure自体がこの丸め区間より外まで広い場合は，双方のhullをInformationEnclosureとする。
 
 InformationEnclosureは確率的confidence intervalではない。backendはCertifiedEnclosureによってより狭い真値範囲を既に証明していてよく，InformationEnclosureは「現在のApproximation値から再利用可能な情報量」の契約だけを担当する。
 
@@ -1984,26 +1985,28 @@ N[1/2,10] → 0.5
 symbolic expressionに対する概略は次の通り。
 
 ```text
-N[expr, n]
+N[expr, p]
    ↓
-ApproximationContext(decimalDigits=n, guard=8)
+ApproximationContext(decimalDigits=p, guard=8)  // pは有効10進桁数
    ↓
-workingBinaryBits = ceil((n+guard)*3.322)
+workingBinaryBits = ceil((p+guard)*3.322)
    ↓
-CertifiedEvaluator.enclose(expr, workingBinaryBits)
+CertifiedEvaluator.enclose(..., Certified)
+CertifiedEvaluator.enclose(..., Information)
    ↓
-RealInterval または ComplexInterval
+CertifiedEnclosure / InformationEnclosure
    ↓
 区間端点をexact Rationalへ戻す
    ↓
-DecimalApproximation::fromCertifiedInterval(..., n)
+DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(..., p)
    ↓
-両端のn桁丸めが一致？
+CertifiedEnclosureが同じp有効桁表示を一意に確定し，
+InformationEnclosureがその情報量を許す？
    ├─ yes → DecimalApproximationを返す
-   └─ no  → guard増加 → 式全体を再評価
+   └─ no  → guard増加，または保証可能な桁へ保守的に制限
 ```
 
-一方，入力が最初からexact `Number`，つまり整数・有理数・exact複素数なら，一般CertifiedEvaluatorを通さず直接 `DecimalApproximation::fromReal()` で10進化するfast pathがある。
+一方，入力が最初からexact `Number`，つまり整数・有理数・exact複素数なら，一般CertifiedEvaluatorを通さず`DecimalApproximation::fromRealSignificant()`等で直接10進化するfast pathがある。
 
 ## 35.1 v1.5.2のprecision-aware `N`
 

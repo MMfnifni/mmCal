@@ -24,6 +24,9 @@
 - BigUInt / BigInt SBOは今回混ぜず，保守性と単独benchmark可能性を優先して見送り
 - `explain[value]`を追加。評価済み値が既に保持する安価なmetadataだけを`{{"Property", value}, ...}`形式のbrace値で返し，追加の数学計算やArray全走査は行わない。Arrayはshape / element count / square判定等，certified近似はexact Rational enclosureを公開し，`explain[value,"internal"]`では表現・storage等の非互換保証debug metadataも返す。`Pi/E/Phi`はMathRegistryの定数metadataを，`Infinity`等の予約symbolはSymbolRegistryの既知意味を直接参照し，通常の未定義symbolと区別して説明する
 - `DecimalApproximation` / `ComplexDecimalApproximation`を通常の`+ - * /`と単項`-`へ再投入可能にし，exact `Number`をpoint intervalとして混在できるようにした。近似値metadataを真値保証用`CertifiedEnclosure`と情報量制限用`InformationEnclosure`へ分離し，`CertifiedEnclosure ⊆ InformationEnclosure`を不変条件として両方を独立伝播する。`accuracy` / `precision` / tolerance省略時`rationalize`はInformationEnclosureを基準にし，`N[N[Pi,20],100]`や後続演算で内部guard桁・hidden exact pointを新しい情報として回収しない
+- `N[expr,p]`の第2引数を固定小数点以下桁数ではなく**有効10進桁数(significant decimal digits)**として定義。値のscaleに追従するInformationEnclosureを生成し，`N[Pi*10^20,20]`や微小値でも相対Precisionを保つ。固定小数表示は`:fix` / `--fix`へ明確に分離し，0近傍では相対Precisionが0でもabsolute Accuracyを保持するzero-centered certified approximationを返せるようにした
+- `DecimalApproximation` / `ComplexDecimalApproximation`をcertified対応scalar函数のfirst-class入力へ拡張。`sin` / `exp` / `log` / `sqrt` / 双曲線・逆函数 / `gamma` / `erf` / `Ei` / `Si` / `Ci`等でCertifiedEnclosureとInformationEnclosureを独立伝播し，primitiveへrewriteされる`log2` / `log10` / `fract`も同経路へ再投入する。ordered comparisonと`min` / `max`はInformationEnclosureだけで結論を証明できる場合に限って確定し，hidden guard桁をBoolean結果から漏らさない。exact Rational parameterのみを受ける一部特殊函数backendは無理に近似parameter対応せず未評価を維持
+- `Infinity`を通常の有限symbolと同じ相殺・0積簡約へ流さないよう修正。`Infinity-Infinity`，`0*Infinity`，`Infinity/Infinity`等の未定義・未仕様形は現段階では保守的に未評価へ残し，`0`等を捏造しない
 - nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
 - Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
 - exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善

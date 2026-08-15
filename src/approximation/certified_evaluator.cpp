@@ -15,6 +15,8 @@
 #include "interval_math.hpp"
 #include "mathematics/exact_trigonometry.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/complex_decimal_approximation.hpp"
+#include "numeric/decimal_approximation.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 
@@ -371,25 +373,28 @@ CertifiedEvaluator::CertifiedEvaluator(
 
 std::optional<CertifiedValue> CertifiedEvaluator::enclose(
     const Expr& expression,
-    std::size_t precisionBits) const {
+    std::size_t precisionBits,
+    EnclosureKind enclosureKind) const {
     if (exceedsCertifiedExpressionDepth(expression))
         return std::nullopt;
-    return encloseBound(expression, precisionBits, {});
+    return encloseBound(expression, precisionBits, {}, enclosureKind);
 }
 
 std::optional<CertifiedValue> CertifiedEvaluator::enclose(
     const Expr& expression,
     std::size_t precisionBits,
-    std::span<const CertifiedBinding> bindings) const {
+    std::span<const CertifiedBinding> bindings,
+    EnclosureKind enclosureKind) const {
     if (exceedsCertifiedExpressionDepth(expression))
         return std::nullopt;
-    return encloseBound(expression, precisionBits, bindings);
+    return encloseBound(expression, precisionBits, bindings, enclosureKind);
 }
 
 std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
     const Expr& expression,
     std::size_t precisionBits,
-    std::span<const CertifiedBinding> bindings) const {
+    std::span<const CertifiedBinding> bindings,
+    EnclosureKind enclosureKind) const {
     if (precisionBits == 0)
         throw std::invalid_argument("Certified evaluation precision must be at least one bit");
 
@@ -403,6 +408,27 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
             exactRealInterval(complex.real, precisionBits),
             exactRealInterval(complex.imaginary, precisionBits)
         }};
+    }
+
+    if (expression.isDecimalApproximation()) {
+        const auto& value = expression.asDecimalApproximation();
+        const Rational& lower = enclosureKind == EnclosureKind::Information
+            ? value.informationLower() : value.certifiedLower();
+        const Rational& upper = enclosureKind == EnclosureKind::Information
+            ? value.informationUpper() : value.certifiedUpper();
+        return CertifiedValue{RealInterval::fromRationalBounds(lower, upper, precisionBits)};
+    }
+
+    if (expression.isComplexDecimalApproximation()) {
+        const auto& value = expression.asComplexDecimalApproximation();
+        const auto component = [&](const numeric::DecimalApproximation& part) {
+            const Rational& lower = enclosureKind == EnclosureKind::Information
+                ? part.informationLower() : part.certifiedLower();
+            const Rational& upper = enclosureKind == EnclosureKind::Information
+                ? part.informationUpper() : part.certifiedUpper();
+            return RealInterval::fromRationalBounds(lower, upper, precisionBits);
+        };
+        return CertifiedValue{ComplexInterval{component(value.real()), component(value.imaginary())}};
     }
 
     if (expression.isSymbol()) {
@@ -422,7 +448,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
     }
 
     if (expression.isCall())
-        return encloseCall(expression.asCall(), precisionBits, bindings);
+        return encloseCall(expression.asCall(), precisionBits, bindings, enclosureKind);
 
     return std::nullopt;
 }
@@ -430,7 +456,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
 std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     const expression::CallExpr& call,
     std::size_t precisionBits,
-    std::span<const CertifiedBinding> bindings) const {
+    std::span<const CertifiedBinding> bindings,
+    EnclosureKind enclosureKind) const {
     const auto* definition = builtins_.find(call.head);
     if (!definition)
         return std::nullopt;
@@ -438,14 +465,14 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     const auto encloseArgument = [&](std::size_t index) -> std::optional<CertifiedValue> {
         if (index >= call.arguments.size())
             return std::nullopt;
-        return encloseBound(call.arguments[index], precisionBits, bindings);
+        return encloseBound(call.arguments[index], precisionBits, bindings, enclosureKind);
     };
 
     switch (definition->id) {
     case BuiltinId::Add: {
         CertifiedValue result{RealInterval::fromRational(rational(0), precisionBits)};
         for (const Expr& argument : call.arguments) {
-            const auto enclosed = encloseBound(argument, precisionBits, bindings);
+            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind);
             if (!enclosed)
                 return std::nullopt;
             result = addValues(result, *enclosed, precisionBits);
@@ -466,7 +493,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Multiply: {
         CertifiedValue result{RealInterval::fromRational(rational(1), precisionBits)};
         for (const Expr& argument : call.arguments) {
-            const auto enclosed = encloseBound(argument, precisionBits, bindings);
+            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind);
             if (!enclosed)
                 return std::nullopt;
             result = multiplyValues(result, *enclosed, precisionBits);
@@ -523,7 +550,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             call.arguments[0], builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
         if (!scalar)
             return std::nullopt;
         const CertifiedValue radians = angleValueToRadians(
@@ -612,7 +639,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto angleOperand = splitAngleOperand(call.arguments[0], builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
         if (!scalar)
             return std::nullopt;
         const CertifiedValue radians = angleValueToRadians(
@@ -1145,7 +1172,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto angleOperand = splitAngleOperand(argument, builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
         if (!scalar)
             return std::nullopt;
 

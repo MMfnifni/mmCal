@@ -560,10 +560,11 @@ void appendMultiplyCall(
                     || currentText.front() == 'o' || currentText.front() == 'O'
                     || currentText.front() == 'x' || currentText.front() == 'X');
             const bool arrayBoundary = previousText.back() == '}' || currentText.front() == '{';
+            const bool infinityBoundary = previousText == "Infinity" || currentText == "Infinity";
 
-            // 数値literalとの字句衝突と、配列に隣接する積は '*' を明示する。
-            // その他は再parseに必要な最小限の区切りだけを出力する。
-            if (exponentMarkerCollision || radixPrefixCollision || arrayBoundary)
+            // 数値literalとの字句衝突、配列境界、Infinityとの積は '*' を明示する。
+            // Infinityは一般symbolと異なり拡張実数sentinelなので、0*Infinity等を暗黙積で曖昧にしない。
+            if (exponentMarkerCollision || radixPrefixCollision || arrayBoundary || infinityBoundary)
                 output.push_back('*');
             else if (previousIdentifier && currentIdentifier)
                 output.push_back(' ');

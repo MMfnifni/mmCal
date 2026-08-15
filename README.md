@@ -111,7 +111,7 @@ In [26]> Pi
 Out[26]> Pi
 
 In [27]> N[%,30]
-Out[27]> 3.141592653589793238462643383280
+Out[27]> 3.14159265358979323846264338328
 ```
 
 The following sections provide an overview only.
@@ -177,18 +177,18 @@ Out[2]> sqrt[2]
 
 Values such as `Pi`, `E`, `Phi`, and `sqrt[2]` are not treated as pre-stored machine-precision floating-point constants. mmCal distinguishes exact symbolic expressions from numerical approximations.
 
-When a decimal value is required, use `N[expr,n]` to request an arbitrary-precision numerical approximation.
+When a numerical approximation is required, use `N[expr,p]`. `p` is the number of **significant decimal digits**, not a fixed number of digits after the decimal point. Fixed-decimal presentation belongs to `:fix` / `--fix`.
 
 ```text
 In [3]> N[1/3,20]
 Out[3]> 0.33333333333333333333
 
 In [4]> N[Pi,30]
-Out[4]> 3.141592653589793238462643383280
+Out[4]> 3.14159265358979323846264338328
 ```
 
-`N[expression,digits]` returns a numerical approximation of the expression itself.
-By contrast, `:fix` changes **only how values are displayed** and does not change the exact value stored internally.
+`N[expression,p]` evaluates the expression to a certified approximation at `p` significant digits, so requested relative precision follows the scale of the value.
+By contrast, `:fix` changes **only the number of displayed fractional digits** and does not change the exact value stored internally or the Precision semantics of `N`.
 
 ```text
 :fix 6
@@ -209,7 +209,7 @@ The value being calculated and its presentation are kept separate.
 
 ### precision / accuracy / rationalize
 
-Approximate values produced by `N` retain not only a display string but also precision metadata such as a certified enclosure containing the true value.
+Approximate values produced by `N` retain a truth-certifying CertifiedEnclosure and a separate InformationEnclosure that limits how much information later computations may reuse. Approximate values can be fed back into ordinary arithmetic and certified scalar functions such as `sin`, `exp`, `log`, and `sqrt`; cancellation and error propagation naturally reduce the resulting Accuracy / Precision, while an outer `N` cannot recover undeclared guard digits.
 
 - `accuracy[x]`: An integer lower bound on the **guaranteed number of absolute decimal digits** relative to the true value
 - `precision[x]`: An integer lower bound on the **guaranteed number of relative decimal digits** relative to the true value
@@ -362,7 +362,7 @@ In [3]> Pi
 Out[3]> Pi
 
 In [4]> N[@,30]
-Out[4]> 3.141592653589793238462643383280
+Out[4]> 3.14159265358979323846264338328
 ```
 
 The formal history interface is `In [n]` / `Out[n]`: positive indices are absolute and negative indices are relative. Zero is invalid.
@@ -566,19 +566,19 @@ Under `N`, matrix operations dispatch directly to a precision-aware backend just
 
 ```text
 N[det[{{Pi,0},{0,2}}],12]
--> 6.283185307180
+-> 6.28318530718
 
 N[inverse[{{Pi,0},{0,2}}],12]
 -> {{0.318309886184, 0}, {0, 0.5}}
 
 N[solveLinear[{{Pi,0},{0,2}},{Pi,4}],12]
--> {1.0, 2}
+-> {1, 2}
 
 N[qrDecomposition[{{1,2},{3,4}}],8]
 -> {{{-0.31622777,-0.94868330},{-0.94868330,0.31622777}},{{-3.16227766,-4.42718872},{0,-0.63245553}}}
 
 N[eigenvalues[{{1,2},{3,4}}],8]
--> {-0.37228132, 5.37228132}
+-> {-0.37228132, 5.3722813}
 ```
 
 This avoids first constructing a huge exact result. Requested precision is handled directly with certified BigFloat/interval operations. `solveLinear` likewise tries direct augmented interval elimination and never substitutes an epsilon guess when pivots or consistency cannot be certified; dependent overdetermined rows can be intrinsically difficult to certify because interval evaluation loses correlation. `matrixRank` and `nullSpace` are discontinuous with respect to rank deficiency, so exact inputs use exact elimination first. Approximate inputs still use no arbitrary epsilon: the interval backend returns a result only when the pivot structure is certified rather than guessing rank deficiency.

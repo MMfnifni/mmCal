@@ -6,6 +6,10 @@
 #include "mathematics/assumption_set.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "mathematics/predicate.hpp"
+#include "numeric/decimal_approximation.hpp"
+#include "numeric/rational.hpp"
+
+#include <optional>
 
 #include <compare>
 #include <string>
@@ -30,6 +34,23 @@ void requireBinary(std::span<const Expr> arguments, std::string_view name) {
     const Expr& lhs,
     const Expr& rhs) {
     return Expr::call(head, {lhs, rhs});
+}
+
+struct RealBounds final {
+    numeric::Rational lower;
+    numeric::Rational upper;
+};
+
+[[nodiscard]] std::optional<RealBounds> informationBounds(const Expr& value) {
+    if (value.isNumber() && value.asNumber().isReal()) {
+        const numeric::Rational exact = value.asNumber().asReal().toRational();
+        return RealBounds{exact, exact};
+    }
+    if (value.isDecimalApproximation()) {
+        const auto& approximate = value.asDecimalApproximation();
+        return RealBounds{approximate.informationLower(), approximate.informationUpper()};
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -70,19 +91,31 @@ Expr evaluateComparison(
         return Expr{head.view() == names::equal ? equal : !equal};
     }
 
-    if (!lhs.isNumber() || !rhs.isNumber()
-        || !lhs.asNumber().isReal() || !rhs.asNumber().isReal())
+    const auto left = informationBounds(lhs);
+    const auto right = informationBounds(rhs);
+    if (!left || !right)
         return unresolved(head, lhs, rhs);
 
-    const auto order = lhs.asNumber().asReal() <=> rhs.asNumber().asReal();
-    if (head.view() == names::less)
-        return Expr{order == std::strong_ordering::less};
-    if (head.view() == names::lessEqual)
-        return Expr{order != std::strong_ordering::greater};
-    if (head.view() == names::greater)
-        return Expr{order == std::strong_ordering::greater};
-    if (head.view() == names::greaterEqual)
-        return Expr{order != std::strong_ordering::less};
+    if (head.view() == names::less) {
+        if (left->upper < right->lower) return Expr{true};
+        if (left->lower >= right->upper) return Expr{false};
+        return unresolved(head, lhs, rhs);
+    }
+    if (head.view() == names::lessEqual) {
+        if (left->upper <= right->lower) return Expr{true};
+        if (left->lower > right->upper) return Expr{false};
+        return unresolved(head, lhs, rhs);
+    }
+    if (head.view() == names::greater) {
+        if (left->lower > right->upper) return Expr{true};
+        if (left->upper <= right->lower) return Expr{false};
+        return unresolved(head, lhs, rhs);
+    }
+    if (head.view() == names::greaterEqual) {
+        if (left->lower >= right->upper) return Expr{true};
+        if (left->upper < right->lower) return Expr{false};
+        return unresolved(head, lhs, rhs);
+    }
 
     error::throwCalcError(
         error::CalcErrorType::Internal,

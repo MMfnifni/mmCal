@@ -51,11 +51,188 @@ struct InformationBounds final {
     Rational upper;
 };
 
+struct FixedDecimal final {
+    std::string text;
+    std::size_t fractionalDigits = 0;
+    bool exact = false;
+};
+
+[[nodiscard]] FixedDecimal roundFixed(
+    const Rational& rational,
+    std::size_t fractionalDigits);
+
+struct SignificantDecimal final {
+    std::string text;
+    std::size_t fractionalDigits = 0;
+    std::size_t roundingFractionalDigits = 0;
+    Rational displayed;
+    Rational halfQuantum;
+    bool exact = false;
+};
+
 [[nodiscard]] Rational informationHalfQuantum(std::size_t fractionalDigits) {
     const auto exponent = static_cast<std::uint64_t>(fractionalDigits);
     BigInt denominator = pow(BigInt{10}, exponent);
     denominator *= BigInt{2};
     return Rational{BigInt{1}, std::move(denominator)};
+}
+
+[[nodiscard]] std::int64_t checkedSignedSize(std::size_t value) {
+    if (value > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+        throw std::length_error("Decimal exponent is too large");
+    return static_cast<std::int64_t>(value);
+}
+
+[[nodiscard]] std::int64_t decimalExponent(const Rational& value) {
+    if (value.numerator().isZero())
+        return 0;
+
+    const BigInt numerator = value.numerator().abs();
+    const BigInt denominator = value.denominator();
+    const std::size_t numeratorDigits = numerator.toString().size();
+    const std::size_t denominatorDigits = denominator.toString().size();
+
+    if (numeratorDigits >= denominatorDigits) {
+        const std::size_t gap = numeratorDigits - denominatorDigits;
+        const BigInt threshold = denominator * pow(BigInt{10}, static_cast<std::uint64_t>(gap));
+        const std::int64_t candidate = checkedSignedSize(gap);
+        return numerator < threshold ? candidate - 1 : candidate;
+    }
+
+    const std::size_t gap = denominatorDigits - numeratorDigits;
+    const BigInt scaled = numerator * pow(BigInt{10}, static_cast<std::uint64_t>(gap));
+    const std::int64_t candidate = -checkedSignedSize(gap);
+    return scaled < denominator ? candidate - 1 : candidate;
+}
+
+[[nodiscard]] Rational powerOfTen(std::int64_t exponent) {
+    if (exponent >= 0)
+        return Rational{pow(BigInt{10}, static_cast<std::uint64_t>(exponent))};
+    if (exponent == std::numeric_limits<std::int64_t>::min())
+        throw std::length_error("Decimal exponent is too large");
+    return Rational{BigInt{1}, pow(BigInt{10}, static_cast<std::uint64_t>(-exponent))};
+}
+
+[[nodiscard]] std::size_t trimTrailingFractionalZeros(std::string& text) {
+    const std::size_t point = text.find('.');
+    if (point == std::string::npos)
+        return 0;
+
+    while (text.size() > point + 1 && text.back() == '0')
+        text.pop_back();
+    if (text.back() == '.')
+        text.pop_back();
+    return text.find('.') == std::string::npos ? 0 : text.size() - text.find('.') - 1;
+}
+
+[[nodiscard]] SignificantDecimal roundSignificant(
+    const Rational& value,
+    std::size_t significantDigits) {
+    if (significantDigits == 0)
+        throw std::invalid_argument("Decimal precision must be greater than zero");
+
+    const std::int64_t exponent = value.numerator().isZero()
+        ? -checkedSignedSize(significantDigits)
+        : decimalExponent(value) - checkedSignedSize(significantDigits) + 1;
+    const Rational quantum = powerOfTen(exponent);
+    const FixedDecimal scaledRounded = roundFixed(value / quantum, 0);
+    const BigInt roundedInteger = BigInt::parse(scaledRounded.text);
+    const Rational displayed = Rational{roundedInteger} * quantum;
+
+    const std::int64_t displayedQuantumExponent = displayed.numerator().isZero()
+        ? -checkedSignedSize(significantDigits)
+        : decimalExponent(displayed) - checkedSignedSize(significantDigits) + 1;
+    const Rational displayedQuantum = powerOfTen(displayedQuantumExponent);
+
+    std::size_t fractionalDigits = 0;
+    if (displayedQuantumExponent < 0) {
+        if (displayedQuantumExponent == std::numeric_limits<std::int64_t>::min())
+            throw std::length_error("Decimal precision is too large");
+        fractionalDigits = static_cast<std::size_t>(-displayedQuantumExponent);
+    }
+    const FixedDecimal displayedFixed = roundFixed(displayed, fractionalDigits);
+    std::string text = displayedFixed.text;
+    const std::size_t compactDigits = trimTrailingFractionalZeros(text);
+
+    return SignificantDecimal{
+        std::move(text),
+        compactDigits,
+        fractionalDigits,
+        displayed,
+        displayedQuantum / Rational{BigInt{2}},
+        displayed == value
+    };
+}
+
+
+struct ZeroCenteredDecimal final {
+    std::string text;
+    std::size_t fractionalDigits = 0;
+    Rational halfQuantum;
+};
+
+[[nodiscard]] std::optional<ZeroCenteredDecimal> zeroCenteredDecimal(
+    const Rational& lower,
+    const Rational& upper,
+    std::size_t significantDigits) {
+    if (lower > Rational{} || upper < Rational{})
+        return std::nullopt;
+
+    const Rational lowerMagnitude = lower.numerator().isNegative() ? -lower : lower;
+    const Rational upperMagnitude = upper.numerator().isNegative() ? -upper : upper;
+    const Rational maximumMagnitude = lowerMagnitude < upperMagnitude
+        ? upperMagnitude : lowerMagnitude;
+
+    std::size_t fractionalDigits = significantDigits;
+    if (!maximumMagnitude.isZero()) {
+        const Rational twiceMagnitude = maximumMagnitude * Rational{BigInt{2}};
+        const std::int64_t floorExponent = decimalExponent(twiceMagnitude);
+        const std::int64_t ceilExponent = twiceMagnitude == powerOfTen(floorExponent)
+            ? floorExponent : floorExponent + 1;
+        if (ceilExponent > 0)
+            return std::nullopt;
+        fractionalDigits = ceilExponent < 0
+            ? static_cast<std::size_t>(-ceilExponent)
+            : 0;
+    }
+
+    const FixedDecimal zero = roundFixed(Rational{}, fractionalDigits);
+    return ZeroCenteredDecimal{
+        zero.text,
+        fractionalDigits,
+        informationHalfQuantum(fractionalDigits)
+    };
+}
+
+[[nodiscard]] InformationBounds defaultInformationBoundsSignificant(
+    const SignificantDecimal& rounded,
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper) {
+    const Rational roundedLower = rounded.displayed - rounded.halfQuantum;
+    const Rational roundedUpper = rounded.displayed + rounded.halfQuantum;
+    return InformationBounds{
+        certifiedLower < roundedLower ? certifiedLower : roundedLower,
+        certifiedUpper > roundedUpper ? certifiedUpper : roundedUpper
+    };
+}
+
+[[nodiscard]] InformationBounds explicitInformationBoundsSignificant(
+    const SignificantDecimal& rounded,
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper,
+    const Rational& informationLower,
+    const Rational& informationUpper) {
+    if (informationLower > informationUpper)
+        throw std::invalid_argument("Decimal approximation information enclosure is reversed");
+    if (informationLower > certifiedLower || informationUpper < certifiedUpper)
+        throw std::invalid_argument("Decimal approximation information enclosure must contain the certified enclosure");
+
+    const Rational roundedLower = rounded.displayed - rounded.halfQuantum;
+    const Rational roundedUpper = rounded.displayed + rounded.halfQuantum;
+    return InformationBounds{
+        informationLower < roundedLower ? informationLower : roundedLower,
+        informationUpper > roundedUpper ? informationUpper : roundedUpper
+    };
 }
 
 [[nodiscard]] InformationBounds defaultInformationBounds(
@@ -130,12 +307,6 @@ struct InformationBounds final {
 
     return true;
 }
-
-struct FixedDecimal final {
-    std::string text;
-    std::size_t fractionalDigits = 0;
-    bool exact = false;
-};
 
 // certified区間由来の固定桁表示では，要求桁まで並んだ末尾0をすべて見せる必要はない。
 // ただし近似値であることと，最後に観測された非零桁より一段下まで保証があることを
@@ -222,6 +393,7 @@ DecimalApproximation::DecimalApproximation(
     std::string text,
     std::size_t fractionalDigits,
     std::size_t requestedFractionalDigits,
+    std::size_t requestedSignificantDigits,
     bool rounded,
     ApproximationOrigin origin,
     Rational displayedValue,
@@ -232,6 +404,7 @@ DecimalApproximation::DecimalApproximation(
     : text_(std::move(text)),
       fractionalDigits_(fractionalDigits),
       requestedFractionalDigits_(requestedFractionalDigits),
+      requestedSignificantDigits_(requestedSignificantDigits),
       rounded_(rounded),
       origin_(origin),
       displayedValue_(std::move(displayedValue)),
@@ -267,7 +440,7 @@ DecimalApproximation DecimalApproximation::fromReal(
         const InformationBounds information = defaultInformationBounds(
             rational, rational, rational, repeatingFractionalDigits);
         return DecimalApproximation{
-            text, 0, repeatingFractionalDigits, false, ApproximationOrigin::ExactValue,
+            text, 0, repeatingFractionalDigits, 0, false, ApproximationOrigin::ExactValue,
             rational, rational, rational, information.lower, information.upper};
     }
 
@@ -317,9 +490,31 @@ DecimalApproximation DecimalApproximation::fromReal(
     const InformationBounds information = defaultInformationBounds(
         displayed, rational, rational, repeatingFractionalDigits);
     return DecimalApproximation{
-        text, digits.size(), repeatingFractionalDigits, rounded,
+        text, digits.size(), repeatingFractionalDigits, 0, rounded,
         ApproximationOrigin::ExactValue, displayed, rational, rational,
         information.lower, information.upper};
+}
+
+DecimalApproximation DecimalApproximation::fromRealSignificant(
+    const RealNumber& value,
+    std::size_t significantDigits) {
+    const Rational rational = value.toRational();
+    const SignificantDecimal rounded = roundSignificant(rational, significantDigits);
+    const InformationBounds information = defaultInformationBoundsSignificant(
+        rounded, rational, rational);
+    return DecimalApproximation{
+        rounded.text,
+        rounded.fractionalDigits,
+        rounded.roundingFractionalDigits,
+        significantDigits,
+        !rounded.exact,
+        ApproximationOrigin::ExactValue,
+        rounded.displayed,
+        rational,
+        rational,
+        information.lower,
+        information.upper
+    };
 }
 
 DecimalApproximation DecimalApproximation::fromRealFixed(
@@ -334,6 +529,7 @@ DecimalApproximation DecimalApproximation::fromRealFixed(
         rounded.text,
         rounded.fractionalDigits,
         fractionalDigits,
+        0,
         !rounded.exact,
         ApproximationOrigin::ExactValue,
         displayed,
@@ -365,9 +561,61 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedInterval(
         std::move(text),
         displayedFractionalDigits,
         fractionalDigits,
+        0,
         true,
         ApproximationOrigin::CertifiedInterval,
         displayed,
+        lower,
+        upper,
+        information.lower,
+        information.upper
+    };
+}
+
+std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedIntervalSignificant(
+    const Rational& lower,
+    const Rational& upper,
+    std::size_t significantDigits) {
+    if (lower > upper)
+        throw std::invalid_argument("Certified decimal interval is reversed");
+
+    const SignificantDecimal lowerRounded = roundSignificant(lower, significantDigits);
+    const SignificantDecimal upperRounded = roundSignificant(upper, significantDigits);
+    if (lowerRounded.displayed != upperRounded.displayed) {
+        const auto zero = zeroCenteredDecimal(lower, upper, significantDigits);
+        if (!zero)
+            return std::nullopt;
+        const Rational roundedLower = -zero->halfQuantum;
+        const Rational roundedUpper = zero->halfQuantum;
+        const InformationBounds information{
+            lower < roundedLower ? lower : roundedLower,
+            upper > roundedUpper ? upper : roundedUpper
+        };
+        return DecimalApproximation{
+            zero->text,
+            zero->fractionalDigits,
+            zero->fractionalDigits,
+            significantDigits,
+            true,
+            ApproximationOrigin::CertifiedInterval,
+            Rational{},
+            lower,
+            upper,
+            information.lower,
+            information.upper
+        };
+    }
+
+    const InformationBounds information = defaultInformationBoundsSignificant(
+        lowerRounded, lower, upper);
+    return DecimalApproximation{
+        lowerRounded.text,
+        lowerRounded.fractionalDigits,
+        lowerRounded.roundingFractionalDigits,
+        significantDigits,
+        true,
+        ApproximationOrigin::CertifiedInterval,
+        lowerRounded.displayed,
         lower,
         upper,
         information.lower,
@@ -398,6 +646,7 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedIntervalW
             std::string{base.text()},
             base.fractionalDigits(),
             fractionalDigits,
+            0,
             base.isRounded(),
             ApproximationOrigin::CertifiedInterval,
             base.displayedValue(),
@@ -423,9 +672,71 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedIntervalW
         std::move(text),
         displayedFractionalDigits,
         fractionalDigits,
+        0,
         true,
         ApproximationOrigin::CertifiedInterval,
         displayed,
+        certifiedLower,
+        certifiedUpper,
+        information.lower,
+        information.upper
+    };
+}
+
+std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper,
+    const Rational& informationLower,
+    const Rational& informationUpper,
+    std::size_t significantDigits) {
+    if (certifiedLower > certifiedUpper)
+        throw std::invalid_argument("Certified decimal interval is reversed");
+
+    const SignificantDecimal lowerRounded = roundSignificant(certifiedLower, significantDigits);
+    const SignificantDecimal upperRounded = roundSignificant(certifiedUpper, significantDigits);
+    if (lowerRounded.displayed != upperRounded.displayed) {
+        if (informationLower > informationUpper)
+            throw std::invalid_argument("Decimal approximation information enclosure is reversed");
+        if (informationLower > certifiedLower || informationUpper < certifiedUpper)
+            throw std::invalid_argument("Decimal approximation information enclosure must contain the certified enclosure");
+        const auto zero = zeroCenteredDecimal(informationLower, informationUpper, significantDigits);
+        if (!zero)
+            return std::nullopt;
+        const Rational roundedLower = -zero->halfQuantum;
+        const Rational roundedUpper = zero->halfQuantum;
+        const InformationBounds information{
+            informationLower < roundedLower ? informationLower : roundedLower,
+            informationUpper > roundedUpper ? informationUpper : roundedUpper
+        };
+        return DecimalApproximation{
+            zero->text,
+            zero->fractionalDigits,
+            zero->fractionalDigits,
+            significantDigits,
+            true,
+            ApproximationOrigin::CertifiedInterval,
+            Rational{},
+            certifiedLower,
+            certifiedUpper,
+            information.lower,
+            information.upper
+        };
+    }
+
+    const InformationBounds information = explicitInformationBoundsSignificant(
+        lowerRounded,
+        certifiedLower,
+        certifiedUpper,
+        informationLower,
+        informationUpper);
+    return DecimalApproximation{
+        lowerRounded.text,
+        lowerRounded.fractionalDigits,
+        lowerRounded.roundingFractionalDigits,
+        significantDigits,
+        true,
+        ApproximationOrigin::CertifiedInterval,
+        lowerRounded.displayed,
         certifiedLower,
         certifiedUpper,
         information.lower,
@@ -443,6 +754,10 @@ std::size_t DecimalApproximation::fractionalDigits() const noexcept {
 
 std::size_t DecimalApproximation::requestedFractionalDigits() const noexcept {
     return requestedFractionalDigits_;
+}
+
+std::size_t DecimalApproximation::requestedSignificantDigits() const noexcept {
+    return requestedSignificantDigits_;
 }
 
 bool DecimalApproximation::isRounded() const noexcept {

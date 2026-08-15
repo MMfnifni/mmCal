@@ -6,15 +6,15 @@ N[1/3,2]==>0.33
 N[1/3,20]==>0.33333333333333333333
 N[1/2,20]==>0.5
 N[0.1,20]==>0.1
-N[sqrt[2],1]==>1.4
-N[sqrt[2],2]==>1.41
-N[sqrt[2],20]==>1.41421356237309504880
-N[Pi,1]==>3.1
-N[Pi,2]==>3.14
-N[Pi,20]==>3.14159265358979323846
-N[E,20]==>2.71828182845904523536
-N[Phi,20]==>1.61803398874989484820
-N[arg[-1],20]==>"3.14159265358979323846 Rad"
+N[sqrt[2],1]==>1
+N[sqrt[2],2]==>1.4
+N[sqrt[2],20]==>1.4142135623730950488
+N[Pi,1]==>3
+N[Pi,2]==>3.1
+N[Pi,20]==>3.1415926535897932385
+N[E,20]==>2.7182818284590452354
+N[Phi,20]==>1.6180339887498948482
+N[arg[-1],20]==>"3.1415926535897932385 Rad"
 
 accuracy[1/3]==>Infinity
 precision[1/3]==>Infinity
@@ -32,20 +32,48 @@ rationalize[0.1]==>1/10
 
 # N is recursive over arrays and exact finite decimals are not zero-padded.
 N[{1/3,1/2,2},5]==>{0.33333,0.5,2}
-N[{sqrt[2],Pi},10]==>{1.4142135624,3.1415926536}
+N[{sqrt[2],Pi},10]==>{1.414213562,3.141592654}
 
 # N propagates precision into FFT; approximate operands select the same certified backend.
-N[fft[{1,2,3}],12]==>{6,-1.50+0.866025403784I,-1.50-0.866025403784I}
+N[fft[{1,2,3}],12]==>{6,-1.5+0.866025403784I,-1.5-0.866025403784I}
 fft[N[{1,2,3,4},12]]==>{10,-2+2I,-2,-2-2I}
 
 # Certified approximations remain numerical values after N. Exact Number operands mix as point intervals,
 # and output digits may decrease when enclosure propagation reduces the available absolute accuracy.
-N[N[Pi,20],100]==>3.14159265358979323846
-N[Pi,20]+1/3==>3.4749259869231265718
+N[N[Pi,20],100]==>3.1415926535897932385
+N[Pi,20]+1/3==>3.474925986923126572
 N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000]==>0.0000000000000000034694469519536141888238489627838134765625
-accuracy[N[Pi,20]*10000000000]==>10
-accuracy[N[Pi,100]*10^50]==>50
-accuracy[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>999
-precision[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>981
-N[Pi+I,20]*N[E-I,20]==>9.5397342226735670655-0.4233108251307480031I
+accuracy[N[Pi,20]*10000000000]==>8
+accuracy[N[Pi,100]*10^50]==>48
+accuracy[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>998
+precision[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>980
+N[Pi+I,20]*N[E-I,20]==>9.53973422267356707-0.423310825130748003I
 1/N[0,20]=>DomainError: Division by zero
+
+# N precision is scale-relative significant decimal precision; :fix owns fixed fractional presentation.
+N[Pi*10^20,20]==>314159265358979323850
+precision[N[Pi*10^20,20]]==>19
+accuracy[N[Pi/10^20,20]]==>39
+precision[N[Pi/10^100,50]]==>49
+
+# Approximation values are first-class certified scalar inputs. Near zero, absolute Accuracy may remain even when relative Precision is zero.
+sin[N[Pi,20]]==>0.000000000000000000
+accuracy[sin[N[Pi,20]]]==>18
+precision[sin[N[Pi,20]]]==>0
+exp[N[1,20]]==>2.718281828459045235
+log10[N[2,20]]==>0.3010299956639811952
+fract[N[Pi,20]]==>0.141592653589793238
+exp[N[1+I,20]]==>1.46869393991588516+2.28735528717884239I
+sqrt[N[-2,20]]==>1.414213562373095049I
+log[N[-2,20]]==>0.6931471805599453094+3.141592653589793238I
+
+# Infinity does not participate in ordinary finite-symbol cancellation.
+Infinity-Infinity==>Infinity-Infinity
+0*Infinity==>0*Infinity
+
+# Discrete decisions use InformationEnclosure only; hidden guard digits cannot leak through booleans/min/max.
+N[Pi,20]>3==>True
+N[Pi,2]>3.1==>3.1>31/10
+min[N[Pi,20],3]==>3
+max[N[Pi,20],3]==>3.1415926535897932385
+min[N[Pi,2],3.1]==>min[3.1,31/10]

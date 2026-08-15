@@ -297,7 +297,10 @@ void explainDecimal(
     bool internal) {
     add(properties, "Domain", text("Real"));
     add(properties, "Exactness", text("CertifiedApproximation"));
-    add(properties, "RequestedFractionalDigits", integer(value.requestedFractionalDigits()));
+    if (value.requestedSignificantDigits() != 0)
+        add(properties, "RequestedPrecisionDigits", integer(value.requestedSignificantDigits()));
+    else
+        add(properties, "RequestedFractionalDigits", integer(value.requestedFractionalDigits()));
     add(properties, "DisplayedFractionalDigits", integer(value.fractionalDigits()));
     add(properties, "Rounded", Expr{value.isRounded()});
     add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
@@ -320,9 +323,15 @@ void explainComplexDecimal(
     bool internal) {
     add(properties, "Domain", text("Complex"));
     add(properties, "Exactness", text("CertifiedApproximation"));
-    add(properties, "RequestedFractionalDigits", integer(std::min(
-        value.real().requestedFractionalDigits(),
-        value.imaginary().requestedFractionalDigits())));
+    const std::size_t requestedPrecision = std::min(
+        value.real().requestedSignificantDigits(),
+        value.imaginary().requestedSignificantDigits());
+    if (requestedPrecision != 0)
+        add(properties, "RequestedPrecisionDigits", integer(requestedPrecision));
+    else
+        add(properties, "RequestedFractionalDigits", integer(std::min(
+            value.real().requestedFractionalDigits(),
+            value.imaginary().requestedFractionalDigits())));
     add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
     add(properties, "InformationEnclosure", informationEnclosure(value));
 

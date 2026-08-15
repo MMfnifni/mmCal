@@ -585,7 +585,7 @@ private:
     values.reserve(matrix.values().size());
     for (const BigFloat& value : matrix.values()) {
         const Rational exact = value.toRational();
-        const auto decimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        const auto decimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
             exact, exact, digits);
         if (!decimal)
             return std::nullopt;

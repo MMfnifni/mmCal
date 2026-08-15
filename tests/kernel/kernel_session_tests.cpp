@@ -158,7 +158,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"element[x, Real]"},
         "KernelSession: unresolved element predicate remains symbolic");
     tests.expectEqual(evaluateAndFormat(elementarySession, "N[abs[Pi + I], 20]"),
-        std::string{"3.29690830947561515876"},
+        std::string{"3.2969083094756151588"},
         "KernelSession: abs uses certified complex magnitude evaluation");
     tests.expectEqual(evaluateAndFormat(elementarySession, "N[sign[Pi + I], 20]"),
         std::string{"0.95289051398868735278+0.30331447105335286402I"},
@@ -468,21 +468,21 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: N preserves terminating decimal length");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[1/3]"),
         std::string{"0.3333333333333333"},
-        "KernelSession: N defaults to sixteen fractional digits");
+        "KernelSession: N defaults to sixteen significant digits");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[1/3, 20]"),
         std::string{"0.33333333333333333333"},
-        "KernelSession: N accepts explicit fractional digits");
+        "KernelSession: N accepts explicit significant digits");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[Pi]"),
-        std::string{"3.1415926535897932"},
+        std::string{"3.141592653589793"},
         "KernelSession: N invokes the certified Pi provider");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[Pi, 100]"),
-        std::string{"3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170680"},
+        std::string{"3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117068"},
         "KernelSession: Pi precision is arbitrary and certified");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[E, 30]"),
-        std::string{"2.718281828459045235360287471353"},
+        std::string{"2.71828182845904523536028747135"},
         "KernelSession: E is certified from Exp[1], not stored machine precision");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[exp[1/3], 30]"),
-        std::string{"1.395612425086089528628125319603"},
+        std::string{"1.3956124250860895286281253196"},
         "KernelSession: real Exp uses arbitrary-precision certified evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[log[2], 30]"),
         std::string{"0.693147180559945309417232121458"},
@@ -494,22 +494,22 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"0.982793723247329067985710611015"},
         "KernelSession: certified atan2 evaluates a general principal Arg");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[log[1 + I], 30]"),
-        std::string{"0.346573590279972654708616060729+0.785398163397448309615660845820I"},
+        std::string{"0.346573590279972654708616060729+0.78539816339744830961566084582I"},
         "KernelSession: N evaluates the principal complex logarithm");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[exp[1 + I], 30]"),
-        std::string{"1.468693939915885157138967597327+2.287355287178842391208171906701I"},
+        std::string{"1.46869393991588515713896759733+2.2873552871788423912081719067I"},
         "KernelSession: N evaluates general complex Exp without machine floating point");
     tests.expectEqual(evaluateAndFormat(numericalSession, "(-8)^(1/3)"),
         std::string{"(-8)^(1/3)"},
         "KernelSession: exact principal Power remains symbolic when no simple exact form is implemented");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[(-8)^(1/3), 30]"),
-        std::string{"1.0+1.732050807568877293527446341506I"},
+        std::string{"1+1.73205080756887729352744634151I"},
         "KernelSession: non-integer Power uses Exp[w principal Log[z]]");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[2]]"),
-        std::string{"1.4142135623730950"},
+        std::string{"1.414213562373095"},
         "KernelSession: N uses certified arbitrary-precision real sqrt");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[2], 50]"),
-        std::string{"1.41421356237309504880168872420969807856967187537695"},
+        std::string{"1.4142135623730950488016887242096980785696718753769"},
         "KernelSession: sqrt precision is not tied to machine floating point");
     tests.expectEqual(evaluateAndFormat(numericalSession, "(-2)^0.5"),
         std::string{"I sqrt[2]"},
@@ -518,13 +518,13 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"-sqrt[2]"},
         "KernelSession: unary minus remains outside power without parentheses");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[(-2)^0.5, 30]"),
-        std::string{"1.414213562373095048801688724210I"},
+        std::string{"1.41421356237309504880168872421I"},
         "KernelSession: N evaluates exact complex half power through ComplexInterval");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[Pi], 30]"),
-        std::string{"1.772453850905516027298167483341"},
+        std::string{"1.77245385090551602729816748334"},
         "KernelSession: certified evaluator composes Pi and sqrt");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[Pi + sqrt[2], 30]"),
-        std::string{"4.555806215962888287264332107489"},
+        std::string{"4.55580621596288828726433210749"},
         "KernelSession: N evaluates a composed exact expression instead of per-function dispatch");
     tests.expectEqual(evaluateAndFormat(numericalSession, "sqrt[-2]"),
         std::string{"I sqrt[2]"},
@@ -539,10 +539,10 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"1-2I"},
         "KernelSession: principal complex square root keeps non-negative real part");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[1 + I], 30]"),
-        std::string{"1.098684113467809966039801195241+0.455089860562227341304357757822I"},
+        std::string{"1.09868411346780996603980119524+0.455089860562227341304357757822I"},
         "KernelSession: N certifies a general upper-half-plane complex square root");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[-1 - I], 30]"),
-        std::string{"0.455089860562227341304357757822-1.098684113467809966039801195241I"},
+        std::string{"0.455089860562227341304357757822-1.09868411346780996603980119524I"},
         "KernelSession: N certifies principal sqrt below the branch cut");
     tests.expectEqual(evaluateAndFormat(numericalSession, "sin[1]"),
         std::string{"sin[1]"},
@@ -629,7 +629,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"0.5403023058681397174009366074429766037323104206179222276700972553811003947744717645179518560871830893"},
         "KernelSession: bare cos argument is certified in default Radian mode");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sin[1 Grad], 50]"),
-        std::string{"0.01570731731182067575329535330990677008694845073378"},
+        std::string{"0.015707317311820675753295353309906770086948450733779"},
         "KernelSession: explicit Grad is converted through certified Pi");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sin[1 Rad], 100]"),
         std::string{"0.8414709848078965066525023216302989996225630607983710656727517099919104043912396689486397435430526959"},
@@ -638,10 +638,10 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"0.5403023058681397174009366074429766037323104206179222276700972553811003947744717645179518560871830893"},
         "KernelSession: explicit Rad keeps certified arbitrary precision cos backend");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[tan[1 Rad], 100]"),
-        std::string{"1.5574077246549022305069748074583601730872507723815200383839466056988613971517272895550999652022429838"},
+        std::string{"1.557407724654902230506974807458360173087250772381520038383946605698861397151727289555099965202242984"},
         "KernelSession: explicit Rad uses certified arbitrary precision tan backend");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[tan[1], 100]"),
-        std::string{"1.5574077246549022305069748074583601730872507723815200383839466056988613971517272895550999652022429838"},
+        std::string{"1.557407724654902230506974807458360173087250772381520038383946605698861397151727289555099965202242984"},
         "KernelSession: bare tan argument is certified in default Radian mode");
 
 
@@ -687,7 +687,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expect(evaluateError(numericalSession, "atan2[I,1]").type() == error::CalcErrorType::Domain,
         "KernelSession: atan2 rejects exact complex coordinates without waiting for N");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[asin[1/3], 20]"),
-        std::string{"0.33983690945412193710"},
+        std::string{"0.3398369094541219371"},
         "KernelSession: asin arbitrary precision output uses radians by default");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atan2[2,3], 20]"),
         std::string{"0.58800260354756755125"},
@@ -695,7 +695,7 @@ void runKernelSessionTests(TestRunner& tests) {
 
     // 複素逆三角函数はprincipal Log/Sqrtの枝を使う。負実軸のArgは+Pi側。
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[asin[2], 20]"),
-        std::string{"1.57079632679489661923-1.31695789692481670863I"},
+        std::string{"1.5707963267948966192-1.3169578969248167086I"},
         "KernelSession: complex asin follows the principal branch");
     tests.expect(evaluateError(numericalSession, "N[atan[I],20]").type() == error::CalcErrorType::Domain,
         "KernelSession: atan detects its logarithmic singularity at I");
@@ -731,20 +731,20 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: tanh detects an exact complex cosh zero");
 
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sinh[1], 20]"),
-        std::string{"1.17520119364380145688"},
+        std::string{"1.1752011936438014569"},
         "KernelSession: sinh uses certified arbitrary precision evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atanh[1/2], 20]"),
-        std::string{"0.54930614433405484570"},
+        std::string{"0.5493061443340548457"},
         "KernelSession: atanh uses certified arbitrary precision evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[csch[1], 20]"),
         std::string{"0.85091812823932154513"},
         "KernelSession: csch uses certified reciprocal sinh evaluation");
 
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[acosh[-2], 20]"),
-        std::string{"1.31695789692481670863+3.14159265358979323846I"},
+        std::string{"1.3169578969248167086+3.1415926535897932385I"},
         "KernelSession: complex acosh uses the Arg-compatible upper cut value");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atanh[2], 20]"),
-        std::string{"0.54930614433405484570-1.57079632679489661923I"},
+        std::string{"0.5493061443340548457-1.5707963267948966192I"},
         "KernelSession: complex atanh uses the principal Log boundary convention");
 
     // parity metadata is consumed by the Simplifier instead of being duplicated per function.
@@ -1010,7 +1010,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(utilitySession, "cbrt[-2]"), std::string{"-cbrt[2]"},
         "KernelSession: cbrt canonicalizes odd symmetry without using principal Power");
     tests.expectEqual(evaluateAndFormat(utilitySession, "N[cbrt[2],20]"),
-        std::string{"1.25992104989487316477"},
+        std::string{"1.2599210498948731648"},
         "KernelSession: cbrt has certified numerical evaluation");
     tests.expectEqual(evaluateAndFormat(utilitySession, "hypot[3,4]"), std::string{"5"},
         "KernelSession: hypot evaluates an exact Pythagorean triple");

@@ -154,13 +154,13 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         std::string{"0.47746482927568600731"},
         "cosc is certified without early floating conversion");
     tests.expectEqual(eval(session, "N[tanc[Pi/4],20]"),
-        std::string{"1.27323954473516268615"},
+        std::string{"1.2732395447351626862"},
         "tanc has certified pole-aware evaluation");
     tests.expectEqual(eval(session, "N[expm1[1/10^30],50]"),
-        std::string{"0.0000000000000000000000000000010"},
+        std::string{"0.0000000000000000000000000000010000000000000000000000000000005"},
         "expm1 survives severe cancellation by precision refinement");
     tests.expectEqual(eval(session, "N[log1p[1/10^30],50]"),
-        std::string{"0.0000000000000000000000000000010"},
+        std::string{"0.0000000000000000000000000000009999999999999999999999999999995"},
         "log1p survives severe cancellation by precision refinement");
     tests.expect(evalError(session, "log1p[-1]").type() == error::CalcErrorType::Domain,
         "log1p rejects its exact branch singularity");

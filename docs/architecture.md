@@ -54,7 +54,7 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく，明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず，`ComplexInterval`上のradix-2/Bluestein backendへ降りる。Matrixでも同じ`ApproximationContext`を使い，expression→certified interval変換，decimalization，guard-digit refinementを共通helperへ集約する。表示ではexact有限小数を不要に0埋めせず，certified fixed-digit結果の末尾0列は1桁だけ残して圧縮する。
 
-Unreleasedの`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,n]`では表示丸め区間`d ± 0.5*10^-n`をInformationEnclosureへ含め，backend内部のguard桁を後からAccuracyとして回収しない。通常四則演算では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。
+Unreleasedの`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,p]`の`p`は有効10進桁数であり，非zero表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，丸め半量子`0.5*10^(e-p+1)`をInformationEnclosureへ含める。backend内部のguard桁は後からAccuracyとして回収しない。通常四則演算とcertified対応scalar函数では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。ordered comparisonや`min/max`の離散判定はInformationEnclosureだけで証明できる場合に限る。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。`:fix`はこれとは独立した固定小数表示である。
 
 ### `linear_algebra`
 

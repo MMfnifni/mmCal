@@ -41,7 +41,7 @@ log[-1]
 -> I Pi
 
 N[Pi,30]
--> 3.141592653589793238462643383280
+-> 3.14159265358979323846264338328
 ```
 
 `Pi`や`sqrt[2]`は「内部に保存した小数」ではない。exactな数式として保持し、`N[...]`が指定されたときだけcertified numerical evaluationへ進む。
@@ -114,13 +114,13 @@ gamma[1/3]
 
 任意精度の作業値は`BigFloat`，証明付き区間は`RealInterval` / `ComplexInterval`。
 
-`N[expr,n]`では，真値を含む区間の両端が同じn桁丸めへ入ることを確認してから`DecimalApproximation`を返す。
+`N[expr,p]`では，真値を含む区間の両端が同じ`p`有効桁の10進丸めへ入ることを確認してから`DecimalApproximation`を返す。0近傍で相対Precisionを定義できない場合でも，InformationEnclosureから絶対Accuracyを保証できるならzero-centered approximationを返せる。
 
 現在の`DecimalApproximation`は表示文字列だけではなく，要求桁数，由来（exact入力 / certified interval），表示10進値そのもののexact Rationalに加えて，**CertifiedEnclosure**と**InformationEnclosure**の2種類のexact Rational区間を保持する。CertifiedEnclosureは真値包含を証明する区間，InformationEnclosureはその近似値から後続計算で利用してよい情報量を表す区間であり，常に`CertifiedEnclosure ⊆ InformationEnclosure`を満たす。`ComplexDecimalApproximation`も実部・虚部ごとに同じmetadataを保持する。`precision/accuracy/rationalize`はInformationEnclosureを直接使い，表示文字列を再parseして精度を推測しない。
 
 ```text
 N[sqrt[2],30]
--> 1.414213562373095048801688724210
+-> 1.4142135623730954881688724210
 ```
 
 「差が小さくなったので終了」という経験的停止条件だけには依存しない。
@@ -625,7 +625,7 @@ gamma[-1/2]
 -> -2 sqrt[Pi]
 
 N[gamma[1/3],20]
--> 2.67893853470774763366
+-> 2.6789385347077476337
 ```
 
 一般実数はStirling–Bernoulli + rigorous remainder、負実数はreflectionを使用。
@@ -712,7 +712,7 @@ hypergeometric1F1[0,3,2] -> 1
 hypergeometric1F1[-2,3,2] -> 0
 hypergeometric1F1[2,2,1] -> E
 N[hypergeometric1F1[1/6,7/6,1],20]
--> 1.19206880798188830082
+-> 1.1920688079818883008
 ```
 
 parameterが微分変数に依存しないとき、
@@ -745,7 +745,7 @@ hypergeometric2F1[a,b,c,z]
 hypergeometric2F1[-2,1,3,1/2] -> 17/24
 hypergeometric2F1[0,2,3,x] -> 1
 N[hypergeometric2F1[1/2,1/2,3/2,1/4],20]
--> 1.04719755119659774615
+-> 1.0471975511965977462
 ```
 
 parameterが微分変数に依存しない場合、
@@ -785,7 +785,7 @@ ellipticE[x,0] -> x
 ellipticPi[0,x,0] -> x
 
 N[ellipticF[1/2,1/3],20]
--> 0.50684775626543110920
+-> 0.5068477562654311092
 N[ellipticE[1/2,1/3],20]
 -> 0.49331536201475850521
 N[ellipticPi[1/5,1/2,1/3],20]
@@ -846,11 +846,11 @@ polylog[1,z] -> -log[1-z]
 polylog[2,1] -> Pi^2/6
 polylog[2,-1] -> -Pi^2/12
 
-N[Ei[1],20] -> 1.89511781635593675547
+N[Ei[1],20] -> 1.8951178163559367555
 N[Si[1],20] -> 0.94608307036718301494
 N[Ci[1],20] -> 0.33740392290096813466
-N[li[2],20] -> 1.04516378011749278484
-N[polylog[2,1/2],20] -> 0.58224052646501250590
+N[li[2],20] -> 1.0451637801174927848
+N[polylog[2,1/2],20] -> 0.5822405264650125059
 ```
 
 現在の微分Knowledgeは、引数・order parameterが微分変数に依存しない範囲で
@@ -1752,32 +1752,39 @@ Complex領域でもprincipal inverseだけから全解を捏造しない。
 
 ```text
 N[expr]
-N[expr,digits]
+N[expr,p]
 ```
 
-既定は16 fractional digits。
+`p`は**有効10進桁数(significant decimal digits)**であり，既定は16桁。小数点以下の表示桁数ではない。固定小数表示は`:fix` / `--fix`が担当する。
 Arrayへ再帰的に適用できるほか、`arg`などが返す明示角度単位では値の部分だけを近似し、単位は保持する。
 
 v1.5.2では`N`をprecision-aware evaluationの入口として扱う。第2引数の要求精度を先に確定し、第1引数の評価中はそのprecision contextを保持する。通常builtinは従来どおりexact評価され、FFTなど明示的に対応したbuiltinだけが要求精度を受け取って直接certified backendへ降りる。したがってexact-firstの意味論を全体へ暗黙に変更しない。
 
 ```text
 N[Pi,20]
--> 3.14159265358979323846
+-> 3.1415926535897932385
 N[Phi,20]
--> 1.61803398874989484820
+-> 1.6180339887498948482
 N[fft[{1,2,3,4}],20]
 N[arg[-1],20]
--> 3.14159265358979323846 Rad
+-> 3.1415926535897932385 Rad
+
+N[Pi*10^20,20]
+-> 314159265358979323850
+precision[N[Pi*10^20,20]]
+-> 19
+accuracy[N[Pi/10^20,20]]
+-> 39
 ```
 
-exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の固定桁結果では，要求桁まで並んだ末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数，CertifiedEnclosure，InformationEnclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
+exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の有効桁結果では，要求桁に対応する末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数，CertifiedEnclosure，InformationEnclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
 
 ## 24.1 CertifiedEnclosure / InformationEnclosure
 
 `DecimalApproximation` / `ComplexDecimalApproximation`は，近似値ごとに2種類の区間を保持する。
 
 - **CertifiedEnclosure** — 真値が必ず含まれることをbackendが証明した区間。内部guard桁により，ユーザーへ宣言した桁数より大幅に狭い場合がある。数学的な正しさ，zero判定，要求桁への一意丸め判定にはこちらを使う。
-- **InformationEnclosure** — その近似値から後続計算で利用してよい情報量を表す区間。`N[x,n]`で生成した値では，少なくとも表示値`d`を中心とする`d ± 0.5*10^-n`とCertifiedEnclosureの双方を包含する。内部guard桁をユーザー可視のAccuracyとして後から回収しないための意味論上の上限である。
+- **InformationEnclosure** — その近似値から後続計算で利用してよい情報量を表す区間。非zeroの`N[x,p]`で表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，少なくとも`d ± 0.5*10^(e-p+1)`とCertifiedEnclosureの双方を包含する。したがって情報量は値のscaleに追従し，内部guard桁をユーザー可視のAccuracyとして後から回収しない。zero-centered approximationでは相対Precisionではなく，InformationEnclosureが直接absolute Accuracyを表す。
 
 常に次を不変条件とする。
 
@@ -1785,9 +1792,13 @@ exact Rationalが有限10進になる場合，表示は必要以上に0埋めし
 CertifiedEnclosure ⊆ InformationEnclosure
 ```
 
+`Infinity`は拡張実数sentinelであり，一般symbolの有限代数則を適用しない。特に`Infinity-Infinity`，`0*Infinity`，`Infinity/Infinity`は現段階では未評価に留め，`0`等を捏造しない。完全な拡張実数算術は別仕様として扱う。
+
 InformationEnclosureは確率分布や統計的confidence intervalではない。また「真値がこの広い区間のどこにでもあり得る」とbackendが主張するものでもない。真値保証そのものはCertifiedEnclosureが担当し，InformationEnclosureは**現在の値から利用してよい情報量の契約**を表す。したがってbackendがより狭いCertifiedEnclosureを内部に持っていても，それだけを理由に既存近似値の情報量は増えない。
 
 通常の`+ - * /`と単項`-`では2区間を独立に伝播する。exact `Number`は両方について同じpoint intervalとして混在できる。
+
+Unreleasedでは`DecimalApproximation` / `ComplexDecimalApproximation`をcertified numerical evaluatorのfirst-class leafとして扱う。`sin` / `exp` / `log` / `sqrt` / 双曲線・逆函数・`gamma` / `erf` / `Ei` / `Si` / `Ci`等，interval backendを持つscalar函数では両enclosureを独立に伝播する。`log2` / `log10` / `fract`のようにprimitiveへrewriteされる函数もrewrite後に同じ経路へ入る。ordered comparison，`min` / `max`等の離散的判定は**InformationEnclosureだけで結論を証明できる場合**に限って確定し，内部guard桁をBoolean結果から漏らさない。exact Rational parameterだけを受ける現行`1F1` / `2F1` / elliptic / `polylog`の一部backend等は，approximate parameterへ無理に拡張せず未評価に留める。
 
 ```text
 N[Pi,20] + 1/3
@@ -1802,7 +1813,7 @@ Information:  I(Pi) + {1/3}
 
 ```text
 N[N[Pi,20],100]
--> 3.14159265358979323846
+-> 3.1415926535897932385
 ```
 
 は元の20桁保証を保持する。一方，より低い桁を要求した場合は表示丸めに対応するInformationEnclosureを追加して安全に情報を捨てられる。これらは`double`等のmachine arithmeticへ変換せず，両enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて外向き丸めで計算する。
@@ -1826,7 +1837,7 @@ accuracy[N[1/3,20]]
 max(|d-iL|, |d-iU|)
 ```
 
-をabsolute error boundとして使う。`N[...,n]`生成時のInformationEnclosureには表示丸めの`0.5*10^-n`が既に含まれるため，有限小数がCertifiedEnclosure上で真値と偶然完全一致していても，要求桁を越えたhidden guard情報をAccuracyとして回収しない。
+をabsolute error boundとして使う。`N[...,p]`生成時のInformationEnclosureには有効桁丸めに対応するscale依存の半量子が既に含まれるため，有限小数がCertifiedEnclosure上で真値と偶然完全一致していても，要求桁を越えたhidden guard情報をAccuracyとして回収しない。
 
 exactな数・exact symbolic expressionは`Infinity`を返す。
 
@@ -1844,7 +1855,7 @@ precision[N[1/3,20]]
 -> 19
 ```
 
-これは要求した20桁を機械的に返す函数ではない。`1/3`近傍では`0.5*10^-20`級のInformationEnclosure幅が相対的には約`1.5*10^-20`となるため，保証できる整数桁数は19になる。InformationEnclosureが0を含む場合は値絶対値の正の下限を得られないため0を返す。exact expressionは`Infinity`。近接減算ではabsolute Accuracyを多く残したまま結果scaleだけが小さくなるため，Precisionだけが大きく落ちることがある。
+これは要求した20有効桁を機械的に返す函数ではない。`1/3`近傍では有効20桁の丸め量子が`10^-20`なので，InformationEnclosureの相対的不確かさから保証できる整数桁数は19になる。InformationEnclosureが0を含む場合は値絶対値の正の下限を得られないため0を返す。exact expressionは`Infinity`。近接減算ではabsolute Accuracyを多く残したまま結果scaleだけが小さくなるため，Precisionだけが大きく落ちることがある。
 
 ## 25.3 `rationalize[x]`
 
@@ -1928,14 +1939,14 @@ explain[Infinity]
 
 `I`は通常評価でexact complex `Number`へloweringされるため，`explain[I]`は入力tokenではなく評価後の複素数値を説明する。
 
-certified decimal approximationでは，要求小数桁数に加えてCertifiedEnclosureとInformationEnclosureを別々に確認できる。前者は真値保証，後者は後続計算で利用してよい情報量である。
+certified decimal approximationでは，要求有効桁数に加えてCertifiedEnclosureとInformationEnclosureを別々に確認できる。前者は真値保証，後者は後続計算で利用してよい情報量である。
 
 ```text
 explain[N[Pi,20]]
 -> {{"Kind","DecimalApproximation"},
     {"Domain","Real"},
     {"Exactness","CertifiedApproximation"},
-    {"RequestedFractionalDigits",20},
+    {"RequestedPrecisionDigits",20},
     ...
     {"CertifiedEnclosure",{certifiedLower,certifiedUpper}},
     {"InformationEnclosure",{informationLower,informationUpper}}}

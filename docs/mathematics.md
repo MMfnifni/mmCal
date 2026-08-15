@@ -29,9 +29,9 @@ log[-1]  -> I Pi
 
 ## 数値近似
 
-`N[expr,n]`は、真値を含む区間を内部で計算し、必要な10進表示が一意に確定するまで作業精度を増やす方式を基本とする。
+`N[expr,p]`の`p`は有効10進桁数である。真値を含むCertifiedEnclosureを内部で計算し，要求された有効桁表示が一意に確定するまで作業精度を増やす。固定小数点以下桁数は`:fix`の表示機能が担当する。
 
-近似結果には表示値だけでなく、要求桁数、真値を含む区間、生成由来を保持する。`precision`, `accuracy`, `rationalize`はこの情報を利用する。
+近似結果は表示値だけでなく，真値保証用CertifiedEnclosureと，後続計算で再利用してよい情報量を表すInformationEnclosureを保持する。常に`CertifiedEnclosure ⊆ InformationEnclosure`とし，`precision` / `accuracy` / `rationalize`および近似値の後続演算はこの区別を利用する。
 
 `:fix`はこれとは別であり、正確値を画面上だけ指定桁数以下の小数へ丸めて表示する。末尾の不要な0は表示時に省略する。
 

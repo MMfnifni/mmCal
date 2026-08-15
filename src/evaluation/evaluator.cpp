@@ -6,6 +6,7 @@
 #include "approximation/approximation_context.hpp"
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
+#include "approximation/expression_interval.hpp"
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "evaluation/iterator_spec.hpp"
@@ -86,7 +87,7 @@ struct BeginNumericalApproximationTask final {
 };
 
 struct FinishNumericalApproximationTask final {
-    std::size_t fractionalDigits = approximation::ApproximationContext::defaultDecimalDigits;
+    std::size_t precisionDigits = approximation::ApproximationContext::defaultDecimalDigits;
 };
 
 using EvaluationTask = std::variant<
@@ -271,25 +272,25 @@ struct HistoryIndex final {
 
 [[nodiscard]] std::optional<expression::Expr> certifiedDecimalExpression(
     const approximation::CertifiedValue& value,
-    std::size_t fractionalDigits) {
+    std::size_t precisionDigits) {
     if (value.isReal()) {
-        const auto decimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        const auto decimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
             value.asReal().lower().toRational(),
             value.asReal().upper().toRational(),
-            fractionalDigits);
+            precisionDigits);
         return decimal ? std::optional<expression::Expr>{expression::Expr{*decimal}}
                        : std::nullopt;
     }
 
     const approximation::ComplexInterval& complex = value.asComplex();
-    const auto real = numeric::DecimalApproximation::fromCertifiedInterval(
+    const auto real = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
         complex.real().lower().toRational(),
         complex.real().upper().toRational(),
-        fractionalDigits);
-    const auto imaginary = numeric::DecimalApproximation::fromCertifiedInterval(
+        precisionDigits);
+    const auto imaginary = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
         complex.imaginary().lower().toRational(),
         complex.imaginary().upper().toRational(),
-        fractionalDigits);
+        precisionDigits);
     if (!real || !imaginary)
         return std::nullopt;
 
@@ -300,20 +301,21 @@ struct HistoryIndex final {
         intervalIsExactZero(complex.imaginary()))};
 }
 
-[[nodiscard]] numeric::DecimalApproximation reduceApproximationDigits(
+[[nodiscard]] numeric::DecimalApproximation reduceApproximationPrecision(
     const numeric::DecimalApproximation& value,
-    std::size_t fractionalDigits) {
-    if (fractionalDigits >= value.requestedFractionalDigits())
+    std::size_t precisionDigits) {
+    const std::size_t available = value.requestedSignificantDigits();
+    if (available != 0 && precisionDigits >= available)
         return value;
 
     // 桁数を下げる場合も元のInformationEnclosureを保持し，
     // 新しい表示丸め量子だけを追加で情報量上限へ反映する。
-    if (const auto rounded = numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+    if (const auto rounded = numeric::DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(
         value.certifiedLower(),
         value.certifiedUpper(),
         value.informationLower(),
         value.informationUpper(),
-        fractionalDigits))
+        precisionDigits))
         return *rounded;
 
     // 元の保証区間が粗く、より低い桁への丸め境界を跨ぐ特殊caseでは、
@@ -321,11 +323,11 @@ struct HistoryIndex final {
     return value;
 }
 
-[[nodiscard]] expression::Expr reduceApproximationDigits(
+[[nodiscard]] expression::Expr reduceApproximationPrecision(
     const numeric::ComplexDecimalApproximation& value,
-    std::size_t fractionalDigits) {
-    const auto real = reduceApproximationDigits(value.real(), fractionalDigits);
-    const auto imaginary = reduceApproximationDigits(value.imaginary(), fractionalDigits);
+    std::size_t precisionDigits) {
+    const auto real = reduceApproximationPrecision(value.real(), precisionDigits);
+    const auto imaginary = reduceApproximationPrecision(value.imaginary(), precisionDigits);
     return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
         real, imaginary, value.realExactlyZero(), value.imaginaryExactlyZero())};
 }
@@ -652,7 +654,33 @@ expression::Expr Evaluator::evaluateMachine(
                                 "Division by zero");
                         }
 
-                        expression::Expr dispatched = dispatchBuiltin(*current.definition, call, arguments);
+                        expression::Expr dispatched = [&]() {
+                            const bool hasDedicatedApproxArithmetic =
+                                current.definition->id == BuiltinId::Add
+                                || current.definition->id == BuiltinId::Subtract
+                                || current.definition->id == BuiltinId::Multiply
+                                || current.definition->id == BuiltinId::Divide
+                                || current.definition->id == BuiltinId::Negate;
+                            if (!hasDedicatedApproxArithmetic) {
+                                expression::Expr approximateCall = expression::Expr::call(
+                                    call.head,
+                                    std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+                                if (const auto approximate = approximation::evaluateApproximateExpression(
+                                        approximateCall, registry_, mathematics_, angleSemantics_))
+                                    return *approximate;
+                            }
+
+                            expression::Expr result = dispatchBuiltin(*current.definition, call, arguments);
+                            // log2/log10/fract等は通常Evaluatorでprimitiveへrewriteされる。
+                            // rewrite後の式にも近似値が残る場合、同じcertified経路へ一度だけ再投入し、
+                            // wrapper builtinごとのDecimalApproximation分岐を増やさない。
+                            if (!hasDedicatedApproxArithmetic && result.isCall()) {
+                                if (const auto approximate = approximation::evaluateApproximateExpression(
+                                        result, registry_, mathematics_, angleSemantics_))
+                                    return *approximate;
+                            }
+                            return result;
+                        }();
 
                         // 組み込み函数が局所的に評価した後、共通Simplifierへ一度通す。
                         // これにより Exp[Log[Pi]] のような複数函数にまたがる安全な書換えを各builtinへ重複実装せず、同じ数学知識へ集約する。
@@ -770,9 +798,9 @@ expression::Expr Evaluator::evaluateMachine(
                         activeUserFunctions_.pop_back();
                     },
                     [&](const BeginNumericalApproximationTask& current) {
-                        constexpr std::size_t defaultFractionalDigits = 16;
+                        constexpr std::size_t defaultPrecisionDigits = 16;
                         const expression::CallExpr& call = current.expression.asCall();
-                        std::size_t fractionalDigits = defaultFractionalDigits;
+                        std::size_t precisionDigits = defaultPrecisionDigits;
 
                         if (call.arguments.size() == 2) {
                             std::vector<expression::Expr> precisionResult = takeResults(results, 1);
@@ -789,11 +817,11 @@ expression::Expr Evaluator::evaluateMachine(
                                     error::CalcErrorType::Type,
                                     "N precision must be a positive integer");
                             }
-                            fractionalDigits = *requestedDigits;
+                            precisionDigits = *requestedDigits;
                         }
 
-                        approximationContexts_.emplace_back(fractionalDigits);
-                        tasks.emplace_back(FinishNumericalApproximationTask{fractionalDigits});
+                        approximationContexts_.emplace_back(precisionDigits);
+                        tasks.emplace_back(FinishNumericalApproximationTask{precisionDigits});
                         tasks.emplace_back(EvaluateTask{
                             call.arguments.front(),
                             current.origins,
@@ -808,7 +836,7 @@ expression::Expr Evaluator::evaluateMachine(
 
                         std::vector<expression::Expr> valueResult = takeResults(results, 1);
                         expression::Expr approximated = finalizeNumericalApproximation(
-                            valueResult.front(), current.fractionalDigits);
+                            valueResult.front(), current.precisionDigits);
                         approximationContexts_.pop_back();
                         results.push_back(std::move(approximated));
                     }
@@ -1134,7 +1162,7 @@ expression::Expr Evaluator::evaluateUndefine(std::span<const expression::Expr> a
 
 expression::Expr Evaluator::finalizeNumericalApproximation(
     const expression::Expr& value,
-    std::size_t fractionalDigits) {
+    std::size_t precisionDigits) {
     // Nはscalarだけでなく配列へも要素単位に作用する。
     // FFT/行列等のexact配列を表示用近似へ落とす際に、各builtinが独自のdigits引数を持つ必要をなくす。
     std::function<expression::Expr(const expression::Expr&)> approximate;
@@ -1142,11 +1170,11 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         // precision-aware builtinが既に近似値を返した場合、外側Nがより低い桁を要求するなら
         // certified enclosureから安全に丸め直す。より高い桁は元情報以上に増やせないため保持する。
         if (current.isDecimalApproximation())
-            return expression::Expr{reduceApproximationDigits(
-                current.asDecimalApproximation(), fractionalDigits)};
+            return expression::Expr{reduceApproximationPrecision(
+                current.asDecimalApproximation(), precisionDigits)};
         if (current.isComplexDecimalApproximation())
-            return reduceApproximationDigits(
-                current.asComplexDecimalApproximation(), fractionalDigits);
+            return reduceApproximationPrecision(
+                current.asComplexDecimalApproximation(), precisionDigits);
 
         if (current.isArray()) {
             const auto& array = current.asArray();
@@ -1154,15 +1182,15 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                 std::vector<numeric::DecimalApproximation> values;
                 values.reserve(array.size());
                 for (std::size_t i = 0; i < array.size(); ++i)
-                    values.push_back(reduceApproximationDigits(array.decimalAt(i), fractionalDigits));
+                    values.push_back(reduceApproximationPrecision(array.decimalAt(i), precisionDigits));
                 return expression::Expr::decimalArray(array.shape, std::move(values));
             }
             if (array.storageKind() == expression::ArrayStorageKind::ComplexDecimalApproximation) {
                 std::vector<numeric::ComplexDecimalApproximation> values;
                 values.reserve(array.size());
                 for (std::size_t i = 0; i < array.size(); ++i) {
-                    const expression::Expr reduced = reduceApproximationDigits(
-                        array.complexDecimalAt(i), fractionalDigits);
+                    const expression::Expr reduced = reduceApproximationPrecision(
+                        array.complexDecimalAt(i), precisionDigits);
                     values.push_back(reduced.asComplexDecimalApproximation());
                 }
                 return expression::Expr::complexDecimalArray(array.shape, std::move(values));
@@ -1201,19 +1229,19 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         if (current.isNumber()) {
             const numeric::Number& number = current.asNumber();
             if (number.isReal())
-                return expression::Expr{numeric::DecimalApproximation::fromReal(
-                    number.asReal(), fractionalDigits)};
+                return expression::Expr{numeric::DecimalApproximation::fromRealSignificant(
+                    number.asReal(), precisionDigits)};
 
             const auto& complex = number.asComplex();
             return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
-                numeric::DecimalApproximation::fromReal(complex.real, fractionalDigits),
-                numeric::DecimalApproximation::fromReal(complex.imaginary, fractionalDigits),
+                numeric::DecimalApproximation::fromRealSignificant(complex.real, precisionDigits),
+                numeric::DecimalApproximation::fromRealSignificant(complex.imaginary, precisionDigits),
                 complex.real.isZero(),
                 complex.imaginary.isZero())};
         }
 
         approximation::CertifiedEvaluator certified{registry_, mathematics_, angleSemantics_};
-        approximation::ApproximationContext context{fractionalDigits};
+        approximation::ApproximationContext context{precisionDigits};
         for (;;) {
             try {
                 const auto enclosed = certified.enclose(current, context.workingBinaryBits());
@@ -1222,7 +1250,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                         "N could not certify a numerical value for part of the expression; it remains unevaluated");
                     return current;
                 }
-                if (const auto decimal = certifiedDecimalExpression(*enclosed, fractionalDigits))
+                if (const auto decimal = certifiedDecimalExpression(*enclosed, precisionDigits))
                     return *decimal;
             }
             catch (const approximation::PrecisionInsufficient&) {

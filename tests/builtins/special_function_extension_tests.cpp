@@ -44,10 +44,10 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expect(evalError(session, "gamma[0]").type() == error::CalcErrorType::Domain,
         "Gamma rejects non-positive integer poles");
     tests.expectEqual(eval(session, "N[gamma[1/3],20]"),
-        std::string{"2.67893853470774763366"},
+        std::string{"2.6789385347077476337"},
         "certified Gamma encloses a general positive real value");
     tests.expectEqual(eval(session, "N[gamma[-1/3],20]"),
-        std::string{"-4.06235381827920125084"},
+        std::string{"-4.0623538182792012508"},
         "certified Gamma uses reflection on the negative real axis");
     tests.expectEqual(eval(session, "N[lgamma[1/3],20]"),
         std::string{"0.98542064692776706919"},
@@ -99,7 +99,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "hypergeometric1F1[2,2,1]"), std::string{"E"},
         "1F1(a;a;z) reuses exp when the parameter is away from its poles");
     tests.expectEqual(eval(session, "N[hypergeometric1F1[1/6,7/6,1],20]"),
-        std::string{"1.19206880798188830082"},
+        std::string{"1.1920688079818883008"},
         "1F1 has a certified exact-Rational real series backend");
     tests.expectEqual(eval(session, "D[hypergeometric1F1[1/6,7/6,x],x]"),
         std::string{"hypergeometric1F1[7/6, 13/6, x]/7"},
@@ -110,7 +110,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "hypergeometric2F1[0,2,3,x]"), std::string{"1"},
         "2F1 with a zero numerator parameter reduces before numerical evaluation");
     tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/2,3/2,1/4],20]"),
-        std::string{"1.04719755119659774615"},
+        std::string{"1.0471975511965977462"},
         "2F1 has a certified real backend inside its principal Gauss-series disk");
     tests.expectEqual(eval(session, "D[hypergeometric2F1[1/2,1/3,5/4,x],x]"),
         std::string{"2hypergeometric2F1[3/2, 4/3, 9/4, x]/15"},
@@ -126,7 +126,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "ellipticPi[0,x,0]"), std::string{"x"},
         "ellipticPi reduces through ellipticF when n=0");
     tests.expectEqual(eval(session, "N[ellipticF[1/2,1/3],20]"),
-        std::string{"0.50684775626543110920"},
+        std::string{"0.5068477562654311092"},
         "ellipticF has a certified real-amplitude backend");
     tests.expectEqual(eval(session, "N[ellipticE[1/2,1/3],20]"),
         std::string{"0.49331536201475850521"},
@@ -158,7 +158,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expect(evalError(session, "li[1]").type() == error::CalcErrorType::Domain,
         "li rejects its logarithmic singularity at one");
     tests.expectEqual(eval(session, "N[Ei[1],20]"),
-        std::string{"1.89511781635593675547"},
+        std::string{"1.8951178163559367555"},
         "Ei has a certified real backend near the origin");
     tests.expectEqual(eval(session, "N[Si[1],20]"),
         std::string{"0.94608307036718301494"},
@@ -167,7 +167,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"0.33740392290096813466"},
         "Ci has a certified positive-real backend");
     tests.expectEqual(eval(session, "N[li[2],20]"),
-        std::string{"1.04516378011749278484"},
+        std::string{"1.0451637801174927848"},
         "li reuses the certified log and Ei backends");
     tests.expectEqual(eval(session, "D[Ei[x],x]"), std::string{"exp[x]/x"},
         "Ei derivative is exact");
@@ -187,7 +187,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "polylog[2,-1]"), std::string{"-Pi^2/12"},
         "dilogarithm at minus one is exact");
     tests.expectEqual(eval(session, "N[polylog[2,1/2],20]"),
-        std::string{"0.58224052646501250590"},
+        std::string{"0.5822405264650125059"},
         "polylog has a certified |z|<1 real series backend for positive integer order");
     tests.expectEqual(eval(session, "D[polylog[2,x],x]"),
         std::string{"-log[1-x]/x"},
@@ -205,7 +205,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "betaln[1/2,1/2]"), std::string{"log[Pi]"},
         "betaln preserves an exact logarithmic result");
     tests.expectEqual(eval(session, "N[beta[1/3,2/3],20]"),
-        std::string{"3.62759872846843570119"},
+        std::string{"3.6275987284684357012"},
         "Beta has a certified positive-real numerical backend");
     tests.expect(evalError(session, "beta[-1/2,2]").type() == error::CalcErrorType::Domain,
         "current Beta contract rejects non-positive real arguments");

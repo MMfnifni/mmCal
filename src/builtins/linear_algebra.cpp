@@ -205,14 +205,18 @@ Expr evaluateConjugateTranspose(
         if (value.isComplexDecimalApproximation()) {
             const auto& complex = value.asComplexDecimalApproximation();
             const auto& imaginary = complex.imaginary();
+            const std::size_t precisionDigits = imaginary.requestedSignificantDigits() != 0
+                ? imaginary.requestedSignificantDigits()
+                : imaginary.requestedFractionalDigits();
             numeric::DecimalApproximation conjugateImaginary = [&] {
                 if (imaginary.origin() == numeric::ApproximationOrigin::ExactValue)
-                    return numeric::DecimalApproximation::fromReal(
+                    return numeric::DecimalApproximation::fromRealSignificant(
                         numeric::RealNumber{-imaginary.displayedValue()},
-                        imaginary.requestedFractionalDigits());
-                const auto result = numeric::DecimalApproximation::fromCertifiedInterval(
+                        precisionDigits);
+                const auto result = numeric::DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(
                     -imaginary.certifiedUpper(), -imaginary.certifiedLower(),
-                    imaginary.requestedFractionalDigits());
+                    -imaginary.informationUpper(), -imaginary.informationLower(),
+                    precisionDigits);
                 if (!result)
                     throw std::logic_error(
                         "Conjugating a certified decimal approximation must preserve rounding");

@@ -110,7 +110,7 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         tests.expect(value.origin() == numeric::ApproximationOrigin::ExactValue
             && value.certifiedEnclosureIsPoint()
             && value.displayedValue() != value.certifiedLower()
-            && value.requestedFractionalDigits() == 20,
+            && value.requestedSignificantDigits() == 20,
             "exact approximation retains point enclosure and requested digits");
     }
 
@@ -128,7 +128,7 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         const auto& value = piApprox.asDecimalApproximation();
         tests.expect(value.origin() == numeric::ApproximationOrigin::CertifiedInterval
             && value.certifiedLower() <= value.certifiedUpper()
-            && value.requestedFractionalDigits() == 20,
+            && value.requestedSignificantDigits() == 20,
             "certified approximation retains its enclosure metadata");
     }
 

@@ -624,9 +624,9 @@ private:
     for (const ComplexPoint& value : matrix.values()) {
         const Rational realExact = value.real.toRational();
         const Rational imaginaryExact = value.imaginary.toRational();
-        const auto real = numeric::DecimalApproximation::fromCertifiedInterval(
+        const auto real = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
             realExact, realExact, digits);
-        const auto imaginary = numeric::DecimalApproximation::fromCertifiedInterval(
+        const auto imaginary = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
             imaginaryExact, imaginaryExact, digits);
         if (!real || !imaginary)
             return std::nullopt;

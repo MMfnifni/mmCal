@@ -5,6 +5,10 @@
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
+#include "numeric/decimal_approximation.hpp"
+#include "numeric/rational.hpp"
+
+#include <optional>
 
 #include <cstdint>
 #include <span>
@@ -22,6 +26,23 @@ using numeric::Number;
 
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
+}
+
+struct RealBounds final {
+    numeric::Rational lower;
+    numeric::Rational upper;
+};
+
+[[nodiscard]] std::optional<RealBounds> informationBounds(const Expr& value) {
+    if (value.isNumber() && value.asNumber().isReal()) {
+        const numeric::Rational exact = value.asNumber().asReal().toRational();
+        return RealBounds{exact, exact};
+    }
+    if (value.isDecimalApproximation()) {
+        const auto& approximate = value.asDecimalApproximation();
+        return RealBounds{approximate.informationLower(), approximate.informationUpper()};
+    }
+    return std::nullopt;
 }
 
 [[nodiscard]] std::vector<Expr> aggregateItems(
@@ -54,20 +75,38 @@ using numeric::Number;
         error::throwCalcError(error::CalcErrorType::Domain,
             minimum ? "min of an empty array is undefined" : "max of an empty array is undefined");
 
-    bool allExactReal = true;
-    for (const Expr& item : items)
-        allExactReal = allExactReal && item.isNumber() && item.asNumber().isReal();
-
-    if (!allExactReal)
-        return Expr::call(registry.symbol(id), std::move(items));
-
-    Expr result = items.front();
-    for (std::size_t i = 1; i < items.size(); ++i) {
-        const auto ordering = items[i].asNumber().asReal() <=> result.asNumber().asReal();
-        if ((minimum && ordering < 0) || (!minimum && ordering > 0))
-            result = items[i];
+    std::vector<RealBounds> bounds;
+    bounds.reserve(items.size());
+    for (const Expr& item : items) {
+        const auto valueBounds = informationBounds(item);
+        if (!valueBounds)
+            return Expr::call(registry.symbol(id), std::move(items));
+        bounds.push_back(*valueBounds);
     }
-    return result;
+
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < items.size(); ++i) {
+        if (items[i] == items[best])
+            continue;
+        if (minimum) {
+            if (bounds[i].upper < bounds[best].lower) {
+                best = i;
+                continue;
+            }
+            if (bounds[best].upper <= bounds[i].lower)
+                continue;
+        }
+        else {
+            if (bounds[i].lower > bounds[best].upper) {
+                best = i;
+                continue;
+            }
+            if (bounds[best].lower >= bounds[i].upper)
+                continue;
+        }
+        return Expr::call(registry.symbol(id), std::move(items));
+    }
+    return items[best];
 }
 
 } // namespace

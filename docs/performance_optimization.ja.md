@@ -415,7 +415,7 @@ N[fft[data],16]
 
 `N`の第1引数を保持し、precisionを先に確定する。FFT dispatch時にprecision contextが存在すれば、`double`ではなく`ComplexInterval`/BigFloat端点で直接transformする。exactな`fft[...]`の経路は変更しない。
 
-代表benchmark（同一GCC Release環境、16 fractional digits）:
+代表benchmark（同一GCC Release環境。当時の旧`N`仕様で16 fractional digits）:
 
 ```text
 32 points   exact ~11.6 ms   certified ~2.7 ms

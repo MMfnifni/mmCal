@@ -22,6 +22,11 @@ public:
         const RealNumber& value,
         std::size_t repeatingFractionalDigits = 16);
 
+    // N[expr,p]用。pは小数部桁数ではなく有効10進桁数を表す。
+    [[nodiscard]] static DecimalApproximation fromRealSignificant(
+        const RealNumber& value,
+        std::size_t significantDigits);
+
     // 指定した小数部桁数へ必ず固定桁で最近接・偶数丸めする。
     // 証明済み区間の両端比較など、桁数を揃える必要がある内部処理向け。
     [[nodiscard]] static DecimalApproximation fromRealFixed(
@@ -36,6 +41,11 @@ public:
         const Rational& upper,
         std::size_t fractionalDigits);
 
+    [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedIntervalSignificant(
+        const Rational& lower,
+        const Rational& upper,
+        std::size_t significantDigits);
+
     // 真値保証区間とは別に，この近似値から後続計算で利用してよい情報量の区間を指定する。
     // information enclosureはcertified enclosureを必ず包含し，表示丸めの量子幅も内部で包含させる。
     [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedIntervalWithInformation(
@@ -45,9 +55,17 @@ public:
         const Rational& informationUpper,
         std::size_t fractionalDigits);
 
+    [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedIntervalWithInformationSignificant(
+        const Rational& certifiedLower,
+        const Rational& certifiedUpper,
+        const Rational& informationLower,
+        const Rational& informationUpper,
+        std::size_t significantDigits);
+
     [[nodiscard]] std::string_view text() const noexcept;
     [[nodiscard]] std::size_t fractionalDigits() const noexcept;
     [[nodiscard]] std::size_t requestedFractionalDigits() const noexcept;
+    [[nodiscard]] std::size_t requestedSignificantDigits() const noexcept;
     [[nodiscard]] bool isRounded() const noexcept;
     [[nodiscard]] ApproximationOrigin origin() const noexcept;
     // 表示文字列が表す10進値そのものをexact Rationalで保持する。
@@ -65,6 +83,7 @@ private:
     std::string text_;
     std::size_t fractionalDigits_ = 0;
     std::size_t requestedFractionalDigits_ = 0;
+    std::size_t requestedSignificantDigits_ = 0;
     bool rounded_ = false;
     ApproximationOrigin origin_ = ApproximationOrigin::ExactValue;
     Rational displayedValue_;
@@ -77,6 +96,7 @@ private:
         std::string text,
         std::size_t fractionalDigits,
         std::size_t requestedFractionalDigits,
+        std::size_t requestedSignificantDigits,
         bool rounded,
         ApproximationOrigin origin,
         Rational displayedValue,

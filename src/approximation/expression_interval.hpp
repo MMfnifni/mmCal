@@ -18,18 +18,27 @@ namespace mmcal::approximation {
     std::size_t precisionBits,
     const CertifiedEvaluator& certified);
 
-// certified区間を要求小数桁へ一意に丸められる場合だけExpr化する。
+// certified区間を要求有効桁へ一意に丸められる場合だけExpr化する。
 // exact pointはN[exact,p]と同じ最小表記を維持する。
 [[nodiscard]] std::optional<expression::Expr> decimalExpression(
     const RealInterval& value,
-    std::size_t fractionalDigits);
+    std::size_t significantDigits);
 [[nodiscard]] std::optional<expression::Expr> decimalExpression(
     const ComplexInterval& value,
-    std::size_t fractionalDigits);
+    std::size_t significantDigits);
 
 // 既存Approximationを含む入力から、最も低い要求桁をbackend精度として推定する。
 [[nodiscard]] std::optional<ApproximationContext> inferredApproximationContext(
     std::span<const expression::Expr> expressions);
+
+// 既存DecimalApproximationを含む任意のcertified対応scalar式を，
+// CertifiedEnclosure / InformationEnclosureの両方で評価する。
+// 対応外函数，情報区間ではbranch/domainを安全に確定できない式はnullopt。
+[[nodiscard]] std::optional<expression::Expr> evaluateApproximateExpression(
+    const expression::Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 
 // DecimalApproximation / ComplexDecimalApproximationを含むscalar四則演算。
 // exact Numberはpoint intervalとして混在できる。入力approximationが一つもない場合や，

@@ -145,11 +145,14 @@ void appendDecimal(std::string& output, const numeric::DecimalApproximation& val
     appendField(output, value.text());
     appendUnsigned(output, value.fractionalDigits());
     appendUnsigned(output, value.requestedFractionalDigits());
+    appendUnsigned(output, value.requestedSignificantDigits());
     appendField(output, value.isRounded() ? "1" : "0");
     appendField(output, value.origin() == numeric::ApproximationOrigin::ExactValue ? "0" : "1");
     appendRational(output, value.displayedValue());
     appendRational(output, value.certifiedLower());
     appendRational(output, value.certifiedUpper());
+    appendRational(output, value.informationLower());
+    appendRational(output, value.informationUpper());
 }
 
 void appendExpr(std::string& output, const Expr& expression) {

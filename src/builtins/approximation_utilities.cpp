@@ -5,10 +5,12 @@
 #include "error/error_message.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -67,10 +69,32 @@ using numeric::RealNumber;
     return digits;
 }
 
+[[nodiscard]] std::size_t guaranteedDigits(const Rational& error) {
+    if (error.isZero())
+        return 0;
+    if (error >= Rational{BigInt{1}})
+        return 0;
+
+    const std::size_t numeratorDigits = error.numerator().abs().toString().size();
+    const std::size_t denominatorDigits = error.denominator().toString().size();
+    if (denominatorDigits <= numeratorDigits)
+        return 0;
+
+    std::size_t candidate = denominatorDigits - numeratorDigits;
+    const BigInt scaledNumerator = error.numerator().abs()
+        * numeric::pow(BigInt{10}, static_cast<std::uint64_t>(candidate));
+    if (scaledNumerator < error.denominator())
+        return candidate;
+    return candidate == 0 ? 0 : candidate - 1;
+}
+
 [[nodiscard]] std::size_t accuracyDigits(const DecimalApproximation& value) {
-    return guaranteedDigits(
-        informationAbsoluteError(value),
-        value.requestedFractionalDigits());
+    const Rational error = informationAbsoluteError(value);
+    if (error.isZero())
+        return value.requestedSignificantDigits() != 0
+            ? value.requestedSignificantDigits()
+            : value.requestedFractionalDigits();
+    return guaranteedDigits(error);
 }
 
 [[nodiscard]] std::size_t precisionDigits(const DecimalApproximation& value) {
@@ -86,8 +110,9 @@ using numeric::RealNumber;
         return 0;
 
     const Rational relativeError = informationAbsoluteError(value) / minimumMagnitude;
-    const std::size_t cap = value.requestedFractionalDigits()
-        + decimalIntegerDigits(value.displayedValue()) + 2;
+    const std::size_t cap = value.requestedSignificantDigits() != 0
+        ? value.requestedSignificantDigits()
+        : value.requestedFractionalDigits() + decimalIntegerDigits(value.displayedValue()) + 2;
     return guaranteedDigits(relativeError, cap);
 }
 

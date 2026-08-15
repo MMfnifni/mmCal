@@ -156,7 +156,7 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"nullSpace[{{x, 1}}]"},
         "Linear algebra: nullSpace does not guess an undecidable symbolic pivot");
     tests.expectEqual(eval(session, "N[nullSpace[{{1,Pi}}],12]"),
-        std::string{"{{-3.141592653590, 1}}"},
+        std::string{"{{-3.14159265359, 1}}"},
         "Linear algebra: N keeps exact-first pivot structure for nullSpace before approximating its basis");
     tests.expectEqual(eval(session, "nullSpace[N[{{Pi,0},{0,0}},12]]"),
         std::string{"{{0, 1}}"},
@@ -174,10 +174,10 @@ void runLinearAlgebraTests(TestRunner& tests) {
         "Linear algebra: exact Householder QR preserves rational factors when the norm closes exactly");
     tests.expectEqual(eval(session,
         "N[dot[at[qrDecomposition[{{1,2},{3,4}}],0],at[qrDecomposition[{{1,2},{3,4}}],1]],8]"),
-        std::string{"{{1.0, 2.0}, {3.0, 4.0}}"},
+        std::string{"{{1, 2}, {3, 4}}"},
         "Linear algebra: exact Householder QR reconstructs A");
     tests.expectEqual(eval(session, "N[qrDecomposition[{{1,2},{3,4}}],8]"),
-        std::string{"{{{-0.31622777, -0.94868330}, {-0.94868330, 0.31622777}}, {{-3.16227766, -4.42718872}, {0, -0.63245553}}}"},
+        std::string{"{{{-0.31622777, -0.9486833}, {-0.9486833, 0.31622777}}, {{-3.1622777, -4.4271887}, {0, -0.63245553}}}"},
         "Linear algebra: N dispatches QR directly to the certified Householder backend");
     tests.expectEqual(eval(session, "dimensions[at[qrDecomposition[{{1,0},{0,1},{0,0}}],0]]"),
         std::string{"{3, 2}"},
@@ -187,10 +187,10 @@ void runLinearAlgebraTests(TestRunner& tests) {
         "Linear algebra: reduced QR exposes a rectangular R through {Q,R}");
     tests.expectEqual(eval(session,
         "N[dot[at[qrDecomposition[{{1,2},{3,4},{5,6}}],0],at[qrDecomposition[{{1,2},{3,4},{5,6}}],1]],8]"),
-        std::string{"{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}}"},
+        std::string{"{{1, 2}, {3, 4}, {5, 6}}"},
         "Linear algebra: rectangular reduced QR reconstructs A");
     tests.expectEqual(eval(session, "N[luDecomposition[{{Pi,1},{2,3}}],8]"),
-        std::string{"{{{1, 0}, {0, 1}}, {{1, 0}, {0.63661977, 1}}, {{3.14159265, 1}, {0, 2.36338023}}}"},
+        std::string{"{{{1, 0}, {0, 1}}, {{1, 0}, {0.63661977, 1}}, {{3.1415927, 1}, {0, 2.3633802}}}"},
         "Linear algebra: N dispatches LU directly to the certified decomposition backend");
     tests.expectEqual(eval(session, "qrDecomposition[{{a,b},{0,c}}]"),
         std::string{"{{{1, 0}, {0, 1}}, {{a, b}, {0, c}}}"},
@@ -200,32 +200,32 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"qrDecomposition[{{19, -1, -2, 2}, {2, 19, 0, -1}, {-1, -2, 19, 1}, {1, 0, -1, 19}}]"},
         "Linear algebra: general exact QR stops before the observed 4x4 expression explosion");
     tests.expectEqual(eval(session, "N[det[{{Pi,0},{0,2}}],12]"),
-        std::string{"6.283185307180"},
+        std::string{"6.28318530718"},
         "Linear algebra: N pushes precision directly into determinant");
     tests.expectEqual(eval(session, "N[dot[{{Pi,0},{0,Pi}},{{1,2},{3,4}}],12]"),
-        std::string{"{{3.141592653590, 6.283185307180}, {9.424777960769, 12.566370614359}}"},
+        std::string{"{{3.14159265359, 6.28318530718}, {9.42477796077, 12.5663706144}}"},
         "Linear algebra: N pushes precision directly into dot");
     tests.expectEqual(eval(session, "N[inverse[{{Pi,0},{0,2}}],12]"),
         std::string{"{{0.318309886184, 0}, {0, 0.5}}"},
         "Linear algebra: N uses the certified inverse backend");
     tests.expectEqual(eval(session, "N[rref[{{Pi,0},{0,2}}],12]"),
-        std::string{"{{1.0, 0}, {0, 1}}"},
+        std::string{"{{1, 0}, {0, 1}}"},
         "Linear algebra: N uses certified pivots for rref");
     tests.expectEqual(eval(session, "N[norm[{Pi,1}],12]"),
-        std::string{"3.296908309476"},
+        std::string{"3.29690830948"},
         "Linear algebra: N uses the certified Hermitian norm backend");
     tests.expectEqual(eval(session, "dot[N[{{Pi,0},{0,Pi}},12],{{1,2},{3,4}}]"),
-        std::string{"{{3.141592653590, 6.283185307180}, {9.424777960769, 12.566370614359}}"},
+        std::string{"{{3.14159265359, 6.28318530718}, {9.42477796077, 12.5663706144}}"},
         "Linear algebra: approximate Array inputs infer backend precision like FFT");
     tests.expectEqual(eval(session, "N[matrixRank[{{Pi,2Pi},{1,2}}],12]"),
         std::string{"1"},
         "Linear algebra: N preserves exact rank when exact elimination can certify dependence");
     tests.expectEqual(eval(session, "matrixRank[N[{{Pi,2Pi},{1,2}},12]]"),
-        std::string{"matrixRank[{{3.141592653590, 6.283185307180}, {1, 2}}]"},
+        std::string{"matrixRank[{{3.14159265359, 6.28318530718}, {1, 2}}]"},
         "Linear algebra: approximate matrixRank does not invent a rank-deficiency threshold");
     tests.expectEqual(eval(session,
         "N[solveLinear[{{Pi,0},{0,2}},{Pi,4}],12]"),
-        std::string{"{1.0, 2}"},
+        std::string{"{1, 2}"},
         "Linear algebra: N pushes precision directly into solveLinear");
     tests.expectEqual(eval(session, "conjugateTranspose[{{1,I},{2,3I}}]"),
         std::string{"{{1, 2}, {-I, -3I}}"},
@@ -241,15 +241,15 @@ void runLinearAlgebraTests(TestRunner& tests) {
         "Linear algebra: reduced SVD returns V with shape n x min(m,n)");
     tests.expectEqual(eval(session,
         "N[dot[at[svd[{{1,2},{3,4},{5,6}}],0],dot[at[svd[{{1,2},{3,4},{5,6}}],1],transpose[at[svd[{{1,2},{3,4},{5,6}}],2]]]],8]"),
-        std::string{"{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}}"},
+        std::string{"{{1, 2}, {3, 4}, {5, 6}}"},
         "Linear algebra: numerical reduced SVD reconstructs a tall matrix");
     tests.expectEqual(eval(session,
         "N[dot[at[svd[{{1,2,3},{4,5,6}}],0],dot[at[svd[{{1,2,3},{4,5,6}}],1],transpose[at[svd[{{1,2,3},{4,5,6}}],2]]]],8]"),
-        std::string{"{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}"},
+        std::string{"{{1, 2, 3}, {4, 5, 6}}"},
         "Linear algebra: numerical reduced SVD reconstructs a wide matrix");
     tests.expectEqual(eval(session,
         "N[dot[at[svd[{{1,I},{0,1}}],0],dot[at[svd[{{1,I},{0,1}}],1],conjugateTranspose[at[svd[{{1,I},{0,1}}],2]]]],8]"),
-        std::string{"{{1.0, 1.0I}, {0.0I, 1.0}}"},
+        std::string{"{{1, I}, {0.000000000000000I, 1}}"},
         "Linear algebra: complex numerical SVD reconstructs A with V Hermitian-transposed");
     tests.expectEqual(eval(session, "eigenvalues[{{1,2},{3,4}}]"),
         std::string{"{(5+sqrt[33])/2, (5-sqrt[33])/2}"},
@@ -267,10 +267,10 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"eigenvectors[{{1, 1}, {0, 1}}]"},
         "Linear algebra: defective exact 2x2 matrices do not receive duplicate eigenvectors");
     tests.expectEqual(eval(session, "N[eigenvalues[{{1,2},{3,4}}],8]"),
-        std::string{"{-0.37228132, 5.37228132}"},
+        std::string{"{-0.37228132, 5.3722813}"},
         "Linear algebra: N dispatches eigenvalues directly to the Schur backend");
     tests.expectEqual(eval(session, "N[eigenvalues[{{Pi,1},{0,2}}],8]"),
-        std::string{"{3.14159265, 2.0}"},
+        std::string{"{3.1415927, 2}"},
         "Linear algebra: eigen relation audit uses certified input intervals");
     tests.expectEqual(eval(session, "N[eigenvectors[{{1,1},{0,1}}],8]"),
         std::string{"eigenvectors[{{1, 1}, {0, 1}}]"},
