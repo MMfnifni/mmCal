@@ -4,6 +4,7 @@
 
 ### 開発・検証基盤
 
+- Lexer / Parser / Lowererで式として成立しなかった入力は履歴へcommitせず，`In[n]`番号を消費しないよう変更。SyntaxError表示はpending番号を示し，修正後の次入力は同じ`In[n]`を再利用する。parse/lower成功後の評価エラーは従来どおり入力履歴へ残す
 - `mmCal.Benchmarks --random-expressions`へgrammar-awareなsemantic expression fuzzerを追加
 - `--loop`ではcase数を制限せず連続実行し，最初のFAILを検出した時点でshrinking・seed/case再現情報を表示して即停止する
 - 各caseはmaster seedと1-based case番号から独立生成され，`--seed N --case M`だけで該当caseを直接再現できる

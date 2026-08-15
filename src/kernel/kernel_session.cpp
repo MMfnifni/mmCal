@@ -59,17 +59,13 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
     exitRequested_ = false;
     clearRequested_ = false;
     definitionsChanged_ = false;
-    ++inputCount_;
-    // clearHistory後も画面の絶対入力番号とvector indexを一致させるため、
-    // emplaceではなく現在の入力番号までslotを確保する。
-    inputHistory_.resize(inputCount_);
-    outputHistory_.resize(inputCount_);
-    inputHistory_.back().reset();
-    outputHistory_.back().reset();
     diagnostics_.clear();
 
+    // Frontendで式として成立しなかった入力は履歴番号を消費しない。
+    // エラー表示には次の入力番号を使い，正常にloweringできた時点で確定する。
+    const std::size_t pendingInputNumber = nextInputNumber();
     auto source = std::make_shared<const std::string>(sourceText);
-    auto document = std::make_shared<const source::SourceDocument>(inputCount_, source);
+    auto document = std::make_shared<const source::SourceDocument>(pendingInputNumber, source);
 
     try {
         syntax::Lexer lexer{*source};
@@ -79,7 +75,14 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
             makeParserOptions(symbolRegistry_, registry_, userFunctions_)};
         syntax::SyntaxTree tree = parser.parse();
         syntax::LoweringResult lowered = lowerer_.lowerTracked(tree, document);
+
+        inputCount_ = pendingInputNumber;
+        // clearHistory後も画面の絶対入力番号とvector indexを一致させるため、
+        // emplaceではなく現在の入力番号までslotを確保する。
+        inputHistory_.resize(inputCount_);
+        outputHistory_.resize(inputCount_);
         inputHistory_.back() = lowered.expression;
+        outputHistory_.back().reset();
 
         const evaluation::EvaluationContext context{
             history_, inputHistory_, outputHistory_, &diagnostics_,

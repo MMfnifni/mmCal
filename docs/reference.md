@@ -235,7 +235,7 @@ In [-1]
 Out[-1]
 ```
 
-`In [n]` retrieves the lowered Expr for the target input and then **evaluates it normally in the current session environment**. Positive `In [n]` uses an absolute input number. Negative `In [-n]` counts previous input slots while excluding the input currently being evaluated. Therefore `@` / `@@` / `@@@` / ... mean `In [-1]` / `In [-2]` / `In [-3]` / ... respectively, with no fixed shorthand depth limit. An input that reached parse/lower but failed during evaluation can therefore be retried through `In [-1]`; a slot that never produced a lowered Expr is unavailable.
+`In [n]` retrieves the lowered Expr for the target input and then **evaluates it normally in the current session environment**. Positive `In [n]` uses an absolute input number. Negative `In [-n]` counts previous input slots while excluding the input currently being evaluated. Therefore `@` / `@@` / `@@@` / ... mean `In [-1]` / `In [-2]` / `In [-3]` / ... respectively, with no fixed shorthand depth limit. An input that reached parse/lower but failed during evaluation can therefore be retried through `In [-1]`. By contrast, an input rejected by the Lexer, Parser, or Lowerer is never committed to history and does not consume an `In[n]` number. The error still refers to the pending input number, and the corrected next input reuses that same prompt number.
 
 `Out[n]` returns a stored result snapshot without reevaluation. Positive `Out[n]` is indexed by the absolute input number, while negative `Out[-n]` counts **successful outputs only** from the most recent one. Therefore `% == Out[-1]`, `%% == Out[-2]`, `%%% == Out[-3]`, ... remain true even when failed evaluations occur between successful outputs. Repeated `%` also has no fixed shorthand depth limit.
 

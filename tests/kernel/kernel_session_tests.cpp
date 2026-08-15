@@ -878,7 +878,23 @@ void runKernelSessionTests(TestRunner& tests) {
     const error::CalcError syntaxDocumentError = evaluateError(syntaxDocumentSession, "1 + )");
     tests.expect(syntaxDocumentError.document()
         && syntaxDocumentError.document()->inputNumber() == 1,
-        "KernelSession: parser errors are attached to their input document");
+        "KernelSession: parser errors are attached to the pending input document");
+    tests.expectEqual(syntaxDocumentSession.inputCount(), std::size_t{0},
+        "KernelSession: parser errors do not consume an input number");
+    tests.expectEqual(syntaxDocumentSession.nextInputNumber(), std::size_t{1},
+        "KernelSession: parser errors leave the next prompt number unchanged");
+
+    const error::CalcError malformedLiteralError = evaluateError(syntaxDocumentSession, "2..2+a");
+    tests.expect(malformedLiteralError.type() == error::CalcErrorType::Syntax
+        && malformedLiteralError.document()
+        && malformedLiteralError.document()->inputNumber() == 1,
+        "KernelSession: malformed literals report the still-pending input number");
+    tests.expectEqual(syntaxDocumentSession.inputCount(), std::size_t{0},
+        "KernelSession: malformed literals do not consume an input number");
+    tests.expectEqual(evaluateAndFormat(syntaxDocumentSession, "2+3"), std::string{"5"},
+        "KernelSession: valid input after a frontend error reuses the pending number");
+    tests.expectEqual(syntaxDocumentSession.inputCount(), std::size_t{1},
+        "KernelSession: successfully lowered input commits the input number");
 
     static_cast<void>(functionSession.evaluate("loop[x] := loop[x]"));
     const error::CalcError recursionError = evaluateError(functionSession, "loop[1]");

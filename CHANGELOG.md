@@ -4,6 +4,7 @@
 
 ### Development and validation
 
+- Inputs rejected by the Lexer, Parser, or Lowerer are no longer committed to history and no longer consume an `In[n]` number. Syntax errors still report the pending input number, and the corrected next input reuses that prompt number; evaluation failures after successful parse/lower remain stored as input history.
 - Added a grammar-aware semantic expression fuzzer to `mmCal.Benchmarks --random-expressions`.
 - `--loop` runs without a case limit and stops immediately on the first FAIL after shrinking the expression and printing seed/case reproduction information.
 - Every case is derived independently from the master seed and a 1-based case index, so `--seed N --case M` reproduces the exact case directly.
