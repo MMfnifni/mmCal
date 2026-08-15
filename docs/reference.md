@@ -119,7 +119,7 @@ Here, the `1` in `sin[1]` means **1 radian**. The default angle unit is radians.
 
 For `N[expr,n]`, mmCal confirms that both endpoints of an interval containing the true value round to the same `n`-digit result before returning a `DecimalApproximation`.
 
-A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance (exact input / certified interval), the displayed decimal value as an exact Rational, and an exact Rational enclosure containing the true value. Certified-interval output may compact a run of trailing zeros to one visible zero without reducing this metadata. `ComplexDecimalApproximation` similarly retains metadata for the real and imaginary components. `precision`, `accuracy`, and `rationalize` use this metadata directly rather than reparsing the display string and guessing its quality.
+A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance (exact input / certified interval), the displayed decimal value as an exact Rational, and two exact Rational intervals: a **CertifiedEnclosure** and an **InformationEnclosure**. The CertifiedEnclosure proves containment of the true value. The InformationEnclosure limits how much information later computations may legitimately reuse, with the invariant `CertifiedEnclosure ⊆ InformationEnclosure`. `ComplexDecimalApproximation` keeps the same metadata independently for its real and imaginary components. `precision`, `accuracy`, and `rationalize` use the InformationEnclosure directly rather than reparsing the display string and guessing its quality.
 
 ```text
 N[sqrt[2],30]
@@ -1754,11 +1754,42 @@ N[arg[-1],20]
 -> 3.14159265358979323846 Rad
 ```
 
-When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. For a certified-interval result produced through a fixed requested precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. The requested digit count and certified enclosure remain intact in metadata, so the number of visible zeros is not itself the precision guarantee.
+When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. For a certified-interval result produced through a fixed requested precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. The requested digit count, CertifiedEnclosure, and InformationEnclosure remain intact in metadata, so the number of visible zeros is not itself the precision guarantee.
 
-`DecimalApproximation` and `ComplexDecimalApproximation` are not display-only terminal values. Their stored certified enclosures participate directly in ordinary `+ - * /` and unary `-`, and exact `Number` operands are mixed in as point intervals. For example, `N[Pi,20]+1/3` returns another certified approximation. If interval propagation makes the originally requested number of fractional digits impossible to certify, the result is emitted with fewer guaranteed digits; `accuracy` and `precision` then reflect that reduced enclosure quality. Internal guard digits are not recoverable as new user-visible accuracy: a semantic `0.5*10^-n` error floor corresponding to the declared input precision is propagated as an information cap in addition to the true certified enclosure.
+## 24.1 CertifiedEnclosure / InformationEnclosure
 
-An outer `N` never invents information that is absent from an existing approximation. Thus `N[N[Pi,20],100]` retains the original 20-digit guarantee rather than reconstructing unavailable digits. Arithmetic remains certified interval arithmetic over the stored exact Rational enclosures; it does not fall back to `double` or another machine-real domain.
+`DecimalApproximation` and `ComplexDecimalApproximation` retain two different intervals for every approximate component.
+
+- **CertifiedEnclosure** — an interval that the backend has proved contains the true value. Internal guard digits may make it much narrower than the precision declared to the user. Correctness checks, exact-zero checks, and unique decimal-rounding checks use this interval.
+- **InformationEnclosure** — an interval describing how much information later computation is allowed to reuse from the approximation. For a value produced by `N[x,n]`, it contains both the CertifiedEnclosure and at least the displayed value `d ± 0.5*10^-n`. It prevents hidden guard digits from later reappearing as user-visible accuracy.
+
+The invariant is always
+
+```text
+CertifiedEnclosure ⊆ InformationEnclosure
+```
+
+The InformationEnclosure is not a probability distribution or a statistical confidence interval, nor does it claim that the backend considers every point in the wider interval mathematically possible. Truth certification belongs exclusively to the CertifiedEnclosure. The InformationEnclosure is an **information contract**: a narrower internal certificate alone does not grant later code permission to recover undeclared digits.
+
+Ordinary `+ - * /` and unary `-` propagate both intervals independently. Exact `Number` operands enter both paths as identical point intervals.
+
+```text
+N[Pi,20] + 1/3
+
+Certified:    C(Pi) + {1/3}
+Information:  I(Pi) + {1/3}
+```
+
+The output decimal is justified from the CertifiedEnclosure, while the number of digits the result may declare is capped by the InformationEnclosure. Scaling and cancellation therefore reduce `accuracy` / `precision` naturally. The propagated InformationEnclosure is stored in the result itself rather than being compressed back to a digit count after every operation.
+
+An outer `N` cannot narrow an existing InformationEnclosure merely by increasing working precision. Thus
+
+```text
+N[N[Pi,20],100]
+-> 3.14159265358979323846
+```
+
+retains the original 20-digit guarantee. Asking for fewer digits is allowed to discard information by adding the coarser output-rounding interval. Both enclosures are propagated through `RealInterval` / `ComplexInterval` with outward rounding; no `double` or machine-real fallback is used.
 
 ---
 
@@ -1773,13 +1804,13 @@ accuracy[N[1/3,20]]
 -> 20
 ```
 
-Given displayed value `d` and certified source enclosure `[l,u]`, the implementation computes
+Given displayed value `d` and InformationEnclosure `[iL,iU]`, the implementation uses
 
 ```text
-max(|d-l|, |d-u|)
+max(|d-iL|, |d-iU|)
 ```
 
-and also applies `0.5*10^-n` as a semantic error floor so that an `N[...,n]` approximation retains the meaning of an approximate value. Therefore, even if a terminating decimal happens to coincide exactly with the true value, it does not acquire infinite accuracy beyond the requested digits.
+as its absolute error bound. The InformationEnclosure created by `N[...,n]` already contains the `0.5*10^-n` output-rounding interval, so even a terminating decimal whose CertifiedEnclosure is an exact point cannot recover hidden guard information as additional Accuracy.
 
 Exact numbers and exact symbolic expressions return `Infinity`.
 
@@ -1790,18 +1821,18 @@ accuracy[Pi]  -> Infinity
 
 ## 25.2 `precision[x]`
 
-Uses the same absolute error bound divided by a lower bound on the absolute value of the true value derived from the certified enclosure, returning an **integer lower bound on the guaranteed number of relative decimal digits**.
+Uses the same absolute error bound divided by a positive lower bound on the value magnitude derived from the InformationEnclosure, returning an **integer lower bound on the guaranteed number of relative decimal digits**.
 
 ```text
 precision[N[1/3,20]]
 -> 19
 ```
 
-This function does not mechanically return the requested 20 digits. Around `1/3`, an absolute error floor of `0.5*10^-20` corresponds to a relative error of approximately `1.5*10^-20`, so only 19 integer decimal digits can be guaranteed. If the enclosure contains zero, no positive lower bound on relative accuracy is available, so the result is 0. Exact expressions return `Infinity`.
+This function does not mechanically return the requested 20 digits. Around `1/3`, the `0.5*10^-20`-scale InformationEnclosure corresponds to a relative uncertainty of approximately `1.5*10^-20`, so only 19 integer decimal digits can be guaranteed. If the InformationEnclosure contains zero, no positive lower bound on the value magnitude is available, so the result is 0. Exact expressions return `Infinity`. Near-cancellation can therefore preserve substantial absolute Accuracy while losing many relative Precision digits.
 
 ## 25.3 `rationalize[x]`
 
-Finds the **exact Rational with the smallest denominator** contained in the certified enclosure of an approximate value. The search uses continued-fraction-style interval recursion over exact Rational values and never converts the interval to `double`.
+Finds the **exact Rational with the smallest denominator** contained in the InformationEnclosure of an approximate value. The search uses continued-fraction-style interval recursion over exact Rational values and never converts the interval to `double`. Using the InformationEnclosure prevents `rationalize` from recovering hidden guard digits or a hidden exact point that was not declared by the approximation.
 
 ```text
 rationalize[N[1/3,20]]
@@ -1847,7 +1878,7 @@ explain[{{1,2},{3,4}}]
 
 Arguments are evaluated normally before introspection, so `explain[1+2]` describes `3`. History outputs can be inspected directly with `explain[Out[n]]` or `explain[%]`.
 
-The result is displayed as a brace sequence of property/value pairs. Because values such as `Dimensions` and `Enclosure` may themselves be Arrays or brace values, the internal result is a general `ListExpr` rather than a dense `ArrayExpr`; the structured values are not flattened into strings.
+The result is displayed as a brace sequence of property/value pairs. Because values such as `Dimensions` and the enclosure properties may themselves be Arrays or brace values, the internal result is a general `ListExpr` rather than a dense `ArrayExpr`; the structured values are not flattened into strings.
 
 `Exactness` is a classification rather than a boolean. Current principal values are `"Exact"`, `"CertifiedApproximation"`, and `"Unknown"`.
 
@@ -1876,7 +1907,7 @@ explain[Infinity]
 
 `I` is lowered by normal evaluation to an exact complex `Number`, so `explain[I]` describes the evaluated complex value rather than the input token.
 
-Certified decimal approximations expose the requested fractional digits and the exact Rational enclosure containing the true value. Arrays expose O(1) storage-domain/exactness metadata plus essentially free shape properties such as `ArrayRank`, `Dimensions`, `ElementCount`, `Vector`, `Matrix`, `Square`, `Order`, and `Empty`. Determinant, mathematical rank, invertibility, eigenvalues, and similar derived properties are intentionally omitted.
+Certified decimal approximations expose both the exact Rational CertifiedEnclosure and the InformationEnclosure in addition to their requested fractional digits. The former is the truth certificate; the latter is the information limit propagated by later approximate arithmetic. Arrays expose O(1) storage-domain/exactness metadata plus essentially free shape properties such as `ArrayRank`, `Dimensions`, `ElementCount`, `Vector`, `Matrix`, `Square`, `Order`, and `Empty`. Determinant, mathematical rank, invertibility, eigenvalues, and similar derived properties are intentionally omitted.
 
 Integers expose sign, zero, and `BitLength`. Decimal digit count is not computed automatically because huge integers would require decimal conversion; Rationals instead expose numerator/denominator bit lengths.
 

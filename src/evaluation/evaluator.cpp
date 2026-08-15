@@ -306,13 +306,14 @@ struct HistoryIndex final {
     if (fractionalDigits >= value.requestedFractionalDigits())
         return value;
 
-    // exact point由来なら従来の有限小数最小表記を維持する。
-    if (value.enclosureIsPoint())
-        return numeric::DecimalApproximation::fromReal(
-            numeric::RealNumber{value.certifiedLower()}, fractionalDigits);
-
-    if (const auto rounded = numeric::DecimalApproximation::fromCertifiedInterval(
-        value.certifiedLower(), value.certifiedUpper(), fractionalDigits))
+    // 桁数を下げる場合も元のInformationEnclosureを保持し，
+    // 新しい表示丸め量子だけを追加で情報量上限へ反映する。
+    if (const auto rounded = numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+        value.certifiedLower(),
+        value.certifiedUpper(),
+        value.informationLower(),
+        value.informationUpper(),
+        fractionalDigits))
         return *rounded;
 
     // 元の保証区間が粗く、より低い桁への丸め境界を跨ぐ特殊caseでは、

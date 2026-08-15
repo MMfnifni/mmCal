@@ -1793,7 +1793,7 @@ guard += growth
 
 # 32. `DecimalApproximation`
 
-これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + certified enclosure**である。Unreleasedではこのenclosureを数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。ただし演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
+これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + 二重enclosure metadata**である。Unreleasedではこの値を数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
 
 保持内容:
 
@@ -1801,11 +1801,13 @@ guard += growth
 text                      表示文字列
 fractionalDigits          実際の小数部桁数
 requestedFractionalDigits 要求桁数
-rounded                   丸めが行われたか
+rounded                   表示値がCertifiedEnclosureに対して丸められたか
 origin                    ExactValue / CertifiedInterval
 displayedValue            表示10進値そのもののexact Rational
-certifiedLower            真値を含む下界 Rational
-certifiedUpper            真値を含む上界 Rational
+certifiedLower            CertifiedEnclosure下界 Rational
+certifiedUpper            CertifiedEnclosure上界 Rational
+informationLower          InformationEnclosure下界 Rational
+informationUpper          InformationEnclosure上界 Rational
 ```
 
 つまり
@@ -1816,29 +1818,95 @@ certifiedUpper            真値を含む上界 Rational
 
 だけを保存しているのではない。
 
-表示値そのものもexact Rationalへ戻せ，さらにその値がどの保証区間から確定したかを保持する。
+## 32.1 CertifiedEnclosure
 
-`accuracy`，`precision`，`rationalize` が文字列を再parseして精度を推測しなくてよいのはこのためである。
+`[certifiedLower, certifiedUpper]`は，真値を必ず含むことをbackendが証明した区間である。内部guard桁によってユーザー要求より狭くてもよい。
 
-## 32.1 certified approximation同士の四則演算
+用途は，
 
-`DecimalApproximation` / `ComplexDecimalApproximation`を含む`+ - * /`と単項`-`では，各入力の`certifiedLower/certifiedUpper`をintervalへ変換する。exact `Number`はpoint intervalとして同じ演算へ混在できる。真値包含の計算そのものには保存済みcertified enclosureを使い，そのoutward-rounded結果から出力10進値を確定する。
+- 真値包含の保証
+- exact zero等の証明
+- 指定10進桁へ両端が同じ値へ丸まることの確認
+- 後続のcertified interval arithmetic
 
-一方，backendが内部guard桁を使って作ったcertified enclosureは，ユーザーへ宣言した`requestedFractionalDigits`より狭い場合がある。この隠れたguard桁を後続演算で新しいAccuracyとして回収しないよう，各approximationには表示値を中心とする`±0.5*10^-n`（`n = requestedFractionalDigits`）もsemantic error floorとして適用し，別のsemantic intervalを伝播する。最終結果の要求桁数は，実際のcertified resultで一意に丸められる範囲かつsemantic resultが保証できる範囲へ制限する。
+である。
+
+この区間は**数学的な正しさの層**であり，ユーザーが何桁の情報を受け取ったかとは別問題である。
+
+## 32.2 InformationEnclosure
+
+`[informationLower, informationUpper]`は，その近似値から後続計算で利用してよい情報量を表す。常に
+
+```text
+certifiedLower  >= informationLower
+certifiedUpper  <= informationUpper
+
+すなわち
+
+CertifiedEnclosure ⊆ InformationEnclosure
+```
+
+を不変条件とする。
+
+`N[x,n]`で10進近似を生成するときは，表示値`d`に対して
+
+```text
+[d - 0.5*10^-n, d + 0.5*10^-n]
+```
+
+をInformationEnclosureへ少なくとも含める。CertifiedEnclosureが内部guard桁によってこれより狭くても，その隠れた桁を後続計算でAccuracyとして回収しない。CertifiedEnclosure自体がこの丸め区間より外まで広い場合は，双方のhullをInformationEnclosureとする。
+
+InformationEnclosureは確率的confidence intervalではない。backendはCertifiedEnclosureによってより狭い真値範囲を既に証明していてよく，InformationEnclosureは「現在のApproximation値から再利用可能な情報量」の契約だけを担当する。
+
+## 32.3 certified approximation同士の四則演算
+
+`DecimalApproximation` / `ComplexDecimalApproximation`を含む`+ - * /`と単項`-`では，CertifiedEnclosureとInformationEnclosureを**別々に同じ演算へ通す**。exact `Number`は双方に同じpoint intervalとして混在する。
 
 ```text
 N[Pi,20] + 1/3
-    ↓
-Piのcertified interval + exact point(1/3)
-    ↓
-outward-rounded interval addition
-    ↓
-一意に保証できる桁数のDecimalApproximation
+
+Certified:
+    C(Pi) + {1/3}
+
+Information:
+    I(Pi) + {1/3}
 ```
 
-scale変更や誤差伝播によってabsolute accuracyは低下し得る。例えば大きなexact係数との乗算でenclosure幅が拡大すれば，結果の`requestedFractionalDigits`自体を安全な値へ下げる。大幅なaccuracy低下で要求桁から1桁ずつ試行しないよう，区間幅の10進桁数から候補桁へ跳んだ後に丸め一致を最終確認する。恒等的な`x+0`や`x*1`では実certified enclosureを不必要に広げない一方，`accuracy[N[Pi,100]*10^50]`は50となり，内部guard桁をAccuracyとして再利用しない。
+出力10進値そのものはCertifiedEnclosureから一意に保証できる値だけを採用する。さらに，表示値と伝播済みInformationEnclosureとの距離から宣言可能なabsolute digitsを求め，出力桁数をその範囲へ制限する。
 
-外側の`N`は情報を増幅しない。`N[N[Pi,20],100]`は20桁保証の近似値のままであり，元approximationに存在しない100桁を再生成しない。
+重要なのは，演算後のInformationEnclosureを**結果`DecimalApproximation`へそのまま保存する**ことである。以前のように「結果桁数だけへ圧縮し，次回に`±0.5*10^-n`から再構成する」方式では，演算履歴中の情報幅を正確に保持できない。現在は複数演算を跨いでも伝播した情報区間を保持する。出力を新しい10進桁へ丸める際は，その出力丸め量子もInformationEnclosureへhullとして加える。
+
+scale変更や相殺によってinformation幅は拡大し得るため，`accuracy` / `precision`は自然に低下する。例えば，
+
+```text
+accuracy[N[Pi,100]*10^50]
+-> 50
+```
+
+となり，CertifiedEnclosure内部のguard桁を新しいAccuracyとして回収しない。近接減算ではabsolute Accuracyを多く保ったまま結果値のscaleが小さくなるため，Precisionのみ大きく失う場合がある。
+
+外側の`N`はInformationEnclosureを狭めない。
+
+```text
+N[N[Pi,20],100]
+-> 3.14159265358979323846
+```
+
+のように，working precisionを100桁へ増やしても入力Approximationに存在しない情報は生成しない。より低い桁へ丸める場合だけ，新しい粗い出力丸め区間をInformationEnclosureへ加えて情報を安全に捨てる。
+
+## 32.4 `accuracy` / `precision` / `rationalize`
+
+これらはCertifiedEnclosureではなくInformationEnclosureを基準にする。
+
+表示値を`d`，InformationEnclosureを`[iL,iU]`とすると，absolute error boundは
+
+```text
+max(|d-iL|, |d-iU|)
+```
+
+である。`accuracy`はこれから保証可能なabsolute decimal digitsを求める。`precision`はInformationEnclosureが0を跨がない場合に値絶対値の下限を使ってrelative errorへ変換する。0を含む場合は正の相対保証を作れないため0となる。
+
+`tolerance`省略時の`rationalize`もInformationEnclosure内の最小分母Rationalを選ぶ。これにより，CertifiedEnclosureにだけ残るhidden guard桁やhidden exact pointをRational化で掘り返さない。明示`tolerance`指定時は従来どおり表示値中心の指定区間を使う。
 
 ---
 
@@ -2167,7 +2235,7 @@ std::vector<std::uint32_t> limbs_;
 
 ## 39.4 x86-64 GCCでの参考`sizeof`
 
-以下はv1.5.2正式版時点のsourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。Unreleasedのtyped-node化後もnumeric型と`Expr` handle自体のサイズは同じだが，`Expr::Node`には全kind共通の544 B payloadを持たなくなった。
+以下はv1.5.2正式版時点のsourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。Unreleasedではtyped-node化に加え，`DecimalApproximation`へInformationEnclosure用Rational boundsを追加したため，近似値型の現在サイズはこのrelease時点表から変化している。`Expr::Node`には全kind共通の544 B payloadを持たなくなった。
 
 | 型 | `sizeof`参考値 | 主な理由 |
 |---|---:|---|
@@ -2181,6 +2249,8 @@ std::vector<std::uint32_t> limbs_;
 | `ComplexDecimalApproximation` | 536 B | real/imag approximate metadata |
 | `Expr` handle | 16 B | `shared_ptr` |
 | `Expr::Node::Value`相当variant（v1.5.2正式版） | 544 B | 最大alternativeをinline保持。Unreleasedで廃止 |
+
+InformationEnclosure追加後の同じx86-64 GCC環境での参考値は，`DecimalApproximation = 376 B`，`ComplexDecimalApproximation = 792 B`。これはexact Rational boundsを2本追加したためであり，typed-node化後はこの増加が他kindのNode固定費へ波及しない。
 
 ここから重要なことが分かる。
 

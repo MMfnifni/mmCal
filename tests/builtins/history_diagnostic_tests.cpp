@@ -108,7 +108,7 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     if (exactApprox.isDecimalApproximation()) {
         const auto& value = exactApprox.asDecimalApproximation();
         tests.expect(value.origin() == numeric::ApproximationOrigin::ExactValue
-            && value.enclosureIsPoint()
+            && value.certifiedEnclosureIsPoint()
             && value.displayedValue() != value.certifiedLower()
             && value.requestedFractionalDigits() == 20,
             "exact approximation retains point enclosure and requested digits");
@@ -141,8 +141,9 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
 
     const std::string piExplain = eval(warnings, "explain[N[Pi,20]]");
     tests.expect(piExplain.find("{\"Exactness\", \"CertifiedApproximation\"}") != std::string::npos
-        && piExplain.find("{\"Enclosure\", {") != std::string::npos,
-        "explain exposes certified approximation classification and enclosure");
+        && piExplain.find("{\"CertifiedEnclosure\", {") != std::string::npos
+        && piExplain.find("{\"InformationEnclosure\", {") != std::string::npos,
+        "explain exposes certified and information enclosures separately");
     tests.expect(evalError(warnings, "explain[1,\"full\"]").type() == error::CalcErrorType::Domain,
         "explain rejects unknown modes instead of silently changing cost semantics");
 }

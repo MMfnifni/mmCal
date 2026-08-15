@@ -35,27 +35,14 @@ using numeric::RealNumber;
     return quotient;
 }
 
-[[nodiscard]] Rational powerOfTenDenominator(std::size_t digits) {
-    BigInt denominator{1};
-    for (std::size_t i = 0; i < digits; ++i)
-        denominator *= BigInt{10};
-    return Rational{BigInt{1}, std::move(denominator)};
-}
-
 [[nodiscard]] Rational maximum(const Rational& lhs, const Rational& rhs) {
     return lhs < rhs ? rhs : lhs;
 }
 
-[[nodiscard]] Rational effectiveAbsoluteError(const DecimalApproximation& value) {
-    const Rational lowerError = absRational(value.displayedValue() - value.certifiedLower());
-    const Rational upperError = absRational(value.displayedValue() - value.certifiedUpper());
-    const Rational sourceError = maximum(lowerError, upperError);
-
-    // N[x,n]は近似値という型意味を保持するため、真値と表示値が偶然一致してもn桁要求を越えて無限精度とは扱わない。
-    // 丸め量子の半幅をsemantic floorにする。
-    Rational quantum = powerOfTenDenominator(value.requestedFractionalDigits());
-    quantum /= Rational{BigInt{2}};
-    return maximum(sourceError, quantum);
+[[nodiscard]] Rational informationAbsoluteError(const DecimalApproximation& value) {
+    const Rational lowerError = absRational(value.displayedValue() - value.informationLower());
+    const Rational upperError = absRational(value.displayedValue() - value.informationUpper());
+    return maximum(lowerError, upperError);
 }
 
 [[nodiscard]] std::size_t decimalIntegerDigits(const Rational& value) {
@@ -82,13 +69,13 @@ using numeric::RealNumber;
 
 [[nodiscard]] std::size_t accuracyDigits(const DecimalApproximation& value) {
     return guaranteedDigits(
-        effectiveAbsoluteError(value),
+        informationAbsoluteError(value),
         value.requestedFractionalDigits());
 }
 
 [[nodiscard]] std::size_t precisionDigits(const DecimalApproximation& value) {
-    const Rational& lower = value.certifiedLower();
-    const Rational& upper = value.certifiedUpper();
+    const Rational& lower = value.informationLower();
+    const Rational& upper = value.informationUpper();
     if (lower <= Rational{} && upper >= Rational{})
         return 0;
 
@@ -98,7 +85,7 @@ using numeric::RealNumber;
     if (minimumMagnitude.isZero())
         return 0;
 
-    const Rational relativeError = effectiveAbsoluteError(value) / minimumMagnitude;
+    const Rational relativeError = informationAbsoluteError(value) / minimumMagnitude;
     const std::size_t cap = value.requestedFractionalDigits()
         + decimalIntegerDigits(value.displayedValue()) + 2;
     return guaranteedDigits(relativeError, cap);
@@ -226,7 +213,7 @@ using numeric::RealNumber;
             value.displayedValue() - *tolerance,
             value.displayedValue() + *tolerance);
     }
-    return simplestInInterval(value.certifiedLower(), value.certifiedUpper());
+    return simplestInInterval(value.informationLower(), value.informationUpper());
 }
 
 [[nodiscard]] std::optional<Expr> rationalizeValue(

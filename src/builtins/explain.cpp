@@ -243,17 +243,31 @@ void explainPredefinedSymbol(
     return "Unknown";
 }
 
-[[nodiscard]] Expr enclosure(const DecimalApproximation& value) {
+[[nodiscard]] Expr certifiedEnclosure(const DecimalApproximation& value) {
     return brace({
         Expr{Number{value.certifiedLower()}},
         Expr{Number{value.certifiedUpper()}}
     });
 }
 
-[[nodiscard]] Expr enclosure(const ComplexDecimalApproximation& value) {
+[[nodiscard]] Expr informationEnclosure(const DecimalApproximation& value) {
     return brace({
-        pair("Real", enclosure(value.real())),
-        pair("Imaginary", enclosure(value.imaginary()))
+        Expr{Number{value.informationLower()}},
+        Expr{Number{value.informationUpper()}}
+    });
+}
+
+[[nodiscard]] Expr certifiedEnclosure(const ComplexDecimalApproximation& value) {
+    return brace({
+        pair("Real", certifiedEnclosure(value.real())),
+        pair("Imaginary", certifiedEnclosure(value.imaginary()))
+    });
+}
+
+[[nodiscard]] Expr informationEnclosure(const ComplexDecimalApproximation& value) {
+    return brace({
+        pair("Real", informationEnclosure(value.real())),
+        pair("Imaginary", informationEnclosure(value.imaginary()))
     });
 }
 
@@ -286,7 +300,8 @@ void explainDecimal(
     add(properties, "RequestedFractionalDigits", integer(value.requestedFractionalDigits()));
     add(properties, "DisplayedFractionalDigits", integer(value.fractionalDigits()));
     add(properties, "Rounded", Expr{value.isRounded()});
-    add(properties, "Enclosure", enclosure(value));
+    add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    add(properties, "InformationEnclosure", informationEnclosure(value));
 
     if (internal) {
         add(properties, "Representation", text("DecimalApproximation"));
@@ -294,7 +309,8 @@ void explainDecimal(
             value.origin() == ApproximationOrigin::ExactValue
                 ? "ExactValue"
                 : "CertifiedInterval"));
-        add(properties, "EnclosureIsPoint", Expr{value.enclosureIsPoint()});
+        add(properties, "CertifiedEnclosureIsPoint", Expr{value.certifiedEnclosureIsPoint()});
+        add(properties, "InformationEnclosureIsPoint", Expr{value.informationEnclosureIsPoint()});
     }
 }
 
@@ -307,7 +323,8 @@ void explainComplexDecimal(
     add(properties, "RequestedFractionalDigits", integer(std::min(
         value.real().requestedFractionalDigits(),
         value.imaginary().requestedFractionalDigits())));
-    add(properties, "Enclosure", enclosure(value));
+    add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    add(properties, "InformationEnclosure", informationEnclosure(value));
 
     if (internal) {
         add(properties, "Representation", text("ComplexDecimalApproximation"));

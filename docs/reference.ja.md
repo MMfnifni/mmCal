@@ -112,11 +112,11 @@ gamma[1/3]
 
 ## 2.5 certified approximation
 
-任意精度の作業値は`BigFloat`、証明付き区間は`RealInterval` / `ComplexInterval`。
+任意精度の作業値は`BigFloat`，証明付き区間は`RealInterval` / `ComplexInterval`。
 
-`N[expr,n]`では、真値を含む区間の両端が同じn桁丸めへ入ることを確認してから`DecimalApproximation`を返す。
+`N[expr,n]`では，真値を含む区間の両端が同じn桁丸めへ入ることを確認してから`DecimalApproximation`を返す。
 
-現在の`DecimalApproximation`は表示文字列だけではなく、要求桁数、由来（exact入力 / certified interval）、表示10進値そのもののexact Rational、真値を含むexact Rational enclosureを保持する。certified interval由来では連続する末尾0を表示上1個まで圧縮しても，このmetadataは要求桁数のまま保持する。`ComplexDecimalApproximation`も実部・虚部のmetadataを保持する。`precision/accuracy/rationalize`はこのmetadataを直接使い、表示文字列を再parseして精度を推測しない。
+現在の`DecimalApproximation`は表示文字列だけではなく，要求桁数，由来（exact入力 / certified interval），表示10進値そのもののexact Rationalに加えて，**CertifiedEnclosure**と**InformationEnclosure**の2種類のexact Rational区間を保持する。CertifiedEnclosureは真値包含を証明する区間，InformationEnclosureはその近似値から後続計算で利用してよい情報量を表す区間であり，常に`CertifiedEnclosure ⊆ InformationEnclosure`を満たす。`ComplexDecimalApproximation`も実部・虚部ごとに同じmetadataを保持する。`precision/accuracy/rationalize`はInformationEnclosureを直接使い，表示文字列を再parseして精度を推測しない。
 
 ```text
 N[sqrt[2],30]
@@ -1770,11 +1770,42 @@ N[arg[-1],20]
 -> 3.14159265358979323846 Rad
 ```
 
-exact Rationalが有限10進になる場合、表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の固定桁結果では，要求桁まで並んだ末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数とcertified enclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
+exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の固定桁結果では，要求桁まで並んだ末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数，CertifiedEnclosure，InformationEnclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
 
-`DecimalApproximation` / `ComplexDecimalApproximation`は表示専用の行き止まりではなく，保存済みcertified enclosureを使って通常の`+ - * /`と単項`-`へ再投入できる。exact `Number`もpoint intervalとして混在できるため，例えば `N[Pi,20]+1/3` はcertified approximationを返す。演算でenclosure幅が広がり要求桁を一意に丸められなくなった場合は，保証可能な小数桁まで出力桁を下げる。この低下は`accuracy` / `precision`のmetadataへ反映される。なおbackend内部のguard桁を後続演算で新しいAccuracyとして回収しないよう，宣言済み要求桁に対応する`0.5*10^-n`のsemantic error floorも伝播上限として用いる。
+## 24.1 CertifiedEnclosure / InformationEnclosure
 
-外側の`N`は既存approximationが持つ情報量を増やさない。したがって `N[N[Pi,20],100]` は元の20桁保証を保持し，存在しない追加桁を復元しない。これらは`double`等のmachine arithmeticへ変換せず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて外向き丸めで計算する。
+`DecimalApproximation` / `ComplexDecimalApproximation`は，近似値ごとに2種類の区間を保持する。
+
+- **CertifiedEnclosure** — 真値が必ず含まれることをbackendが証明した区間。内部guard桁により，ユーザーへ宣言した桁数より大幅に狭い場合がある。数学的な正しさ，zero判定，要求桁への一意丸め判定にはこちらを使う。
+- **InformationEnclosure** — その近似値から後続計算で利用してよい情報量を表す区間。`N[x,n]`で生成した値では，少なくとも表示値`d`を中心とする`d ± 0.5*10^-n`とCertifiedEnclosureの双方を包含する。内部guard桁をユーザー可視のAccuracyとして後から回収しないための意味論上の上限である。
+
+常に次を不変条件とする。
+
+```text
+CertifiedEnclosure ⊆ InformationEnclosure
+```
+
+InformationEnclosureは確率分布や統計的confidence intervalではない。また「真値がこの広い区間のどこにでもあり得る」とbackendが主張するものでもない。真値保証そのものはCertifiedEnclosureが担当し，InformationEnclosureは**現在の値から利用してよい情報量の契約**を表す。したがってbackendがより狭いCertifiedEnclosureを内部に持っていても，それだけを理由に既存近似値の情報量は増えない。
+
+通常の`+ - * /`と単項`-`では2区間を独立に伝播する。exact `Number`は両方について同じpoint intervalとして混在できる。
+
+```text
+N[Pi,20] + 1/3
+
+Certified:    C(Pi) + {1/3}
+Information:  I(Pi) + {1/3}
+```
+
+出力10進値の正当性はCertifiedEnclosureから決定し，出力として宣言できる桁数はInformationEnclosureを越えない範囲へ制限する。scale拡大や近接減算ではInformationEnclosureも演算されるため，`accuracy` / `precision`は自然に低下し得る。演算結果自身にも伝播後のInformationEnclosureを保存するので，複数回の演算を跨いでも単なる「要求桁数」へ情報を圧縮し直さない。
+
+外側の`N`はInformationEnclosureを狭めて情報を発明しない。したがって
+
+```text
+N[N[Pi,20],100]
+-> 3.14159265358979323846
+```
+
+は元の20桁保証を保持する。一方，より低い桁を要求した場合は表示丸めに対応するInformationEnclosureを追加して安全に情報を捨てられる。これらは`double`等のmachine arithmeticへ変換せず，両enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて外向き丸めで計算する。
 
 ---
 
@@ -1782,20 +1813,20 @@ exact Rationalが有限10進になる場合、表示は必要以上に0埋めし
 
 ## 25.1 `accuracy[x]`
 
-`DecimalApproximation`について、真値に対する**保証可能な絶対10進桁数の整数下限**を返す。
+`DecimalApproximation`について，真値に対する**保証可能な絶対10進桁数の整数下限**を返す。
 
 ```text
 accuracy[N[1/3,20]]
 -> 20
 ```
 
-表示値`d`とcertified source enclosure `[l,u]`から
+表示値`d`とInformationEnclosure `[iL,iU]`から
 
 ```text
-max(|d-l|, |d-u|)
+max(|d-iL|, |d-iU|)
 ```
 
-を求め、さらに`N[...,n]`が近似値型であるという意味を失わないよう`0.5*10^-n`をsemantic error floorとして加味する。したがって、有限小数が真値と偶然完全一致しても要求桁を越えて無限accuracyとはしない。
+をabsolute error boundとして使う。`N[...,n]`生成時のInformationEnclosureには表示丸めの`0.5*10^-n`が既に含まれるため，有限小数がCertifiedEnclosure上で真値と偶然完全一致していても，要求桁を越えたhidden guard情報をAccuracyとして回収しない。
 
 exactな数・exact symbolic expressionは`Infinity`を返す。
 
@@ -1806,18 +1837,18 @@ accuracy[Pi]  -> Infinity
 
 ## 25.2 `precision[x]`
 
-同じabsolute error boundを、certified enclosureから得られる真値絶対値の下限で割り、**保証可能な相対10進桁数の整数下限**を返す。
+同じabsolute error boundを，InformationEnclosureから得られる値絶対値の正の下限で割り，**保証可能な相対10進桁数の整数下限**を返す。
 
 ```text
 precision[N[1/3,20]]
 -> 19
 ```
 
-これは要求した20桁を機械的に返す函数ではない。`1/3`近傍では`0.5*10^-20`の絶対誤差floorが相対的には約`1.5*10^-20`となるため、厳密に保証できる整数桁数は19になる。0を含むenclosureでは相対誤差を正に下から評価できないため0を返す。exact expressionは`Infinity`。
+これは要求した20桁を機械的に返す函数ではない。`1/3`近傍では`0.5*10^-20`級のInformationEnclosure幅が相対的には約`1.5*10^-20`となるため，保証できる整数桁数は19になる。InformationEnclosureが0を含む場合は値絶対値の正の下限を得られないため0を返す。exact expressionは`Infinity`。近接減算ではabsolute Accuracyを多く残したまま結果scaleだけが小さくなるため，Precisionだけが大きく落ちることがある。
 
 ## 25.3 `rationalize[x]`
 
-近似値が持つcertified enclosure内から、**分母が最小になるexact Rational**を求める。探索はexact Rational上のcontinued-fraction型interval recursionで行い、doubleへ変換しない。
+近似値が持つInformationEnclosure内から，**分母が最小になるexact Rational**を求める。探索はexact Rational上のcontinued-fraction型interval recursionで行い，doubleへ変換しない。これにより，CertifiedEnclosureだけが保持しているhidden guard桁やhidden exact pointから，ユーザーへ宣言していない情報を`rationalize`で掘り返さない。
 
 ```text
 rationalize[N[1/3,20]]
@@ -1868,7 +1899,7 @@ explain[Out[25]]
 explain[%]
 ```
 
-返値はbrace構文で表示されるproperty/value pair列。`Dimensions`や`Enclosure`の値自体がArray/braceになり得るため，内部表現はdense `ArrayExpr`ではなく一般`ListExpr`を用いる。表示上は`{{"Kind",...},{...}}`であり，情報を文字列へ潰さない。
+返値はbrace構文で表示されるproperty/value pair列。`Dimensions`や各種Enclosureの値自体がArray/braceになり得るため，内部表現はdense `ArrayExpr`ではなく一般`ListExpr`を用いる。表示上は`{{"Kind",...},{...}}`であり，情報を文字列へ潰さない。
 
 `Exactness`はbooleanではなく分類値を返す。現在の主な値は`"Exact"` / `"CertifiedApproximation"` / `"Unknown"`。近似値を単に`Exact=False`とは表現しない。
 
@@ -1897,7 +1928,7 @@ explain[Infinity]
 
 `I`は通常評価でexact complex `Number`へloweringされるため，`explain[I]`は入力tokenではなく評価後の複素数値を説明する。
 
-certified decimal approximationでは，要求小数桁数と真値を含むexact Rational enclosureを直接確認できる。
+certified decimal approximationでは，要求小数桁数に加えてCertifiedEnclosureとInformationEnclosureを別々に確認できる。前者は真値保証，後者は後続計算で利用してよい情報量である。
 
 ```text
 explain[N[Pi,20]]
@@ -1906,7 +1937,8 @@ explain[N[Pi,20]]
     {"Exactness","CertifiedApproximation"},
     {"RequestedFractionalDigits",20},
     ...
-    {"Enclosure",{lower,upper}}}
+    {"CertifiedEnclosure",{certifiedLower,certifiedUpper}},
+    {"InformationEnclosure",{informationLower,informationUpper}}}
 ```
 
 Arrayではstorage metadataからO(1)で分かる`Domain` / `Exactness`と，shapeからほぼ無料で分かる`ArrayRank` / `Dimensions` / `ElementCount` / `Vector` / `Matrix` / `Square` / `Order` / `Empty`を返す。`det`，数学的`matrixRank`，invertibility，eigenvalue等は返さない。必要なら既存函数を明示的に呼ぶ。

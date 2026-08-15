@@ -112,6 +112,32 @@ void runDecimalApproximationTests(TestRunner& tests) {
     tests.expect(!certifiedUnstable.has_value(),
         "DecimalApproximation: refuses an interval that crosses a rounding boundary");
 
+    const auto withInformation = DecimalApproximation::fromCertifiedIntervalWithInformation(
+        Rational{BigInt{33330}, BigInt{100000}},
+        Rational{BigInt{33331}, BigInt{100000}},
+        Rational{BigInt{3332}, BigInt{10000}},
+        Rational{BigInt{3334}, BigInt{10000}},
+        3);
+    tests.expect(withInformation.has_value()
+        && withInformation->certifiedLower() == Rational{BigInt{33330}, BigInt{100000}}
+        && withInformation->certifiedUpper() == Rational{BigInt{33331}, BigInt{100000}}
+        && withInformation->informationLower() == Rational{BigInt{665}, BigInt{2000}}
+        && withInformation->informationUpper() == Rational{BigInt{667}, BigInt{2000}},
+        "DecimalApproximation: preserves propagated information and the output rounding quantum");
+
+    tests.expect(preciseThird.informationLower() <= preciseThird.certifiedLower()
+        && preciseThird.certifiedUpper() <= preciseThird.informationUpper(),
+        "DecimalApproximation: information enclosure always contains certified truth enclosure");
+
+    tests.expectThrows<std::invalid_argument>([] {
+        static_cast<void>(DecimalApproximation::fromCertifiedIntervalWithInformation(
+            Rational{BigInt{1}, BigInt{3}},
+            Rational{BigInt{1}, BigInt{3}},
+            Rational{BigInt{34}, BigInt{100}},
+            Rational{BigInt{35}, BigInt{100}},
+            3));
+    }, "DecimalApproximation: rejects information enclosure that excludes certified truth");
+
     tests.expectThrows<std::invalid_argument>([] {
         static_cast<void>(DecimalApproximation::fromReal(
             RealNumber{Rational{BigInt{1}, BigInt{3}}},

@@ -1,6 +1,8 @@
 // 十進近似値metadata
 #include "decimal_approximation.hpp"
 
+#include "integer_algorithms.hpp"
+
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -43,6 +45,53 @@ void incrementDecimal(std::string& digits, BigInt& integerPart) {
     integerPart += BigInt{1};
 }
 
+
+struct InformationBounds final {
+    Rational lower;
+    Rational upper;
+};
+
+[[nodiscard]] Rational informationHalfQuantum(std::size_t fractionalDigits) {
+    const auto exponent = static_cast<std::uint64_t>(fractionalDigits);
+    BigInt denominator = pow(BigInt{10}, exponent);
+    denominator *= BigInt{2};
+    return Rational{BigInt{1}, std::move(denominator)};
+}
+
+[[nodiscard]] InformationBounds defaultInformationBounds(
+    const Rational& displayed,
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper,
+    std::size_t fractionalDigits) {
+    const Rational halfQuantum = informationHalfQuantum(fractionalDigits);
+    const Rational roundedLower = displayed - halfQuantum;
+    const Rational roundedUpper = displayed + halfQuantum;
+    return InformationBounds{
+        certifiedLower < roundedLower ? certifiedLower : roundedLower,
+        certifiedUpper > roundedUpper ? certifiedUpper : roundedUpper
+    };
+}
+
+[[nodiscard]] InformationBounds explicitInformationBounds(
+    const Rational& displayed,
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper,
+    const Rational& informationLower,
+    const Rational& informationUpper,
+    std::size_t fractionalDigits) {
+    if (informationLower > informationUpper)
+        throw std::invalid_argument("Decimal approximation information enclosure is reversed");
+    if (informationLower > certifiedLower || informationUpper < certifiedUpper)
+        throw std::invalid_argument("Decimal approximation information enclosure must contain the certified enclosure");
+
+    const Rational halfQuantum = informationHalfQuantum(fractionalDigits);
+    const Rational roundedLower = displayed - halfQuantum;
+    const Rational roundedUpper = displayed + halfQuantum;
+    return InformationBounds{
+        informationLower < roundedLower ? informationLower : roundedLower,
+        informationUpper > roundedUpper ? informationUpper : roundedUpper
+    };
+}
 
 [[nodiscard]] Rational exactDecimalValue(std::string_view text) {
     bool negative = false;
@@ -177,7 +226,9 @@ DecimalApproximation::DecimalApproximation(
     ApproximationOrigin origin,
     Rational displayedValue,
     Rational certifiedLower,
-    Rational certifiedUpper)
+    Rational certifiedUpper,
+    Rational informationLower,
+    Rational informationUpper)
     : text_(std::move(text)),
       fractionalDigits_(fractionalDigits),
       requestedFractionalDigits_(requestedFractionalDigits),
@@ -185,11 +236,17 @@ DecimalApproximation::DecimalApproximation(
       origin_(origin),
       displayedValue_(std::move(displayedValue)),
       certifiedLower_(std::move(certifiedLower)),
-      certifiedUpper_(std::move(certifiedUpper)) {
+      certifiedUpper_(std::move(certifiedUpper)),
+      informationLower_(std::move(informationLower)),
+      informationUpper_(std::move(informationUpper)) {
     if (text_.empty())
         throw std::invalid_argument("Decimal approximation text cannot be empty");
     if (certifiedLower_ > certifiedUpper_)
         throw std::invalid_argument("Decimal approximation enclosure is reversed");
+    if (informationLower_ > informationUpper_)
+        throw std::invalid_argument("Decimal approximation information enclosure is reversed");
+    if (informationLower_ > certifiedLower_ || informationUpper_ < certifiedUpper_)
+        throw std::invalid_argument("Decimal approximation information enclosure must contain the certified enclosure");
 }
 
 DecimalApproximation DecimalApproximation::fromReal(
@@ -205,10 +262,14 @@ DecimalApproximation DecimalApproximation::fromReal(
 
     BigInt integerPart = numerator / denominator;
     BigInt remainder = numerator % denominator;
-    if (remainder.isZero())
+    if (remainder.isZero()) {
+        const std::string text = rational.numerator().toString();
+        const InformationBounds information = defaultInformationBounds(
+            rational, rational, rational, repeatingFractionalDigits);
         return DecimalApproximation{
-            rational.numerator().toString(), 0, repeatingFractionalDigits, false,
-            ApproximationOrigin::ExactValue, rational, rational, rational};
+            text, 0, repeatingFractionalDigits, false, ApproximationOrigin::ExactValue,
+            rational, rational, rational, information.lower, information.upper};
+    }
 
     const bool terminating = hasTerminatingDecimal(denominator);
     std::string digits;
@@ -252,9 +313,13 @@ DecimalApproximation DecimalApproximation::fromReal(
     text.push_back('.');
     text += digits;
 
+    const Rational displayed = exactDecimalValue(text);
+    const InformationBounds information = defaultInformationBounds(
+        displayed, rational, rational, repeatingFractionalDigits);
     return DecimalApproximation{
         text, digits.size(), repeatingFractionalDigits, rounded,
-        ApproximationOrigin::ExactValue, exactDecimalValue(text), rational, rational};
+        ApproximationOrigin::ExactValue, displayed, rational, rational,
+        information.lower, information.upper};
 }
 
 DecimalApproximation DecimalApproximation::fromRealFixed(
@@ -262,15 +327,20 @@ DecimalApproximation DecimalApproximation::fromRealFixed(
     std::size_t fractionalDigits) {
     const FixedDecimal rounded = roundFixed(value.toRational(), fractionalDigits);
     const Rational rational = value.toRational();
+    const Rational displayed = exactDecimalValue(rounded.text);
+    const InformationBounds information = defaultInformationBounds(
+        displayed, rational, rational, fractionalDigits);
     return DecimalApproximation{
         rounded.text,
         rounded.fractionalDigits,
         fractionalDigits,
         !rounded.exact,
         ApproximationOrigin::ExactValue,
-        exactDecimalValue(rounded.text),
+        displayed,
         rational,
-        rational
+        rational,
+        information.lower,
+        information.upper
     };
 }
 
@@ -286,11 +356,10 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedInterval(
     if (lowerRounded.text != upperRounded.text)
         return std::nullopt;
 
-    // 区間両端が同じ丸め結果を持つため、その間にある真値も必ず同じ結果になる。
-    // 値自体が厳密に10進有限であるとは限らないので、certified interval由来は常に「丸められた近似値」として扱う。
-    // 内部保証は要求桁数のまま保持し，表示だけ末尾0を1桁まで圧縮する。
     std::string text = lowerRounded.text;
     const Rational displayed = exactDecimalValue(text);
+    const InformationBounds information = defaultInformationBounds(
+        displayed, lower, upper, fractionalDigits);
     const std::size_t displayedFractionalDigits = compactCertifiedDecimal(text);
     return DecimalApproximation{
         std::move(text),
@@ -300,7 +369,67 @@ std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedInterval(
         ApproximationOrigin::CertifiedInterval,
         displayed,
         lower,
-        upper
+        upper,
+        information.lower,
+        information.upper
+    };
+}
+
+std::optional<DecimalApproximation> DecimalApproximation::fromCertifiedIntervalWithInformation(
+    const Rational& certifiedLower,
+    const Rational& certifiedUpper,
+    const Rational& informationLower,
+    const Rational& informationUpper,
+    std::size_t fractionalDigits) {
+    if (certifiedLower > certifiedUpper)
+        throw std::invalid_argument("Certified decimal interval is reversed");
+
+    // certified truthがpointなら，既存Nと同じく有限10進値の不要な末尾0を増やさない。
+    // InformationEnclosureは別metadataとして保持するため，最小表示にしても情報量を回収しない。
+    if (certifiedLower == certifiedUpper) {
+        const RealNumber exact{certifiedLower};
+        const DecimalApproximation base = fractionalDigits == 0
+            ? fromRealFixed(exact, 0)
+            : fromReal(exact, fractionalDigits);
+        const InformationBounds information = explicitInformationBounds(
+            base.displayedValue(), certifiedLower, certifiedUpper,
+            informationLower, informationUpper, fractionalDigits);
+        return DecimalApproximation{
+            std::string{base.text()},
+            base.fractionalDigits(),
+            fractionalDigits,
+            base.isRounded(),
+            ApproximationOrigin::CertifiedInterval,
+            base.displayedValue(),
+            certifiedLower,
+            certifiedUpper,
+            information.lower,
+            information.upper
+        };
+    }
+
+    const FixedDecimal lowerRounded = roundFixed(certifiedLower, fractionalDigits);
+    const FixedDecimal upperRounded = roundFixed(certifiedUpper, fractionalDigits);
+    if (lowerRounded.text != upperRounded.text)
+        return std::nullopt;
+
+    std::string text = lowerRounded.text;
+    const Rational displayed = exactDecimalValue(text);
+    const InformationBounds information = explicitInformationBounds(
+        displayed, certifiedLower, certifiedUpper, informationLower, informationUpper,
+        fractionalDigits);
+    const std::size_t displayedFractionalDigits = compactCertifiedDecimal(text);
+    return DecimalApproximation{
+        std::move(text),
+        displayedFractionalDigits,
+        fractionalDigits,
+        true,
+        ApproximationOrigin::CertifiedInterval,
+        displayed,
+        certifiedLower,
+        certifiedUpper,
+        information.lower,
+        information.upper
     };
 }
 
@@ -336,8 +465,20 @@ const Rational& DecimalApproximation::certifiedUpper() const noexcept {
     return certifiedUpper_;
 }
 
-bool DecimalApproximation::enclosureIsPoint() const noexcept {
+const Rational& DecimalApproximation::informationLower() const noexcept {
+    return informationLower_;
+}
+
+const Rational& DecimalApproximation::informationUpper() const noexcept {
+    return informationUpper_;
+}
+
+bool DecimalApproximation::certifiedEnclosureIsPoint() const noexcept {
     return certifiedLower_ == certifiedUpper_;
+}
+
+bool DecimalApproximation::informationEnclosureIsPoint() const noexcept {
+    return informationLower_ == informationUpper_;
 }
 
 } // namespace mmcal::numeric

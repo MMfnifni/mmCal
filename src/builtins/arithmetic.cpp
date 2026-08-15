@@ -119,12 +119,12 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         return value.asNumber().isZero();
     if (value.isDecimalApproximation()) {
         const auto& decimal = value.asDecimalApproximation();
-        return decimal.enclosureIsPoint() && decimal.certifiedLower().isZero();
+        return decimal.certifiedEnclosureIsPoint() && decimal.certifiedLower().isZero();
     }
     if (value.isComplexDecimalApproximation()) {
         const auto& complex = value.asComplexDecimalApproximation();
-        return complex.real().enclosureIsPoint() && complex.real().certifiedLower().isZero()
-            && complex.imaginary().enclosureIsPoint()
+        return complex.real().certifiedEnclosureIsPoint() && complex.real().certifiedLower().isZero()
+            && complex.imaginary().certifiedEnclosureIsPoint()
             && complex.imaginary().certifiedLower().isZero();
     }
     return false;

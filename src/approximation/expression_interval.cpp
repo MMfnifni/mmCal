@@ -17,14 +17,6 @@
 namespace mmcal::approximation {
 namespace {
 
-[[nodiscard]] numeric::Rational semanticHalfQuantum(
-    const numeric::DecimalApproximation& value) {
-    const auto digits = static_cast<std::uint64_t>(value.requestedFractionalDigits());
-    numeric::BigInt denominator = numeric::pow(numeric::BigInt{10}, digits);
-    denominator *= numeric::BigInt{2};
-    return numeric::Rational{numeric::BigInt{1}, std::move(denominator)};
-}
-
 [[nodiscard]] RealInterval intervalFromDecimal(
     const numeric::DecimalApproximation& value,
     std::size_t precisionBits) {
@@ -32,20 +24,11 @@ namespace {
         value.certifiedLower(), value.certifiedUpper(), precisionBits);
 }
 
-[[nodiscard]] RealInterval semanticIntervalFromDecimal(
+[[nodiscard]] RealInterval informationIntervalFromDecimal(
     const numeric::DecimalApproximation& value,
     std::size_t precisionBits) {
-    // certified source enclosureはguard bits分だけ要求桁より狭いことがある。
-    // semantic側では±0.5*10^-nも包含し，後続演算が宣言済みaccuracy以上の
-    // 情報を回収しないための上限としてだけ利用する。実際の包含保証は別のintervalで保持する。
-    const numeric::Rational halfQuantum = semanticHalfQuantum(value);
-    const numeric::Rational semanticLower = value.displayedValue() - halfQuantum;
-    const numeric::Rational semanticUpper = value.displayedValue() + halfQuantum;
-    const numeric::Rational lower = value.certifiedLower() < semanticLower
-        ? value.certifiedLower() : semanticLower;
-    const numeric::Rational upper = value.certifiedUpper() > semanticUpper
-        ? value.certifiedUpper() : semanticUpper;
-    return RealInterval::fromRationalBounds(lower, upper, precisionBits);
+    return RealInterval::fromRationalBounds(
+        value.informationLower(), value.informationUpper(), precisionBits);
 }
 
 [[nodiscard]] bool exactZero(const RealInterval& value) noexcept {
@@ -55,7 +38,7 @@ namespace {
 [[nodiscard]] std::optional<CertifiedValue> storedNumericInterval(
     const expression::Expr& value,
     std::size_t precisionBits,
-    bool semantic) {
+    bool information) {
     if (value.isNumber()) {
         const auto& number = value.asNumber();
         if (number.isReal())
@@ -69,17 +52,17 @@ namespace {
     }
 
     if (value.isDecimalApproximation())
-        return CertifiedValue{semantic
-            ? semanticIntervalFromDecimal(value.asDecimalApproximation(), precisionBits)
+        return CertifiedValue{information
+            ? informationIntervalFromDecimal(value.asDecimalApproximation(), precisionBits)
             : intervalFromDecimal(value.asDecimalApproximation(), precisionBits)};
 
     if (value.isComplexDecimalApproximation()) {
         const auto& complex = value.asComplexDecimalApproximation();
         return CertifiedValue{ComplexInterval{
-            semantic ? semanticIntervalFromDecimal(complex.real(), precisionBits)
-                     : intervalFromDecimal(complex.real(), precisionBits),
-            semantic ? semanticIntervalFromDecimal(complex.imaginary(), precisionBits)
-                     : intervalFromDecimal(complex.imaginary(), precisionBits)}};
+            information ? informationIntervalFromDecimal(complex.real(), precisionBits)
+                        : intervalFromDecimal(complex.real(), precisionBits),
+            information ? informationIntervalFromDecimal(complex.imaginary(), precisionBits)
+                        : intervalFromDecimal(complex.imaginary(), precisionBits)}};
     }
 
     return std::nullopt;
@@ -222,43 +205,94 @@ namespace {
 
 [[nodiscard]] std::size_t componentAccuracyCap(
     const numeric::DecimalApproximation& displayed,
-    const RealInterval& semantic,
+    const RealInterval& information,
     std::size_t cap) {
     const numeric::Rational lowerError = absRational(
-        displayed.displayedValue() - semantic.lower().toRational());
+        displayed.displayedValue() - information.lower().toRational());
     const numeric::Rational upperError = absRational(
-        displayed.displayedValue() - semantic.upper().toRational());
+        displayed.displayedValue() - information.upper().toRational());
     return guaranteedDigits(maximum(lowerError, upperError), cap);
 }
 
-[[nodiscard]] std::size_t semanticAccuracyCap(
+[[nodiscard]] std::size_t informationAccuracyCap(
     const expression::Expr& displayed,
-    const CertifiedValue& semantic,
+    const CertifiedValue& information,
     std::size_t cap) {
     if (displayed.isDecimalApproximation()) {
-        const RealInterval& interval = semantic.isReal()
-            ? semantic.asReal() : semantic.asComplex().real();
+        const RealInterval& interval = information.isReal()
+            ? information.asReal() : information.asComplex().real();
         return componentAccuracyCap(displayed.asDecimalApproximation(), interval, cap);
     }
 
     if (!displayed.isComplexDecimalApproximation())
         return cap;
     const auto& complex = displayed.asComplexDecimalApproximation();
-    const ComplexInterval interval = semantic.toComplex();
+    const ComplexInterval interval = information.toComplex();
     return std::min(
         componentAccuracyCap(complex.real(), interval.real(), cap),
         componentAccuracyCap(complex.imaginary(), interval.imaginary(), cap));
 }
 
+[[nodiscard]] std::optional<expression::Expr> decimalExpressionWithInformation(
+    const RealInterval& certified,
+    const RealInterval& information,
+    std::size_t fractionalDigits) {
+    const auto decimal = numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+        certified.lower().toRational(),
+        certified.upper().toRational(),
+        information.lower().toRational(),
+        information.upper().toRational(),
+        fractionalDigits);
+    return decimal ? std::optional<expression::Expr>{expression::Expr{*decimal}}
+                   : std::nullopt;
+}
+
+[[nodiscard]] std::optional<expression::Expr> decimalExpressionWithInformation(
+    const ComplexInterval& certified,
+    const ComplexInterval& information,
+    std::size_t fractionalDigits) {
+    const auto real = numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+        certified.real().lower().toRational(),
+        certified.real().upper().toRational(),
+        information.real().lower().toRational(),
+        information.real().upper().toRational(),
+        fractionalDigits);
+    const auto imaginary = numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+        certified.imaginary().lower().toRational(),
+        certified.imaginary().upper().toRational(),
+        information.imaginary().lower().toRational(),
+        information.imaginary().upper().toRational(),
+        fractionalDigits);
+    if (!real || !imaginary)
+        return std::nullopt;
+    if (exactZero(certified.imaginary()))
+        return expression::Expr{*real};
+    return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
+        *real, *imaginary, exactZero(certified.real()), false)};
+}
+
+[[nodiscard]] std::optional<expression::Expr> decimalExpressionWithInformation(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t fractionalDigits) {
+    if (certified.isReal()) {
+        const RealInterval& info = information.isReal()
+            ? information.asReal() : information.asComplex().real();
+        return decimalExpressionWithInformation(certified.asReal(), info, fractionalDigits);
+    }
+    return decimalExpressionWithInformation(
+        certified.asComplex(), information.toComplex(), fractionalDigits);
+}
+
 [[nodiscard]] std::optional<expression::Expr> finalizeApproximateOperation(
     const CertifiedValue& certified,
-    const CertifiedValue& semantic,
+    const CertifiedValue& information,
     std::size_t sourceDigits) {
     const auto preliminary = bestDecimalExpression(certified, sourceDigits);
     if (!preliminary)
         return std::nullopt;
-    const std::size_t cap = semanticAccuracyCap(*preliminary, semantic, sourceDigits);
-    return bestDecimalExpression(certified, cap);
+    const std::size_t cap = informationAccuracyCap(*preliminary, information, sourceDigits);
+    return decimalExpressionWithInformation(certified, information, cap);
 }
 
 void collectApproximationDigits(
@@ -405,16 +439,16 @@ std::optional<expression::Expr> addApproximateScalars(
 
     const std::size_t precisionBits = context->workingBinaryBits();
     CertifiedValue result{RealInterval::fromRational(numeric::Rational{}, precisionBits)};
-    CertifiedValue semantic{RealInterval::fromRational(numeric::Rational{}, precisionBits)};
+    CertifiedValue information{RealInterval::fromRational(numeric::Rational{}, precisionBits)};
     for (const auto& expression : expressions) {
         const auto enclosed = storedNumericInterval(expression, precisionBits, false);
-        const auto semanticValue = storedNumericInterval(expression, precisionBits, true);
-        if (!enclosed || !semanticValue)
+        const auto informationValue = storedNumericInterval(expression, precisionBits, true);
+        if (!enclosed || !informationValue)
             return std::nullopt;
         result = addValues(result, *enclosed, precisionBits);
-        semantic = addValues(semantic, *semanticValue, precisionBits);
+        information = addValues(information, *informationValue, precisionBits);
     }
-    return finalizeApproximateOperation(result, semantic, context->decimalDigits());
+    return finalizeApproximateOperation(result, information, context->decimalDigits());
 }
 
 std::optional<expression::Expr> subtractApproximateScalars(
@@ -428,13 +462,13 @@ std::optional<expression::Expr> subtractApproximateScalars(
     const std::size_t precisionBits = context->workingBinaryBits();
     const auto left = storedNumericInterval(lhs, precisionBits, false);
     const auto right = storedNumericInterval(rhs, precisionBits, false);
-    const auto semanticLeft = storedNumericInterval(lhs, precisionBits, true);
-    const auto semanticRight = storedNumericInterval(rhs, precisionBits, true);
-    if (!left || !right || !semanticLeft || !semanticRight)
+    const auto informationLeft = storedNumericInterval(lhs, precisionBits, true);
+    const auto informationRight = storedNumericInterval(rhs, precisionBits, true);
+    if (!left || !right || !informationLeft || !informationRight)
         return std::nullopt;
     return finalizeApproximateOperation(
         subtractValues(*left, *right, precisionBits),
-        subtractValues(*semanticLeft, *semanticRight, precisionBits),
+        subtractValues(*informationLeft, *informationRight, precisionBits),
         context->decimalDigits());
 }
 
@@ -447,17 +481,17 @@ std::optional<expression::Expr> multiplyApproximateScalars(
     const std::size_t precisionBits = context->workingBinaryBits();
     CertifiedValue result{RealInterval::fromRational(
         numeric::Rational{numeric::BigInt{1}}, precisionBits)};
-    CertifiedValue semantic{RealInterval::fromRational(
+    CertifiedValue information{RealInterval::fromRational(
         numeric::Rational{numeric::BigInt{1}}, precisionBits)};
     for (const auto& expression : expressions) {
         const auto enclosed = storedNumericInterval(expression, precisionBits, false);
-        const auto semanticValue = storedNumericInterval(expression, precisionBits, true);
-        if (!enclosed || !semanticValue)
+        const auto informationValue = storedNumericInterval(expression, precisionBits, true);
+        if (!enclosed || !informationValue)
             return std::nullopt;
         result = multiplyValues(result, *enclosed, precisionBits);
-        semantic = multiplyValues(semantic, *semanticValue, precisionBits);
+        information = multiplyValues(information, *informationValue, precisionBits);
     }
-    return finalizeApproximateOperation(result, semantic, context->decimalDigits());
+    return finalizeApproximateOperation(result, information, context->decimalDigits());
 }
 
 std::optional<expression::Expr> divideApproximateScalars(
@@ -471,15 +505,15 @@ std::optional<expression::Expr> divideApproximateScalars(
     const std::size_t precisionBits = context->workingBinaryBits();
     const auto left = storedNumericInterval(lhs, precisionBits, false);
     const auto right = storedNumericInterval(rhs, precisionBits, false);
-    const auto semanticLeft = storedNumericInterval(lhs, precisionBits, true);
-    const auto semanticRight = storedNumericInterval(rhs, precisionBits, true);
-    if (!left || !right || !semanticLeft || !semanticRight)
+    const auto informationLeft = storedNumericInterval(lhs, precisionBits, true);
+    const auto informationRight = storedNumericInterval(rhs, precisionBits, true);
+    if (!left || !right || !informationLeft || !informationRight)
         return std::nullopt;
 
     try {
         return finalizeApproximateOperation(
             divideValues(*left, *right, precisionBits),
-            divideValues(*semanticLeft, *semanticRight, precisionBits),
+            divideValues(*informationLeft, *informationRight, precisionBits),
             context->decimalDigits());
     }
     catch (const std::domain_error&) {
@@ -496,11 +530,11 @@ std::optional<expression::Expr> negateApproximateScalar(
 
     const std::size_t precisionBits = context->workingBinaryBits();
     const auto enclosed = storedNumericInterval(value, precisionBits, false);
-    const auto semanticValue = storedNumericInterval(value, precisionBits, true);
-    if (!enclosed || !semanticValue)
+    const auto informationValue = storedNumericInterval(value, precisionBits, true);
+    if (!enclosed || !informationValue)
         return std::nullopt;
     return finalizeApproximateOperation(
-        negateValue(*enclosed), negateValue(*semanticValue), context->decimalDigits());
+        negateValue(*enclosed), negateValue(*informationValue), context->decimalDigits());
 }
 
 std::size_t nextGuardDigits(std::size_t current) {

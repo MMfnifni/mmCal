@@ -36,17 +36,29 @@ public:
         const Rational& upper,
         std::size_t fractionalDigits);
 
+    // 真値保証区間とは別に，この近似値から後続計算で利用してよい情報量の区間を指定する。
+    // information enclosureはcertified enclosureを必ず包含し，表示丸めの量子幅も内部で包含させる。
+    [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedIntervalWithInformation(
+        const Rational& certifiedLower,
+        const Rational& certifiedUpper,
+        const Rational& informationLower,
+        const Rational& informationUpper,
+        std::size_t fractionalDigits);
+
     [[nodiscard]] std::string_view text() const noexcept;
     [[nodiscard]] std::size_t fractionalDigits() const noexcept;
     [[nodiscard]] std::size_t requestedFractionalDigits() const noexcept;
     [[nodiscard]] bool isRounded() const noexcept;
     [[nodiscard]] ApproximationOrigin origin() const noexcept;
     // 表示文字列が表す10進値そのものをexact Rationalで保持する。
-    // 将来のaccuracy/precisionは文字列を再parseせず、これとsource enclosureの差を使う。
+    // accuracy/precisionは文字列を再parseせずInformationEnclosureを直接使う。
     [[nodiscard]] const Rational& displayedValue() const noexcept;
     [[nodiscard]] const Rational& certifiedLower() const noexcept;
     [[nodiscard]] const Rational& certifiedUpper() const noexcept;
-    [[nodiscard]] bool enclosureIsPoint() const noexcept;
+    [[nodiscard]] const Rational& informationLower() const noexcept;
+    [[nodiscard]] const Rational& informationUpper() const noexcept;
+    [[nodiscard]] bool certifiedEnclosureIsPoint() const noexcept;
+    [[nodiscard]] bool informationEnclosureIsPoint() const noexcept;
     [[nodiscard]] bool operator==(const DecimalApproximation&) const = default;
 
 private:
@@ -58,6 +70,8 @@ private:
     Rational displayedValue_;
     Rational certifiedLower_;
     Rational certifiedUpper_;
+    Rational informationLower_;
+    Rational informationUpper_;
 
     DecimalApproximation(
         std::string text,
@@ -67,7 +81,9 @@ private:
         ApproximationOrigin origin,
         Rational displayedValue,
         Rational certifiedLower,
-        Rational certifiedUpper);
+        Rational certifiedUpper,
+        Rational informationLower,
+        Rational informationUpper);
 };
 
 } // namespace mmcal::numeric

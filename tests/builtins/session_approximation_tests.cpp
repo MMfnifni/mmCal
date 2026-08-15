@@ -99,7 +99,9 @@ void runSessionApproximationTests(TestRunner& tests) {
     tests.expectEqual(eval(approximation, "precision[N[1/3,20]]"), std::string{"19"},
         "approximation reports conservative relative decimal digits");
     tests.expectEqual(eval(approximation, "rationalize[N[1/3,20]]"), std::string{"1/3"},
-        "rationalize recovers a rational from a certified point enclosure");
+        "rationalize recovers a rational consistent with the information enclosure");
+    tests.expectEqual(eval(approximation, "rationalize[N[1001/999,2]]"), std::string{"1"},
+        "rationalize does not recover hidden exact point information beyond declared approximation quality");
     tests.expectEqual(eval(approximation, "N[N[1/3,20],10]"),
         std::string{"0.3333333333"},
         "outer N can safely reduce the requested digits of an existing approximation");
@@ -109,6 +111,8 @@ void runSessionApproximationTests(TestRunner& tests) {
     tests.expectEqual(eval(approximation, "N[N[Pi,20],100]"),
         std::string{"3.14159265358979323846"},
         "outer N preserves the available guarantee of a certified approximation");
+    tests.expectEqual(eval(approximation, "accuracy[N[N[Pi,20],100]]"), std::string{"20"},
+        "outer N cannot narrow an existing information enclosure beyond its declared quality");
     tests.expectEqual(eval(approximation, "N[Pi,20]+1/3"),
         std::string{"3.4749259869231265718"},
         "certified approximations can add exact Rational operands");
@@ -125,6 +129,14 @@ void runSessionApproximationTests(TestRunner& tests) {
         "accuracy[N[Pi,100]*10^50]"),
         std::string{"50"},
         "approximation arithmetic never recovers hidden guard digits beyond the input guarantee");
+    tests.expectEqual(eval(approximation,
+        "accuracy[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]"),
+        std::string{"999"},
+        "near cancellation preserves high absolute accuracy through the information enclosure");
+    tests.expectEqual(eval(approximation,
+        "precision[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]"),
+        std::string{"981"},
+        "near cancellation loses relative precision while retaining absolute accuracy");
     tests.expectEqual(eval(approximation, "N[Pi+I,20]*N[E-I,20]"),
         std::string{"9.5397342226735670655-0.4233108251307480031I"},
         "complex certified approximations participate in arithmetic");
