@@ -78,12 +78,15 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
 
 [[nodiscard]] std::string_view semanticKind(
     const Expr& value,
+    const evaluation::BuiltinRegistry& builtins,
     const symbols::SymbolRegistry& symbols,
     const mathematics::MathRegistry& mathematics) noexcept {
     if (!value.isSymbol())
         return kindName(value.kind());
 
     const auto& symbol = value.asSymbol();
+    if (builtins.find(symbol))
+        return "BuiltinFunction";
     if (mathematics.findConstant(symbol))
         return "Constant";
 
@@ -111,6 +114,139 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
         return "Boolean";
     }
     return "Symbol";
+}
+
+[[nodiscard]] std::string_view argumentEvaluationName(
+    evaluation::ArgumentEvaluation value) noexcept {
+    using evaluation::ArgumentEvaluation;
+    switch (value) {
+    case ArgumentEvaluation::All: return "All";
+    case ArgumentEvaluation::HoldFirst: return "HoldFirst";
+    case ArgumentEvaluation::HoldFirstTwo: return "HoldFirstTwo";
+    case ArgumentEvaluation::HoldFirstAndIteratorSpec: return "HoldFirstAndIteratorSpec";
+    case ArgumentEvaluation::HoldFirstAndTableIteratorSpec: return "HoldFirstAndTableIteratorSpec";
+    case ArgumentEvaluation::HoldAll: return "HoldAll";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string_view parityName(mathematics::FunctionParity value) noexcept {
+    switch (value) {
+    case mathematics::FunctionParity::Neither: return "Neither";
+    case mathematics::FunctionParity::Odd: return "Odd";
+    case mathematics::FunctionParity::Even: return "Even";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string_view functionDomainName(mathematics::FunctionDomainRule value) noexcept {
+    using mathematics::FunctionDomainRule;
+    switch (value) {
+    case FunctionDomainRule::Unknown: return "Unknown";
+    case FunctionDomainRule::RealToReal: return "RealToReal";
+    case FunctionDomainRule::ComplexToComplex: return "ComplexToComplex";
+    case FunctionDomainRule::ComplexToComplexRealPreserving: return "ComplexToComplexRealPreserving";
+    case FunctionDomainRule::ComplexToReal: return "ComplexToReal";
+    case FunctionDomainRule::RealPairToReal: return "RealPairToReal";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string_view branchName(mathematics::FunctionBranchRule value) noexcept {
+    using mathematics::FunctionBranchRule;
+    switch (value) {
+    case FunctionBranchRule::SingleValued: return "SingleValued";
+    case FunctionBranchRule::PrincipalSquareRoot: return "PrincipalSquareRoot";
+    case FunctionBranchRule::PrincipalArgument: return "PrincipalArgument";
+    case FunctionBranchRule::PrincipalLogarithm: return "PrincipalLogarithm";
+    case FunctionBranchRule::PrincipalPower: return "PrincipalPower";
+    case FunctionBranchRule::PrincipalArcSine: return "PrincipalArcSine";
+    case FunctionBranchRule::PrincipalArcCosine: return "PrincipalArcCosine";
+    case FunctionBranchRule::PrincipalArcTangent: return "PrincipalArcTangent";
+    case FunctionBranchRule::PrincipalAtan2: return "PrincipalAtan2";
+    case FunctionBranchRule::PrincipalAreaHyperbolicSine: return "PrincipalAreaHyperbolicSine";
+    case FunctionBranchRule::PrincipalAreaHyperbolicCosine: return "PrincipalAreaHyperbolicCosine";
+    case FunctionBranchRule::PrincipalAreaHyperbolicTangent: return "PrincipalAreaHyperbolicTangent";
+    case FunctionBranchRule::PrincipalHypergeometric2F1: return "PrincipalHypergeometric2F1";
+    case FunctionBranchRule::PrincipalElliptic: return "PrincipalElliptic";
+    case FunctionBranchRule::PrincipalExponentialIntegral: return "PrincipalExponentialIntegral";
+    case FunctionBranchRule::PrincipalCosineIntegral: return "PrincipalCosineIntegral";
+    case FunctionBranchRule::PrincipalLogarithmicIntegral: return "PrincipalLogarithmicIntegral";
+    case FunctionBranchRule::PrincipalPolylogarithm: return "PrincipalPolylogarithm";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string_view monotonicityName(mathematics::RealMonotonicity value) noexcept {
+    switch (value) {
+    case mathematics::RealMonotonicity::Unknown: return "Unknown";
+    case mathematics::RealMonotonicity::Increasing: return "Increasing";
+    case mathematics::RealMonotonicity::Decreasing: return "Decreasing";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] std::string_view realRangeName(mathematics::RealRangeRule value) noexcept {
+    using mathematics::RealRangeRule;
+    switch (value) {
+    case RealRangeRule::Unknown: return "Unknown";
+    case RealRangeRule::AllReal: return "AllReal";
+    case RealRangeRule::Positive: return "Positive";
+    case RealRangeRule::NonNegative: return "NonNegative";
+    case RealRangeRule::OpenMinusOneToOne: return "OpenMinusOneToOne";
+    case RealRangeRule::ClosedMinusOneToOne: return "ClosedMinusOneToOne";
+    case RealRangeRule::OneToInfinity: return "OneToInfinity";
+    }
+    return "Unknown";
+}
+
+void explainBuiltin(
+    const expression::Symbol& symbol,
+    const evaluation::BuiltinDefinition& definition,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    std::vector<Expr>& properties,
+    bool internal) {
+    const expression::Symbol& canonical = builtins.symbol(definition.id);
+    add(properties, "Domain", text("Function"));
+    add(properties, "Exactness", text("Exact"));
+    add(properties, "Name", text(symbol.view()));
+    if (!symbol.sameIdentity(canonical))
+        add(properties, "CanonicalName", text(canonical.view()));
+
+    if (definition.minimumArguments == definition.maximumArguments)
+        add(properties, "Arity", integer(definition.minimumArguments));
+    else {
+        add(properties, "MinimumArguments", integer(definition.minimumArguments));
+        if (definition.maximumArguments != evaluation::BuiltinDefinition::unlimited)
+            add(properties, "MaximumArguments", integer(definition.maximumArguments));
+        else
+            add(properties, "Variadic", Expr{true});
+    }
+    add(properties, "ArgumentEvaluation", text(argumentEvaluationName(definition.argumentEvaluation)));
+
+    if (const auto* math = mathematics.findFunction(canonical)) {
+        add(properties, "FunctionDomain", text(functionDomainName(math->domainRule)));
+        if (math->parity != mathematics::FunctionParity::Neither)
+            add(properties, "Parity", text(parityName(math->parity)));
+        add(properties, "Branch", text(branchName(math->branchRule)));
+        if (math->periodTurns)
+            add(properties, "PeriodTurns", Expr{numeric::Number{*math->periodTurns}});
+        if (math->inverseFunction) {
+            if (const auto* inverse = mathematics.findFunction(*math->inverseFunction))
+                add(properties, "PrincipalInverse", text(inverse->symbol.view()));
+        }
+        add(properties, "RealGloballyInjective", Expr{math->realGloballyInjective});
+        if (math->realMonotonicity != mathematics::RealMonotonicity::Unknown)
+            add(properties, "RealMonotonicity", text(monotonicityName(math->realMonotonicity)));
+        if (math->realRangeRule != mathematics::RealRangeRule::Unknown)
+            add(properties, "RealRange", text(realRangeName(math->realRangeRule)));
+    }
+
+    if (internal) {
+        add(properties, "Representation", text("BuiltinDefinition"));
+        add(properties, "SourceCallable", Expr{definition.sourceCallable});
+    }
 }
 
 void addPredefinedInternal(
@@ -392,6 +528,7 @@ void explainArray(const ArrayExpr& array, std::vector<Expr>& properties, bool in
 
 expression::Expr evaluateExplain(
     std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& builtins,
     const symbols::SymbolRegistry& symbols,
     const mathematics::MathRegistry& mathematics) {
     if (arguments.empty() || arguments.size() > 2)
@@ -402,7 +539,7 @@ expression::Expr evaluateExplain(
     const Expr& value = arguments.front();
     std::vector<Expr> properties;
     properties.reserve(16);
-    add(properties, "Kind", text(semanticKind(value, symbols, mathematics)));
+    add(properties, "Kind", text(semanticKind(value, builtins, symbols, mathematics)));
 
     switch (value.kind()) {
     case ExprKind::Number:
@@ -424,6 +561,10 @@ expression::Expr evaluateExplain(
         break;
     case ExprKind::Symbol: {
         const auto& symbol = value.asSymbol();
+        if (const auto* builtin = builtins.find(symbol)) {
+            explainBuiltin(symbol, *builtin, builtins, mathematics, properties, internal);
+            break;
+        }
         const PredefinedSymbolDefinition* predefined = symbols.find(symbol);
         if (const ConstantDefinition* constant = mathematics.findConstant(symbol))
             explainMathematicalConstant(*constant, predefined, properties, internal);

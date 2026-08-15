@@ -12,8 +12,17 @@
 
 namespace mmcal::solver {
 
+// 実軸上の周期函数sin/cos/tanについて、affine引数に限り整数parameterを持つ全解族へ反転する。
+[[nodiscard]] std::optional<SolutionSet> solveRealPeriodicFunctionRelation(
+    const expression::Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions = {});
+
 // MathRegistryで「実軸上global injective」と証明済みの函数だけを
-// principal inverseで反転する。周期函数はここでは扱わず、誤ったprincipal解へ潰さない。
+// principal inverseで反転する。
 [[nodiscard]] std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
     const expression::Expr& relation,
     const expression::Symbol& variable,

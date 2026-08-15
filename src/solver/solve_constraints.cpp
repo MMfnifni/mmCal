@@ -241,6 +241,10 @@ void appendUnique(mathematics::AssumptionSet& target, const mathematics::Assumpt
     mathematics::AssumptionSet processedAssumptions;
     for (const SolverVariable& variable : variables)
         processedAssumptions.add(mathematics::elementOf(Expr{variable.symbol}, variable.domain));
+    // 周期解のkのようなformal parameterもdomain knowledgeへ含める。
+    // これにより2 Pi k等がRealであることを既知事実だけで証明できる。
+    for (const SolverVariable& parameter : branch.freeVariables)
+        processedAssumptions.add(mathematics::elementOf(Expr{parameter.symbol}, parameter.domain));
 
     mathematics::AssumptionSet pending;
     for (const Predicate& condition : branch.conditions.predicates()) {

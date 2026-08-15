@@ -35,8 +35,8 @@ struct SolutionBranch final {
     std::vector<SolutionBinding> bindings;
     mathematics::AssumptionSet conditions;
     std::optional<std::size_t> multiplicity;
-    // 連立一次方程式などで、solver変数自身を自由parameterとして残す。
-    // bindingsに現れない変数のうち、解族をparameter化するものだけを列挙する。
+    // 解族をparameter化する自由変数。連立一次方程式の未拘束solver変数に加え、
+    // 周期解の整数kのようなformal parameterも保持できる。
     std::vector<SolverVariable> freeVariables;
 
     [[nodiscard]] bool unconditional() const noexcept { return conditions.empty(); }

@@ -897,6 +897,9 @@ using numeric::Number;
     case BuiltinId::VectorSum:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:
+    case BuiltinId::Map:
+    case BuiltinId::Range:
+    case BuiltinId::Table:
     case BuiltinId::Expand:
     case BuiltinId::Factor:
     case BuiltinId::Collect:

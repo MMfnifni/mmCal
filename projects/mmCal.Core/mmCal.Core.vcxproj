@@ -208,6 +208,7 @@
     <ClInclude Include="..\..\src\builtins\linear_algebra.hpp" />
     <ClInclude Include="..\..\src\builtins\numerical_calculus.hpp" />
     <ClInclude Include="..\..\src\builtins\aggregate.hpp" />
+    <ClInclude Include="..\..\src\builtins\iteration.hpp" />
     <ClInclude Include="..\..\src\builtins\statistics.hpp" />
     <ClInclude Include="..\..\src\builtins\combinatorics.hpp" />
     <ClInclude Include="..\..\src\builtins\signal_processing.hpp" />
@@ -318,6 +319,7 @@
     <ClCompile Include="..\..\src\builtins\linear_algebra.cpp" />
     <ClCompile Include="..\..\src\builtins\numerical_calculus.cpp" />
     <ClCompile Include="..\..\src\builtins\aggregate.cpp" />
+    <ClCompile Include="..\..\src\builtins\iteration.cpp" />
     <ClCompile Include="..\..\src\builtins\statistics.cpp" />
     <ClCompile Include="..\..\src\builtins\combinatorics.cpp" />
     <ClCompile Include="..\..\src\builtins\signal_processing.cpp" />

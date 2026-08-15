@@ -2,6 +2,7 @@
 #include "solution_set.hpp"
 
 #include <stdexcept>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -38,13 +39,16 @@ void validateBranch(
             throw std::invalid_argument("Solution binds the same variable more than once");
     }
 
-    std::unordered_set<symbols::SymbolId, symbols::SymbolIdHash> free;
+    std::unordered_set<std::string> freeNames;
     for (const SolverVariable& variable : branch.freeVariables) {
-        if (!allowed.contains(variable.symbol.id()))
-            throw std::invalid_argument("Free solution parameter is not a solver variable");
-        if (bound.contains(variable.symbol.id()))
-            throw std::invalid_argument("A solver variable cannot be both bound and free");
-        if (!free.insert(variable.symbol.id()).second)
+        if (!variable.symbol.valid())
+            throw std::invalid_argument("Free solution parameter is invalid");
+        if (variable.domain == mathematics::NumericDomain::Unknown)
+            throw std::invalid_argument("Free solution parameter domain cannot be Unknown");
+        for (const SolutionBinding& binding : branch.bindings)
+            if (binding.variable == variable.symbol)
+                throw std::invalid_argument("A solution symbol cannot be both bound and free");
+        if (!freeNames.insert(variable.symbol.name()).second)
             throw std::invalid_argument("Free solution parameter is duplicated");
     }
 

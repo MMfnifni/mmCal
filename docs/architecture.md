@@ -46,7 +46,7 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 ### `solver`
 
-多項式、Rational function、制約付き解集合、実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。
+多項式，Rational function，制約付き解集合，実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。Unreleasedでは`SolutionBranch::freeVariables`をsolver変数の自由変数だけでなく，`where k in Integer`のような**branch-local formal parameter**にも一般化した。実軸`sin/cos/tan`の周期解はMathRegistryのperiod / principal inverse / real rangeを利用し，solve変数に対するexact affine argumentだけをinteger-parameter familyへ展開する。formal parameterはEnvironmentのユーザー変数ではなくSolutionSet内で局所束縛され，非線形argumentやComplex全解は安全な表現がない限り未解決のまま保持する。
 
 ### `approximation`
 

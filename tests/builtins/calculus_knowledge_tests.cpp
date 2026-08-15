@@ -106,10 +106,40 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
             && findDiagnostic(session, "solve::unresolved") != nullptr,
         "Solve does not invent a global inverse for a general Gauss hypergeometric function");
 
-    const std::string periodic = eval(session, "solve[sin[x]==0,x,Real]");
-    tests.expect(periodic == "UnresolvedSolutionSet[x]"
-            && findDiagnostic(session, "solve::unresolved") != nullptr,
-        "periodic equations stay unresolved until integer-parameter solution families exist");
+    tests.expectEqual(eval(session, "solve[sin[x]==0,x,Real]"),
+        std::string{"{x==Pi k where k in Integer}"},
+        "Solve represents real sine zeros as integer-parameter solution families");
+    tests.expectEqual(eval(session, "solve[cos[x]==0,x,Real]"),
+        std::string{"{x==Pi/2+Pi k where k in Integer}"},
+        "Solve represents real cosine zeros as periodic families");
+    tests.expectEqual(eval(session, "solve[tan[x]==1,x,Real]"),
+        std::string{"{x==Pi/4+Pi k where k in Integer}"},
+        "Solve uses the half-turn period of tangent");
+    tests.expectEqual(eval(session, "solve[sin[2x+1]==0,x,Real]"),
+        std::string{"{x==-(1-Pi k)/2 where k in Integer}"},
+        "Solve propagates periodic targets through an exact affine argument");
+    tests.expectEqual(eval(session, "solve[sin[x]==1,x,Real]"),
+        std::string{"{x==Pi/2+2Pi k where k in Integer}"},
+        "Sine endpoint targets avoid duplicate periodic branches");
+    tests.expectEqual(eval(session, "solve[cos[x]==-1,x,Real]"),
+        std::string{"{x==Pi+2Pi k where k in Integer}"},
+        "Cosine endpoint targets avoid duplicate periodic branches");
+    tests.expectEqual(eval(session, "solve[sin[x]==2,x,Real]"), std::string{"{}"},
+        "periodic Solve rejects exact targets outside the real range");
+    tests.expectEqual(eval(session, "solve[sin[x^2]==0,x,Real]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "first periodic Solve implementation remains conservative for nonlinear arguments");
+    tests.expectEqual(eval(session, "solve[sin[x]==k,x,Real]").find("where k1 in Integer") != std::string::npos, true,
+        "periodic Solve chooses a fresh formal parameter when k already occurs in the relation");
+
+    kernel::KernelSession degreePeriodic;
+    static_cast<void>(eval(degreePeriodic, "angleMode[Deg]"));
+    tests.expectEqual(eval(degreePeriodic, "solve[sin[x]==0,x,Real]"),
+        std::string{"{x==180k where k in Integer}"},
+        "periodic Solve respects Degree session semantics");
+    tests.expectEqual(eval(degreePeriodic, "solve[tan[x]==1,x,Real]"),
+        std::string{"{x==45+180k where k in Integer}"},
+        "tangent periodic families respect Degree semantics");
 }
 
 } // namespace mmcal::tests

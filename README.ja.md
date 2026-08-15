@@ -476,7 +476,12 @@ solve[x^2<4,x,Real]
 
 solve[exp[x]==2,x,Real]
 -> {x==log[2]}
+
+solve[sin[x]==0,x,Real]
+-> {x==Pi k where k in Integer}
 ```
+
+`sin/cos/tan`の実軸周期解は，exact非零一次係数を持つaffine argumentから段階的にinteger-parameter familyへ対応している。非線形argumentやComplex全解をprincipal inverseだけから捏造しない。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。
@@ -506,6 +511,14 @@ zeros[0,3]
 ```
 
 添字は0-based。`arrayRank[A]`はArrayの次元数，`matrixRank[A]`は線形代数上の階数であり，意味を分離している。
+
+有限列の生成と明示的なelement-wise適用には`range` / `table` / `map`を使う。`table`のiteratorはlocal scopeであり，外側の同名定義を汚さない。`map`はscalar leafへ明示適用するため，通常の`exp[A]`等を自動element-wise化しない。
+
+```text
+range[0,1,1/3] -> {0,1/3,2/3,1}
+table[i^2,{i,5}] -> {1,4,9,16,25}
+map[sin,{0,Pi/2,Pi}] -> {0,1,0}
+```
 
 基本線形代数のcanonical APIは次のとおり。
 

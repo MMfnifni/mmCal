@@ -7,6 +7,7 @@
 #include "mathematics/knowledge_context.hpp"
 #include "mathematics/predicate.hpp"
 #include "numeric/decimal_approximation.hpp"
+#include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/rational.hpp"
 
 #include <optional>
@@ -41,6 +42,11 @@ struct RealBounds final {
     numeric::Rational upper;
 };
 
+struct ComplexBounds final {
+    RealBounds real;
+    RealBounds imaginary;
+};
+
 [[nodiscard]] std::optional<RealBounds> informationBounds(const Expr& value) {
     if (value.isNumber() && value.asNumber().isReal()) {
         const numeric::Rational exact = value.asNumber().asReal().toRational();
@@ -51,6 +57,43 @@ struct RealBounds final {
         return RealBounds{approximate.informationLower(), approximate.informationUpper()};
     }
     return std::nullopt;
+}
+
+[[nodiscard]] std::optional<ComplexBounds> complexInformationBounds(const Expr& value) {
+    if (value.isNumber()) {
+        const auto& number = value.asNumber();
+        if (number.isReal()) {
+            const numeric::Rational exact = number.asReal().toRational();
+            return ComplexBounds{RealBounds{exact, exact}, RealBounds{numeric::Rational{}, numeric::Rational{}}};
+        }
+        const auto& complex = number.asComplex();
+        return ComplexBounds{
+            RealBounds{complex.real.toRational(), complex.real.toRational()},
+            RealBounds{complex.imaginary.toRational(), complex.imaginary.toRational()}};
+    }
+    if (value.isDecimalApproximation()) {
+        const auto& approximate = value.asDecimalApproximation();
+        return ComplexBounds{
+            RealBounds{approximate.informationLower(), approximate.informationUpper()},
+            RealBounds{numeric::Rational{}, numeric::Rational{}}};
+    }
+    if (value.isComplexDecimalApproximation()) {
+        const auto& approximate = value.asComplexDecimalApproximation();
+        return ComplexBounds{
+            RealBounds{approximate.real().informationLower(), approximate.real().informationUpper()},
+            RealBounds{approximate.imaginary().informationLower(), approximate.imaginary().informationUpper()}};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool disjoint(const RealBounds& lhs, const RealBounds& rhs) {
+    return lhs.upper < rhs.lower || rhs.upper < lhs.lower;
+}
+
+[[nodiscard]] bool samePoint(const RealBounds& lhs, const RealBounds& rhs) {
+    return lhs.lower == lhs.upper
+        && rhs.lower == rhs.upper
+        && lhs.lower == rhs.lower;
 }
 
 } // namespace
@@ -83,8 +126,24 @@ Expr evaluateComparison(
             determined = true;
             equal = lhs.asString() == rhs.asString();
         }
+        else {
+            const auto leftBounds = complexInformationBounds(lhs);
+            const auto rightBounds = complexInformationBounds(rhs);
+            if (leftBounds && rightBounds) {
+                if (disjoint(leftBounds->real, rightBounds->real)
+                    || disjoint(leftBounds->imaginary, rightBounds->imaginary)) {
+                    determined = true;
+                    equal = false;
+                }
+                else if (samePoint(leftBounds->real, rightBounds->real)
+                    && samePoint(leftBounds->imaginary, rightBounds->imaginary)) {
+                    determined = true;
+                    equal = true;
+                }
+            }
+        }
 
-        // 証明できない記号式の不一致を、誤ってfalseとは断定しない。
+        // InformationEnclosureだけで証明できない近似値や記号式の不一致を、誤ってfalseとは断定しない。
         if (!determined)
             return unresolved(head, lhs, rhs);
 

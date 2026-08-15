@@ -480,7 +480,12 @@ solve[x^2<4,x,Real]
 
 solve[exp[x]==2,x,Real]
 -> {x==log[2]}
+
+solve[sin[x]==0,x,Real]
+-> {x==Pi k where k in Integer}
 ```
+
+Real periodic `sin/cos/tan` equations can now return integer-parameter families when the argument is affine in the solve variable with an exact nonzero linear coefficient. Nonlinear arguments and complete Complex-domain families are not fabricated from a principal inverse.
 
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.
@@ -510,6 +515,14 @@ zeros[0,3]
 ```
 
 Indices are zero-based. `arrayRank[A]` means the number of Array dimensions, while `matrixRank[A]` is the linear-algebra rank.
+
+Use `range` / `table` / `map` for finite sequence generation and explicit element-wise application. `table` iterators are locally scoped and do not overwrite an outer definition. `map` visits scalar leaves explicitly, so ordinary calls such as `exp[A]` are not silently given element-wise semantics.
+
+```text
+range[0,1,1/3] -> {0,1/3,2/3,1}
+table[i^2,{i,5}] -> {1,4,9,16,25}
+map[sin,{0,Pi/2,Pi}] -> {0,1,0}
+```
 
 The canonical basic linear-algebra API is:
 

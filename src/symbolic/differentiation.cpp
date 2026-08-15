@@ -897,6 +897,9 @@ using numeric::Rational;
     case BuiltinId::NumericIntegral:
     case BuiltinId::NumericalApproximation:
     case BuiltinId::Precision:
+    case BuiltinId::Map:
+    case BuiltinId::Range:
+    case BuiltinId::Table:
     case BuiltinId::Accuracy:
     case BuiltinId::Explain:
     case BuiltinId::Rationalize:

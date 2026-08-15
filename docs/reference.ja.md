@@ -910,7 +910,44 @@ min[x,3]
 -> min[x, 3]
 ```
 
-`sum[f,{k,a,b}]`型の記号有限和はまだ未実装。
+`sum[f,{k,a,b}]`型の記号有限和はまだ未実装である。有限列を明示的に生成する場合は`table`と`sum`を組み合わせられる。
+
+## 15.1 `range` / `table` / `map`
+
+exactな有限列の生成と明示的なelement-wise適用には次を使う。
+
+```text
+range[n]
+range[a,b]
+range[a,b,step]
+
+table[expr,{i,n}]
+table[expr,{i,a,b}]
+table[expr,{i,a,b,step}]
+
+map[f,arrayOrBrace]
+```
+
+`range`の境界とstepはexact real Integer / Rationalに限定する。終端はstep方向で到達範囲に含まれる場合に含める。浮動小数stepを暗黙に丸めて列を作らない。
+
+```text
+range[5] -> {1,2,3,4,5}
+range[0,1,1/3] -> {0,1/3,2/3,1}
+range[5,1,-2] -> {5,3,1}
+```
+
+`table`はbodyを保持し，iterator変数だけを各反復のlocal scopeへ束縛して通常評価する。外側に同名の定義があっても反復終了後に復元され，nested `table`も独立scopeを持つ。
+
+```text
+table[i^2,{i,5}] -> {1,4,9,16,25}
+table[i/2,{i,0,2,1/2}] -> {0,1/4,1/2,3/4,1}
+```
+
+`map[f,value]`はArrayまたは一般braceの**scalar leaf**へ`f[...]`を明示的に適用し，元のshape / ragged brace構造を保つ。`exp[A]`等を自動的にelement-wise化しないため，将来のmatrix function意味論と衝突しない。
+
+```text
+map[sin,{0,Pi/2,Pi}] -> {0,1,0}
+```
 
 ---
 
@@ -1736,11 +1773,29 @@ solve[exp[x]==a,x,Real]
 -> {x == log[a] if a in Real && a > 0}
 ```
 
-`sin/cos/tan`にもinverse・range・period metadataは登録しているが、実軸全体ではglobal injectiveではない。整数parameterを含む全解family表現が未実装なので、principal inverse一個へ潰さない。
+### 実軸周期函数のparameterized solution family
+
+`sin/cos/tan`はglobal injectiveではないためprincipal inverse一個へ潰さず，実軸で周期を保った整数parameter familyを返す。formal parameterは`where k in Integer`で局所的に束縛され，relation内に`k`が既に現れる場合は`k1`等のfresh nameを選ぶ。
 
 ```text
 solve[sin[x]==0,x,Real]
--> WARN + UnresolvedSolutionSet[x]
+-> {x==Pi k where k in Integer}
+
+solve[cos[x]==0,x,Real]
+-> {x==Pi/2+Pi k where k in Integer}
+
+solve[tan[x]==1,x,Real]
+-> {x==Pi/4+Pi k where k in Integer}
+```
+
+初版は`sin/cos/tan`の1引数函数で，引数がsolve変数に対する**exact非零一次係数を持つaffine式**の場合に限定する。targetの実値域は既存Knowledgeで検証し，`sin[x]==2`等は空集合へ落とす。非線形argumentやComplex全解をprincipal inverseだけから捏造しない。
+
+periodはsessionの角度modeに従う。初版のperiodic Solverはargument全体への明示`Rad` / `Deg` / `Grad` suffixをまだaffine polynomialとして正規化しないため，その形は未解決のまま保持する。
+
+```text
+angleMode[Deg]
+solve[sin[x]==0,x,Real]
+-> {x==180k where k in Integer}
 ```
 
 Complex領域でもprincipal inverseだけから全解を捏造しない。
@@ -1822,7 +1877,7 @@ N[N[Pi,20],100]
 
 # 25. precision / accuracy / rationalize
 
-## 25.1 `accuracy[x]`
+## 26.1 `accuracy[x]`
 
 `DecimalApproximation`について，真値に対する**保証可能な絶対10進桁数の整数下限**を返す。
 
@@ -1846,7 +1901,7 @@ accuracy[1/3] -> Infinity
 accuracy[Pi]  -> Infinity
 ```
 
-## 25.2 `precision[x]`
+## 26.2 `precision[x]`
 
 同じabsolute error boundを，InformationEnclosureから得られる値絶対値の正の下限で割り，**保証可能な相対10進桁数の整数下限**を返す。
 
@@ -1857,7 +1912,7 @@ precision[N[1/3,20]]
 
 これは要求した20有効桁を機械的に返す函数ではない。`1/3`近傍では有効20桁の丸め量子が`10^-20`なので，InformationEnclosureの相対的不確かさから保証できる整数桁数は19になる。InformationEnclosureが0を含む場合は値絶対値の正の下限を得られないため0を返す。exact expressionは`Infinity`。近接減算ではabsolute Accuracyを多く残したまま結果scaleだけが小さくなるため，Precisionだけが大きく落ちることがある。
 
-## 25.3 `rationalize[x]`
+## 26.3 `rationalize[x]`
 
 近似値が持つInformationEnclosure内から，**分母が最小になるexact Rational**を求める。探索はexact Rational上のcontinued-fraction型interval recursionで行い，doubleへ変換しない。これにより，CertifiedEnclosureだけが保持しているhidden guard桁やhidden exact pointから，ユーザーへ宣言していない情報を`rationalize`で掘り返さない。
 
@@ -1884,7 +1939,7 @@ rationalize[N[1/3,20],0]
 
 mmCalではソースの`0.1`自体が最初から`1/10`なので、`rationalize[0.1]`は単に`1/10`のままである。Arrayや式内部のDecimalApproximationも再帰的にRational化する。
 
-## 25.4 `explain[value]`
+## 26.4 `explain[value]`
 
 評価済みの値が**既に保持している情報だけ**を構造化して返す軽量introspection函数。対象を改めて`det` / `matrixRank` / LU / Eigen等へ掛けたり，Generic Arrayを全走査して性質を推論したりはしない。したがって`explain`自体のために高価な数学計算は開始しない。
 
@@ -1938,6 +1993,27 @@ explain[Infinity]
 ```
 
 `I`は通常評価でexact complex `Number`へloweringされるため，`explain[I]`は入力tokenではなく評価後の複素数値を説明する。
+
+組込み函数symbolもBuiltinRegistry / MathRegistryの既存metadataだけをO(1)で参照して説明する。arity，held-argument規則，数学函数のdomain / parity / period / principal inverse / real range等を確認できる。
+
+```text
+explain[sin]
+-> {{"Kind","BuiltinFunction"},
+    {"Domain","Function"},
+    {"Exactness","Exact"},
+    {"Name","sin"},
+    {"Arity",1},
+    {"ArgumentEvaluation","All"},
+    {"FunctionDomain","ComplexToComplexRealPreserving"},
+    {"Parity","Odd"},
+    {"PeriodTurns",1},
+    {"PrincipalInverse","asin"}, ...}
+
+explain[table]
+-> ... {"ArgumentEvaluation","HoldFirstAndTableIteratorSpec"} ...
+```
+
+これは函数を実行して性質を調べる機構ではなく，registryに既に登録済みのmetadataの照会である。
 
 certified decimal approximationでは，要求有効桁数に加えてCertifiedEnclosureとInformationEnclosureを別々に確認できる。前者は真値保証，後者は後続計算で利用してよい情報量である。
 
@@ -2039,7 +2115,7 @@ choice[{2,3,5,7}]
 
 rank-1 arrayまたはvariadic listから1要素。
 
-## 25.5 normal
+## 26.5 normal
 
 ```text
 randn[]
@@ -2110,7 +2186,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名237個 / sourceから呼出可能な名前219個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名240個 / sourceから呼出可能な名前222個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2123,13 +2199,13 @@ Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
-log10, log1p, log2, mad, madR, madd, mag, matmul, max, mcols,
+log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
 luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
-pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, rank,
+pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, range, rank,
 qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
 sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
-singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, tan, tanc, tanh, tanhc, trace,
+singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
 vsub, vsum, vunit, winsor, winsorR, zeros, zscore
@@ -2224,7 +2300,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 今後追加検討:
 
-今後はAlgebraicNumber / Root基盤、`rootApproximant`、周期函数の整数parameter付き解集合、Machine evaluator / `for` / `plot`を候補とする。
+今後はAlgebraicNumber / Root基盤，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
 
 ---
 

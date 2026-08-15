@@ -130,6 +130,9 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     // 集約函数。単一配列または可変長scalarを受ける。
     variadic(builtins::names::sum, BuiltinId::Sum, 0, ArgumentEvaluation::All, true),
     variadic(builtins::names::product, BuiltinId::Product, 0, ArgumentEvaluation::All, true),
+    fixed(builtins::names::map, BuiltinId::Map, 2, ArgumentEvaluation::HoldFirst, true),
+    range(builtins::names::range, BuiltinId::Range, 1, 3, ArgumentEvaluation::All, true),
+    fixed(builtins::names::table, BuiltinId::Table, 2, ArgumentEvaluation::HoldFirstAndTableIteratorSpec, true),
     variadic(builtins::names::min, BuiltinId::Min, 1, ArgumentEvaluation::All, true),
     variadic(builtins::names::max, BuiltinId::Max, 1, ArgumentEvaluation::All, true),
     variadic(builtins::names::mean, BuiltinId::Mean, 1, ArgumentEvaluation::All, true),

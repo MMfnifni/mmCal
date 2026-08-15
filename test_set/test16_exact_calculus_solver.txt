@@ -66,3 +66,12 @@ integrate[1/(1+sin[x]),x]==>-2/(1+tan[x/2])
 integrate[1/(1-cos[x]),x]==>-1/tan[x/2]
 integrate[1/(2+cos[x]),x]==>2atan[tan[x/2]/sqrt[3]]sqrt[3]/3
 integrate[(3x^2+1)exp[x^3+x],x]==>exp[x+x^3]
+
+# Real periodic solution families use an explicit integer formal parameter.
+solve[sin[x]==0,x,Real]==>{x==Pi k where k in Integer}
+solve[cos[x]==0,x,Real]==>{x==Pi/2+Pi k where k in Integer}
+solve[tan[x]==1,x,Real]==>{x==Pi/4+Pi k where k in Integer}
+solve[sin[2x+1]==0,x,Real]==>{x==-(1-Pi k)/2 where k in Integer}
+solve[sin[x]==1,x,Real]==>{x==Pi/2+2Pi k where k in Integer}
+solve[sin[x]==2,x,Real]==>{}
+solve[sin[x^2]==0,x,Real]==>UnresolvedSolutionSet[x]

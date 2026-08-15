@@ -50,6 +50,41 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "min[x,3]"), std::string{"min[x, 3]"},
         "min stays symbolic when ordering cannot be proved");
 
+    // Exact sequence generation and explicit element-wise iteration.
+    tests.expectEqual(eval(session, "range[5]"), std::string{"{1, 2, 3, 4, 5}"},
+        "range[n] constructs an exact inclusive integer sequence");
+    tests.expectEqual(eval(session, "range[0,1,1/3]"), std::string{"{0, 1/3, 2/3, 1}"},
+        "range supports exact Rational steps without floating drift");
+    tests.expectEqual(eval(session, "range[5,1,-2]"), std::string{"{5, 3, 1}"},
+        "range supports descending exact sequences with an explicit negative step");
+    tests.expectEqual(eval(session, "map[sin,{0,Pi/2,Pi}]"), std::string{"{0, 1, 0}"},
+        "map applies a function explicitly to Array scalar leaves");
+    static_cast<void>(eval(session, "mapSquare[x]:=x^2+1"));
+    tests.expectEqual(eval(session, "map[mapSquare,{{1,2},{3,4}}]"),
+        std::string{"{{2, 5}, {10, 17}}"},
+        "map accepts user functions while preserving dense Array shape");
+    tests.expectEqual(eval(session, "map[mapSquare,{{1,2},{3}}]"),
+        std::string{"{{2, 5}, {10}}"},
+        "map preserves ragged brace structure while visiting scalar leaves");
+    tests.expectEqual(eval(session, "table[i^2,{i,5}]"), std::string{"{1, 4, 9, 16, 25}"},
+        "table evaluates a held body over an exact local iterator");
+    tests.expectEqual(eval(session, "table[i/2,{i,0,2,1/2}]"),
+        std::string{"{0, 1/4, 1/2, 3/4, 1}"},
+        "table supports exact Rational iterator ranges");
+    tests.expectEqual(eval(session, "table[table[i+j,{j,2}],{i,2}]"),
+        std::string{"{{2, 3}, {3, 4}}"},
+        "nested table scopes iterator variables independently");
+    static_cast<void>(eval(session, "i:=99"));
+    tests.expectEqual(eval(session, "table[i,{i,3}]"), std::string{"{1, 2, 3}"},
+        "table iterator scope shadows a global definition locally");
+    tests.expectEqual(eval(session, "i"), std::string{"99"},
+        "table restores the outer definition after iteration");
+
+    tests.expect(evalError(session, "table[1/0,{i,3}]").type() == error::CalcErrorType::Domain,
+        "table propagates body errors without swallowing the original diagnostic");
+    tests.expectEqual(eval(session, "i"), std::string{"99"},
+        "table unwinds its local iterator scope when the body throws");
+
     // shared array shape layer and exact vector/matrix utilities.
     tests.expectEqual(eval(session, "identity[2]"), std::string{"{{1, 0}, {0, 1}}"},
         "identity constructs an exact matrix");

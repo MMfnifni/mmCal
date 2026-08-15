@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{237},
+    tests.expectEqual(registry.size(), std::size_t{240},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -203,8 +203,24 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && ifDefinition->argumentEvaluation == ArgumentEvaluation::HoldAll,
         "BuiltinRegistry: If is a held source-callable special form");
 
+    const BuiltinDefinition* map = registry.find(builtins::names::map);
+    tests.expect(map && map->sourceCallable
+        && map->argumentEvaluation == ArgumentEvaluation::HoldFirst
+        && map->acceptsArity(2),
+        "BuiltinRegistry: map holds its function symbol while evaluating the container");
+    const BuiltinDefinition* range = registry.find(builtins::names::range);
+    tests.expect(range && range->sourceCallable
+        && range->argumentEvaluation == ArgumentEvaluation::All
+        && range->acceptsArity(1) && range->acceptsArity(2) && range->acceptsArity(3),
+        "BuiltinRegistry: range accepts one to three evaluated exact bounds");
+    const BuiltinDefinition* tableBuiltin = registry.find(builtins::names::table);
+    tests.expect(tableBuiltin && tableBuiltin->sourceCallable
+        && tableBuiltin->argumentEvaluation == ArgumentEvaluation::HoldFirstAndTableIteratorSpec
+        && tableBuiltin->acceptsArity(2),
+        "BuiltinRegistry: table holds the body and binds its iterator specification");
+
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{219},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{222},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
@@ -254,6 +270,8 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("diff")
         && sourceFunctions.contains("nintegrate")
         && sourceFunctions.contains("integrate") && sourceFunctions.contains("limit")
+        && sourceFunctions.contains("map") && sourceFunctions.contains("range")
+        && sourceFunctions.contains("table")
         && sourceFunctions.contains("cbrt") && sourceFunctions.contains("hypot")
         && sourceFunctions.contains("cis") && sourceFunctions.contains("polar")
         && sourceFunctions.contains("nextpow2")

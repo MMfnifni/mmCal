@@ -357,6 +357,9 @@
     <ClInclude Include="..\..\src\builtins\aggregate.hpp">
       <Filter>src\builtins</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\builtins\iteration.hpp">
+      <Filter>src\builtins</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\builtins\statistics.hpp">
       <Filter>src\builtins</Filter>
     </ClInclude>
@@ -657,6 +660,9 @@
       <Filter>src\builtins</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\builtins\aggregate.cpp">
+      <Filter>src\builtins</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\builtins\iteration.cpp">
       <Filter>src\builtins</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\builtins\statistics.cpp">

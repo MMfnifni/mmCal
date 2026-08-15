@@ -11,3 +11,5 @@ explain[E]==>{{"Kind", "Constant"}, {"Domain", "Real"}, {"Exactness", "Exact"}, 
 explain[Phi]==>{{"Kind", "Constant"}, {"Domain", "Real"}, {"Exactness", "Exact"}, {"Name", "Phi"}, {"Real", True}, {"Positive", True}, {"Irrational", True}, {"ArithmeticClass", "Algebraic"}}
 explain[Infinity]==>{{"Kind", "Constant"}, {"Domain", "ExtendedReal"}, {"Exactness", "Exact"}, {"Name", "Infinity"}, {"Infinite", True}, {"Finite", False}, {"Sign", "Positive"}}
 explain[1,"full"]=>DomainError: Unknown explain mode: full
+explain[sin]==>{{"Kind", "BuiltinFunction"}, {"Domain", "Function"}, {"Exactness", "Exact"}, {"Name", "sin"}, {"Arity", 1}, {"ArgumentEvaluation", "All"}, {"FunctionDomain", "ComplexToComplexRealPreserving"}, {"Parity", "Odd"}, {"Branch", "SingleValued"}, {"PeriodTurns", 1}, {"PrincipalInverse", "asin"}, {"RealGloballyInjective", False}, {"RealRange", "ClosedMinusOneToOne"}}
+explain[table]==>{{"Kind", "BuiltinFunction"}, {"Domain", "Function"}, {"Exactness", "Exact"}, {"Name", "table"}, {"Arity", 2}, {"ArgumentEvaluation", "HoldFirstAndTableIteratorSpec"}}

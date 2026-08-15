@@ -913,7 +913,44 @@ min[x,3]
 -> min[x, 3]
 ```
 
-Symbolic finite sums of the form `sum[f,{k,a,b}]` are not yet implemented.
+Symbolic finite sums of the form `sum[f,{k,a,b}]` are not yet implemented. Explicit finite sequences can be generated with `table` and then aggregated with `sum`.
+
+## 15.1 `range` / `table` / `map`
+
+Use the following functions for exact finite sequence generation and explicit element-wise application.
+
+```text
+range[n]
+range[a,b]
+range[a,b,step]
+
+table[expr,{i,n}]
+table[expr,{i,a,b}]
+table[expr,{i,a,b,step}]
+
+map[f,arrayOrBrace]
+```
+
+`range` accepts exact real Integer / Rational bounds and steps. The endpoint is included when it lies in the stepped sequence. Floating steps are not silently rounded into a sequence.
+
+```text
+range[5] -> {1,2,3,4,5}
+range[0,1,1/3] -> {0,1/3,2/3,1}
+range[5,1,-2] -> {5,3,1}
+```
+
+`table` holds its body and binds only the iterator variable in a local scope for each iteration. An outer definition of the same name is restored after iteration, and nested tables have independent scopes.
+
+```text
+table[i^2,{i,5}] -> {1,4,9,16,25}
+table[i/2,{i,0,2,1/2}] -> {0,1/4,1/2,3/4,1}
+```
+
+`map[f,value]` explicitly applies `f[...]` to the **scalar leaves** of an Array or general brace while preserving dense shape or ragged-brace structure. Ordinary calls such as `exp[A]` are deliberately not made element-wise automatically, leaving room for future matrix-function semantics.
+
+```text
+map[sin,{0,Pi/2,Pi}] -> {0,1,0}
+```
 
 ---
 
@@ -1721,11 +1758,29 @@ solve[exp[x]==a,x,Real]
 -> {x == log[a] if a in Real && a > 0}
 ```
 
-Inverse, range, and period metadata are also registered for `sin/cos/tan`, but these functions are not globally injective on the real axis. Because integer-parameter families of solutions are not yet implemented, mmCal does not collapse the full solution set to a single principal inverse.
+### Parameterized real solution families for periodic functions
+
+`sin/cos/tan` are not globally injective, so mmCal does not collapse them to one principal inverse. On the real axis it can instead preserve periodicity with an integer formal parameter. The parameter is locally bound by `where k in Integer`; if `k` already occurs in the relation, a fresh name such as `k1` is selected.
 
 ```text
 solve[sin[x]==0,x,Real]
--> WARN + UnresolvedSolutionSet[x]
+-> {x==Pi k where k in Integer}
+
+solve[cos[x]==0,x,Real]
+-> {x==Pi/2+Pi k where k in Integer}
+
+solve[tan[x]==1,x,Real]
+-> {x==Pi/4+Pi k where k in Integer}
+```
+
+The first implementation is deliberately limited to one-argument `sin/cos/tan` equations whose argument is affine in the solve variable with an **exact nonzero linear coefficient**. Existing Knowledge checks the real target range, so equations such as `sin[x]==2` reduce to the empty set. Nonlinear arguments and complete Complex-domain periodic families remain unresolved rather than being guessed.
+
+The period follows the current session angle mode. The first periodic Solver does not yet normalize an explicit `Rad` / `Deg` / `Grad` suffix around the entire argument into the affine polynomial matcher, so that form remains unresolved for now.
+
+```text
+angleMode[Deg]
+solve[sin[x]==0,x,Real]
+-> {x==180k where k in Integer}
 ```
 
 The Complex domain likewise does not fabricate complete solution sets from principal inverses alone.
@@ -1918,6 +1973,27 @@ explain[Infinity]
 
 `I` is lowered by normal evaluation to an exact complex `Number`, so `explain[I]` describes the evaluated complex value rather than the input token.
 
+Builtin function symbols are also described directly from existing BuiltinRegistry / MathRegistry metadata in O(1) time. This can expose arity, held-argument rules, and mathematical metadata such as domain, parity, period, principal inverse, and real range without executing the function.
+
+```text
+explain[sin]
+-> {{"Kind","BuiltinFunction"},
+    {"Domain","Function"},
+    {"Exactness","Exact"},
+    {"Name","sin"},
+    {"Arity",1},
+    {"ArgumentEvaluation","All"},
+    {"FunctionDomain","ComplexToComplexRealPreserving"},
+    {"Parity","Odd"},
+    {"PeriodTurns",1},
+    {"PrincipalInverse","asin"}, ...}
+
+explain[table]
+-> ... {"ArgumentEvaluation","HoldFirstAndTableIteratorSpec"} ...
+```
+
+This is registry introspection, not an attempt to execute the function to discover additional properties.
+
 Certified decimal approximations expose both the exact Rational CertifiedEnclosure and the InformationEnclosure in addition to their requested significant-digit precision. The former is the truth certificate; the latter is the information limit propagated by later approximate arithmetic. Arrays expose O(1) storage-domain/exactness metadata plus essentially free shape properties such as `ArrayRank`, `Dimensions`, `ElementCount`, `Vector`, `Matrix`, `Square`, `Order`, and `Empty`. Determinant, mathematical rank, invertibility, eigenvalues, and similar derived properties are intentionally omitted.
 
 Integers expose sign, zero, and `BitLength`. Decimal digit count is not computed automatically because huge integers would require decimal conversion; Rationals instead expose numerator/denominator bit lengths.
@@ -2076,7 +2152,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **237 registered builtin/alias names / 219 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **240 registered builtin/alias names / 222 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2089,13 +2165,13 @@ Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F
 expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
 integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
-log10, log1p, log2, mad, madR, madd, mag, matmul, max, mcols,
+log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
 luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
-pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, rank,
+pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, range, rank,
 qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
 sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
-singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, tan, tanc, tanh, tanhc, trace,
+singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
 vsub, vsum, vunit, winsor, winsorR, zeros, zscore
@@ -2190,7 +2266,7 @@ Representative items:
 
 Further candidates:
 
-AlgebraicNumber / Root infrastructure, `rootApproximant`, integer-parameter solution families for periodic functions, and a Machine evaluator / `for` / `plot`.
+AlgebraicNumber / Root infrastructure, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
 
 ---
 

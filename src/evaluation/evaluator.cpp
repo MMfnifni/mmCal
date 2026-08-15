@@ -8,6 +8,7 @@
 #include "approximation/certified_evaluator.hpp"
 #include "approximation/expression_interval.hpp"
 #include "builtins/names.hpp"
+#include "builtins/iteration.hpp"
 #include "error/error_message.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
@@ -78,6 +79,17 @@ struct EnterUserFunctionTask final {
 
 struct FinishUserFunctionTask final {};
 
+struct BeginLocalScopeTask final {
+    expression::Symbol symbol;
+    expression::Expr value;
+};
+
+struct EndLocalScopeTask final {};
+
+struct BuildTableTask final {
+    std::size_t elementCount = 0;
+};
+
 // N[...] は第1引数を先にexact評価しない。precisionだけを確定してから子式を評価し、
 // precision-aware builtinへ要求精度を伝播した後、最後に従来どおりcertified decimalへ落とす。
 struct BeginNumericalApproximationTask final {
@@ -100,6 +112,9 @@ using EvaluationTask = std::variant<
     IfConditionTask,
     EnterUserFunctionTask,
     FinishUserFunctionTask,
+    BeginLocalScopeTask,
+    EndLocalScopeTask,
+    BuildTableTask,
     BeginNumericalApproximationTask,
     FinishNumericalApproximationTask>;
 
@@ -167,6 +182,56 @@ void scheduleIteratorSpecArgument(
     tasks.emplace_back(BuildArrayTask{argument, {1, 2}, origins});
     tasks.emplace_back(EvaluateTask{spec->element(2), origins, depth});
     tasks.emplace_back(EvaluateTask{spec->element(1), origins, depth});
+}
+
+// table iteratorではvariableだけを保持し、残りのrange引数だけを通常評価する。
+void scheduleTableIteratorSpecArgument(
+    std::vector<EvaluationTask>& tasks,
+    const expression::Expr& argument,
+    const expression::OriginMap* origins,
+    std::size_t depth) {
+    const expression::ArrayExpr* spec = tableIteratorArray(argument);
+    if (!spec) {
+        tasks.emplace_back(PushResultTask{argument});
+        return;
+    }
+
+    std::vector<std::size_t> indices;
+    indices.reserve(spec->size() - 1);
+    for (std::size_t i = 1; i < spec->size(); ++i)
+        indices.push_back(i);
+    tasks.emplace_back(BuildArrayTask{argument, indices, origins});
+    for (std::size_t i = spec->size(); i-- > 1;)
+        tasks.emplace_back(EvaluateTask{spec->element(i), origins, depth});
+}
+
+[[nodiscard]] expression::Expr mapLeafCalls(
+    const expression::Expr& container,
+    const expression::Symbol& function) {
+    if (container.isArray()) {
+        const auto& array = container.asArray();
+        std::vector<expression::Expr> mapped;
+        mapped.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i)
+            mapped.push_back(expression::Expr::call(function, {array.element(i)}));
+        return expression::Expr::array(array.shape, std::move(mapped));
+    }
+
+    if (container.isList()) {
+        std::vector<expression::Expr> mapped;
+        mapped.reserve(container.asList().elements.size());
+        for (const auto& element : container.asList().elements) {
+            if (element.isArray() || element.isList())
+                mapped.push_back(mapLeafCalls(element, function));
+            else
+                mapped.push_back(expression::Expr::call(function, {element}));
+        }
+        return expression::Expr::list(std::move(mapped));
+    }
+
+    error::throwCalcError(
+        error::CalcErrorType::Type,
+        "map expects an Array or brace value as its second argument");
 }
 
 [[nodiscard]] std::vector<expression::Expr> takeResults(
@@ -560,11 +625,21 @@ expression::Expr Evaluator::evaluateMachine(
                                             current.depth + 1);
                                         continue;
                                     }
+                                    if (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndTableIteratorSpec
+                                        && index == 1) {
+                                        scheduleTableIteratorSpecArgument(
+                                            tasks,
+                                            call.arguments[index],
+                                            current.origins,
+                                            current.depth + 1);
+                                        continue;
+                                    }
 
                                     const bool held = definition->argumentEvaluation == ArgumentEvaluation::HoldAll
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirst && index == 0)
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstTwo && index < 2)
-                                        || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndIteratorSpec && index == 0);
+                                        || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndIteratorSpec && index == 0)
+                                        || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndTableIteratorSpec && index == 0);
                                     if (held)
                                         tasks.emplace_back(PushResultTask{call.arguments[index]});
                                     else
@@ -652,6 +727,37 @@ expression::Expr Evaluator::evaluateMachine(
                             error::throwCalcError(
                                 error::CalcErrorType::Domain,
                                 "Division by zero");
+                        }
+
+                        if (current.definition->id == BuiltinId::Map) {
+                            if (!arguments[0].isSymbol())
+                                error::throwCalcError(
+                                    error::CalcErrorType::Type,
+                                    "map first argument must be a function symbol");
+                            expression::Expr mapped = mapLeafCalls(
+                                arguments[1], arguments[0].asSymbol());
+                            tasks.emplace_back(EvaluateTask{
+                                std::move(mapped), current.origins, current.depth + 1});
+                            return;
+                        }
+
+                        if (current.definition->id == BuiltinId::Table) {
+                            const auto spec = parseTableIteratorSpec(arguments[1]);
+                            if (!spec)
+                                error::throwCalcError(
+                                    error::CalcErrorType::Type,
+                                    "table iterator must be {symbol, end}, {symbol, lower, upper}, or {symbol, lower, upper, step}");
+                            std::vector<expression::Expr> values = builtins::exactRangeValues(
+                                spec->rangeArguments, "table");
+                            tasks.emplace_back(BuildTableTask{values.size()});
+                            for (std::size_t i = values.size(); i-- > 0;) {
+                                tasks.emplace_back(EndLocalScopeTask{});
+                                tasks.emplace_back(EvaluateTask{
+                                    arguments[0], current.origins, current.depth + 1});
+                                tasks.emplace_back(BeginLocalScopeTask{
+                                    spec->variable, std::move(values[i])});
+                            }
+                            return;
                         }
 
                         expression::Expr dispatched = [&]() {
@@ -796,6 +902,21 @@ expression::Expr Evaluator::evaluateMachine(
 
                         environment_.popScope();
                         activeUserFunctions_.pop_back();
+                    },
+                    [&](const BeginLocalScopeTask& current) {
+                        environment_.pushScope();
+                        environment_.setLocal(current.symbol, current.value);
+                    },
+                    [&](const EndLocalScopeTask&) {
+                        if (environment_.localDepth() <= initialLocalDepth)
+                            error::throwCalcError(
+                                error::CalcErrorType::Internal,
+                                "Local evaluation scope stack is inconsistent");
+                        environment_.popScope();
+                    },
+                    [&](const BuildTableTask& current) {
+                        results.push_back(expression::braceValue(
+                            takeResults(results, current.elementCount)));
                     },
                     [&](const BeginNumericalApproximationTask& current) {
                         constexpr std::size_t defaultPrecisionDigits = 16;

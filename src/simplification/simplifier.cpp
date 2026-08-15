@@ -1607,6 +1607,9 @@ struct PositiveIntegerPower final {
     case BuiltinId::Precision:
     case BuiltinId::Accuracy:
     case BuiltinId::Explain:
+    case BuiltinId::Map:
+    case BuiltinId::Range:
+    case BuiltinId::Table:
     case BuiltinId::Rationalize:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:

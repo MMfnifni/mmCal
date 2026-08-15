@@ -139,6 +139,13 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         std::string{"{{\"Kind\", \"Constant\"}, {\"Domain\", \"ExtendedReal\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"Infinity\"}, {\"Infinite\", True}, {\"Finite\", False}, {\"Sign\", \"Positive\"}}"},
         "explain uses predefined-symbol metadata for Infinity");
 
+    tests.expectEqual(eval(warnings, "explain[sin]"),
+        std::string{"{{\"Kind\", \"BuiltinFunction\"}, {\"Domain\", \"Function\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"sin\"}, {\"Arity\", 1}, {\"ArgumentEvaluation\", \"All\"}, {\"FunctionDomain\", \"ComplexToComplexRealPreserving\"}, {\"Parity\", \"Odd\"}, {\"Branch\", \"SingleValued\"}, {\"PeriodTurns\", 1}, {\"PrincipalInverse\", \"asin\"}, {\"RealGloballyInjective\", False}, {\"RealRange\", \"ClosedMinusOneToOne\"}}"},
+        "explain exposes zero-cost BuiltinRegistry and MathRegistry metadata");
+    tests.expectEqual(eval(warnings, "explain[table]"),
+        std::string{"{{\"Kind\", \"BuiltinFunction\"}, {\"Domain\", \"Function\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"table\"}, {\"Arity\", 2}, {\"ArgumentEvaluation\", \"HoldFirstAndTableIteratorSpec\"}}"},
+        "explain reports held-argument evaluation semantics for table");
+
     const std::string piExplain = eval(warnings, "explain[N[Pi,20]]");
     tests.expect(piExplain.find("{\"Exactness\", \"CertifiedApproximation\"}") != std::string::npos
         && piExplain.find("{\"CertifiedEnclosure\", {") != std::string::npos

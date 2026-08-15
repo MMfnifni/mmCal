@@ -202,6 +202,12 @@ void runSessionApproximationTests(TestRunner& tests) {
         "ordered comparison can use an InformationEnclosure when the result is provable");
     tests.expectEqual(eval(approximation, "N[Pi,2]>3.1"), std::string{"3.1>31/10"},
         "ordered comparison remains unresolved when InformationEnclosures overlap the boundary");
+    tests.expectEqual(eval(approximation, "N[Pi,20]==3"), std::string{"False"},
+        "approximate equality proves inequality only from disjoint InformationEnclosures");
+    tests.expectEqual(eval(approximation, "N[Pi,2]==3.1"), std::string{"3.1==31/10"},
+        "approximate equality remains unresolved when InformationEnclosures overlap");
+    tests.expectEqual(eval(approximation, "N[Pi,2]!=3.1"), std::string{"3.1!=31/10"},
+        "approximate inequality remains unresolved when InformationEnclosures overlap");
     tests.expectEqual(eval(approximation, "min[N[Pi,20],3]"), std::string{"3"},
         "min accepts certified approximations when InformationEnclosures order the inputs");
     tests.expectEqual(eval(approximation, "max[N[Pi,20],3]"),

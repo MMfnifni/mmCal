@@ -17,6 +17,7 @@
 #include "builtins/explain.hpp"
 #include "builtins/complex_functions.hpp"
 #include "builtins/hyperbolic.hpp"
+#include "builtins/iteration.hpp"
 #include "builtins/linear_algebra.hpp"
 #include "builtins/numerical_calculus.hpp"
 #include "builtins/trigonometric.hpp"
@@ -528,6 +529,13 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateSum(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Product:
         return builtins::evaluateProduct(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::Range:
+        return builtins::evaluateRange(arguments);
+    case BuiltinId::Map:
+    case BuiltinId::Table:
+        error::throwCalcError(
+            error::CalcErrorType::Internal,
+            "map/table must be handled by the evaluation machine");
     case BuiltinId::Min:
         return builtins::evaluateMin(arguments, registry_);
     case BuiltinId::Max:
@@ -742,7 +750,7 @@ expression::Expr Evaluator::dispatchBuiltin(
         return expression::Expr::call(call.head, {arguments.front()});
     }
     case BuiltinId::Explain:
-        return builtins::evaluateExplain(arguments, symbolRegistry_, mathematics_);
+        return builtins::evaluateExplain(arguments, registry_, symbolRegistry_, mathematics_);
     case BuiltinId::Accuracy: {
         const auto* infinity = symbolRegistry_.find("Infinity");
         if (!infinity)
@@ -846,6 +854,10 @@ expression::Expr Evaluator::dispatchBuiltin(
                     && mathematics::isSubdomainOf(
                         *constraints.domain, mathematics::NumericDomain::Real);
                 if (realDomain) {
+                    if (auto periodic = solver::solveRealPeriodicFunctionRelation(
+                            arguments[0], variables.front(), registry_, mathematics_,
+                            angleSemantics_, constraints.assumptions))
+                        return *periodic;
                     if (auto transcendental = solver::solveRealInjectiveFunctionRelation(
                             arguments[0], variables.front(), registry_, mathematics_,
                             angleSemantics_, constraints.assumptions))

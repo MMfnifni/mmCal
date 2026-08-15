@@ -76,6 +76,9 @@ enum class BuiltinId {
     GradianToRadian,
     Sum,
     Product,
+    Map,
+    Range,
+    Table,
     Min,
     Max,
     Mean,
@@ -235,6 +238,7 @@ enum class ArgumentEvaluation {
     HoldFirst,
     HoldFirstTwo,
     HoldFirstAndIteratorSpec,
+    HoldFirstAndTableIteratorSpec,
     HoldAll
 };
 
