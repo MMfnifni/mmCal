@@ -1756,7 +1756,9 @@ N[arg[-1],20]
 
 When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. For a certified-interval result produced through a fixed requested precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. The requested digit count and certified enclosure remain intact in metadata, so the number of visible zeros is not itself the precision guarantee.
 
-Approximate values are not yet a general Machine/ApproximateReal arithmetic domain. The displayed value, requested digit count, and certified enclosure are stored separately.
+`DecimalApproximation` and `ComplexDecimalApproximation` are not display-only terminal values. Their stored certified enclosures participate directly in ordinary `+ - * /` and unary `-`, and exact `Number` operands are mixed in as point intervals. For example, `N[Pi,20]+1/3` returns another certified approximation. If interval propagation makes the originally requested number of fractional digits impossible to certify, the result is emitted with fewer guaranteed digits; `accuracy` and `precision` then reflect that reduced enclosure quality. Internal guard digits are not recoverable as new user-visible accuracy: a semantic `0.5*10^-n` error floor corresponding to the declared input precision is propagated as an information cap in addition to the true certified enclosure.
+
+An outer `N` never invents information that is absent from an existing approximation. Thus `N[N[Pi,20],100]` retains the original 20-digit guarantee rather than reconstructing unavailable digits. Arithmetic remains certified interval arithmetic over the stored exact Rational enclosures; it does not fall back to `double` or another machine-real domain.
 
 ---
 

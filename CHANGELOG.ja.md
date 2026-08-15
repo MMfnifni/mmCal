@@ -22,6 +22,7 @@
 - naiveな単一`vector<Rational>` packed案は，transposeで100万個のRational/BigIntをdeep copyして約650–675 msとなるため棄却。shared paged backing + view方式では`--matrix-large transpose 1024 16`が約0.059 ms，最大RSS約133.4 MiB。13.63 MBの1024×1024 decimal literalをCLIで`dimensions[...]`した測定は約4.55 s / 431 MiB
 - BigUInt / BigInt SBOは今回混ぜず，保守性と単独benchmark可能性を優先して見送り
 - `explain[value]`を追加。評価済み値が既に保持する安価なmetadataだけを`{{"Property", value}, ...}`形式のbrace値で返し，追加の数学計算やArray全走査は行わない。Arrayはshape / element count / square判定等，certified近似はexact Rational enclosureを公開し，`explain[value,"internal"]`では表現・storage等の非互換保証debug metadataも返す。`Pi/E/Phi`はMathRegistryの定数metadataを，`Infinity`等の予約symbolはSymbolRegistryの既知意味を直接参照し，通常の未定義symbolと区別して説明する
+- `DecimalApproximation` / `ComplexDecimalApproximation`を通常の`+ - * /`と単項`-`へ再投入可能にし，exact `Number`をpoint intervalとして混在できるようにした。演算後enclosureが入力要求桁を維持できない場合は保証可能な桁へ自動降格し，`accuracy` / `precision`へ反映。`N[N[Pi,20],100]`は元の20桁保証を保持し，存在しない桁を復元しない
 - nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
 - Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
 - exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善

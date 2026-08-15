@@ -117,6 +117,8 @@ Out[27]> 3.141592653589793238462643383280
 The following sections provide an overview only.
 For function specifications and implementation details, see the [reference](docs/reference.md) or the Markdown documents in the `docs` directory.
 
+`N` results retain certified enclosures rather than only display text. Certified decimal approximations can therefore participate in ordinary `+ - * /` together with exact Numbers; propagated uncertainty may reduce the reported accuracy, and an outer `N` never reconstructs digits that were not guaranteed by the input approximation.
+
 ## v1.5.2
 
 v1.5.2 keeps the exact-first numerical foundation of v1.5.1 while substantially expanding **symbolic calculus, special functions, precision-aware numerical evaluation, Arrays, and linear algebra**.

@@ -15,7 +15,7 @@ enum class ApproximationOrigin {
 };
 
 // 厳密実数やcertified区間を、ユーザーへ提示する10進表現として保持する値型。
-// 数値算法の作業値ではなく「確定した表示結果」であり、BigFloat/RealIntervalとは責務を分ける。
+// 反復算法の作業値ではなく「確定した表示結果 + certified enclosure」であり、BigFloat/RealIntervalとは責務を分ける。保存enclosureは後続のcertified四則演算へ再利用できる。
 class DecimalApproximation final {
 public:
     [[nodiscard]] static DecimalApproximation fromReal(

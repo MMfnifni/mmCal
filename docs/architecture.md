@@ -52,7 +52,7 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 任意精度作業値と区間演算を使い、必要桁が保証できる数値近似を生成する。`Pi`はbinary-splitting Chudnovsky，`exp/log`はbinary splittingと保証付きrange reduction，巨大Radianの三角函数はPi保証区間によるargument reductionを使う。深すぎるASTはOSのstack overflowへ到達する前に拒否する。
 
-v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく、明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず、`ComplexInterval`上のradix-2/Bluestein backendへ降りる。Matrixでも同じ`ApproximationContext`を使い，expression→certified interval変換，decimalization，guard-digit refinementを共通helperへ集約する。表示ではexact有限小数を不要に0埋めせず，certified fixed-digit結果の末尾0列は1桁だけ残して圧縮する。要求桁数とcertified enclosureは`DecimalApproximation` metadataへ保持し，表示上の0の個数を保証桁数の代用にはしない。
+v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく、明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず、`ComplexInterval`上のradix-2/Bluestein backendへ降りる。Matrixでも同じ`ApproximationContext`を使い，expression→certified interval変換，decimalization，guard-digit refinementを共通helperへ集約する。表示ではexact有限小数を不要に0埋めせず，certified fixed-digit結果の末尾0列は1桁だけ残して圧縮する。要求桁数とcertified enclosureは`DecimalApproximation` metadataへ保持し，表示上の0の個数を保証桁数の代用にはしない。 Unreleasedでは`DecimalApproximation` / `ComplexDecimalApproximation`を通常四則演算へ再投入できるようにし，exact `Number`はpoint intervalとして混在させる。結果のenclosureが入力要求桁を維持できない場合は保証可能な桁へ自動的に下げる一方，外側`N`で既存approximation以上の情報を発明しない。
 
 ### `linear_algebra`
 

@@ -106,6 +106,30 @@ void runSessionApproximationTests(TestRunner& tests) {
     tests.expectEqual(eval(approximation, "N[N[1/3,10],20]"),
         std::string{"0.3333333333"},
         "outer N never invents precision beyond an existing approximation");
+    tests.expectEqual(eval(approximation, "N[N[Pi,20],100]"),
+        std::string{"3.14159265358979323846"},
+        "outer N preserves the available guarantee of a certified approximation");
+    tests.expectEqual(eval(approximation, "N[Pi,20]+1/3"),
+        std::string{"3.4749259869231265718"},
+        "certified approximations can add exact Rational operands");
+    tests.expectEqual(eval(approximation,
+        "N[226375608064910089/72057594037927936,1000]-"
+        "N[905502432259640355/288230376151711744,1000]"),
+        std::string{"0.0000000000000000034694469519536141888238489627838134765625"},
+        "certified approximations participate directly in subtraction");
+    tests.expectEqual(eval(approximation,
+        "accuracy[N[Pi,20]*10000000000]"),
+        std::string{"10"},
+        "approximation arithmetic reduces reported accuracy when scale amplifies uncertainty");
+    tests.expectEqual(eval(approximation,
+        "accuracy[N[Pi,100]*10^50]"),
+        std::string{"50"},
+        "approximation arithmetic never recovers hidden guard digits beyond the input guarantee");
+    tests.expectEqual(eval(approximation, "N[Pi+I,20]*N[E-I,20]"),
+        std::string{"9.5397342226735670655-0.4233108251307480031I"},
+        "complex certified approximations participate in arithmetic");
+    tests.expect(evalError(approximation, "1/N[0,20]").type() == error::CalcErrorType::Domain,
+        "division detects an approximation whose certified enclosure is exactly zero");
 
     tests.expectEqual(eval(approximation, "rationalize[N[1/3,20],0]"),
         std::string{"33333333333333333333/100000000000000000000"},

@@ -1772,7 +1772,9 @@ N[arg[-1],20]
 
 exact Rationalが有限10進になる場合、表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の固定桁結果では，要求桁まで並んだ末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数とcertified enclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
 
-近似値は現在まだ一般の四則演算用Machine/ApproximateReal domainではない。表示値・要求桁・certified enclosureを別々に保持する。
+`DecimalApproximation` / `ComplexDecimalApproximation`は表示専用の行き止まりではなく，保存済みcertified enclosureを使って通常の`+ - * /`と単項`-`へ再投入できる。exact `Number`もpoint intervalとして混在できるため，例えば `N[Pi,20]+1/3` はcertified approximationを返す。演算でenclosure幅が広がり要求桁を一意に丸められなくなった場合は，保証可能な小数桁まで出力桁を下げる。この低下は`accuracy` / `precision`のmetadataへ反映される。なおbackend内部のguard桁を後続演算で新しいAccuracyとして回収しないよう，宣言済み要求桁に対応する`0.5*10^-n`のsemantic error floorも伝播上限として用いる。
+
+外側の`N`は既存approximationが持つ情報量を増やさない。したがって `N[N[Pi,20],100]` は元の20桁保証を保持し，存在しない追加桁を復元しない。これらは`double`等のmachine arithmeticへ変換せず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて外向き丸めで計算する。
 
 ---
 

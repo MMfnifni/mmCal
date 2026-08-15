@@ -1,6 +1,7 @@
 // 四則演算、冪
 #include "arithmetic.hpp"
 
+#include "approximation/expression_interval.hpp"
 #include "error/error_message.hpp"
 #include "names.hpp"
 #include "mathematics/value_facts.hpp"
@@ -68,6 +69,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     }
     if (numeric)
         return numberExpr(std::move(sum));
+    if (const auto approximate = approximation::addApproximateScalars(arguments))
+        return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Add), arguments);
 }
 
@@ -85,7 +88,46 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     }
     if (numeric)
         return numberExpr(std::move(product));
+    if (const auto approximate = approximation::multiplyApproximateScalars(arguments))
+        return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Multiply), arguments);
+}
+
+[[nodiscard]] Expr scalarSubtract(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& registry) {
+    if (lhs.isNumber() && rhs.isNumber())
+        return numberExpr(lhs.asNumber() - rhs.asNumber());
+    if (const auto approximate = approximation::subtractApproximateScalars(lhs, rhs))
+        return *approximate;
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Subtract), {lhs, rhs});
+}
+
+[[nodiscard]] Expr scalarNegate(
+    const Expr& value,
+    const evaluation::BuiltinRegistry& registry) {
+    if (value.isNumber())
+        return numberExpr(-value.asNumber());
+    if (const auto approximate = approximation::negateApproximateScalar(value))
+        return *approximate;
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Negate), {value});
+}
+
+[[nodiscard]] bool isCertifiedExactZero(const Expr& value) noexcept {
+    if (value.isNumber())
+        return value.asNumber().isZero();
+    if (value.isDecimalApproximation()) {
+        const auto& decimal = value.asDecimalApproximation();
+        return decimal.enclosureIsPoint() && decimal.certifiedLower().isZero();
+    }
+    if (value.isComplexDecimalApproximation()) {
+        const auto& complex = value.asComplexDecimalApproximation();
+        return complex.real().enclosureIsPoint() && complex.real().certifiedLower().isZero()
+            && complex.imaginary().enclosureIsPoint()
+            && complex.imaginary().certifiedLower().isZero();
+    }
+    return false;
 }
 
 [[noreturn]] void arrayArithmeticError(std::string message) {
@@ -163,20 +205,12 @@ Expr evaluateSubtract(
         for (std::size_t i = 0; i < lhs.asArray().size(); ++i) {
             const Expr left = lhs.asArray().element(i);
             const Expr right = rhs.asArray().element(i);
-            if (left.isNumber() && right.isNumber())
-                elements.emplace_back(left.asNumber() - right.asNumber());
-            else
-                elements.push_back(Expr::call(
-                    registry.symbol(evaluation::BuiltinId::Subtract), {left, right}));
+            elements.push_back(scalarSubtract(left, right, registry));
         }
         return Expr::array(lhs.asArray().shape, std::move(elements));
     }
 
-    if (lhs.isNumber() && rhs.isNumber())
-        return numberExpr(lhs.asNumber() - rhs.asNumber());
-    return Expr::call(
-        registry.symbol(evaluation::BuiltinId::Subtract),
-        {lhs, rhs});
+    return scalarSubtract(lhs, rhs, registry);
 }
 
 Expr evaluateMultiply(
@@ -236,10 +270,13 @@ Expr evaluateDivide(
 
     const Expr& numerator = arguments[0];
     const Expr& denominator = arguments[1];
-    if (denominator.isNumber() && denominator.asNumber().isZero())
+    if (isCertifiedExactZero(denominator))
         error::throwCalcError(error::CalcErrorType::Domain, "Division by zero");
     if (numerator.isNumber() && denominator.isNumber())
         return numberExpr(numerator.asNumber() / denominator.asNumber());
+    if (const auto approximate = approximation::divideApproximateScalars(
+        numerator, denominator))
+        return *approximate;
 
     return Expr::call(
         registry.symbol(evaluation::BuiltinId::Divide),
@@ -346,20 +383,11 @@ Expr evaluateNegate(
         std::vector<Expr> elements;
         elements.reserve(array.size());
         for (std::size_t i = 0; i < array.size(); ++i) {
-            const Expr element = array.element(i);
-            if (element.isNumber())
-                elements.emplace_back(-element.asNumber());
-            else
-                elements.push_back(Expr::call(
-                    registry.symbol(evaluation::BuiltinId::Negate), {element}));
+            elements.push_back(scalarNegate(array.element(i), registry));
         }
         return Expr::array(array.shape, std::move(elements));
     }
-    if (arguments.front().isNumber())
-        return numberExpr(-arguments.front().asNumber());
-    return Expr::call(
-        registry.symbol(evaluation::BuiltinId::Negate),
-        {arguments.front()});
+    return scalarNegate(arguments.front(), registry);
 }
 
 Expr evaluateFactorial(std::span<const Expr> arguments) {

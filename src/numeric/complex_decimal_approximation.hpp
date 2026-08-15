@@ -8,7 +8,7 @@
 namespace mmcal::numeric {
 
 // certifiedな複素近似をユーザーへ提示するための出力表現。
-// DecimalApproximationと同様、内部演算値ではなく「確定済みの表示結果」を保持する。
+// DecimalApproximationと同様、反復算法のworking valueではなく「確定済み表示結果 + certified enclosure」を保持し、後続のcertified四則演算へ再利用できる。
 class ComplexDecimalApproximation final {
 public:
     [[nodiscard]] static ComplexDecimalApproximation fromComponents(

@@ -1793,7 +1793,7 @@ guard += growth
 
 # 32. `DecimalApproximation`
 
-これは計算途中のfloating valueではなく，ユーザーへ返す**確定済み10進結果**である。
+これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + certified enclosure**である。Unreleasedではこのenclosureを数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。ただし演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
 
 保持内容:
 
@@ -1819,6 +1819,26 @@ certifiedUpper            真値を含む上界 Rational
 表示値そのものもexact Rationalへ戻せ，さらにその値がどの保証区間から確定したかを保持する。
 
 `accuracy`，`precision`，`rationalize` が文字列を再parseして精度を推測しなくてよいのはこのためである。
+
+## 32.1 certified approximation同士の四則演算
+
+`DecimalApproximation` / `ComplexDecimalApproximation`を含む`+ - * /`と単項`-`では，各入力の`certifiedLower/certifiedUpper`をintervalへ変換する。exact `Number`はpoint intervalとして同じ演算へ混在できる。真値包含の計算そのものには保存済みcertified enclosureを使い，そのoutward-rounded結果から出力10進値を確定する。
+
+一方，backendが内部guard桁を使って作ったcertified enclosureは，ユーザーへ宣言した`requestedFractionalDigits`より狭い場合がある。この隠れたguard桁を後続演算で新しいAccuracyとして回収しないよう，各approximationには表示値を中心とする`±0.5*10^-n`（`n = requestedFractionalDigits`）もsemantic error floorとして適用し，別のsemantic intervalを伝播する。最終結果の要求桁数は，実際のcertified resultで一意に丸められる範囲かつsemantic resultが保証できる範囲へ制限する。
+
+```text
+N[Pi,20] + 1/3
+    ↓
+Piのcertified interval + exact point(1/3)
+    ↓
+outward-rounded interval addition
+    ↓
+一意に保証できる桁数のDecimalApproximation
+```
+
+scale変更や誤差伝播によってabsolute accuracyは低下し得る。例えば大きなexact係数との乗算でenclosure幅が拡大すれば，結果の`requestedFractionalDigits`自体を安全な値へ下げる。大幅なaccuracy低下で要求桁から1桁ずつ試行しないよう，区間幅の10進桁数から候補桁へ跳んだ後に丸め一致を最終確認する。恒等的な`x+0`や`x*1`では実certified enclosureを不必要に広げない一方，`accuracy[N[Pi,100]*10^50]`は50となり，内部guard桁をAccuracyとして再利用しない。
+
+外側の`N`は情報を増幅しない。`N[N[Pi,20],100]`は20桁保証の近似値のままであり，元approximationに存在しない100桁を再生成しない。
 
 ---
 

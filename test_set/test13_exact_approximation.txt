@@ -36,3 +36,13 @@ N[{sqrt[2],Pi},10]==>{1.4142135624,3.1415926536}
 # N propagates precision into FFT; approximate operands select the same certified backend.
 N[fft[{1,2,3}],12]==>{6,-1.50+0.866025403784I,-1.50-0.866025403784I}
 fft[N[{1,2,3,4},12]]==>{10,-2+2I,-2,-2-2I}
+
+# Certified approximations remain numerical values after N. Exact Number operands mix as point intervals,
+# and output digits may decrease when enclosure propagation reduces the available absolute accuracy.
+N[N[Pi,20],100]==>3.14159265358979323846
+N[Pi,20]+1/3==>3.4749259869231265718
+N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000]==>0.0000000000000000034694469519536141888238489627838134765625
+accuracy[N[Pi,20]*10000000000]==>10
+accuracy[N[Pi,100]*10^50]==>50
+N[Pi+I,20]*N[E-I,20]==>9.5397342226735670655-0.4233108251307480031I
+1/N[0,20]=>DomainError: Division by zero
