@@ -355,130 +355,6 @@ enum class IntegralRoundingOperation {
 }
 
 
-[[nodiscard]] std::uint64_t addMod64(
-    std::uint64_t lhs,
-    std::uint64_t rhs,
-    std::uint64_t modulus) noexcept {
-    return lhs >= modulus - rhs ? lhs - (modulus - rhs) : lhs + rhs;
-}
-
-[[nodiscard]] std::uint64_t multiplyMod64(
-    std::uint64_t lhs,
-    std::uint64_t rhs,
-    std::uint64_t modulus) noexcept {
-    std::uint64_t result = 0;
-    lhs %= modulus;
-    while (rhs != 0) {
-        if ((rhs & 1U) != 0)
-            result = addMod64(result, lhs, modulus);
-        rhs >>= 1U;
-        if (rhs != 0)
-            lhs = addMod64(lhs, lhs, modulus);
-    }
-    return result;
-}
-
-[[nodiscard]] std::uint64_t powerMod64(
-    std::uint64_t base,
-    std::uint64_t exponent,
-    std::uint64_t modulus) noexcept {
-    std::uint64_t result = 1 % modulus;
-    base %= modulus;
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result = multiplyMod64(result, base, modulus);
-        exponent >>= 1U;
-        if (exponent != 0)
-            base = multiplyMod64(base, base, modulus);
-    }
-    return result;
-}
-
-[[nodiscard]] bool isPrime64(std::uint64_t value) noexcept {
-    if (value < 2)
-        return false;
-    constexpr std::uint64_t smallPrimes[] = {
-        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37
-    };
-    for (const std::uint64_t prime : smallPrimes) {
-        if (value == prime)
-            return true;
-        if (value % prime == 0)
-            return false;
-    }
-
-    std::uint64_t d = value - 1;
-    unsigned s = 0;
-    while ((d & 1U) == 0) {
-        d >>= 1U;
-        ++s;
-    }
-
-    // Sorenson/Websterのpsi_12は2^64を十分に超えるため、first 12 prime basesで
-    // uint64全域をdeterministicに判定できる。
-    for (const std::uint64_t base : smallPrimes) {
-        if (base >= value)
-            continue;
-        std::uint64_t x = powerMod64(base, d, value);
-        if (x == 1 || x == value - 1)
-            continue;
-        bool witness = true;
-        for (unsigned r = 1; r < s; ++r) {
-            x = multiplyMod64(x, x, value);
-            if (x == value - 1) {
-                witness = false;
-                break;
-            }
-        }
-        if (witness)
-            return false;
-    }
-    return true;
-}
-
-[[nodiscard]] std::uint64_t rhoPolynomial(
-    std::uint64_t x,
-    std::uint64_t c,
-    std::uint64_t modulus) noexcept {
-    return addMod64(multiplyMod64(x, x, modulus), c % modulus, modulus);
-}
-
-[[nodiscard]] std::optional<std::uint64_t> pollardRho64(std::uint64_t value) {
-    if (value % 2 == 0)
-        return 2;
-    if (value % 3 == 0)
-        return 3;
-
-    for (std::uint64_t c = 1; c < 128; ++c) {
-        std::uint64_t x = (2 + c) % value;
-        std::uint64_t y = x;
-        std::uint64_t divisor = 1;
-        for (std::size_t iteration = 0; iteration < 2'000'000 && divisor == 1; ++iteration) {
-            x = rhoPolynomial(x, c, value);
-            y = rhoPolynomial(rhoPolynomial(y, c, value), c, value);
-            const std::uint64_t difference = x > y ? x - y : y - x;
-            divisor = std::gcd(difference, value);
-        }
-        if (divisor > 1 && divisor < value)
-            return divisor;
-    }
-    return std::nullopt;
-}
-
-[[nodiscard]] bool factorUint64(std::uint64_t value, std::vector<std::uint64_t>& factors) {
-    if (value == 1)
-        return true;
-    if (isPrime64(value)) {
-        factors.push_back(value);
-        return true;
-    }
-    const auto divisor = pollardRho64(value);
-    if (!divisor)
-        return false;
-    return factorUint64(*divisor, factors)
-        && factorUint64(value / *divisor, factors);
-}
-
 [[nodiscard]] Expr factorList(std::vector<std::uint64_t> factors, bool negative) {
     std::sort(factors.begin(), factors.end());
     std::vector<Expr> elements;
@@ -721,7 +597,7 @@ Expr evaluateIsPrime(
     const auto value = numeric::tryToUint64(*integerValue);
     if (!value)
         return holdUnary(arguments, registry, evaluation::BuiltinId::IsPrime, names::isPrime);
-    return Expr{isPrime64(*value)};
+    return Expr{numeric::isPrimeUint64(*value)};
 }
 
 Expr evaluateNextPrime(
@@ -741,7 +617,7 @@ Expr evaluateNextPrime(
     if (candidate > 2 && (candidate & 1U) == 0)
         ++candidate;
     while (candidate > *value) {
-        if (isPrime64(candidate))
+        if (numeric::isPrimeUint64(candidate))
             return integerResult(BigInt::fromUnsigned(candidate));
         if (candidate > std::numeric_limits<std::uint64_t>::max() - 2)
             break;
@@ -767,7 +643,7 @@ Expr evaluatePreviousPrime(
     if (candidate > 2 && (candidate & 1U) == 0)
         --candidate;
     for (;;) {
-        if (isPrime64(candidate))
+        if (numeric::isPrimeUint64(candidate))
             return integerResult(BigInt::fromUnsigned(candidate));
         if (candidate <= 3)
             return integerResult(BigInt{2});
@@ -794,7 +670,7 @@ Expr evaluateFactorInteger(
         return Expr::list({Expr{Number{negative ? BigInt{-1} : BigInt{1}}}});
 
     std::vector<std::uint64_t> factors;
-    if (!factorUint64(*value, factors))
+    if (!numeric::factorUint64(*value, factors))
         return holdUnary(arguments, registry, evaluation::BuiltinId::FactorInteger, names::factorInteger);
     return factorList(std::move(factors), negative);
 }
@@ -815,7 +691,7 @@ Expr evaluateTotient(
         return integerResult(BigInt{1});
 
     std::vector<std::uint64_t> factors;
-    if (!factorUint64(*value, factors))
+    if (!numeric::factorUint64(*value, factors))
         return holdUnary(arguments, registry, evaluation::BuiltinId::Totient, names::totient);
     std::sort(factors.begin(), factors.end());
     std::uint64_t result = *value;

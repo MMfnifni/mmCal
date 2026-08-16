@@ -70,7 +70,7 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 | rational-function polynomial exponent | -64..64 | solver内部変換の式爆発防止 |
 | polynomial conversion | degree/terms各4096 | 共通budget |
 | algebraic `root` defining polynomial | degree最大64 | Real Sturm分離・Complex certified isolation/refinementを無制限化しない |
-| algebraic-field resultant candidate | degree最大16 | Root間のexact `+ - * /`でresultant次数爆発を抑え，超過時はsymbolic式を保持 |
+| algebraic-field candidate | degree最大16 | resultant / minimal-polynomial factor reduction / primitive-element reductionの次数爆発を抑える。証明不能・超過時はfallbackまたはsymbolic式を保持 |
 
 ## 5. Linear algebra
 

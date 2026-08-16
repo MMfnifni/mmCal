@@ -501,7 +501,7 @@ N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 ```
 
-Complex側は`root[{a0,...,an},k,Complex]`で全複素根をcertified isolating diskへ分離し，高次Rational係数多項式のComplex Solveもexact Rootへfallbackできる。Root / exact Rational / exact complex Rational間の`+ - * /`はresultantとisolating regionによる再同定でbounded exact algebraic-field演算へ接続する。現在は候補次数budget 16を設け，minimal polynomialへの完全既約化，primitive-element reduction，一般algebraic equality / orderingは意図的に後続へ残す。
+Complex側は`root[{a0,...,an},k,Complex]`で全複素根をcertified isolating diskへ分離し，高次Rational係数多項式のComplex Solveもexact Rootへfallbackできる。個々のRoot生成時には，次数16以下で証明可能な場合に有理既約因子をexactに選択して定義多項式をminimal polynomialへ縮約する。Root同士の`+ - * /`では，operandのminimal polynomialが既約と証明でき，`theta=alpha+c beta`が積次数の既約拡大を生成すると証明できる場合にprimitive-element reductionを使い，それ以外はresultantとisolating regionによる再同定へfallbackする。一般algebraic equality / ordering，`rootApproximant`，次数budgetを超える完全なQ因子分解は意図的に後続へ残す。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。

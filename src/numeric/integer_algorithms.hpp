@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace mmcal::numeric {
 
@@ -25,5 +26,7 @@ struct IntegerCubeRootResult final {
 [[nodiscard]] IntegerSqrtResult integerSqrt(const BigInt& value);
 [[nodiscard]] IntegerCubeRootResult integerCubeRoot(const BigInt& value);
 [[nodiscard]] bool isPerfectSquare(const BigInt& value);
+[[nodiscard]] bool isPrimeUint64(std::uint64_t value) noexcept;
+[[nodiscard]] bool factorUint64(std::uint64_t value, std::vector<std::uint64_t>& factors);
 
 } // namespace mmcal::numeric

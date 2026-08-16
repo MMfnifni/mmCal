@@ -42,7 +42,7 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 ### `symbolic`
 
-`D`, `integrate`, `limit`, 代数変形、多項式、置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。Unreleasedでは`AlgebraicNumber` specialized IRを追加した。実Rootはexact Rational Sturm列で定義多項式の異なる実根を分離し，Rational isolating intervalと1-based実根indexを持つ。Complex Rootは`root[{a0,...,an},k,Complex]`としてsquare-free monic polynomialの全複素根をcertified isolating diskへ分離し，決定的な1-based orderingを与える。一般Exprを巨大variantへ戻すのではなく，Root Callを必要時だけ`RealAlgebraicNumber` / `ComplexAlgebraicNumber` viewへ解釈する。さらにresultantとoperand/result isolating regionの再同定により，Root / exact Rational / exact complex Rational間のbounded exact `+ - * /`を閉じる。候補次数budgetを超える場合や結果rootを一意に証明できない場合は元のsymbolic式を保持する。
+`D`, `integrate`, `limit`, 代数変形、多項式、置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。Unreleasedでは`AlgebraicNumber` specialized IRを追加した。実Rootはexact Rational Sturm列で定義多項式の異なる実根を分離し，Rational isolating intervalと1-based実根indexを持つ。Complex Rootは`root[{a0,...,an},k,Complex]`としてsquare-free monic polynomialの全複素根をcertified isolating diskへ分離し，決定的な1-based orderingを与える。一般Exprを巨大variantへ戻すのではなく，Root Callを必要時だけ`RealAlgebraicNumber` / `ComplexAlgebraicNumber` viewへ解釈する。個別Root生成時にはbounded exact Q-factorizationで選択rootを含む有理既約因子を証明できた場合だけminimal polynomialへ縮約する。Root同士のfield arithmeticでは，operand minimal polynomialの既約性と`theta=alpha+c beta`の積次数既約多項式を証明できた場合にtensor-product algebraからprimitive-element power basisへexactに落とし，そのsimple extension内で結果minimal polynomialを線形従属から導く。証明できない場合はresultantとoperand/result isolating regionの再同定へfallbackし，候補次数budgetを超える場合や結果rootを一意に証明できない場合は元のsymbolic式を保持する。
 
 ### `solver`
 

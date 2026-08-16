@@ -118,6 +118,15 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "root[{4,0,-4,0,1},2]"),
         std::string{"root[{-2, 0, 1}, 2]"},
         "root removes repeated polynomial factors because indices count distinct real roots");
+    tests.expectEqual(eval(session, "root[{6,0,-5,0,1},1]"),
+        std::string{"root[{-3, 0, 1}, 1]"},
+        "root reduces a square-free reducible polynomial to the selected real minimal factor");
+    tests.expectEqual(eval(session, "root[{6,0,-5,0,1},3]"),
+        std::string{"root[{-2, 0, 1}, 2]"},
+        "real minimal-polynomial reduction preserves the selected conjugate root");
+    tests.expectEqual(eval(session, "root[{2,0,3,0,1},1,Complex]"),
+        std::string{"root[{2, 0, 1}, 1, Complex]"},
+        "complex Root reduces a reducible defining polynomial to the certified selected factor");
     tests.expectEqual(eval(session, "N[root[{-2,0,1},2],30]"),
         std::string{"1.41421356237309504880168872421"},
         "root has certified arbitrary-precision numerical refinement");
@@ -133,6 +142,9 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[x^4+1==0,x,Real]"),
         std::string{"{}"},
         "Real Root isolation proves that a rational polynomial has no real roots");
+    tests.expectEqual(eval(session, "solve[(x^2-2)*(x^2-3)==0,x,Real]"),
+        std::string{"{x==root[{-3, 0, 1}, 1], x==root[{-2, 0, 1}, 1], x==root[{-2, 0, 1}, 2], x==root[{-3, 0, 1}, 2]}"},
+        "Real Solve canonicalizes reducible polynomial roots to their minimal factors");
     tests.expectEqual(eval(session, "solve[x^5-x+1==0,x]"),
         std::string{"{x==root[{1, -1, 0, 0, 0, 1}, 1, Complex], x==root[{1, -1, 0, 0, 0, 1}, 2, Complex], x==root[{1, -1, 0, 0, 0, 1}, 3, Complex], x==root[{1, -1, 0, 0, 0, 1}, 4, Complex], x==root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
         "Complex Solve falls back to certified complex Root isolation for unresolved rational polynomials");
@@ -142,6 +154,18 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
         std::string{"2"},
         "bounded AlgebraicNumber arithmetic re-identifies an exact rational product");
+    tests.expectEqual(eval(session,
+        "(root[{-2,0,1},2]+root[{-3,0,1},2])^2"),
+        std::string{"root[{1, -10, 1}, 2]"},
+        "minimal-polynomial reduction keeps the correct positive conjugate after algebraic squaring");
+    tests.expectEqual(eval(session,
+        "(root[{-2,0,1},2]+root[{-3,0,1},2])^3"),
+        std::string{"root[{1, 0, -970, 0, 1}, 4]"},
+        "chained algebraic powers retain the certified result root while reducing the polynomial");
+    tests.expectEqual(eval(session,
+        "root[{-2,0,1},2]+root[{-3,0,0,1},1]"),
+        std::string{"root[{1, -36, 12, -6, -6, 0, 1}, 2]"},
+        "primitive-element reduction computes a degree-six minimal polynomial in a linearly disjoint compositum");
     tests.expectEqual(eval(session, "root[{1,0,1},2,Complex]+I"),
         std::string{"2I"},
         "AlgebraicNumber arithmetic mixes complex Root values with exact complex rationals");

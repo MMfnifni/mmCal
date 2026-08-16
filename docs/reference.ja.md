@@ -1938,7 +1938,26 @@ root[{1,0,1},2,Complex]+I
 -> 2I
 ```
 
-resultant次数の爆発を避けるため，現在の**algebraic-field演算の候補次数budgetは16**。超える場合やresult rootを一意に再同定できない場合は元のexact symbolic式を保持する。完全な有理既約因子化，minimal polynomial，primitive-element reduction，異なる表現間の一般algebraic equality，`rootApproximant`はまだ未実装である。したがって現在の`AlgebraicNumber`は「exact root identity＋bounded field arithmetic」の基盤であり，完全な代数体canonicalizerではない。
+Rootを個別に生成する際は，square-free monic多項式のまま止めず，**選択されたrootを含む有理既約因子をexactに証明できる場合だけminimal polynomialへ縮約**する。現在のbounded factorizationは次数16以下を対象とし，小素数体上の既約性証明とexact Kronecker factor探索を組み合わせる。実RootではSturm根数で対象因子への所属をexactに判定し，Complex Rootではcertified isolating diskと因子側root diskの一意対応を証明する。証明できなければ元のsquare-free定義多項式を保持し，minimal polynomialを推測しない。
+
+```text
+root[{6,0,-5,0,1},1]
+-> root[{-3,0,1},1]
+
+root[{2,0,3,0,1},1,Complex]
+-> root[{2,0,1},1,Complex]
+```
+
+`isolateAll`は同一多項式に対するroot enumeration契約を守るため元の多項式とglobal root indexを維持し，個々の`root[...]`生成またはSolve出力へ変換する境界でminimal-polynomial canonicalizationを行う。
+
+Root同士のfield arithmeticでは，operandのminimal polynomialがQ上既約と証明でき，候補`theta=alpha+c beta`について最初のexact線形従属から得た多項式が次数`deg(alpha)deg(beta)`を持ちQ上既約と証明できた場合，`theta`を**primitive element**として採用する。`Q(alpha,beta)=Q(theta)`を証明できた場合だけtensor-product basisからtheta power basisへexactに変換し，和・差・積・商のminimal polynomialをsimple extension内の線形従属から直接求める。証明できない重なり拡大やbudget超過では従来のresultant＋isolating-region再同定へfallbackする。
+
+```text
+root[{-2,0,1},2]+root[{-3,0,0,1},1]
+-> root[{1,-36,12,-6,-6,0,1},2]
+```
+
+resultant・primitive-element双方の次数爆発を避けるため，現在の**algebraic-field候補次数budgetは16**。完全な任意次数Q因子分解，persistent number-field objectを跨ぐ一般primitive-element reuse，異なる表現間の完全なalgebraic equality / ordering，`rootApproximant`はまだ未実装である。したがって現在の`AlgebraicNumber`は「証明できる範囲でminimal polynomialとsimple-extension reductionまで行うbounded exact algebraic-field backend」であり，完全な代数体canonicalizerではない。
 
 ---
 
@@ -2437,7 +2456,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 今後追加検討:
 
-今後はminimal polynomial / primitive-element reduction，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
+今後は任意次数の完全Q因子分解・persistent number-field reduction・一般algebraic equality / ordering・`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
 
 ---
 

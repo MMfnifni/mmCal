@@ -2,6 +2,7 @@
 #include "algebraic_number.hpp"
 
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/big_float.hpp"
 #include "approximation/certified_constants.hpp"
 #include "approximation/certified_trigonometry.hpp"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -136,6 +138,418 @@ void normalize(Polynomial& polynomial) {
             coefficient /= leading;
     }
     return result;
+}
+
+
+// minimal polynomial縮約はresultant次数budgetと同程度の小～中次数へ限定する。
+// 高次数を無理にfactorしてRoot生成自体を重くしない。
+constexpr std::size_t maximumMinimalPolynomialDegree = 16;
+constexpr std::size_t maximumKroneckerDivisors = 4096;
+constexpr std::size_t maximumKroneckerCombinations = 200'000;
+
+using ModPolynomial = std::vector<std::uint32_t>;
+
+[[nodiscard]] std::uint32_t modMultiply(
+    std::uint32_t lhs,
+    std::uint32_t rhs,
+    std::uint32_t modulus) noexcept {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(lhs) * rhs) % modulus);
+}
+
+[[nodiscard]] std::uint32_t modPower(
+    std::uint32_t base,
+    std::uint64_t exponent,
+    std::uint32_t modulus) noexcept {
+    std::uint32_t result = 1 % modulus;
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result = modMultiply(result, base, modulus);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = modMultiply(base, base, modulus);
+    }
+    return result;
+}
+
+void normalizeMod(ModPolynomial& polynomial) {
+    while (!polynomial.empty() && polynomial.back() == 0)
+        polynomial.pop_back();
+}
+
+[[nodiscard]] std::optional<std::uint32_t> rationalModulo(
+    const Rational& value,
+    std::uint32_t prime) {
+    const BigInt p = BigInt::fromUnsigned(prime);
+    BigInt numerator = value.numerator() % p;
+    BigInt denominator = value.denominator() % p;
+    if (numerator.isNegative())
+        numerator += p;
+    if (denominator.isNegative())
+        denominator += p;
+    const auto n = numeric::tryToUint64(numerator);
+    const auto d = numeric::tryToUint64(denominator);
+    if (!n || !d || *d == 0)
+        return std::nullopt;
+    const std::uint32_t inverse = modPower(
+        static_cast<std::uint32_t>(*d), prime - 2, prime);
+    return modMultiply(static_cast<std::uint32_t>(*n), inverse, prime);
+}
+
+[[nodiscard]] std::optional<ModPolynomial> polynomialModulo(
+    const Polynomial& polynomial,
+    std::uint32_t prime) {
+    ModPolynomial result;
+    result.reserve(polynomial.size());
+    for (const Rational& coefficient : polynomial) {
+        const auto value = rationalModulo(coefficient, prime);
+        if (!value)
+            return std::nullopt;
+        result.push_back(*value);
+    }
+    normalizeMod(result);
+    if (result.size() != polynomial.size())
+        return std::nullopt;
+    return result;
+}
+
+[[nodiscard]] ModPolynomial modRemainder(
+    ModPolynomial dividend,
+    const ModPolynomial& divisor,
+    std::uint32_t prime) {
+    normalizeMod(dividend);
+    if (divisor.empty())
+        throw std::logic_error("Finite-field polynomial divisor is zero");
+    const std::size_t divisorDegree = divisor.size() - 1;
+    const std::uint32_t inverseLeading = modPower(divisor.back(), prime - 2, prime);
+    while (!dividend.empty() && dividend.size() - 1 >= divisorDegree) {
+        const std::size_t shift = dividend.size() - 1 - divisorDegree;
+        const std::uint32_t factor = modMultiply(dividend.back(), inverseLeading, prime);
+        for (std::size_t i = 0; i <= divisorDegree; ++i) {
+            const std::uint32_t amount = modMultiply(factor, divisor[i], prime);
+            dividend[i + shift] = dividend[i + shift] >= amount
+                ? dividend[i + shift] - amount
+                : static_cast<std::uint32_t>(dividend[i + shift] + prime - amount);
+        }
+        normalizeMod(dividend);
+    }
+    return dividend;
+}
+
+[[nodiscard]] ModPolynomial modGcd(
+    ModPolynomial lhs,
+    ModPolynomial rhs,
+    std::uint32_t prime) {
+    normalizeMod(lhs);
+    normalizeMod(rhs);
+    while (!rhs.empty()) {
+        ModPolynomial next = modRemainder(std::move(lhs), rhs, prime);
+        lhs = std::move(rhs);
+        rhs = std::move(next);
+    }
+    if (lhs.empty())
+        return lhs;
+    const std::uint32_t inverse = modPower(lhs.back(), prime - 2, prime);
+    for (std::uint32_t& coefficient : lhs)
+        coefficient = modMultiply(coefficient, inverse, prime);
+    return lhs;
+}
+
+[[nodiscard]] ModPolynomial modMultiplyReduce(
+    const ModPolynomial& lhs,
+    const ModPolynomial& rhs,
+    const ModPolynomial& modulusPolynomial,
+    std::uint32_t prime) {
+    if (lhs.empty() || rhs.empty())
+        return {};
+    ModPolynomial product(lhs.size() + rhs.size() - 1);
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        for (std::size_t j = 0; j < rhs.size(); ++j) {
+            const std::uint32_t amount = modMultiply(lhs[i], rhs[j], prime);
+            product[i + j] = static_cast<std::uint32_t>(
+                (static_cast<std::uint64_t>(product[i + j]) + amount) % prime);
+        }
+    return modRemainder(std::move(product), modulusPolynomial, prime);
+}
+
+[[nodiscard]] ModPolynomial modPowerPolynomial(
+    ModPolynomial base,
+    std::uint64_t exponent,
+    const ModPolynomial& modulusPolynomial,
+    std::uint32_t prime) {
+    ModPolynomial result{1};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result = modMultiplyReduce(result, base, modulusPolynomial, prime);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = modMultiplyReduce(base, base, modulusPolynomial, prime);
+    }
+    return result;
+}
+
+[[nodiscard]] std::vector<std::size_t> distinctPrimeFactors(std::size_t value) {
+    std::vector<std::size_t> result;
+    for (std::size_t divisor = 2; divisor <= value / divisor; ++divisor) {
+        if (value % divisor != 0)
+            continue;
+        result.push_back(divisor);
+        while (value % divisor == 0)
+            value /= divisor;
+    }
+    if (value > 1)
+        result.push_back(value);
+    return result;
+}
+
+[[nodiscard]] bool irreducibleModuloPrime(
+    const Polynomial& polynomial,
+    std::uint32_t prime) {
+    const auto reduced = polynomialModulo(polynomial, prime);
+    if (!reduced || reduced->size() <= 1)
+        return false;
+    const std::size_t degree = reduced->size() - 1;
+    ModPolynomial x{0, 1};
+    ModPolynomial frobenius = x;
+    std::vector<ModPolynomial> powers(degree + 1);
+    powers[0] = x;
+    for (std::size_t i = 1; i <= degree; ++i) {
+        frobenius = modPowerPolynomial(
+            std::move(frobenius), prime, *reduced, prime);
+        powers[i] = frobenius;
+    }
+    if (powers[degree] != x)
+        return false;
+
+    for (const std::size_t divisor : distinctPrimeFactors(degree)) {
+        ModPolynomial difference = powers[degree / divisor];
+        if (difference.size() < 2)
+            difference.resize(2);
+        difference[1] = difference[1] == 0 ? prime - 1 : difference[1] - 1;
+        normalizeMod(difference);
+        const ModPolynomial common = modGcd(*reduced, std::move(difference), prime);
+        if (common.size() > 1)
+            return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool provenIrreducibleOverQ(const Polynomial& polynomial) {
+    if (polynomial.size() <= 2)
+        return polynomial.size() == 2;
+    constexpr std::uint32_t primes[] = {
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47
+    };
+    for (const std::uint32_t prime : primes)
+        if (irreducibleModuloPrime(polynomial, prime))
+            return true;
+    return false;
+}
+
+struct IntegerPolynomial final {
+    std::vector<BigInt> coefficients;
+};
+
+[[nodiscard]] IntegerPolynomial primitiveIntegerPolynomial(const Polynomial& polynomial) {
+    BigInt denominatorLcm{1};
+    for (const Rational& coefficient : polynomial)
+        denominatorLcm = numeric::lcm(denominatorLcm, coefficient.denominator());
+
+    std::vector<BigInt> coefficients;
+    coefficients.reserve(polynomial.size());
+    BigInt common;
+    for (const Rational& coefficient : polynomial) {
+        BigInt value = coefficient.numerator()
+            * (denominatorLcm / coefficient.denominator());
+        common = common.isZero() ? value.abs() : numeric::gcd(common, value.abs());
+        coefficients.push_back(std::move(value));
+    }
+    if (!common.isZero() && common != BigInt{1})
+        for (BigInt& coefficient : coefficients)
+            coefficient /= common;
+    if (!coefficients.empty() && coefficients.back().isNegative())
+        for (BigInt& coefficient : coefficients)
+            coefficient = -coefficient;
+    return IntegerPolynomial{std::move(coefficients)};
+}
+
+[[nodiscard]] BigInt evaluateIntegerPolynomial(
+    const IntegerPolynomial& polynomial,
+    std::int64_t value) {
+    BigInt result;
+    const BigInt x{value};
+    for (auto iterator = polynomial.coefficients.rbegin();
+         iterator != polynomial.coefficients.rend(); ++iterator)
+        result = result * x + *iterator;
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<std::uint64_t>> positiveDivisors(
+    const BigInt& value) {
+    const auto magnitude = numeric::tryToUint64(value.abs());
+    if (!magnitude || *magnitude == 0)
+        return std::nullopt;
+    std::vector<std::uint64_t> factors;
+    if (!numeric::factorUint64(*magnitude, factors))
+        return std::nullopt;
+    std::sort(factors.begin(), factors.end());
+    std::vector<std::pair<std::uint64_t, std::size_t>> groups;
+    for (const std::uint64_t factor : factors) {
+        if (!groups.empty() && groups.back().first == factor)
+            ++groups.back().second;
+        else
+            groups.emplace_back(factor, 1);
+    }
+    std::vector<std::uint64_t> divisors{1};
+    for (const auto& [prime, exponent] : groups) {
+        const std::size_t existing = divisors.size();
+        std::uint64_t power = 1;
+        for (std::size_t e = 1; e <= exponent; ++e) {
+            if (power > std::numeric_limits<std::uint64_t>::max() / prime)
+                return std::nullopt;
+            power *= prime;
+            if (divisors.size() + existing > maximumKroneckerDivisors)
+                return std::nullopt;
+            for (std::size_t i = 0; i < existing; ++i) {
+                if (divisors[i] > std::numeric_limits<std::uint64_t>::max() / power)
+                    return std::nullopt;
+                divisors.push_back(divisors[i] * power);
+            }
+        }
+    }
+    std::sort(divisors.begin(), divisors.end());
+    return divisors;
+}
+
+[[nodiscard]] Polynomial multiplyByLinear(
+    const Polynomial& polynomial,
+    const Rational& root) {
+    Polynomial result(polynomial.size() + 1);
+    for (std::size_t i = 0; i < polynomial.size(); ++i) {
+        result[i] -= polynomial[i] * root;
+        result[i + 1] += polynomial[i];
+    }
+    normalize(result);
+    return result;
+}
+
+[[nodiscard]] Polynomial interpolatePoints(
+    const std::vector<std::int64_t>& points,
+    const std::vector<BigInt>& values) {
+    Polynomial result(points.size());
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        Polynomial basis{Rational{BigInt{1}}};
+        BigInt denominator{1};
+        for (std::size_t j = 0; j < points.size(); ++j) {
+            if (i == j)
+                continue;
+            basis = multiplyByLinear(basis, Rational{BigInt{points[j]}});
+            denominator *= BigInt{points[i] - points[j]};
+        }
+        const Rational scale{values[i], denominator};
+        for (std::size_t k = 0; k < basis.size(); ++k)
+            result[k] += basis[k] * scale;
+    }
+    normalize(result);
+    return result;
+}
+
+struct KroneckerSample final {
+    std::int64_t x = 0;
+    std::vector<std::uint64_t> divisors;
+};
+
+[[nodiscard]] std::optional<std::pair<Polynomial, Polynomial>> kroneckerSplit(
+    const Polynomial& polynomial) {
+    const std::size_t degree = polynomial.size() - 1;
+    if (degree < 2 || degree > maximumMinimalPolynomialDegree)
+        return std::nullopt;
+    const IntegerPolynomial integerPolynomial = primitiveIntegerPolynomial(polynomial);
+
+    for (std::int64_t x = -8; x <= 8; ++x) {
+        if (evaluateIntegerPolynomial(integerPolynomial, x).isZero()) {
+            Polynomial factor{-Rational{BigInt{x}}, Rational{BigInt{1}}};
+            Polynomial quotient = divideExact(polynomial, factor);
+            return std::pair<Polynomial, Polynomial>{
+                canonicalPolynomial(factor), canonicalPolynomial(quotient)};
+        }
+    }
+
+    std::vector<KroneckerSample> pool;
+    for (std::int64_t radius = 0; radius <= 24; ++radius) {
+        const std::array<std::int64_t, 2> candidates{radius, -radius};
+        for (std::size_t candidateIndex = 0; candidateIndex < candidates.size(); ++candidateIndex) {
+            if (radius == 0 && candidateIndex != 0)
+                continue;
+            const std::int64_t x = candidates[candidateIndex];
+            const BigInt value = evaluateIntegerPolynomial(integerPolynomial, x);
+            if (value.isZero())
+                continue;
+            const auto divisors = positiveDivisors(value);
+            if (divisors)
+                pool.push_back(KroneckerSample{x, *divisors});
+        }
+    }
+    std::sort(pool.begin(), pool.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.divisors.size() < rhs.divisors.size();
+    });
+
+    for (std::size_t factorDegree = 1; factorDegree <= degree / 2; ++factorDegree) {
+        if (pool.size() < factorDegree + 1)
+            break;
+        std::vector<KroneckerSample> samples(
+            pool.begin(), pool.begin() + static_cast<std::ptrdiff_t>(factorDegree + 1));
+        std::vector<std::int64_t> points;
+        points.reserve(samples.size());
+        for (const auto& sample : samples)
+            points.push_back(sample.x);
+        std::vector<BigInt> values(samples.size());
+        std::size_t combinations = 0;
+        std::optional<std::pair<Polynomial, Polynomial>> found;
+
+        std::function<void(std::size_t)> search = [&](std::size_t index) {
+            if (found || combinations >= maximumKroneckerCombinations)
+                return;
+            if (index == samples.size()) {
+                ++combinations;
+                Polynomial candidate = interpolatePoints(points, values);
+                if (candidate.size() <= 1 || candidate.size() >= polynomial.size())
+                    return;
+                for (const Rational& coefficient : candidate)
+                    if (!coefficient.isInteger())
+                        return;
+                candidate = canonicalPolynomial(candidate);
+                if (candidate.size() <= 1 || candidate.size() >= polynomial.size())
+                    return;
+                if (!remainder(polynomial, candidate).empty())
+                    return;
+                Polynomial quotient = divideExact(polynomial, candidate);
+                if (quotient.size() <= 1)
+                    return;
+                found = std::pair<Polynomial, Polynomial>{
+                    std::move(candidate), canonicalPolynomial(quotient)};
+                return;
+            }
+
+            for (const std::uint64_t divisor : samples[index].divisors) {
+                const BigInt positive = BigInt::fromUnsigned(divisor);
+                values[index] = positive;
+                search(index + 1);
+                if (found || combinations >= maximumKroneckerCombinations)
+                    return;
+                if (index != 0) {
+                    values[index] = -positive;
+                    search(index + 1);
+                    if (found || combinations >= maximumKroneckerCombinations)
+                        return;
+                }
+            }
+        };
+        search(0);
+        if (found)
+            return found;
+    }
+    return std::nullopt;
 }
 
 [[nodiscard]] std::vector<Polynomial> sturmSequence(const Polynomial& polynomial) {
@@ -301,6 +715,79 @@ struct PendingInterval final {
     return width * powerOfTwo(precisionBits + 8) <= minimumMagnitude;
 }
 
+
+struct ReducedRealRoot final {
+    Polynomial polynomial;
+    std::size_t rootIndex = 0;
+    RationalRootInterval interval;
+    bool minimalPolynomialProven = false;
+};
+
+[[nodiscard]] std::optional<std::pair<std::size_t, RationalRootInterval>>
+findRealRootInFactor(
+    const Polynomial& factor,
+    const RationalRootInterval& target) {
+    if (target.isPoint()) {
+        if (!evaluate(factor, target.lower).isZero())
+            return std::nullopt;
+    }
+    else {
+        const auto sturm = sturmSequence(factor);
+        if (rootsBetween(sturm, target.lower, target.upper) != 1)
+            return std::nullopt;
+    }
+
+    const auto intervals = isolateIntervals(factor);
+    if (!intervals)
+        return std::nullopt;
+    const auto sturm = sturmSequence(factor);
+    for (std::size_t i = 0; i < intervals->size(); ++i) {
+        const RationalRootInterval& interval = (*intervals)[i];
+        if (target.isPoint()) {
+            if (interval.lower <= target.lower && target.lower <= interval.upper)
+                return std::pair<std::size_t, RationalRootInterval>{i + 1, interval};
+            continue;
+        }
+        const Rational lower = target.lower < interval.lower ? interval.lower : target.lower;
+        const Rational upper = target.upper < interval.upper ? target.upper : interval.upper;
+        if (lower < upper && rootsBetween(sturm, lower, upper) == 1)
+            return std::pair<std::size_t, RationalRootInterval>{i + 1, interval};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] ReducedRealRoot reduceRealRootPolynomial(
+    Polynomial polynomial,
+    std::size_t rootIndex,
+    RationalRootInterval interval) {
+    while (polynomial.size() > 2 && polynomial.size() - 1 <= maximumMinimalPolynomialDegree) {
+        if (provenIrreducibleOverQ(polynomial))
+            return ReducedRealRoot{
+                std::move(polynomial), rootIndex, std::move(interval), true};
+        const auto split = kroneckerSplit(polynomial);
+        if (!split)
+            break;
+        const auto left = findRealRootInFactor(split->first, interval);
+        const auto right = findRealRootInFactor(split->second, interval);
+        if (left && !right) {
+            polynomial = split->first;
+            rootIndex = left->first;
+            interval = left->second;
+            continue;
+        }
+        if (right && !left) {
+            polynomial = split->second;
+            rootIndex = right->first;
+            interval = right->second;
+            continue;
+        }
+        break;
+    }
+    const bool proven = polynomial.size() == 2 || provenIrreducibleOverQ(polynomial);
+    return ReducedRealRoot{
+        std::move(polynomial), rootIndex, std::move(interval), proven};
+}
+
 } // namespace
 
 RealAlgebraicNumber::RealAlgebraicNumber(
@@ -325,8 +812,10 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::create(
     const auto intervals = isolateIntervals(normalizedPolynomial);
     if (!intervals || rootIndex > intervals->size())
         return std::nullopt;
+    ReducedRealRoot reduced = reduceRealRootPolynomial(
+        std::move(normalizedPolynomial), rootIndex, (*intervals)[rootIndex - 1]);
     return RealAlgebraicNumber{
-        std::move(normalizedPolynomial), rootIndex, (*intervals)[rootIndex - 1]};
+        std::move(reduced.polynomial), reduced.rootIndex, std::move(reduced.interval)};
 }
 
 std::optional<std::vector<RealAlgebraicNumber>> RealAlgebraicNumber::isolateAll(
@@ -747,6 +1236,72 @@ struct RationalIntervalPair final { Rational lower; Rational upper; };
     return disk.radius * powerOfTwo(precisionBits + 8) <= scale;
 }
 
+
+struct ReducedComplexRoot final {
+    Polynomial polynomial;
+    std::size_t rootIndex = 0;
+    RationalComplexDisk disk;
+    bool minimalPolynomialProven = false;
+};
+
+[[nodiscard]] std::optional<std::pair<std::size_t, RationalComplexDisk>>
+findComplexRootInFactor(
+    const Polynomial& factor,
+    const RationalComplexDisk& target) {
+    for (std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+        const auto disks = isolateComplexDisks(factor, bits);
+        if (!disks)
+            return std::nullopt;
+        std::size_t matchCount = 0;
+        std::size_t matchIndex = 0;
+        RationalComplexDisk matchDisk{};
+        for (std::size_t i = 0; i < disks->size(); ++i) {
+            if (!disksDisjoint((*disks)[i], target)) {
+                ++matchCount;
+                matchIndex = i + 1;
+                matchDisk = (*disks)[i];
+            }
+        }
+        if (matchCount == 1)
+            return std::pair<std::size_t, RationalComplexDisk>{matchIndex, matchDisk};
+        if (matchCount == 0)
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] ReducedComplexRoot reduceComplexRootPolynomial(
+    Polynomial polynomial,
+    std::size_t rootIndex,
+    RationalComplexDisk disk) {
+    while (polynomial.size() > 2 && polynomial.size() - 1 <= maximumMinimalPolynomialDegree) {
+        if (provenIrreducibleOverQ(polynomial))
+            return ReducedComplexRoot{
+                std::move(polynomial), rootIndex, std::move(disk), true};
+        const auto split = kroneckerSplit(polynomial);
+        if (!split)
+            break;
+        const auto left = findComplexRootInFactor(split->first, disk);
+        const auto right = findComplexRootInFactor(split->second, disk);
+        if (left && !right) {
+            polynomial = split->first;
+            rootIndex = left->first;
+            disk = left->second;
+            continue;
+        }
+        if (right && !left) {
+            polynomial = split->second;
+            rootIndex = right->first;
+            disk = right->second;
+            continue;
+        }
+        break;
+    }
+    const bool proven = polynomial.size() == 2 || provenIrreducibleOverQ(polynomial);
+    return ReducedComplexRoot{
+        std::move(polynomial), rootIndex, std::move(disk), proven};
+}
+
 } // namespace
 
 ComplexAlgebraicNumber::ComplexAlgebraicNumber(
@@ -769,8 +1324,10 @@ std::optional<ComplexAlgebraicNumber> ComplexAlgebraicNumber::create(
     const auto disks = isolateComplexDisks(normalizedPolynomial);
     if (!disks || rootIndex > disks->size())
         return std::nullopt;
+    ReducedComplexRoot reduced = reduceComplexRootPolynomial(
+        std::move(normalizedPolynomial), rootIndex, (*disks)[rootIndex - 1]);
     return ComplexAlgebraicNumber{
-        std::move(normalizedPolynomial), rootIndex, (*disks)[rootIndex - 1]};
+        std::move(reduced.polynomial), reduced.rootIndex, std::move(reduced.disk)};
 }
 
 std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::isolateAll(
@@ -1074,6 +1631,302 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
     return dx * dx + dy * dy <= radius * radius;
 }
 
+
+using RationalVector = std::vector<Rational>;
+using RationalMatrix = std::vector<RationalVector>;
+
+[[nodiscard]] std::optional<RationalVector> solveColumnCombination(
+    const std::vector<RationalVector>& columns,
+    const RationalVector& target) {
+    const std::size_t rowCount = target.size();
+    const std::size_t columnCount = columns.size();
+    if (columnCount == 0)
+        return std::all_of(target.begin(), target.end(), [](const Rational& x) { return x.isZero(); })
+            ? std::optional<RationalVector>{RationalVector{}} : std::nullopt;
+    for (const RationalVector& column : columns)
+        if (column.size() != rowCount)
+            return std::nullopt;
+
+    RationalMatrix matrix(rowCount, RationalVector(columnCount + 1));
+    for (std::size_t row = 0; row < rowCount; ++row) {
+        for (std::size_t column = 0; column < columnCount; ++column)
+            matrix[row][column] = columns[column][row];
+        matrix[row][columnCount] = target[row];
+    }
+
+    std::vector<std::size_t> pivotRows(columnCount, rowCount);
+    std::size_t pivotRow = 0;
+    for (std::size_t column = 0; column < columnCount && pivotRow < rowCount; ++column) {
+        std::size_t selected = pivotRow;
+        while (selected < rowCount && matrix[selected][column].isZero())
+            ++selected;
+        if (selected == rowCount)
+            continue;
+        if (selected != pivotRow)
+            std::swap(matrix[selected], matrix[pivotRow]);
+        const Rational pivot = matrix[pivotRow][column];
+        for (std::size_t k = column; k <= columnCount; ++k)
+            matrix[pivotRow][k] /= pivot;
+        for (std::size_t row = 0; row < rowCount; ++row) {
+            if (row == pivotRow || matrix[row][column].isZero())
+                continue;
+            const Rational factor = matrix[row][column];
+            for (std::size_t k = column; k <= columnCount; ++k)
+                matrix[row][k] -= factor * matrix[pivotRow][k];
+        }
+        pivotRows[column] = pivotRow;
+        ++pivotRow;
+    }
+
+    for (std::size_t row = 0; row < rowCount; ++row) {
+        bool allZero = true;
+        for (std::size_t column = 0; column < columnCount; ++column)
+            allZero = allZero && matrix[row][column].isZero();
+        if (allZero && !matrix[row][columnCount].isZero())
+            return std::nullopt;
+    }
+    // 呼出側は独立なbasis列だけを渡す。rank不足なら表現を一意に決められない。
+    if (std::any_of(pivotRows.begin(), pivotRows.end(),
+            [rowCount](std::size_t row) { return row == rowCount; }))
+        return std::nullopt;
+
+    RationalVector solution(columnCount);
+    for (std::size_t column = 0; column < columnCount; ++column)
+        solution[column] = matrix[pivotRows[column]][columnCount];
+    return solution;
+}
+
+[[nodiscard]] RationalVector tensorBasisElement(
+    std::size_t lhsDegree,
+    std::size_t rhsDegree,
+    std::size_t lhsExponent,
+    std::size_t rhsExponent) {
+    RationalVector value(lhsDegree * rhsDegree);
+    value[lhsExponent * rhsDegree + rhsExponent] = Rational{BigInt{1}};
+    return value;
+}
+
+[[nodiscard]] RationalVector tensorMultiply(
+    const RationalVector& lhs,
+    const RationalVector& rhs,
+    const Polynomial& lhsPolynomial,
+    const Polynomial& rhsPolynomial) {
+    const std::size_t m = lhsPolynomial.size() - 1;
+    const std::size_t n = rhsPolynomial.size() - 1;
+    if (lhs.size() != m * n || rhs.size() != m * n)
+        throw std::logic_error("Primitive-element tensor size mismatch");
+
+    const std::size_t alphaCount = 2 * m - 1;
+    const std::size_t betaCount = 2 * n - 1;
+    std::vector<Rational> temporary(alphaCount * betaCount);
+    auto at = [&](std::size_t alpha, std::size_t beta) -> Rational& {
+        return temporary[alpha * betaCount + beta];
+    };
+    for (std::size_t ai = 0; ai < m; ++ai)
+        for (std::size_t bi = 0; bi < n; ++bi) {
+            const Rational& left = lhs[ai * n + bi];
+            if (left.isZero())
+                continue;
+            for (std::size_t aj = 0; aj < m; ++aj)
+                for (std::size_t bj = 0; bj < n; ++bj) {
+                    const Rational& right = rhs[aj * n + bj];
+                    if (!right.isZero())
+                        at(ai + aj, bi + bj) += left * right;
+                }
+        }
+
+    for (std::int64_t alpha = static_cast<std::int64_t>(alphaCount) - 1;
+         alpha >= static_cast<std::int64_t>(m); --alpha) {
+        for (std::size_t beta = 0; beta < betaCount; ++beta) {
+            Rational coefficient = at(static_cast<std::size_t>(alpha), beta);
+            if (coefficient.isZero())
+                continue;
+            at(static_cast<std::size_t>(alpha), beta) = Rational{};
+            const std::size_t shift = static_cast<std::size_t>(alpha) - m;
+            for (std::size_t k = 0; k < m; ++k)
+                at(shift + k, beta) -= coefficient * lhsPolynomial[k];
+        }
+    }
+    for (std::int64_t beta = static_cast<std::int64_t>(betaCount) - 1;
+         beta >= static_cast<std::int64_t>(n); --beta) {
+        for (std::size_t alpha = 0; alpha < m; ++alpha) {
+            Rational coefficient = at(alpha, static_cast<std::size_t>(beta));
+            if (coefficient.isZero())
+                continue;
+            at(alpha, static_cast<std::size_t>(beta)) = Rational{};
+            const std::size_t shift = static_cast<std::size_t>(beta) - n;
+            for (std::size_t k = 0; k < n; ++k)
+                at(alpha, shift + k) -= coefficient * rhsPolynomial[k];
+        }
+    }
+
+    RationalVector result(m * n);
+    for (std::size_t alpha = 0; alpha < m; ++alpha)
+        for (std::size_t beta = 0; beta < n; ++beta)
+            result[alpha * n + beta] = at(alpha, beta);
+    return result;
+}
+
+[[nodiscard]] std::optional<Polynomial> tensorMinimalPolynomial(
+    const RationalVector& element,
+    const Polynomial& lhsPolynomial,
+    const Polynomial& rhsPolynomial) {
+    const std::size_t dimension = element.size();
+    RationalVector one(dimension);
+    one.front() = Rational{BigInt{1}};
+    std::vector<RationalVector> powers;
+    powers.reserve(dimension);
+    powers.push_back(one);
+    RationalVector current = one;
+    for (std::size_t degree = 1; degree <= dimension; ++degree) {
+        current = tensorMultiply(current, element, lhsPolynomial, rhsPolynomial);
+        if (const auto coefficients = solveColumnCombination(powers, current)) {
+            Polynomial relation(degree + 1);
+            for (std::size_t i = 0; i < degree; ++i)
+                relation[i] = -(*coefficients)[i];
+            relation[degree] = Rational{BigInt{1}};
+            return canonicalPolynomial(relation);
+        }
+        powers.push_back(current);
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<RationalVector> tensorReciprocal(
+    const RationalVector& value,
+    const Polynomial& lhsPolynomial,
+    const Polynomial& rhsPolynomial) {
+    const std::size_t m = lhsPolynomial.size() - 1;
+    const std::size_t n = rhsPolynomial.size() - 1;
+    const std::size_t dimension = m * n;
+    std::vector<RationalVector> columns;
+    columns.reserve(dimension);
+    for (std::size_t index = 0; index < dimension; ++index) {
+        RationalVector basis(dimension);
+        basis[index] = Rational{BigInt{1}};
+        columns.push_back(tensorMultiply(value, basis, lhsPolynomial, rhsPolynomial));
+    }
+    RationalVector one(dimension);
+    one.front() = Rational{BigInt{1}};
+    return solveColumnCombination(columns, one);
+}
+
+[[nodiscard]] std::optional<RationalVector> primitiveOperationElement(
+    const RationalVector& lhs,
+    const RationalVector& rhs,
+    AlgebraicBinaryOperation operation,
+    const Polynomial& lhsPolynomial,
+    const Polynomial& rhsPolynomial) {
+    RationalVector result(lhs.size());
+    switch (operation) {
+    case AlgebraicBinaryOperation::Add:
+    case AlgebraicBinaryOperation::Subtract:
+        for (std::size_t i = 0; i < lhs.size(); ++i)
+            result[i] = operation == AlgebraicBinaryOperation::Add
+                ? lhs[i] + rhs[i] : lhs[i] - rhs[i];
+        return result;
+    case AlgebraicBinaryOperation::Multiply:
+        return tensorMultiply(lhs, rhs, lhsPolynomial, rhsPolynomial);
+    case AlgebraicBinaryOperation::Divide: {
+        const auto reciprocal = tensorReciprocal(rhs, lhsPolynomial, rhsPolynomial);
+        if (!reciprocal)
+            return std::nullopt;
+        return tensorMultiply(lhs, *reciprocal, lhsPolynomial, rhsPolynomial);
+    }
+    }
+    return std::nullopt;
+}
+
+struct PrimitiveElementReduction final {
+    Polynomial polynomial;
+    std::vector<RationalVector> tensorPowerBasis;
+};
+
+[[nodiscard]] std::optional<PrimitiveElementReduction> primitiveElementReduction(
+    const RationalVector& alpha,
+    const RationalVector& beta,
+    const Polynomial& lhsPolynomial,
+    const Polynomial& rhsPolynomial) {
+    const std::size_t dimension = alpha.size();
+    constexpr std::int64_t candidates[] = {1, 2, -1, 3, -2, 4, -3};
+    for (const std::int64_t multiplier : candidates) {
+        RationalVector theta(dimension);
+        const Rational scale{BigInt{multiplier}};
+        for (std::size_t i = 0; i < dimension; ++i)
+            theta[i] = alpha[i] + scale * beta[i];
+        const auto polynomial = tensorMinimalPolynomial(theta, lhsPolynomial, rhsPolynomial);
+        if (!polynomial || polynomial->size() - 1 != dimension
+            || !provenIrreducibleOverQ(*polynomial))
+            continue;
+
+        std::vector<RationalVector> powers;
+        powers.reserve(dimension);
+        RationalVector current(dimension);
+        current.front() = Rational{BigInt{1}};
+        for (std::size_t exponent = 0; exponent < dimension; ++exponent) {
+            powers.push_back(current);
+            current = tensorMultiply(current, theta, lhsPolynomial, rhsPolynomial);
+        }
+        // degree==dimensionの既約relationがあるので1,theta,...,theta^(d-1)はbasis。
+        if (!solveColumnCombination(powers, alpha)
+            || !solveColumnCombination(powers, beta))
+            continue;
+        return PrimitiveElementReduction{*polynomial, std::move(powers)};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] RationalVector fieldMultiply(
+    const RationalVector& lhs,
+    const RationalVector& rhs,
+    const Polynomial& minimalPolynomial) {
+    const std::size_t degree = minimalPolynomial.size() - 1;
+    if (lhs.size() != degree || rhs.size() != degree)
+        throw std::logic_error("Primitive-element field size mismatch");
+    Polynomial product(2 * degree - 1);
+    for (std::size_t i = 0; i < degree; ++i)
+        for (std::size_t j = 0; j < degree; ++j)
+            product[i + j] += lhs[i] * rhs[j];
+    for (std::int64_t exponent = static_cast<std::int64_t>(product.size()) - 1;
+         exponent >= static_cast<std::int64_t>(degree); --exponent) {
+        Rational coefficient = product[static_cast<std::size_t>(exponent)];
+        if (coefficient.isZero())
+            continue;
+        product[static_cast<std::size_t>(exponent)] = Rational{};
+        const std::size_t shift = static_cast<std::size_t>(exponent) - degree;
+        for (std::size_t k = 0; k < degree; ++k)
+            product[shift + k] -= coefficient * minimalPolynomial[k];
+    }
+    product.resize(degree);
+    return product;
+}
+
+[[nodiscard]] std::optional<Polynomial> fieldMinimalPolynomial(
+    const RationalVector& element,
+    const Polynomial& primitivePolynomial) {
+    const std::size_t dimension = primitivePolynomial.size() - 1;
+    if (element.size() != dimension)
+        return std::nullopt;
+    RationalVector one(dimension);
+    one.front() = Rational{BigInt{1}};
+    std::vector<RationalVector> powers;
+    powers.reserve(dimension);
+    powers.push_back(one);
+    RationalVector current = one;
+    for (std::size_t degree = 1; degree <= dimension; ++degree) {
+        current = fieldMultiply(current, element, primitivePolynomial);
+        if (const auto coefficients = solveColumnCombination(powers, current)) {
+            Polynomial relation(degree + 1);
+            for (std::size_t i = 0; i < degree; ++i)
+                relation[i] = -(*coefficients)[i];
+            relation[degree] = Rational{BigInt{1}};
+            return canonicalPolynomial(relation);
+        }
+        powers.push_back(current);
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] RationalComplexDisk intervalDisk(const RationalRootInterval& interval) {
     const Rational two{BigInt{2}};
     return RationalComplexDisk{
@@ -1132,6 +1985,51 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
             return AlgebraicNumber::create(polynomial, matchIndex, domain);
     }
     return std::nullopt;
+}
+
+
+[[nodiscard]] std::optional<AlgebraicNumber> primitiveElementCombine(
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation) {
+    Polynomial left(lhs.polynomial().begin(), lhs.polynomial().end());
+    Polynomial right(rhs.polynomial().begin(), rhs.polynomial().end());
+    if (left.size() <= 2 || right.size() <= 2)
+        return std::nullopt;
+    if (!provenIrreducibleOverQ(left) || !provenIrreducibleOverQ(right))
+        return std::nullopt;
+
+    const std::size_t m = left.size() - 1;
+    const std::size_t n = right.size() - 1;
+    const std::size_t dimension = m * n;
+    if (dimension == 0 || dimension > maximumAlgebraicArithmeticDegree)
+        return std::nullopt;
+
+    const RationalVector alpha = tensorBasisElement(m, n, 1, 0);
+    const RationalVector beta = tensorBasisElement(m, n, 0, 1);
+    const auto primitive = primitiveElementReduction(alpha, beta, left, right);
+    if (!primitive)
+        return std::nullopt;
+
+    const auto resultElement = primitiveOperationElement(
+        alpha, beta, operation, left, right);
+    if (!resultElement)
+        return std::nullopt;
+    const auto resultInPrimitiveBasis = solveColumnCombination(
+        primitive->tensorPowerBasis, *resultElement);
+    if (!resultInPrimitiveBasis)
+        return std::nullopt;
+    const auto minimal = fieldMinimalPolynomial(
+        *resultInPrimitiveBasis, primitive->polynomial);
+    if (!minimal || minimal->size() <= 1)
+        return std::nullopt;
+    if (!provenIrreducibleOverQ(*minimal) && minimal->size() > 2)
+        return std::nullopt;
+
+    const AlgebraicRootDomain resultDomain =
+        lhs.domain() == AlgebraicRootDomain::Real && rhs.domain() == AlgebraicRootDomain::Real
+        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
+    return selectResultRoot(*minimal, resultDomain, lhs, rhs, operation);
 }
 
 
@@ -1230,6 +2128,9 @@ std::optional<AlgebraicNumber> AlgebraicNumber::combine(
     const AlgebraicNumber& lhs,
     const AlgebraicNumber& rhs,
     AlgebraicBinaryOperation operation) {
+    if (const auto reduced = primitiveElementCombine(lhs, rhs, operation))
+        return reduced;
+
     Polynomial left(lhs.polynomial().begin(), lhs.polynomial().end());
     Polynomial right(rhs.polynomial().begin(), rhs.polynomial().end());
     if (left.size() <= 1 || right.size() <= 1)

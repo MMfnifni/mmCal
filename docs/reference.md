@@ -1914,7 +1914,26 @@ root[{1,0,1},2,Complex]+I
 -> 2I
 ```
 
-To bound resultant growth, the current **algebraic-field candidate-degree budget is 16**. If that budget is exceeded or the result root cannot be uniquely re-identified, the original exact symbolic expression is retained. Full Rational factorization to minimal polynomials, primitive-element reduction, general algebraic equality across unrelated representations, and `rootApproximant` remain deferred. The current layer is therefore exact root identity plus bounded field arithmetic, not yet a complete number-field canonicalizer.
+Individual Root construction no longer stops at square-free monic normalization when a stronger statement can be proven: **the defining polynomial is reduced to the Rational irreducible factor containing the selected root only when that factor is certified exactly**. The bounded factorization backend currently covers degree at most 16, combining finite-field irreducibility proofs with exact Kronecker factor search. Real roots identify the selected factor by exact Sturm root counts; Complex roots require a unique certified match between the selected isolating disk and the factor's root disks. If the proof fails, the original square-free defining polynomial is retained rather than guessing a minimal polynomial.
+
+```text
+root[{6,0,-5,0,1},1]
+-> root[{-3,0,1},1]
+
+root[{2,0,3,0,1},1,Complex]
+-> root[{2,0,1},1,Complex]
+```
+
+`isolateAll` intentionally preserves the original polynomial and global root index so enumeration remains stable for one polynomial; minimal-polynomial canonicalization is applied when an individual `root[...]` is constructed or a Solve result is materialized.
+
+For Root-to-Root field arithmetic, if both operand minimal polynomials are proven irreducible over Q and a candidate `theta=alpha+c beta` has a first exact power dependence of degree `deg(alpha)deg(beta)` whose polynomial is also proven irreducible, theta is accepted as a **primitive element**. Only then is the tensor-product basis converted exactly into the theta power basis, and the result's minimal polynomial is derived from exact linear dependence inside the simple extension. Overlapping extensions, failed certificates, or budget overflow fall back to the previous resultant plus isolating-region re-identification path.
+
+```text
+root[{-2,0,1},2]+root[{-3,0,0,1},1]
+-> root[{1,-36,12,-6,-6,0,1},2]
+```
+
+To bound both resultant and primitive-element growth, the current **algebraic-field candidate-degree budget is 16**. Complete arbitrary-degree Q-factorization, persistent number-field objects/reuse across unrelated expressions, complete algebraic equality/ordering across unrelated representations, and `rootApproximant` remain deferred. The current layer is therefore a bounded exact algebraic-field backend that performs proven minimal-polynomial and simple-extension reductions where possible, not yet a complete number-field canonicalizer.
 
 ---
 
@@ -2395,7 +2414,7 @@ Representative items:
 
 Further candidates:
 
-minimal-polynomial / primitive-element reduction, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
+complete arbitrary-degree Q-factorization, persistent number-field reduction, general algebraic equality/ordering, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
 
 ---
 

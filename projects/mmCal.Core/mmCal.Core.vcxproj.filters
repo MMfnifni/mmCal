@@ -411,6 +411,7 @@
   <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp">
       <Filter>src\numeric</Filter>

@@ -234,6 +234,7 @@
     <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp" />
+  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp" />
     <ClCompile Include="..\..\src\numeric\integer_algorithms.cpp" />

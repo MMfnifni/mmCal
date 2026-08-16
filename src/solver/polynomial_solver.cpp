@@ -1703,8 +1703,12 @@ std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
 
     std::vector<SolutionBranch> branches;
     branches.reserve(roots->size());
-    for (const symbolic::RealAlgebraicNumber& root : *roots)
-        branches.push_back(branch(variable, algebraicRootExpr(root, builtins)));
+    for (const symbolic::RealAlgebraicNumber& root : *roots) {
+        const auto canonical = symbolic::RealAlgebraicNumber::create(
+            root.polynomial(), root.rootIndex());
+        branches.push_back(branch(variable,
+            algebraicRootExpr(canonical ? *canonical : root, builtins)));
+    }
     return SolutionSet::finite(variables, std::move(branches));
 }
 
@@ -1784,8 +1788,12 @@ SolutionSet solvePolynomialEquation(
             return SolutionSet::empty(variables);
         std::vector<SolutionBranch> branches;
         branches.reserve(roots->size());
-        for (const symbolic::ComplexAlgebraicNumber& root : *roots)
-            branches.push_back(branch(variable, algebraicRootExpr(root, builtins)));
+        for (const symbolic::ComplexAlgebraicNumber& root : *roots) {
+            const auto canonical = symbolic::ComplexAlgebraicNumber::create(
+                root.polynomial(), root.rootIndex());
+            branches.push_back(branch(variable,
+                algebraicRootExpr(canonical ? *canonical : root, builtins)));
+        }
         return SolutionSet::finite(variables, std::move(branches));
     }
     return SolutionSet::unresolved(variables);
