@@ -2,6 +2,7 @@
 #include "elementary_utilities.hpp"
 
 #include "builtins/names.hpp"
+#include "approximation/expression_interval.hpp"
 #include "error/error_message.hpp"
 #include "mathematics/exact_roots.hpp"
 #include "mathematics/exact_trigonometry.hpp"
@@ -112,6 +113,75 @@ Expr evaluateHypot(
 
     return Expr::call(registry.symbol(BuiltinId::Hypot), {arguments[0], arguments[1]});
 }
+
+Expr evaluateFma(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 3, names::fma);
+    if (arguments[0].isNumber() && arguments[1].isNumber() && arguments[2].isNumber())
+        return Expr{arguments[0].asNumber() * arguments[1].asNumber() + arguments[2].asNumber()};
+
+    const Expr expression = Expr::call(registry.symbol(BuiltinId::Add), {
+        Expr::call(registry.symbol(BuiltinId::Multiply), {arguments[0], arguments[1]}),
+        arguments[2]});
+    if (const auto approximate = approximation::evaluateApproximateExpression(
+            expression, registry, mathematics, angles))
+        return *approximate;
+    return Expr::call(registry.symbol(BuiltinId::Fma),
+        {arguments[0], arguments[1], arguments[2]});
+}
+
+Expr evaluateClamp(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 3, names::clamp);
+    if (arguments[1].isNumber() && arguments[2].isNumber()) {
+        if (!arguments[1].asNumber().isReal() || !arguments[2].asNumber().isReal())
+            error::throwCalcError(error::CalcErrorType::Type, "clamp bounds must be real");
+        if (arguments[2].asNumber().asReal() < arguments[1].asNumber().asReal())
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "clamp requires lower bound <= upper bound");
+    }
+
+    if (arguments[0].isNumber() && arguments[1].isNumber() && arguments[2].isNumber()) {
+        if (!arguments[0].asNumber().isReal())
+            error::throwCalcError(error::CalcErrorType::Type, "clamp requires a real value");
+        const auto& x = arguments[0].asNumber().asReal();
+        const auto& lo = arguments[1].asNumber().asReal();
+        const auto& hi = arguments[2].asNumber().asReal();
+        if (x < lo)
+            return arguments[1];
+        if (hi < x)
+            return arguments[2];
+        return arguments[0];
+    }
+
+    const Expr expression = Expr::call(registry.symbol(BuiltinId::Min), {
+        Expr::call(registry.symbol(BuiltinId::Max), {arguments[0], arguments[1]}),
+        arguments[2]});
+    if (const auto approximate = approximation::evaluateApproximateExpression(
+            expression, registry, mathematics, angles))
+        return *approximate;
+    return Expr::call(registry.symbol(BuiltinId::Clamp),
+        {arguments[0], arguments[1], arguments[2]});
+}
+
+Expr evaluateProj(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    requireArity(arguments, 1, names::proj);
+    // 現在のNumber/DecimalApproximationはすべて有限値。複素Infinity体系を導入するまでは
+    // Riemann球面への射影は有限値に対して恒等写像となる。
+    if (arguments[0].isNumber() || arguments[0].isDecimalApproximation()
+        || arguments[0].isComplexDecimalApproximation())
+        return arguments[0];
+    return Expr::call(registry.symbol(BuiltinId::Proj), {arguments[0]});
+}
+
 
 Expr evaluateCis(
     std::span<const Expr> arguments,

@@ -234,7 +234,6 @@
     <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp" />
-  <ClInclude Include="..\..\src\approximation\elementary_function.hpp" /><ClInclude Include="..\..\src\approximation\machine_math.hpp" /></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp" />
     <ClCompile Include="..\..\src\numeric\integer_algorithms.cpp" />
@@ -344,7 +343,7 @@
     <ClCompile Include="..\..\src\linear_algebra\svd_complex.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\fraction_free_elimination.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\approximate_matrix.cpp" />
-  <ClCompile Include="..\..\src\approximation\machine_math.cpp" /></ItemGroup>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

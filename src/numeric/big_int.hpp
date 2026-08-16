@@ -30,6 +30,8 @@ public:
     [[nodiscard]] bool isPositive() const noexcept;
     [[nodiscard]] std::size_t bitLength() const noexcept;
     [[nodiscard]] std::size_t trailingZeroBits() const noexcept;
+    [[nodiscard]] std::size_t populationCount() const noexcept;
+    [[nodiscard]] bool testBit(std::size_t index) const;
     [[nodiscard]] BigInt abs() const;
     [[nodiscard]] std::string toString(unsigned radix = 10) const;
 
@@ -40,6 +42,9 @@ public:
     BigInt& operator*=(const BigInt& rhs);
     BigInt& operator/=(const BigInt& rhs);
     BigInt& operator%=(const BigInt& rhs);
+    BigInt& operator&=(const BigInt& rhs);
+    BigInt& operator|=(const BigInt& rhs);
+    BigInt& operator^=(const BigInt& rhs);
     BigInt& operator<<=(std::size_t bits);
     BigInt& operator>>=(std::size_t bits);
 
@@ -67,6 +72,10 @@ struct BigIntDivModResult final {
 [[nodiscard]] BigInt operator*(BigInt lhs, const BigInt& rhs);
 [[nodiscard]] BigInt operator/(BigInt lhs, const BigInt& rhs);
 [[nodiscard]] BigInt operator%(BigInt lhs, const BigInt& rhs);
+[[nodiscard]] BigInt operator&(BigInt lhs, const BigInt& rhs);
+[[nodiscard]] BigInt operator|(BigInt lhs, const BigInt& rhs);
+[[nodiscard]] BigInt operator^(BigInt lhs, const BigInt& rhs);
+[[nodiscard]] BigInt operator~(const BigInt& value);
 [[nodiscard]] BigInt operator<<(BigInt value, std::size_t bits);
 [[nodiscard]] BigInt operator>>(BigInt value, std::size_t bits);
 

@@ -133,15 +133,30 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[x^4+1==0,x,Real]"),
         std::string{"{}"},
         "Real Root isolation proves that a rational polynomial has no real roots");
-    const std::string complexAlgebraicUnresolved = eval(session, "solve[x^5-x+1==0,x]");
-    tests.expect(complexAlgebraicUnresolved == "UnresolvedSolutionSet[x]"
-            && findDiagnostic(session, "solve::unresolved") != nullptr,
-        "general complex algebraic Root isolation remains intentionally unresolved");
+    tests.expectEqual(eval(session, "solve[x^5-x+1==0,x]"),
+        std::string{"{x==root[{1, -1, 0, 0, 0, 1}, 1, Complex], x==root[{1, -1, 0, 0, 0, 1}, 2, Complex], x==root[{1, -1, 0, 0, 0, 1}, 3, Complex], x==root[{1, -1, 0, 0, 0, 1}, 4, Complex], x==root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
+        "Complex Solve falls back to certified complex Root isolation for unresolved rational polynomials");
+    tests.expectEqual(eval(session, "N[root[{1,0,1},2,Complex],30]"),
+        std::string{"I"},
+        "complex Root refinement certifies an exact imaginary algebraic root");
+    tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
+        std::string{"2"},
+        "bounded AlgebraicNumber arithmetic re-identifies an exact rational product");
+    tests.expectEqual(eval(session, "root[{1,0,1},2,Complex]+I"),
+        std::string{"2I"},
+        "AlgebraicNumber arithmetic mixes complex Root values with exact complex rationals");
+    tests.expectEqual(eval(session, "root[{1,-1,0,0,0,1},1,Complex]+1"),
+        std::string{"root[{1, 4, -10, 10, -5, 1}, 1, Complex]"},
+        "high-degree algebraic roots support exact rational translation without numerical fallback");
     const std::string rootExplanation = eval(session, "explain[root[{-2,0,1},2]]");
     tests.expect(rootExplanation.find("{\"Kind\", \"AlgebraicNumber\"}") != std::string::npos
             && rootExplanation.find("{\"PolynomialDegree\", 2}") != std::string::npos
             && rootExplanation.find("{\"RootIndex\", 2}") != std::string::npos,
         "explain exposes Root as an exact real algebraic number without evaluating it numerically");
+    const std::string complexRootExplanation = eval(session, "explain[root[{1,0,1},1,Complex]]");
+    tests.expect(complexRootExplanation.find("{\"Domain\", \"Complex\"}") != std::string::npos
+            && complexRootExplanation.find("{\"RootIndex\", 1}") != std::string::npos,
+        "explain exposes complex Root values as exact complex algebraic numbers");
 
     tests.expectEqual(eval(session, "solve[sin[x]==0,x,Real]"),
         std::string{"{x==Pi k where k in Integer}"},

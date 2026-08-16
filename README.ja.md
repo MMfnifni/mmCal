@@ -501,7 +501,7 @@ N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 ```
 
-一般Complex Root isolationとRoot間のalgebraic-field演算はまだ未実装である。
+Complex側は`root[{a0,...,an},k,Complex]`で全複素根をcertified isolating diskへ分離し，高次Rational係数多項式のComplex Solveもexact Rootへfallbackできる。Root / exact Rational / exact complex Rational間の`+ - * /`はresultantとisolating regionによる再同定でbounded exact algebraic-field演算へ接続する。現在は候補次数budget 16を設け，minimal polynomialへの完全既約化，primitive-element reduction，一般algebraic equality / orderingは意図的に後続へ残す。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。

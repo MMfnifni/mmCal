@@ -562,6 +562,9 @@ sinc[90 Deg]
 ```text
 floor ceil trunc round frac
 gcd lcm mod rem quotient
+bitand bitor bitxor bitnot
+bitshiftl bitshiftr bitlength bitcount bitget
+fma clamp proj
 ```
 
 例:
@@ -571,6 +574,8 @@ floor[-3/2] -> -2
 ceil[-3/2]  -> -1
 trunc[-3/2] -> -1
 round[5/2]  -> 2       // nearest-even
+round[125,-1] -> 120
+round[135,-1] -> 140
 frac[-3/2]  -> 1/2
 
 gcd[84,126,210] -> 42
@@ -579,11 +584,22 @@ lcm[6,8,9] -> 72
 quotient[-5,3] -> -1
 rem[-5,3]      -> -2
 mod[-5,3]      -> 1
+
+bitand[-1,5] -> 5
+bitor[-8,3]  -> -5
+bitxor[-1,5] -> -6
+bitnot[5]    -> -6
+bitshiftr[-3,1] -> -2
+bitget[-2,100]  -> 1
 ```
 
-`mod`はfloor quotient、`rem`はtruncate-toward-zero quotientに対応する。
+`round[x,n]`は`10^-n`単位のnearest-even丸めで，負の`n`も許す。approximation入力ではInformationEnclosure全体が同じ丸め値へ入る場合だけ確定する。
 
-現在の`round`は1引数版のみ。旧`round[x,n]`はまだ戻していない。
+bitwise函数は任意長BigIntに対して**無限長2の補数**として定義する。したがって負数は上位bitを1でsign-extensionする。`bitshiftr`はuser-facingには算術右shift，`bitcount`は無限個の1を持つ負数には定義せず非負整数だけを受ける。現段階ではlexerへ`& | << >>`等のinfix構文を追加せず，函数APIへ意味論を一意に集約している。
+
+`fma[a,b,c]`はexact入力ではexactに`a*b+c`を返し，certified approximationを含む場合は中間DecimalApproximationへ一度丸めず一つのCertified/Information評価へ入れる。`clamp[x,lo,hi]`は実数用で，approximationではInformationEnclosureから境界順序を保証できる範囲だけ確定する。`proj[z]`は現在の有限exact/certified複素値に対して恒等写像であり，完全な複素Infinity/Riemann球面意味論はextended-real体系と同時に扱う。
+
+`mod`はfloor quotient、`rem`はtruncate-toward-zero quotientに対応する。
 
 ---
 
@@ -1867,42 +1883,62 @@ solve[sin[x]==0,x,Real]
 
 Complex領域でもprincipal inverseだけから全解を捏造しない。
 
-### exact実代数根 `root`
+### exact代数根 `root` / `AlgebraicNumber`
 
-Unreleasedでは，一般高次多項式の**実根**をradicalへ無理に展開せずexactに保持する`root`表現を追加した。
+Unreleasedでは，一般高次多項式の根をradicalへ無理に展開せずexactに保持する`root`表現を実数・複素数へ拡張した。
 
 ```text
 root[{a0,a1,...,an},k]
+root[{a0,a1,...,an},k,Complex]
 ```
 
-はexact Rational係数多項式
+係数列はexact Rationalを昇冪順に並べ，
 
 ```text
 a0 + a1 x + ... + an x^n
 ```
 
-の**異なる実根を小さい順に並べた1-based第`k`根**を表す。係数列は昇冪順である。定義多項式はmonicかつsquare-freeへexactに正規化するため，例えば
+を表す。2引数形は**異なる実根を昇順に並べた1-based第`k`根**である。3引数`Complex`形は全複素根をexactに分離し，`Re(z)+Pi Im(z)`の昇順による決定的1-based indexを使う。各rootの実部・虚部は代数数でPiは超越数なので，異なる代数根がこのordering keyで一致することはない。root isolationそのものはこのorderingの数値近似へ依存せず，Rational center/radiusを持つ一意root diskをexactなRouché判定で証明した後に順序を確定する。
+
+定義多項式はmonicかつsquare-freeへexactに正規化する。
 
 ```text
 root[{4,0,-4,0,1},2]
 -> root[{-2,0,1},2]
+
+root[{4,0,4,0,1},1,Complex]
+-> root[{2,0,1},1,Complex]
 ```
 
-となる。これは`(x^2-2)^2`と`x^2-2`が同じdistinct real-root集合を持つためである。完全な有理既約因子化によるminimal polynomial化まではまだ行わない。
-
-内部の`RealAlgebraicNumber`はRational Sturm列で根数をexactに数え，各根へ一意なRational isolating intervalを保持する。`N[root[...,k],p]`ではその区間を要求有効桁まで二分・Sturm監査し，certified approximationへ変換する。
+実根では`RealAlgebraicNumber`がRational Sturm列とRational isolating intervalを保持する。複素根では`ComplexAlgebraicNumber`がexact Rational中心・半径のisolating diskを保持し，approximate root candidateは証明のための候補生成にだけ用いる。`N[root[...,k],p]`は対応するinterval/diskを再分離・細分化してcertified approximationへ変換する。
 
 ```text
 N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 
+N[root[{1,0,1},2,Complex],30]
+-> I
+
 solve[x^5-x+1==0,x,Real]
 -> {x==root[{1,-1,0,0,0,1},1]}
+
+solve[x^5-x+1==0,x]
+-> {x==root[{1,-1,0,0,0,1},1,Complex], ...}
 ```
 
-既存の線形・二次・binomial・Rational-root deflation等で自然なexact式に閉じる場合は従来のSolverを優先し，それでも閉じないRational係数多項式をReal領域で解く場合だけ`root` fallbackを使う。`solve[...,x]` / `Complex`に対する一般複素代数根は，複素root isolationと一貫した順序付けが未実装なので現在も`UnresolvedSolutionSet`を保持する。
+既存の線形・二次・binomial・Rational-root deflation等で自然なexact式に閉じる場合は従来Solverを優先する。それでも閉じないRational係数多項式では，Real領域はSturm real Root，Complex/default領域はcertified complex Root isolationをfallbackとして使う。現在の定義多項式次数budgetは64である。
 
-現段階の`RealAlgebraicNumber`は**exact実代数数を識別・分離・certified近似する基盤**であり，異なるRoot同士の代数体演算やminimal polynomial計算までを一つのscalar `Number`型へ畳み込むものではない。したがって`root[...] + root[...]`等はexact symbolic expressionとして保持する。現在のRoot定義多項式次数budgetは64である。
+`AlgebraicNumber`はReal/Complex Rootを共通に扱い，bounded resultant arithmeticでRootとexact Rational/complex Rationalの`+ - * /`，および小さい整数冪をexact Rootへ閉じる。演算後はresultantの候補多項式を作るだけでなく，operandのisolating interval/diskを演算して得た保証領域と照合し，正しいresult rootが一つに証明できた場合だけ簡約する。
+
+```text
+root[{-2,0,1},2]*root[{-2,0,1},2]
+-> 2
+
+root[{1,0,1},2,Complex]+I
+-> 2I
+```
+
+resultant次数の爆発を避けるため，現在の**algebraic-field演算の候補次数budgetは16**。超える場合やresult rootを一意に再同定できない場合は元のexact symbolic式を保持する。完全な有理既約因子化，minimal polynomial，primitive-element reduction，異なる表現間の一般algebraic equality，`rootApproximant`はまだ未実装である。したがって現在の`AlgebraicNumber`は「exact root identity＋bounded field arithmetic」の基盤であり，完全な代数体canonicalizerではない。
 
 ---
 
@@ -2289,7 +2325,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名250個 / sourceから呼出可能な名前232個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名262個 / sourceから呼出可能な名前244個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2311,7 +2347,8 @@ sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta
+vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta,
+bitand, bitor, bitxor, bitnot, bitshiftl, bitshiftr, bitlength, bitcount, bitget, fma, clamp, proj
 ```
 
 ---
@@ -2393,7 +2430,6 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 - condition number / least squares / 一般parametric linear system
 - `hilbert`（旧仕様の名称再確認）
-- `fma`, `clamp`, `proj`
 - 工学函数、財務函数、単位変換
 - 旧colon command `:defs`, `:help`, `:unset`, `:undef` 等（函数版`Defs[]/UnDef[]`は実装済み）。`:angle`は`angleMode[]`へ置換し、表示設定として`:fix`/`:status`を実装済み
 - `for`, `plot`
@@ -2401,7 +2437,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 今後追加検討:
 
-今後は複素AlgebraicNumber / Root isolation，Root間のexact algebraic-field演算，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
+今後はminimal polynomial / primitive-element reduction，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
 
 ---
 

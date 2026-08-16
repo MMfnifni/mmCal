@@ -417,10 +417,13 @@ using numeric::Number;
         }
 
     case BuiltinId::Root:
-        if (call.arguments.size() != 2)
-            return {};
-        // root[...]はEvaluatorがexact Rational係数と有効な実根indexを検証してから残す。
-        return ValueFacts{NumericDomain::Real, RealSign::Unknown, true, false};
+        // root[...,k]は実根，root[...,k,Complex]は複素根としてEvaluatorが検証してから残す。
+        if (call.arguments.size() == 2)
+            return ValueFacts{NumericDomain::Real, RealSign::Unknown, true, false};
+        if (call.arguments.size() == 3 && call.arguments[2].isSymbol()
+            && call.arguments[2].asSymbol().view() == "Complex")
+            return ValueFacts{NumericDomain::Complex, RealSign::Unknown, true, false};
+        return {};
 
     case BuiltinId::Cbrt:
         if (call.arguments.size() != 1 || !argument(0).isProvablyReal())
@@ -798,6 +801,41 @@ using numeric::Number;
             result.exact = false;
             return result;
         }
+
+    case BuiltinId::BitAnd:
+    case BuiltinId::BitOr:
+    case BuiltinId::BitXor:
+    case BuiltinId::BitNot:
+    case BuiltinId::BitShiftLeft:
+    case BuiltinId::BitShiftRight:
+    case BuiltinId::BitLength:
+    case BuiltinId::BitCount:
+    case BuiltinId::BitGet:
+        return ValueFacts{NumericDomain::Integer, RealSign::Unknown, true, false};
+
+    case BuiltinId::Fma:
+        if (call.arguments.size() != 3 || !argument(0).isNumeric()
+            || !argument(1).isNumeric() || !argument(2).isNumeric())
+            return {};
+        {
+            const bool real = argument(0).isProvablyReal()
+                && argument(1).isProvablyReal() && argument(2).isProvablyReal();
+            return ValueFacts{real ? NumericDomain::Real : NumericDomain::Complex,
+                RealSign::Unknown,
+                argument(0).exact && argument(1).exact && argument(2).exact, false};
+        }
+
+    case BuiltinId::Clamp:
+        if (call.arguments.size() != 3 || !argument(0).isProvablyReal()
+            || !argument(1).isProvablyReal() || !argument(2).isProvablyReal())
+            return {};
+        return ValueFacts{NumericDomain::Real, RealSign::Unknown,
+            argument(0).exact && argument(1).exact && argument(2).exact, false};
+
+    case BuiltinId::Proj:
+        if (call.arguments.size() != 1)
+            return {};
+        return argument(0);
 
     case BuiltinId::Factorial:
         if (call.arguments.size() == 1 && argument(0).domain == NumericDomain::Integer)

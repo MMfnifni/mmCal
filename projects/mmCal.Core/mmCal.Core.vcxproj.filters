@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
     <Filter Include="src">
@@ -411,7 +411,6 @@
   <ClInclude Include="..\..\src\linear_algebra\svd_complex.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\fraction_free_elimination.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\approximate_matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
-  <ClInclude Include="..\..\src\approximation\elementary_function.hpp"><Filter>src\approximation</Filter></ClInclude><ClInclude Include="..\..\src\approximation\machine_math.hpp"><Filter>src\approximation</Filter></ClInclude></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\numeric\big_int.cpp">
       <Filter>src\numeric</Filter>
@@ -713,5 +712,5 @@
   <ClCompile Include="..\..\src\linear_algebra\svd_complex.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\fraction_free_elimination.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\approximate_matrix.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
-  <ClCompile Include="..\..\src\approximation\machine_math.cpp"><Filter>src\approximation</Filter></ClCompile></ItemGroup>
+  </ItemGroup>
 </Project>

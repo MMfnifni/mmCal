@@ -3,6 +3,7 @@
 #include "evaluation/builtin_registry.hpp"
 #include "expression/expr.hpp"
 #include "mathematics/math_registry.hpp"
+#include "mathematics/angle.hpp"
 
 #include <span>
 
@@ -13,6 +14,19 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics);
 [[nodiscard]] expression::Expr evaluateHypot(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateFma(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateClamp(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateProj(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry);
 [[nodiscard]] expression::Expr evaluateCis(

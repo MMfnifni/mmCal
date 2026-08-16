@@ -159,6 +159,19 @@ namespace {
     });
 }
 
+[[nodiscard]] expression::Expr canonicalRootCall(
+    const symbolic::ComplexAlgebraicNumber& algebraic,
+    const BuiltinRegistry& registry) {
+    std::vector<numeric::Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    return expression::Expr::call(registry.symbol(BuiltinId::Root), {
+        expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}},
+        expression::Expr{expression::Symbol{"Complex"}}
+    });
+}
+
 [[nodiscard]] bool containsUnresolvedSolution(const solver::SolutionSet& solutions) {
     if (solutions.kind() == solver::SolutionSetKind::Unresolved)
         return true;
@@ -168,6 +181,25 @@ namespace {
         [](const solver::SolutionCase& item) {
             return item.outcome == solver::SolutionSetKind::Unresolved;
         });
+}
+
+[[nodiscard]] bool containsComplexAlgebraicRoot(
+    const solver::SolutionSet& solutions,
+    const BuiltinRegistry& registry) {
+    if (solutions.kind() != solver::SolutionSetKind::Finite)
+        return false;
+    for (const solver::SolutionBranch& branch : solutions.branches()) {
+        for (const solver::SolutionBinding& binding : branch.bindings) {
+            if (!binding.value.isCall())
+                continue;
+            const auto* definition = registry.find(binding.value.asCall().head);
+            const auto& arguments = binding.value.asCall().arguments;
+            if (definition && definition->id == BuiltinId::Root && arguments.size() == 3
+                && arguments[2].isSymbol() && arguments[2].asSymbol().view() == "Complex")
+                return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -357,6 +389,24 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateRound(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Frac:
         return builtins::evaluateFrac(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::BitAnd:
+        return builtins::evaluateBitAnd(arguments, registry_);
+    case BuiltinId::BitOr:
+        return builtins::evaluateBitOr(arguments, registry_);
+    case BuiltinId::BitXor:
+        return builtins::evaluateBitXor(arguments, registry_);
+    case BuiltinId::BitNot:
+        return builtins::evaluateBitNot(arguments, registry_);
+    case BuiltinId::BitShiftLeft:
+        return builtins::evaluateBitShiftLeft(arguments, registry_);
+    case BuiltinId::BitShiftRight:
+        return builtins::evaluateBitShiftRight(arguments, registry_);
+    case BuiltinId::BitLength:
+        return builtins::evaluateBitLength(arguments, registry_);
+    case BuiltinId::BitCount:
+        return builtins::evaluateBitCount(arguments, registry_);
+    case BuiltinId::BitGet:
+        return builtins::evaluateBitGet(arguments, registry_);
     case BuiltinId::Gcd:
         return builtins::evaluateGcd(arguments, registry_);
     case BuiltinId::Lcm:
@@ -562,6 +612,12 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateCbrt(arguments, registry_, mathematics_);
     case BuiltinId::Hypot:
         return builtins::evaluateHypot(arguments, registry_);
+    case BuiltinId::Fma:
+        return builtins::evaluateFma(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::Clamp:
+        return builtins::evaluateClamp(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::Proj:
+        return builtins::evaluateProj(arguments, registry_);
     case BuiltinId::Cis:
         return builtins::evaluateCis(arguments, registry_);
     case BuiltinId::Polar:
@@ -827,19 +883,30 @@ expression::Expr Evaluator::dispatchBuiltin(
             "rationalize could not convert part of the expression; it remains unevaluated");
         return expression::Expr::call(call.head, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
     case BuiltinId::Root: {
-        if (arguments.size() != 2)
+        if (arguments.size() < 2 || arguments.size() > 3)
             error::throwCalcError(error::CalcErrorType::Type,
-                "root expects a coefficient array and a positive root index");
+                "root expects root[coefficients,index] or root[coefficients,index,Complex]");
         const auto coefficients = rootCoefficients(arguments[0]);
         const auto index = rootIndex(arguments[1]);
         if (!coefficients || coefficients->size() < 2 || !index)
             error::throwCalcError(error::CalcErrorType::Type,
                 "root expects exact real Rational coefficients and a positive integer index");
+        const bool complexDomain = arguments.size() == 3;
+        if (complexDomain && (!arguments[2].isSymbol() || arguments[2].asSymbol().view() != "Complex"))
+            error::throwCalcError(error::CalcErrorType::Type,
+                "root third argument must be Complex");
         if (coefficients->size() == 2) {
             if (*index != 1)
                 error::throwCalcError(error::CalcErrorType::Domain,
-                    "root index exceeds the number of real roots");
+                    "root index exceeds the number of roots");
             return expression::Expr{numeric::Number{-(*coefficients)[0] / (*coefficients)[1]}};
+        }
+        if (complexDomain) {
+            const auto algebraic = symbolic::ComplexAlgebraicNumber::create(*coefficients, *index);
+            if (!algebraic)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "complex root index is invalid or root isolation exceeded the current budget");
+            return canonicalRootCall(*algebraic, registry_);
         }
         const auto algebraic = symbolic::RealAlgebraicNumber::create(*coefficients, *index);
         if (!algebraic)
@@ -945,7 +1012,8 @@ expression::Expr Evaluator::dispatchBuiltin(
                 }
                 solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
                     arguments[0], variables.front(), registry_, mathematics_, angleSemantics_);
-                if (realDomain && polynomial.kind() == solver::SolutionSetKind::Unresolved) {
+                if (realDomain && (polynomial.kind() == solver::SolutionSetKind::Unresolved
+                        || containsComplexAlgebraicRoot(polynomial, registry_))) {
                     if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
                             arguments[0], variables.front(), registry_, mathematics_, angleSemantics_))
                         return *algebraic;

@@ -34,6 +34,24 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateBitAnd(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitOr(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitXor(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitNot(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitShiftLeft(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitShiftRight(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitLength(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitCount(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateBitGet(
+    std::span<const expression::Expr> arguments, const evaluation::BuiltinRegistry& registry);
 [[nodiscard]] expression::Expr evaluateGcd(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry);

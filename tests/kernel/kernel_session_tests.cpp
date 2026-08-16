@@ -952,6 +952,35 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: round uses nearest-even for exact half ties");
     tests.expectEqual(evaluateAndFormat(discreteSession, "round[3/2]"), std::string{"2"},
         "KernelSession: nearest-even rounds the other half tie to the even integer");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "round[125,-1]"), std::string{"120"},
+        "KernelSession: round[x,n] supports negative decimal places with nearest-even ties");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "round[135,-1]"), std::string{"140"},
+        "KernelSession: round[x,n] chooses the even neighboring decade");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "round[N[Pi,5],2]"), std::string{"157/50"},
+        "KernelSession: approximate decimal rounding resolves only from the InformationEnclosure");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitand[-1,5]"), std::string{"5"},
+        "KernelSession: bitand uses sign-extended two's-complement semantics");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitor[-8,3]"), std::string{"-5"},
+        "KernelSession: bitor supports negative arbitrary integers");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitxor[-1,5]"), std::string{"-6"},
+        "KernelSession: bitxor supports negative arbitrary integers");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitnot[5]"), std::string{"-6"},
+        "KernelSession: bitnot is infinite two's-complement complement");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitshiftr[-3,1]"), std::string{"-2"},
+        "KernelSession: bitshiftr is an arithmetic user-facing right shift");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitget[-2,100]"), std::string{"1"},
+        "KernelSession: bitget observes sign extension for negative integers");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitcount[255]"), std::string{"8"},
+        "KernelSession: bitcount counts set bits of nonnegative integers");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "bitlength[-255]"), std::string{"8"},
+        "KernelSession: bitlength reports magnitude bit length");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "fma[2,3,4]"), std::string{"10"},
+        "KernelSession: fma keeps exact arithmetic exact");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "clamp[N[Pi,20],3,4]"),
+        std::string{"3.141592653589793238"},
+        "KernelSession: clamp resolves approximate ordering from InformationEnclosure");
+    tests.expectEqual(evaluateAndFormat(discreteSession, "proj[3+4I]"), std::string{"3+4I"},
+        "KernelSession: proj is identity on finite exact complex values");
     tests.expectEqual(evaluateAndFormat(discreteSession, "frac[-3/2]"), std::string{"1/2"},
         "KernelSession: frac is the mathematical fractional part in [0,1)");
     tests.expectEqual(evaluateAndFormat(discreteSession, "floor[Pi]"), std::string{"3"},

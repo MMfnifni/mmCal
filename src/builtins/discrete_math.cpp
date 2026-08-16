@@ -11,11 +11,13 @@
 #include <compare>
 #include <algorithm>
 #include <cstdint>
+#include <charconv>
 #include <limits>
 #include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -94,6 +96,103 @@ void requireArity(std::span<const Expr> arguments, std::size_t arity, std::strin
 
 [[nodiscard]] Expr integerResult(BigInt value) {
     return Expr{Number{std::move(value)}};
+}
+
+[[nodiscard]] BigInt powerOfTenInteger(std::size_t exponent) {
+    BigInt result{1};
+    BigInt base{10};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] std::int64_t requireSignedSmallInteger(
+    const Expr& expression, std::string_view name, std::int64_t limit = 100'000) {
+    const BigInt* value = exactInteger(expression);
+    if (!value)
+        error::throwCalcError(error::CalcErrorType::Type,
+            std::string{name} + " requires an exact integer argument");
+    const std::string text = value->toString();
+    std::int64_t result = 0;
+    const auto converted = std::from_chars(text.data(), text.data() + text.size(), result);
+    if (converted.ec != std::errc{} || converted.ptr != text.data() + text.size()
+        || result < -limit || result > limit)
+        error::throwCalcError(error::CalcErrorType::Domain,
+            std::string{name} + " integer argument exceeds the current limit");
+    return result;
+}
+
+[[nodiscard]] Rational roundDecimal(const Rational& value, std::int64_t digits) {
+    const std::size_t magnitude = static_cast<std::size_t>(digits < 0 ? -digits : digits);
+    const BigInt scale = powerOfTenInteger(magnitude);
+    if (digits >= 0) {
+        const Rational scaled = value * Rational{scale};
+        return Rational{roundNearestEven(scaled), scale};
+    }
+    const Rational scaled = value / Rational{scale};
+    return Rational{roundNearestEven(scaled) * scale};
+}
+
+[[nodiscard]] std::optional<Rational> certifyDecimalRound(
+    const Expr& expression,
+    std::int64_t digits,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const approximation::CertifiedEvaluator evaluator{registry, mathematics, angles};
+    for (std::size_t bits = 64; bits <= 4096; bits *= 2) {
+        try {
+            const auto enclosed = evaluator.enclose(
+                expression, bits,
+                approximation::CertifiedEvaluator::EnclosureKind::Information);
+            if (!enclosed)
+                return std::nullopt;
+            const approximation::RealInterval* real = nullptr;
+            if (enclosed->isReal())
+                real = &enclosed->asReal();
+            else if (enclosed->asComplex().isProvablyReal())
+                real = &enclosed->asComplex().real();
+            else
+                error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
+            const Rational lower = roundDecimal(real->lower().toRational(), digits);
+            const Rational upper = roundDecimal(real->upper().toRational(), digits);
+            if (lower == upper)
+                return lower;
+        }
+        catch (const approximation::PrecisionInsufficient&) {}
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::size_t requireBitIndex(const Expr& expression, std::string_view name) {
+    const BigInt* value = exactInteger(expression);
+    if (!value || value->isNegative())
+        error::throwCalcError(error::CalcErrorType::Type,
+            std::string{name} + " requires a nonnegative integer bit index");
+    const auto converted = numeric::tryToUint64(*value);
+    if (!converted || *converted > std::numeric_limits<std::size_t>::max())
+        error::throwCalcError(error::CalcErrorType::Overflow,
+            std::string{name} + " bit index is too large");
+    return static_cast<std::size_t>(*converted);
+}
+
+[[nodiscard]] BigInt arithmeticShiftRight(BigInt value, std::size_t bits) {
+    if (!value.isNegative())
+        return value >> bits;
+    if (value.isZero())
+        return value;
+    BigInt magnitude = value.abs();
+    if (bits >= magnitude.bitLength())
+        return BigInt{-1};
+    const BigInt bias = (BigInt{1} << bits) - BigInt{1};
+    magnitude += bias;
+    magnitude >>= bits;
+    return -magnitude;
 }
 
 enum class IntegralRoundingOperation {
@@ -455,18 +554,31 @@ Expr evaluateRound(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    requireArity(arguments, 1, names::round);
-    const auto value = exactRealRational(arguments.front());
-    if (!value) {
-        if (arguments.front().isNumber())
-            error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
-        if (const auto certified = certifyIntegralRounding(
-                arguments.front(), IntegralRoundingOperation::Round,
-                registry, mathematics, angles))
-            return integerResult(*certified);
-        return holdUnary(arguments, registry, evaluation::BuiltinId::Round, names::round);
+    if (arguments.size() < 1 || arguments.size() > 2)
+        error::throwCalcError(error::CalcErrorType::Type, "round expects 1 or 2 arguments");
+    if (arguments.size() == 1) {
+        const auto value = exactRealRational(arguments.front());
+        if (!value) {
+            if (arguments.front().isNumber())
+                error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
+            if (const auto certified = certifyIntegralRounding(
+                    arguments.front(), IntegralRoundingOperation::Round,
+                    registry, mathematics, angles))
+                return integerResult(*certified);
+            return holdUnary(arguments, registry, evaluation::BuiltinId::Round, names::round);
+        }
+        return integerResult(roundNearestEven(*value));
     }
-    return integerResult(roundNearestEven(*value));
+
+    const std::int64_t digits = requireSignedSmallInteger(arguments[1], names::round);
+    if (const auto value = exactRealRational(arguments[0]))
+        return Expr{Number{roundDecimal(*value, digits)}};
+    if (arguments[0].isNumber())
+        error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
+    if (const auto certified = certifyDecimalRound(
+            arguments[0], digits, registry, mathematics, angles))
+        return Expr{Number{*certified}};
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Round), {arguments[0], arguments[1]});
 }
 
 Expr evaluateFrac(
@@ -489,6 +601,77 @@ Expr evaluateFrac(
     }
     return Expr{Number{*value - Rational{floorRational(*value)}}};
 }
+
+Expr evaluateBitAnd(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    BigInt result = requireInteger(arguments.front(), names::bitAnd);
+    for (std::size_t i = 1; i < arguments.size(); ++i)
+        result &= requireInteger(arguments[i], names::bitAnd);
+    return integerResult(std::move(result));
+}
+
+Expr evaluateBitOr(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    BigInt result = requireInteger(arguments.front(), names::bitOr);
+    for (std::size_t i = 1; i < arguments.size(); ++i)
+        result |= requireInteger(arguments[i], names::bitOr);
+    return integerResult(std::move(result));
+}
+
+Expr evaluateBitXor(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    BigInt result = requireInteger(arguments.front(), names::bitXor);
+    for (std::size_t i = 1; i < arguments.size(); ++i)
+        result ^= requireInteger(arguments[i], names::bitXor);
+    return integerResult(std::move(result));
+}
+
+Expr evaluateBitNot(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 1, names::bitNot);
+    return integerResult(~requireInteger(arguments[0], names::bitNot));
+}
+
+Expr evaluateBitShiftLeft(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 2, names::bitShiftLeft);
+    BigInt value = requireInteger(arguments[0], names::bitShiftLeft);
+    const std::int64_t shift = requireSignedSmallInteger(arguments[1], names::bitShiftLeft, 10'000'000);
+    if (shift >= 0)
+        value <<= static_cast<std::size_t>(shift);
+    else
+        value = arithmeticShiftRight(std::move(value), static_cast<std::size_t>(-shift));
+    return integerResult(std::move(value));
+}
+
+Expr evaluateBitShiftRight(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 2, names::bitShiftRight);
+    BigInt value = requireInteger(arguments[0], names::bitShiftRight);
+    const std::int64_t shift = requireSignedSmallInteger(arguments[1], names::bitShiftRight, 10'000'000);
+    if (shift >= 0)
+        value = arithmeticShiftRight(std::move(value), static_cast<std::size_t>(shift));
+    else
+        value <<= static_cast<std::size_t>(-shift);
+    return integerResult(std::move(value));
+}
+
+Expr evaluateBitLength(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 1, names::bitLength);
+    const BigInt value = requireInteger(arguments[0], names::bitLength);
+    return integerResult(BigInt::fromUnsigned(static_cast<std::uint64_t>(value.bitLength())));
+}
+
+Expr evaluateBitCount(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 1, names::bitCount);
+    const BigInt value = requireInteger(arguments[0], names::bitCount);
+    if (value.isNegative())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "bitcount is defined only for nonnegative integers");
+    return integerResult(BigInt::fromUnsigned(static_cast<std::uint64_t>(value.populationCount())));
+}
+
+Expr evaluateBitGet(std::span<const Expr> arguments, const evaluation::BuiltinRegistry&) {
+    requireArity(arguments, 2, names::bitGet);
+    const BigInt value = requireInteger(arguments[0], names::bitGet);
+    const std::size_t index = requireBitIndex(arguments[1], names::bitGet);
+    return integerResult(BigInt{value.testBit(index) ? 1 : 0});
+}
+
 
 Expr evaluateGcd(
     std::span<const Expr> arguments,

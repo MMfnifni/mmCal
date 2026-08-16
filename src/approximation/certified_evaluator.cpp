@@ -107,6 +107,38 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
         coefficients, static_cast<std::size_t>(*index));
 }
 
+
+[[nodiscard]] std::optional<symbolic::ComplexAlgebraicNumber> complexAlgebraicRoot(
+    const expression::CallExpr& call) {
+    if (call.arguments.size() != 3 || !call.arguments[2].isSymbol()
+        || call.arguments[2].asSymbol().view() != "Complex"
+        || !call.arguments[0].isArray() || call.arguments[0].asArray().rank() != 1)
+        return std::nullopt;
+
+    const auto& coefficientsArray = call.arguments[0].asArray();
+    std::vector<Rational> coefficients;
+    coefficients.reserve(coefficientsArray.size());
+    for (std::size_t i = 0; i < coefficientsArray.size(); ++i) {
+        const Expr value = coefficientsArray.element(i);
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        coefficients.push_back(value.asNumber().asReal().toRational());
+    }
+
+    const Expr& indexExpression = call.arguments[1];
+    if (!indexExpression.isNumber() || !indexExpression.asNumber().isReal()
+        || !indexExpression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& indexInteger = indexExpression.asNumber().asReal().asInteger();
+    if (indexInteger.isNegative() || indexInteger.isZero())
+        return std::nullopt;
+    const auto index = numeric::tryToUint64(indexInteger);
+    if (!index || *index > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    return symbolic::ComplexAlgebraicNumber::create(
+        coefficients, static_cast<std::size_t>(*index));
+}
+
 [[nodiscard]] Rational rational(std::int64_t numerator, std::int64_t denominator = 1) {
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
@@ -502,6 +534,25 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
     switch (definition->id) {
     case BuiltinId::Root: {
+        if (call.arguments.size() == 3) {
+            const auto algebraic = complexAlgebraicRoot(call);
+            if (!algebraic)
+                return std::nullopt;
+            if (const auto general = symbolic::AlgebraicNumber::create(
+                    algebraic->polynomial(), algebraic->rootIndex(),
+                    symbolic::AlgebraicRootDomain::Complex)) {
+                if (const auto exact = general->exactRationalParts())
+                    return CertifiedValue{ComplexInterval{
+                        RealInterval::fromRational(exact->first, precisionBits),
+                        RealInterval::fromRational(exact->second, precisionBits)}};
+            }
+            const symbolic::RationalComplexDisk disk = algebraic->refined(precisionBits);
+            return CertifiedValue{ComplexInterval{
+                RealInterval::fromRationalBounds(
+                    disk.real - disk.radius, disk.real + disk.radius, precisionBits),
+                RealInterval::fromRationalBounds(
+                    disk.imaginary - disk.radius, disk.imaginary + disk.radius, precisionBits)}};
+        }
         const auto algebraic = algebraicRoot(call);
         if (!algebraic)
             return std::nullopt;
@@ -1440,8 +1491,59 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         return normalizeComplex(enclosePrincipalComplexAtanh(complex, precisionBits));
     }
 
+    case BuiltinId::Fma: {
+        if (call.arguments.size() != 3)
+            return std::nullopt;
+        const auto a = encloseArgument(0);
+        const auto b = encloseArgument(1);
+        const auto c = encloseArgument(2);
+        if (!a || !b || !c)
+            return std::nullopt;
+        return addValues(multiplyValues(*a, *b, precisionBits), *c, precisionBits);
+    }
+
+    case BuiltinId::Clamp: {
+        if (call.arguments.size() != 3)
+            return std::nullopt;
+        const auto x = encloseArgument(0);
+        const auto lo = encloseArgument(1);
+        const auto hi = encloseArgument(2);
+        if (!x || !lo || !hi || !x->isReal() || !lo->isReal() || !hi->isReal())
+            return std::nullopt;
+        if (hi->asReal().lower() < lo->asReal().upper())
+            throw PrecisionInsufficient{"clamp bounds cannot yet be ordered"};
+        const auto clampValue = [](const numeric::BigFloat& value,
+                                   const numeric::BigFloat& lower,
+                                   const numeric::BigFloat& upper) {
+            if (value < lower)
+                return lower;
+            if (upper < value)
+                return upper;
+            return value;
+        };
+        numeric::BigFloat lower = clampValue(
+            x->asReal().lower(), lo->asReal().lower(), hi->asReal().lower());
+        numeric::BigFloat upper = clampValue(
+            x->asReal().upper(), lo->asReal().upper(), hi->asReal().upper());
+        return CertifiedValue{RealInterval{std::move(lower), std::move(upper)}};
+    }
+
+    case BuiltinId::Proj:
+        if (call.arguments.size() != 1)
+            return std::nullopt;
+        return encloseArgument(0);
+
     case BuiltinId::Polar:
     case BuiltinId::NextPow2:
+    case BuiltinId::BitAnd:
+    case BuiltinId::BitOr:
+    case BuiltinId::BitXor:
+    case BuiltinId::BitNot:
+    case BuiltinId::BitShiftLeft:
+    case BuiltinId::BitShiftRight:
+    case BuiltinId::BitLength:
+    case BuiltinId::BitCount:
+    case BuiltinId::BitGet:
     case BuiltinId::Sum:
     case BuiltinId::Product:
     case BuiltinId::Min:

@@ -1576,6 +1576,18 @@ struct PositiveIntegerPower final {
     case BuiltinId::Trunc:
     case BuiltinId::Round:
     case BuiltinId::Frac:
+    case BuiltinId::BitAnd:
+    case BuiltinId::BitOr:
+    case BuiltinId::BitXor:
+    case BuiltinId::BitNot:
+    case BuiltinId::BitShiftLeft:
+    case BuiltinId::BitShiftRight:
+    case BuiltinId::BitLength:
+    case BuiltinId::BitCount:
+    case BuiltinId::BitGet:
+    case BuiltinId::Fma:
+    case BuiltinId::Clamp:
+    case BuiltinId::Proj:
     case BuiltinId::Gcd:
     case BuiltinId::Lcm:
     case BuiltinId::Mod:

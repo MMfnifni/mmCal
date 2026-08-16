@@ -6,10 +6,12 @@
 #include "names.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/integer_algorithms.hpp"
+#include "symbolic/algebraic_number.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,6 +57,119 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 }
 
 
+
+[[nodiscard]] std::optional<symbolic::AlgebraicNumber> algebraicValue(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& registry) {
+    if (expression.isNumber()) {
+        const Number& number = expression.asNumber();
+        if (number.isReal())
+            return symbolic::AlgebraicNumber::fromRational(number.asReal().toRational());
+        return symbolic::AlgebraicNumber::fromComplexRational(
+            number.asComplex().real.toRational(), number.asComplex().imaginary.toRational());
+    }
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = registry.find(expression.asCall().head);
+    if (!definition || definition->id != evaluation::BuiltinId::Root)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if ((arguments.size() != 2 && arguments.size() != 3)
+        || !arguments[0].isArray() || arguments[0].asArray().rank() != 1)
+        return std::nullopt;
+
+    std::vector<Rational> coefficients;
+    coefficients.reserve(arguments[0].asArray().size());
+    for (std::size_t i = 0; i < arguments[0].asArray().size(); ++i) {
+        const Expr value = arguments[0].asArray().element(i);
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        coefficients.push_back(value.asNumber().asReal().toRational());
+    }
+    if (!arguments[1].isNumber() || !arguments[1].asNumber().isReal()
+        || !arguments[1].asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& indexInteger = arguments[1].asNumber().asReal().asInteger();
+    const auto index = numeric::tryToUint64(indexInteger);
+    if (indexInteger.isNegative() || indexInteger.isZero() || !index
+        || *index > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    symbolic::AlgebraicRootDomain domain = symbolic::AlgebraicRootDomain::Real;
+    if (arguments.size() == 3) {
+        if (!arguments[2].isSymbol() || arguments[2].asSymbol().view() != "Complex")
+            return std::nullopt;
+        domain = symbolic::AlgebraicRootDomain::Complex;
+    }
+    return symbolic::AlgebraicNumber::create(
+        coefficients, static_cast<std::size_t>(*index), domain);
+}
+
+[[nodiscard]] Expr algebraicExpr(
+    const symbolic::AlgebraicNumber& value,
+    const evaluation::BuiltinRegistry& registry) {
+    if (const auto exact = value.exactRationalParts()) {
+        if (exact->second.isZero())
+            return Expr{Number{exact->first}};
+        return Expr{Number::complex(RealNumber{exact->first}, RealNumber{exact->second})};
+    }
+    const auto polynomial = value.polynomial();
+    if (polynomial.size() == 2)
+        return Expr{Number{-polynomial[0] / polynomial[1]}};
+
+    std::vector<Rational> coefficients(polynomial.begin(), polynomial.end());
+    const std::size_t coefficientCount = coefficients.size();
+    std::vector<Expr> arguments;
+    arguments.reserve(value.domain() == symbolic::AlgebraicRootDomain::Complex ? 3 : 2);
+    arguments.push_back(Expr::rationalArray({coefficientCount}, std::move(coefficients)));
+    arguments.push_back(Expr{Number{BigInt::fromUnsigned(value.rootIndex())}});
+    if (value.domain() == symbolic::AlgebraicRootDomain::Complex)
+        arguments.push_back(Expr{expression::Symbol{"Complex"}});
+    return Expr::call(registry.symbol(evaluation::BuiltinId::Root), std::move(arguments));
+}
+
+[[nodiscard]] std::optional<Expr> algebraicBinary(
+    const Expr& lhs,
+    const Expr& rhs,
+    symbolic::AlgebraicBinaryOperation operation,
+    const evaluation::BuiltinRegistry& registry) {
+    const auto left = algebraicValue(lhs, registry);
+    const auto right = algebraicValue(rhs, registry);
+    if (!left || !right)
+        return std::nullopt;
+    const auto result = symbolic::AlgebraicNumber::combine(*left, *right, operation);
+    if (!result)
+        return std::nullopt;
+    return algebraicExpr(*result, registry);
+}
+
+[[nodiscard]] std::optional<Expr> algebraicFold(
+    const std::vector<Expr>& arguments,
+    symbolic::AlgebraicBinaryOperation operation,
+    const evaluation::BuiltinRegistry& registry) {
+    if (arguments.empty())
+        return std::nullopt;
+    bool containsRoot = false;
+    for (const Expr& argument : arguments) {
+        if (argument.isCall()) {
+            const auto* definition = registry.find(argument.asCall().head);
+            containsRoot = containsRoot || (definition && definition->id == evaluation::BuiltinId::Root);
+        }
+        if (!algebraicValue(argument, registry))
+            return std::nullopt;
+    }
+    if (!containsRoot)
+        return std::nullopt;
+
+    auto accumulated = algebraicValue(arguments.front(), registry);
+    for (std::size_t i = 1; i < arguments.size(); ++i) {
+        const auto next = algebraicValue(arguments[i], registry);
+        accumulated = symbolic::AlgebraicNumber::combine(*accumulated, *next, operation);
+        if (!accumulated)
+            return std::nullopt;
+    }
+    return algebraicExpr(*accumulated, registry);
+}
+
 [[nodiscard]] Expr scalarAdd(
     const std::vector<Expr>& arguments,
     const evaluation::BuiltinRegistry& registry) {
@@ -69,6 +184,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     }
     if (numeric)
         return numberExpr(std::move(sum));
+    if (const auto algebraic = algebraicFold(arguments, symbolic::AlgebraicBinaryOperation::Add, registry))
+        return *algebraic;
     if (const auto approximate = approximation::addApproximateScalars(arguments))
         return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Add), arguments);
@@ -88,6 +205,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     }
     if (numeric)
         return numberExpr(std::move(product));
+    if (const auto algebraic = algebraicFold(arguments, symbolic::AlgebraicBinaryOperation::Multiply, registry))
+        return *algebraic;
     if (const auto approximate = approximation::multiplyApproximateScalars(arguments))
         return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Multiply), arguments);
@@ -99,6 +218,9 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const evaluation::BuiltinRegistry& registry) {
     if (lhs.isNumber() && rhs.isNumber())
         return numberExpr(lhs.asNumber() - rhs.asNumber());
+    if (const auto algebraic = algebraicBinary(
+        lhs, rhs, symbolic::AlgebraicBinaryOperation::Subtract, registry))
+        return *algebraic;
     if (const auto approximate = approximation::subtractApproximateScalars(lhs, rhs))
         return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Subtract), {lhs, rhs});
@@ -109,6 +231,13 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const evaluation::BuiltinRegistry& registry) {
     if (value.isNumber())
         return numberExpr(-value.asNumber());
+    if (const auto zero = symbolic::AlgebraicNumber::fromRational(Rational{})) {
+        if (const auto algebraic = algebraicValue(value, registry)) {
+            if (const auto result = symbolic::AlgebraicNumber::combine(
+                *zero, *algebraic, symbolic::AlgebraicBinaryOperation::Subtract))
+                return algebraicExpr(*result, registry);
+        }
+    }
     if (const auto approximate = approximation::negateApproximateScalar(value))
         return *approximate;
     return Expr::call(registry.symbol(evaluation::BuiltinId::Negate), {value});
@@ -274,6 +403,9 @@ Expr evaluateDivide(
         error::throwCalcError(error::CalcErrorType::Domain, "Division by zero");
     if (numerator.isNumber() && denominator.isNumber())
         return numberExpr(numerator.asNumber() / denominator.asNumber());
+    if (const auto algebraic = algebraicBinary(
+        numerator, denominator, symbolic::AlgebraicBinaryOperation::Divide, registry))
+        return *algebraic;
     if (const auto approximate = approximation::divideApproximateScalars(
         numerator, denominator))
         return *approximate;
@@ -345,8 +477,34 @@ Expr evaluatePower(
     if (integerExponent == BigInt{1})
         return base;
 
-    if (!base.isNumber())
+    if (!base.isNumber()) {
+        const auto algebraicBase = algebraicValue(base, registry);
+        const auto magnitude = numeric::tryToUint64(integerExponent.abs());
+        if (algebraicBase && magnitude && *magnitude <= 32) {
+            auto result = symbolic::AlgebraicNumber::fromRational(Rational{BigInt{1}});
+            auto factor = algebraicBase;
+            std::uint64_t power = *magnitude;
+            while (result && factor && power != 0) {
+                if ((power & 1U) != 0)
+                    result = symbolic::AlgebraicNumber::combine(
+                        *result, *factor, symbolic::AlgebraicBinaryOperation::Multiply);
+                power >>= 1U;
+                if (power != 0)
+                    factor = symbolic::AlgebraicNumber::combine(
+                        *factor, *factor, symbolic::AlgebraicBinaryOperation::Multiply);
+            }
+            if (result) {
+                if (integerExponent.isNegative()) {
+                    const auto one = symbolic::AlgebraicNumber::fromRational(Rational{BigInt{1}});
+                    result = one ? symbolic::AlgebraicNumber::combine(
+                        *one, *result, symbolic::AlgebraicBinaryOperation::Divide) : std::nullopt;
+                }
+                if (result)
+                    return algebraicExpr(*result, registry);
+            }
+        }
         return Expr::call(registry.symbol(evaluation::BuiltinId::Power), {base, exponent});
+    }
 
     const bool negativeExponent = integerExponent.isNegative();
     const auto magnitude = toUint64(integerExponent.abs());

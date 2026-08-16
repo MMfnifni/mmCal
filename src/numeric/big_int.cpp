@@ -1,6 +1,7 @@
 // 任意精度整数BigInt
 #include "big_int.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -66,6 +67,18 @@ std::size_t BigInt::trailingZeroBits() const noexcept {
     return magnitude_.trailingZeroBits();
 }
 
+std::size_t BigInt::populationCount() const noexcept {
+    return magnitude_.populationCount();
+}
+
+bool BigInt::testBit(std::size_t index) const {
+    if (!negative_)
+        return magnitude_.testBit(index);
+    // -m == ~(m-1) in infinite two's-complement representation.
+    const detail::BigUInt mask = magnitude_ - detail::BigUInt{1};
+    return !mask.testBit(index);
+}
+
 BigInt BigInt::abs() const {
     return BigInt{magnitude_, false};
 }
@@ -129,6 +142,66 @@ BigInt& BigInt::operator/=(const BigInt& rhs) {
 BigInt& BigInt::operator%=(const BigInt& rhs) {
     auto result = divmod(*this, rhs);
     *this = std::move(result.remainder);
+    return *this;
+}
+
+BigInt& BigInt::operator&=(const BigInt& rhs) {
+    const std::size_t width = std::max(bitLength(), rhs.bitLength()) + 1;
+    const detail::BigUInt modulus = detail::BigUInt{1} << width;
+    detail::BigUInt lhsBits = negative_ ? modulus - magnitude_ : magnitude_;
+    const detail::BigUInt rhsBits = rhs.negative_ ? modulus - rhs.magnitude_ : rhs.magnitude_;
+    lhsBits &= rhsBits;
+
+    const detail::BigUInt signBit = detail::BigUInt{1} << (width - 1);
+    if (lhsBits >= signBit) {
+        magnitude_ = modulus - lhsBits;
+        negative_ = true;
+    }
+    else {
+        magnitude_ = std::move(lhsBits);
+        negative_ = false;
+    }
+    normalizeSign();
+    return *this;
+}
+
+BigInt& BigInt::operator|=(const BigInt& rhs) {
+    const std::size_t width = std::max(bitLength(), rhs.bitLength()) + 1;
+    const detail::BigUInt modulus = detail::BigUInt{1} << width;
+    detail::BigUInt lhsBits = negative_ ? modulus - magnitude_ : magnitude_;
+    const detail::BigUInt rhsBits = rhs.negative_ ? modulus - rhs.magnitude_ : rhs.magnitude_;
+    lhsBits |= rhsBits;
+
+    const detail::BigUInt signBit = detail::BigUInt{1} << (width - 1);
+    if (lhsBits >= signBit) {
+        magnitude_ = modulus - lhsBits;
+        negative_ = true;
+    }
+    else {
+        magnitude_ = std::move(lhsBits);
+        negative_ = false;
+    }
+    normalizeSign();
+    return *this;
+}
+
+BigInt& BigInt::operator^=(const BigInt& rhs) {
+    const std::size_t width = std::max(bitLength(), rhs.bitLength()) + 1;
+    const detail::BigUInt modulus = detail::BigUInt{1} << width;
+    detail::BigUInt lhsBits = negative_ ? modulus - magnitude_ : magnitude_;
+    const detail::BigUInt rhsBits = rhs.negative_ ? modulus - rhs.magnitude_ : rhs.magnitude_;
+    lhsBits ^= rhsBits;
+
+    const detail::BigUInt signBit = detail::BigUInt{1} << (width - 1);
+    if (lhsBits >= signBit) {
+        magnitude_ = modulus - lhsBits;
+        negative_ = true;
+    }
+    else {
+        magnitude_ = std::move(lhsBits);
+        negative_ = false;
+    }
+    normalizeSign();
     return *this;
 }
 
@@ -209,6 +282,11 @@ BigInt operator%(BigInt lhs, const BigInt& rhs) {
     lhs %= rhs;
     return lhs;
 }
+
+BigInt operator&(BigInt lhs, const BigInt& rhs) { lhs &= rhs; return lhs; }
+BigInt operator|(BigInt lhs, const BigInt& rhs) { lhs |= rhs; return lhs; }
+BigInt operator^(BigInt lhs, const BigInt& rhs) { lhs ^= rhs; return lhs; }
+BigInt operator~(const BigInt& value) { return -value - BigInt{1}; }
 
 BigInt operator<<(BigInt value, std::size_t bits) {
     value <<= bits;

@@ -24,6 +24,8 @@ public:
     [[nodiscard]] std::size_t limbCount() const noexcept;
     [[nodiscard]] std::size_t bitLength() const noexcept;
     [[nodiscard]] std::size_t trailingZeroBits() const noexcept;
+    [[nodiscard]] std::size_t populationCount() const noexcept;
+    [[nodiscard]] bool testBit(std::size_t index) const noexcept;
 
     [[nodiscard]] static BigUInt parse(std::string_view text, unsigned radix = 10);
     [[nodiscard]] std::string toString(unsigned radix = 10) const;
@@ -33,6 +35,9 @@ public:
     BigUInt& operator*=(const BigUInt& rhs);
     BigUInt& operator/=(const BigUInt& rhs);
     BigUInt& operator%=(const BigUInt& rhs);
+    BigUInt& operator&=(const BigUInt& rhs);
+    BigUInt& operator|=(const BigUInt& rhs);
+    BigUInt& operator^=(const BigUInt& rhs);
 
     // 任意ビット数だけシフトする。右シフトでは下位ビットを切り捨てる。
     BigUInt& operator<<=(std::size_t bits);
@@ -87,6 +92,9 @@ struct BigUIntDivModResult final {
 [[nodiscard]] BigUInt operator*(BigUInt lhs, const BigUInt& rhs);
 [[nodiscard]] BigUInt operator/(BigUInt lhs, const BigUInt& rhs);
 [[nodiscard]] BigUInt operator%(BigUInt lhs, const BigUInt& rhs);
+[[nodiscard]] BigUInt operator&(BigUInt lhs, const BigUInt& rhs);
+[[nodiscard]] BigUInt operator|(BigUInt lhs, const BigUInt& rhs);
+[[nodiscard]] BigUInt operator^(BigUInt lhs, const BigUInt& rhs);
 [[nodiscard]] BigUInt operator<<(BigUInt value, std::size_t bits);
 [[nodiscard]] BigUInt operator>>(BigUInt value, std::size_t bits);
 

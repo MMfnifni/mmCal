@@ -565,6 +565,9 @@ sinc[90 Deg]
 ```text
 floor ceil trunc round frac
 gcd lcm mod rem quotient
+bitand bitor bitxor bitnot
+bitshiftl bitshiftr bitlength bitcount bitget
+fma clamp proj
 ```
 
 Examples:
@@ -574,6 +577,8 @@ floor[-3/2] -> -2
 ceil[-3/2]  -> -1
 trunc[-3/2] -> -1
 round[5/2]  -> 2       // nearest-even
+round[125,-1] -> 120
+round[135,-1] -> 140
 frac[-3/2]  -> 1/2
 
 gcd[84,126,210] -> 42
@@ -582,11 +587,22 @@ lcm[6,8,9] -> 72
 quotient[-5,3] -> -1
 rem[-5,3]      -> -2
 mod[-5,3]      -> 1
+
+bitand[-1,5] -> 5
+bitor[-8,3]  -> -5
+bitxor[-1,5] -> -6
+bitnot[5]    -> -6
+bitshiftr[-3,1] -> -2
+bitget[-2,100]  -> 1
 ```
 
-`mod` corresponds to a floor quotient, while `rem` corresponds to a truncate-toward-zero quotient.
+`round[x,n]` performs nearest-even rounding to a quantum of `10^-n`; negative `n` is allowed. Approximate inputs resolve only when the whole InformationEnclosure rounds to the same value.
 
-The current `round` accepts one argument only. The legacy `round[x,n]` form has not yet been restored.
+The bitwise functions use **infinite two's-complement semantics** over arbitrary BigInt values. Negative operands therefore sign-extend with ones. `bitshiftr` is the user-facing arithmetic right shift, while `bitcount` accepts only nonnegative integers because negative infinite two's-complement values have infinitely many one bits. This version deliberately keeps the semantics in function form rather than adding lexer-level `& | << >>` syntax.
+
+`fma[a,b,c]` remains exact for exact operands and, for certified approximations, evaluates `a*b+c` without an intermediate DecimalApproximation rounding. `clamp[x,lo,hi]` is real-valued and uses InformationEnclosure to prove approximate ordering. `proj[z]` is currently the identity on finite exact/certified complex values; full complex-infinity/Riemann-sphere semantics remain tied to the deferred extended-real model.
+
+`mod` corresponds to a floor quotient, while `rem` corresponds to a truncate-toward-zero quotient.
 
 ---
 
@@ -1852,42 +1868,53 @@ solve[sin[x]==0,x,Real]
 
 The Complex domain likewise does not fabricate complete solution sets from principal inverses alone.
 
-### Exact real algebraic roots: `root`
+### Exact algebraic roots: `root` / `AlgebraicNumber`
 
-Unreleased builds add an exact `root` representation for **real roots** of general higher-degree polynomials without forcing a radical expansion.
+Unreleased builds extend `root` from exact real roots to certified exact real and complex roots without forcing radical expansions.
 
 ```text
 root[{a0,a1,...,an},k]
+root[{a0,a1,...,an},k,Complex]
 ```
 
-denotes the 1-based `k`th **distinct real root in increasing order** of the exact Rational-coefficient polynomial
+The coefficient list stores the exact Rational polynomial `a0 + a1 x + ... + an x^n` in ascending power order. The two-argument form denotes the 1-based `k`th distinct real root in increasing order. The three-argument `Complex` form isolates all complex roots and assigns deterministic 1-based indices by increasing `Re(z)+Pi Im(z)`. Because the real and imaginary parts of algebraic roots are algebraic while Pi is transcendental, two distinct algebraic roots cannot share that exact ordering key. Root certification itself does not depend on this approximate ordering step: a unique Rational-center/Rational-radius disk is first proven by an exact Rouche test, then ordering is certified.
 
-```text
-a0 + a1 x + ... + an x^n.
-```
-
-Coefficients are listed in ascending power order. The defining polynomial is normalized exactly to monic square-free form, so for example
+Defining polynomials normalize exactly to monic square-free form.
 
 ```text
 root[{4,0,-4,0,1},2]
 -> root[{-2,0,1},2]
 ```
 
-because `(x^2-2)^2` and `x^2-2` have the same distinct real-root set. Full Rational factorization to a minimal polynomial is not yet attempted.
-
-Internally, `RealAlgebraicNumber` uses an exact Rational Sturm sequence to count roots and stores a unique Rational isolating interval for each root. `N[root[...,k],p]` refines that interval under Sturm verification until the requested significant precision can be certified.
+`RealAlgebraicNumber` uses exact Rational Sturm sequences and isolating intervals. `ComplexAlgebraicNumber` stores exact Rational-center isolating disks; numerical root candidates are used only to propose disks that must subsequently pass exact certification. `N[root[...,k],p]` refines the corresponding interval/disk into a certified approximation.
 
 ```text
 N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 
+N[root[{1,0,1},2,Complex],30]
+-> I
+
 solve[x^5-x+1==0,x,Real]
 -> {x==root[{1,-1,0,0,0,1},1]}
+
+solve[x^5-x+1==0,x]
+-> {x==root[{1,-1,0,0,0,1},1,Complex], ...}
 ```
 
-Existing linear, quadratic, binomial, and Rational-root-deflation solvers remain preferred when they close to a natural exact expression. The `root` fallback is used for Real-domain Rational polynomials that remain unresolved. General complex algebraic roots for `solve[...,x]` / `Complex` remain `UnresolvedSolutionSet` until complex root isolation and a consistent ordering are implemented.
+Existing linear, quadratic, binomial, and Rational-root-deflation solvers remain preferred when they close naturally. Remaining Rational-polynomial equations use Sturm real Root fallback in a Real domain and certified complex Root isolation in the default/Complex domain. The defining-polynomial degree budget is currently 64.
 
-At this stage, `RealAlgebraicNumber` is infrastructure for **identifying, isolating, and certifiedly approximating exact real algebraic numbers**. It does not yet collapse arithmetic between unrelated Root objects into one algebraic-field scalar or compute full minimal polynomials; expressions such as `root[...] + root[...]` therefore remain exact symbolic expressions. The current defining-polynomial degree budget is 64.
+`AlgebraicNumber` unifies Real/Complex Root values and performs bounded exact `+ - * /` arithmetic with other Root values and exact Rational/complex-Rational operands. It forms a resultant candidate polynomial and then uses the operands' isolating intervals/disks to certify exactly one result root before replacing the expression.
+
+```text
+root[{-2,0,1},2]*root[{-2,0,1},2]
+-> 2
+
+root[{1,0,1},2,Complex]+I
+-> 2I
+```
+
+To bound resultant growth, the current **algebraic-field candidate-degree budget is 16**. If that budget is exceeded or the result root cannot be uniquely re-identified, the original exact symbolic expression is retained. Full Rational factorization to minimal polynomials, primitive-element reduction, general algebraic equality across unrelated representations, and `rootApproximant` remain deferred. The current layer is therefore exact root identity plus bounded field arithmetic, not yet a complete number-field canonicalizer.
 
 ---
 
@@ -2256,7 +2283,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **250 registered builtin/alias names / 232 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **262 registered builtin/alias names / 244 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2278,7 +2305,8 @@ sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta
+vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta,
+bitand, bitor, bitxor, bitnot, bitshiftl, bitshiftr, bitlength, bitcount, bitget, fma, clamp, proj
 ```
 
 ---
@@ -2360,7 +2388,6 @@ Representative items:
 
 - Condition number / least squares / general parametric linear systems
 - `hilbert` (legacy naming/specification still to be confirmed)
-- `fma`, `clamp`, `proj`
 - Engineering functions, financial functions, and unit conversion
 - Legacy colon commands such as `:defs`, `:help`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:fix` / `:status` remain as presentation commands
 - `for`, `plot`
@@ -2368,7 +2395,7 @@ Representative items:
 
 Further candidates:
 
-complex AlgebraicNumber / Root isolation, exact algebraic-field arithmetic between Root values, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
+minimal-polynomial / primitive-element reduction, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
 
 ---
 

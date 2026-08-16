@@ -619,6 +619,21 @@ std::size_t BigUInt::bitLength() const noexcept {
     return (limbs_.size() - 1) * limbBits + std::bit_width(highest);
 }
 
+std::size_t BigUInt::populationCount() const noexcept {
+    std::size_t count = 0;
+    for (const limb_type limb : limbs_)
+        count += std::popcount(limb);
+    return count;
+}
+
+bool BigUInt::testBit(std::size_t index) const noexcept {
+    const std::size_t limbIndex = index / limbBits;
+    if (limbIndex >= limbs_.size())
+        return false;
+    const unsigned offset = static_cast<unsigned>(index % limbBits);
+    return ((limbs_[limbIndex] >> offset) & limb_type{1}) != 0;
+}
+
 std::size_t BigUInt::trailingZeroBits() const noexcept {
     if (isZero())
         return 0;
@@ -991,6 +1006,32 @@ BigUInt& BigUInt::operator/=(const BigUInt& rhs) {
 BigUInt& BigUInt::operator%=(const BigUInt& rhs) {
     auto result = divmod(*this, rhs);
     *this = std::move(result.remainder);
+    return *this;
+}
+
+BigUInt& BigUInt::operator&=(const BigUInt& rhs) {
+    const std::size_t count = std::min(limbs_.size(), rhs.limbs_.size());
+    limbs_.resize(count);
+    for (std::size_t i = 0; i < count; ++i)
+        limbs_[i] &= rhs.limbs_[i];
+    normalize();
+    return *this;
+}
+
+BigUInt& BigUInt::operator|=(const BigUInt& rhs) {
+    if (rhs.limbs_.size() > limbs_.size())
+        limbs_.resize(rhs.limbs_.size(), 0);
+    for (std::size_t i = 0; i < rhs.limbs_.size(); ++i)
+        limbs_[i] |= rhs.limbs_[i];
+    return *this;
+}
+
+BigUInt& BigUInt::operator^=(const BigUInt& rhs) {
+    if (rhs.limbs_.size() > limbs_.size())
+        limbs_.resize(rhs.limbs_.size(), 0);
+    for (std::size_t i = 0; i < rhs.limbs_.size(); ++i)
+        limbs_[i] ^= rhs.limbs_[i];
+    normalize();
     return *this;
 }
 
@@ -1498,6 +1539,21 @@ BigUInt operator/(BigUInt lhs, const BigUInt& rhs) {
 
 BigUInt operator%(BigUInt lhs, const BigUInt& rhs) {
     lhs %= rhs;
+    return lhs;
+}
+
+BigUInt operator&(BigUInt lhs, const BigUInt& rhs) {
+    lhs &= rhs;
+    return lhs;
+}
+
+BigUInt operator|(BigUInt lhs, const BigUInt& rhs) {
+    lhs |= rhs;
+    return lhs;
+}
+
+BigUInt operator^(BigUInt lhs, const BigUInt& rhs) {
+    lhs ^= rhs;
     return lhs;
 }
 

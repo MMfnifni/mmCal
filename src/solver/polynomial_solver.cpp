@@ -67,6 +67,19 @@ using mathematics::RelationKind;
     });
 }
 
+[[nodiscard]] Expr algebraicRootExpr(
+    const symbolic::ComplexAlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins) {
+    std::vector<Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    return Expr::call(builtins.symbol(BuiltinId::Root), {
+        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}},
+        Expr{expression::Symbol{"Complex"}}
+    });
+}
+
 [[nodiscard]] SolutionBranch branch(
     const expression::Symbol& variable,
     Expr value,
@@ -1765,6 +1778,16 @@ SolutionSet solvePolynomialEquation(
         return branches->empty()
             ? SolutionSet::empty(variables)
             : SolutionSet::finite(variables, std::move(*branches));
+
+    if (const auto roots = symbolic::ComplexAlgebraicNumber::isolateAll(polynomial->coefficients())) {
+        if (roots->empty())
+            return SolutionSet::empty(variables);
+        std::vector<SolutionBranch> branches;
+        branches.reserve(roots->size());
+        for (const symbolic::ComplexAlgebraicNumber& root : *roots)
+            branches.push_back(branch(variable, algebraicRootExpr(root, builtins)));
+        return SolutionSet::finite(variables, std::move(branches));
+    }
     return SolutionSet::unresolved(variables);
 }
 

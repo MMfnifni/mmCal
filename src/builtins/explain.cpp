@@ -597,16 +597,21 @@ expression::Expr evaluateExplain(
     case ExprKind::Call: {
         const auto* definition = builtins.find(value.asCall().head);
         if (definition && definition->id == evaluation::BuiltinId::Root
-            && value.asCall().arguments.size() == 2
+            && (value.asCall().arguments.size() == 2 || value.asCall().arguments.size() == 3)
             && value.asCall().arguments[0].isArray()) {
-            add(properties, "Domain", text("Real"));
+            const bool complexRoot = value.asCall().arguments.size() == 3
+                && value.asCall().arguments[2].isSymbol()
+                && value.asCall().arguments[2].asSymbol().view() == "Complex";
+            add(properties, "Domain", text(complexRoot ? "Complex" : "Real"));
             add(properties, "Exactness", text("Exact"));
             const auto& coefficients = value.asCall().arguments[0].asArray();
             if (coefficients.rank() == 1 && coefficients.size() >= 2)
                 add(properties, "PolynomialDegree", integer(coefficients.size() - 1));
             add(properties, "RootIndex", value.asCall().arguments[1]);
             if (internal)
-                add(properties, "Representation", text("RealAlgebraicNumber<RootCall>"));
+                add(properties, "Representation", text(complexRoot
+                    ? "ComplexAlgebraicNumber<RootCall>"
+                    : "RealAlgebraicNumber<RootCall>"));
             break;
         }
         add(properties, "Domain", text("Unknown"));

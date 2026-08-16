@@ -33,8 +33,8 @@ fib[-1]==>DomainError: fib requires non-negative n
 # Arity/type contracts.
 sqrt[]==>TypeError: sqrt expects 1 argument(s)
 sqrt[1,2]==>TypeError: sqrt expects 1 argument(s)
-round[]==>TypeError: round expects 1 argument(s)
-round[1,2]==>TypeError: round expects 1 argument(s)
+round[]==>TypeError: round expects between 1 and 2 arguments
+round[1,2]==>1
 floor[I]==>TypeError: floor requires a real argument
 accuracy[]==>TypeError: accuracy expects 1 argument(s)
 precision[]==>TypeError: precision expects 1 argument(s)

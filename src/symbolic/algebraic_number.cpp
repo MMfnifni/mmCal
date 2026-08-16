@@ -2,8 +2,13 @@
 #include "algebraic_number.hpp"
 
 #include "numeric/big_int.hpp"
+#include "numeric/big_float.hpp"
+#include "approximation/certified_constants.hpp"
+#include "approximation/certified_trigonometry.hpp"
+#include "approximation/real_interval.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -386,6 +391,903 @@ RationalRootInterval RealAlgebraicNumber::refined(std::size_t precisionBits) con
             result.lower = midpoint;
     }
     return result;
+}
+
+
+namespace {
+
+using numeric::BigFloat;
+using numeric::RoundingMode;
+
+struct RationalComplex final {
+    Rational real;
+    Rational imaginary;
+};
+
+[[nodiscard]] RationalComplex rcAdd(const RationalComplex& a, const RationalComplex& b) {
+    return {a.real + b.real, a.imaginary + b.imaginary};
+}
+[[nodiscard]] RationalComplex rcMultiply(const RationalComplex& a, const RationalComplex& b) {
+    return {
+        a.real * b.real - a.imaginary * b.imaginary,
+        a.real * b.imaginary + a.imaginary * b.real};
+}
+[[nodiscard]] RationalComplex rcScale(const RationalComplex& a, const Rational& s) {
+    return {a.real * s, a.imaginary * s};
+}
+[[nodiscard]] Rational rcL1(const RationalComplex& a) {
+    return absolute(a.real) + absolute(a.imaginary);
+}
+[[nodiscard]] Rational rcMagnitudeSquared(const RationalComplex& a) {
+    return a.real * a.real + a.imaginary * a.imaginary;
+}
+[[nodiscard]] RationalComplex rcPower(RationalComplex base, std::size_t exponent) {
+    RationalComplex result{Rational{BigInt{1}}, Rational{}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result = rcMultiply(result, base);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = rcMultiply(base, base);
+    }
+    return result;
+}
+
+[[nodiscard]] std::uint64_t binomialSmall(std::size_t n, std::size_t k) {
+    k = std::min(k, n - k);
+    std::uint64_t result = 1;
+    for (std::size_t i = 1; i <= k; ++i)
+        result = (result * static_cast<std::uint64_t>(n - k + i)) / static_cast<std::uint64_t>(i);
+    return result;
+}
+
+[[nodiscard]] std::vector<RationalComplex> taylorAt(
+    const Polynomial& polynomial,
+    const RationalComplex& center) {
+    const std::size_t degree = polynomial.size() - 1;
+    std::vector<RationalComplex> result(degree + 1);
+    for (std::size_t k = 0; k <= degree; ++k) {
+        RationalComplex sum{};
+        for (std::size_t j = k; j <= degree; ++j) {
+            const Rational choose{BigInt::fromUnsigned(binomialSmall(j, k))};
+            const RationalComplex term = rcScale(
+                rcPower(center, j - k), polynomial[j] * choose);
+            sum = rcAdd(sum, term);
+        }
+        result[k] = std::move(sum);
+    }
+    return result;
+}
+
+[[nodiscard]] bool certifiesUniqueRoot(
+    const Polynomial& polynomial,
+    const RationalComplexDisk& disk) {
+    if (disk.radius <= Rational{})
+        return false;
+    const auto taylor = taylorAt(polynomial, {disk.real, disk.imaginary});
+    if (taylor.size() < 2)
+        return false;
+
+    Rational remainderBound = rcL1(taylor[0]);
+    Rational radiusPower = disk.radius * disk.radius;
+    for (std::size_t k = 2; k < taylor.size(); ++k) {
+        remainderBound += rcL1(taylor[k]) * radiusPower;
+        radiusPower *= disk.radius;
+    }
+    const Rational derivativeSquared = rcMagnitudeSquared(taylor[1]);
+    if (derivativeSquared.isZero())
+        return false;
+    // |q0| + sum_{k>=2}|qk|r^k < |q1|r なら，境界上で線形項が残差を支配する。
+    // Roucheによりdisk内のpの零点数は線形多項式と同じ1個になる。
+    return remainderBound * remainderBound
+        < derivativeSquared * disk.radius * disk.radius;
+}
+
+[[nodiscard]] bool disksDisjoint(
+    const RationalComplexDisk& a,
+    const RationalComplexDisk& b) {
+    const Rational dx = a.real - b.real;
+    const Rational dy = a.imaginary - b.imaginary;
+    const Rational radius = a.radius + b.radius;
+    return dx * dx + dy * dy > radius * radius;
+}
+
+struct ApproxComplex final {
+    BigFloat real;
+    BigFloat imaginary;
+};
+
+[[nodiscard]] BigFloat bf(const Rational& value, std::size_t bits) {
+    return BigFloat::fromRational(value, bits, RoundingMode::NearestEven);
+}
+[[nodiscard]] BigFloat bfAdd(const BigFloat& a, const BigFloat& b, std::size_t bits) {
+    return numeric::add(a, b, bits, RoundingMode::NearestEven);
+}
+[[nodiscard]] BigFloat bfSub(const BigFloat& a, const BigFloat& b, std::size_t bits) {
+    return numeric::subtract(a, b, bits, RoundingMode::NearestEven);
+}
+[[nodiscard]] BigFloat bfMul(const BigFloat& a, const BigFloat& b, std::size_t bits) {
+    return numeric::multiply(a, b, bits, RoundingMode::NearestEven);
+}
+[[nodiscard]] BigFloat bfDiv(const BigFloat& a, const BigFloat& b, std::size_t bits) {
+    return numeric::divide(a, b, bits, RoundingMode::NearestEven);
+}
+[[nodiscard]] ApproxComplex acSub(const ApproxComplex& a, const ApproxComplex& b, std::size_t bits) {
+    return {bfSub(a.real, b.real, bits), bfSub(a.imaginary, b.imaginary, bits)};
+}
+[[nodiscard]] ApproxComplex acMul(const ApproxComplex& a, const ApproxComplex& b, std::size_t bits) {
+    const BigFloat ac = bfMul(a.real, b.real, bits);
+    const BigFloat bd = bfMul(a.imaginary, b.imaginary, bits);
+    const BigFloat ad = bfMul(a.real, b.imaginary, bits);
+    const BigFloat bc = bfMul(a.imaginary, b.real, bits);
+    return {bfSub(ac, bd, bits), bfAdd(ad, bc, bits)};
+}
+[[nodiscard]] ApproxComplex acDiv(const ApproxComplex& a, const ApproxComplex& b, std::size_t bits) {
+    const BigFloat denominator = bfAdd(
+        bfMul(b.real, b.real, bits), bfMul(b.imaginary, b.imaginary, bits), bits);
+    if (denominator.isZero())
+        throw std::domain_error("Complex algebraic root iteration encountered a zero denominator");
+    return {
+        bfDiv(bfAdd(bfMul(a.real, b.real, bits), bfMul(a.imaginary, b.imaginary, bits), bits), denominator, bits),
+        bfDiv(bfSub(bfMul(a.imaginary, b.real, bits), bfMul(a.real, b.imaginary, bits), bits), denominator, bits)};
+}
+[[nodiscard]] ApproxComplex acScale(const ApproxComplex& a, const BigFloat& s, std::size_t bits) {
+    return {bfMul(a.real, s, bits), bfMul(a.imaginary, s, bits)};
+}
+
+[[nodiscard]] ApproxComplex evaluateApprox(
+    const Polynomial& polynomial,
+    const ApproxComplex& z,
+    std::size_t bits) {
+    ApproxComplex result{bf(Rational{}, bits), bf(Rational{}, bits)};
+    for (auto it = polynomial.rbegin(); it != polynomial.rend(); ++it) {
+        result = acMul(result, z, bits);
+        result.real = bfAdd(result.real, bf(*it, bits), bits);
+    }
+    return result;
+}
+
+[[nodiscard]] ApproxComplex evaluateDerivativeApprox(
+    const Polynomial& polynomial,
+    const ApproxComplex& z,
+    std::size_t bits) {
+    ApproxComplex result{bf(Rational{}, bits), bf(Rational{}, bits)};
+    for (std::size_t exponent = polynomial.size() - 1; exponent > 0; --exponent) {
+        result = acMul(result, z, bits);
+        const Rational coefficient = polynomial[exponent]
+            * Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(exponent))};
+        result.real = bfAdd(result.real, bf(coefficient, bits), bits);
+    }
+    return result;
+}
+
+[[nodiscard]] BigFloat intervalMidpoint(
+    const approximation::RealInterval& interval,
+    std::size_t bits) {
+    const Rational midpoint = (interval.lower().toRational() + interval.upper().toRational())
+        / Rational{BigInt{2}};
+    return bf(midpoint, bits);
+}
+
+[[nodiscard]] std::vector<ApproxComplex> durandKernerCandidates(
+    const Polynomial& polynomial,
+    std::size_t bits) {
+    const std::size_t degree = polynomial.size() - 1;
+    const Rational radiusRational = cauchyBound(polynomial) + Rational{BigInt{1}};
+    const BigFloat radius = bf(radiusRational, bits);
+    std::vector<ApproxComplex> roots;
+    roots.reserve(degree);
+    for (std::size_t k = 0; k < degree; ++k) {
+        const Rational turns{
+            BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k + 1)),
+            BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * degree))};
+        const auto cosine = approximation::encloseCosTurns(turns, bits + 16).interval;
+        const auto sine = approximation::encloseSinTurns(turns, bits + 16).interval;
+        roots.push_back(acScale(
+            {intervalMidpoint(cosine, bits), intervalMidpoint(sine, bits)}, radius, bits));
+    }
+
+    const std::size_t iterations = std::min<std::size_t>(4096, 128 + bits * 2);
+    for (std::size_t iteration = 0; iteration < iterations; ++iteration) {
+        std::vector<ApproxComplex> next = roots;
+        bool tinyCorrection = true;
+        const Rational threshold = Rational{BigInt{1}, BigInt{1} << std::min<std::size_t>(bits / 2, 4096)};
+        for (std::size_t i = 0; i < degree; ++i) {
+            ApproxComplex denominator{bf(Rational{BigInt{1}}, bits), bf(Rational{}, bits)};
+            for (std::size_t j = 0; j < degree; ++j)
+                if (i != j)
+                    denominator = acMul(denominator, acSub(roots[i], roots[j], bits), bits);
+            if (denominator.real.isZero() && denominator.imaginary.isZero()) {
+                tinyCorrection = false;
+                continue;
+            }
+            const ApproxComplex correction = acDiv(evaluateApprox(polynomial, roots[i], bits), denominator, bits);
+            next[i] = acSub(roots[i], correction, bits);
+            const Rational correctionL1 = absolute(correction.real.toRational())
+                + absolute(correction.imaginary.toRational());
+            if (correctionL1 > threshold)
+                tinyCorrection = false;
+        }
+        roots = std::move(next);
+        if (tinyCorrection && iteration > degree)
+            break;
+    }
+    return roots;
+}
+
+[[nodiscard]] std::optional<RationalComplexDisk> certifiedDiskAround(
+    const Polynomial& polynomial,
+    ApproxComplex center,
+    std::size_t bits) {
+    // Newtonで中心を数回磨き，その後はexact Rational中心へ固定してRouche判定する。
+    for (std::size_t i = 0; i < 12; ++i) {
+        const ApproxComplex derivative = evaluateDerivativeApprox(polynomial, center, bits);
+        if (derivative.real.isZero() && derivative.imaginary.isZero())
+            break;
+        center = acSub(center,
+            acDiv(evaluateApprox(polynomial, center, bits), derivative, bits), bits);
+    }
+    const RationalComplex rationalCenter{center.real.toRational(), center.imaginary.toRational()};
+    const ApproxComplex derivative = evaluateDerivativeApprox(polynomial, center, bits);
+    Rational correctionL1;
+    if (!(derivative.real.isZero() && derivative.imaginary.isZero())) {
+        const ApproxComplex correction = acDiv(evaluateApprox(polynomial, center, bits), derivative, bits);
+        correctionL1 = absolute(correction.real.toRational())
+            + absolute(correction.imaginary.toRational());
+    }
+    const std::size_t floorBits = std::min<std::size_t>(bits / 2, 4096);
+    const Rational floorRadius{BigInt{1}, BigInt{1} << floorBits};
+    Rational base = correctionL1 * Rational{BigInt{2}};
+    if (base < floorRadius)
+        base = floorRadius;
+
+    for (const std::int64_t multiplier : std::array<std::int64_t, 8>{1,2,4,8,16,32,64,128}) {
+        RationalComplexDisk disk{
+            rationalCenter.real, rationalCenter.imaginary,
+            base * Rational{BigInt{multiplier}}};
+        if (certifiesUniqueRoot(polynomial, disk))
+            return disk;
+    }
+    return std::nullopt;
+}
+
+struct RationalIntervalPair final { Rational lower; Rational upper; };
+
+[[nodiscard]] RationalIntervalPair multiplyIntervals(
+    const RationalIntervalPair& a,
+    const RationalIntervalPair& b) {
+    const std::array<Rational,4> values{
+        a.lower*b.lower, a.lower*b.upper, a.upper*b.lower, a.upper*b.upper};
+    auto [minIt, maxIt] = std::minmax_element(values.begin(), values.end());
+    return {*minIt, *maxIt};
+}
+
+[[nodiscard]] RationalIntervalPair orderingKeyInterval(
+    const RationalComplexDisk& disk,
+    const RationalIntervalPair& pi) {
+    const RationalIntervalPair imaginary{
+        disk.imaginary - disk.radius, disk.imaginary + disk.radius};
+    const auto piImag = multiplyIntervals(pi, imaginary);
+    return {
+        disk.real - disk.radius + piImag.lower,
+        disk.real + disk.radius + piImag.upper};
+}
+
+[[nodiscard]] std::optional<std::vector<RationalComplexDisk>> isolateComplexDisks(
+    const Polynomial& polynomial,
+    std::size_t minimumBits = 128) {
+    if (polynomial.size() <= 1)
+        return std::vector<RationalComplexDisk>{};
+    if (polynomial.size() - 1 > maximumAlgebraicDegree)
+        return std::nullopt;
+    const std::size_t degree = polynomial.size() - 1;
+
+    for (std::size_t bits = std::max<std::size_t>(128, minimumBits); bits <= 4096; bits *= 2) {
+        std::vector<ApproxComplex> candidates;
+        try {
+            candidates = durandKernerCandidates(polynomial, bits);
+        }
+        catch (const std::exception&) {
+            continue;
+        }
+        if (candidates.size() != degree)
+            continue;
+
+        std::vector<RationalComplexDisk> disks;
+        disks.reserve(degree);
+        bool failed = false;
+        for (ApproxComplex& candidate : candidates) {
+            const auto disk = certifiedDiskAround(polynomial, std::move(candidate), bits);
+            if (!disk) {
+                failed = true;
+                break;
+            }
+            disks.push_back(*disk);
+        }
+        if (failed)
+            continue;
+
+        for (std::size_t i = 0; i < disks.size() && !failed; ++i)
+            for (std::size_t j = i + 1; j < disks.size(); ++j)
+                if (!disksDisjoint(disks[i], disks[j])) {
+                    failed = true;
+                    break;
+                }
+        if (failed)
+            continue;
+
+        const auto piBox = approximation::enclosePi(bits + 32).interval;
+        const RationalIntervalPair pi{
+            piBox.lower().toRational(), piBox.upper().toRational()};
+        std::sort(disks.begin(), disks.end(), [&](const RationalComplexDisk& lhs, const RationalComplexDisk& rhs) {
+            const Rational lhsMid = lhs.real + ((pi.lower + pi.upper) / Rational{BigInt{2}}) * lhs.imaginary;
+            const Rational rhsMid = rhs.real + ((pi.lower + pi.upper) / Rational{BigInt{2}}) * rhs.imaginary;
+            return lhsMid < rhsMid;
+        });
+        bool ordered = true;
+        for (std::size_t i = 1; i < disks.size(); ++i) {
+            const auto left = orderingKeyInterval(disks[i - 1], pi);
+            const auto right = orderingKeyInterval(disks[i], pi);
+            if (!(left.upper < right.lower)) {
+                ordered = false;
+                break;
+            }
+        }
+        if (ordered)
+            return disks;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool complexDiskNarrowEnough(
+    const RationalComplexDisk& disk,
+    std::size_t precisionBits) {
+    const Rational scale = Rational{BigInt{1}}
+        + absolute(disk.real) + absolute(disk.imaginary);
+    return disk.radius * powerOfTwo(precisionBits + 8) <= scale;
+}
+
+} // namespace
+
+ComplexAlgebraicNumber::ComplexAlgebraicNumber(
+    std::vector<Rational> polynomial,
+    std::size_t rootIndex,
+    RationalComplexDisk disk)
+    : polynomial_(std::move(polynomial)), rootIndex_(rootIndex), disk_(std::move(disk)) {}
+
+std::optional<ComplexAlgebraicNumber> ComplexAlgebraicNumber::create(
+    std::span<const Rational> polynomial,
+    std::size_t rootIndex) {
+    if (rootIndex == 0)
+        return std::nullopt;
+    Polynomial normalizedPolynomial = normalized(polynomial);
+    if (normalizedPolynomial.size() <= 1)
+        return std::nullopt;
+    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+        return std::nullopt;
+    normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
+    const auto disks = isolateComplexDisks(normalizedPolynomial);
+    if (!disks || rootIndex > disks->size())
+        return std::nullopt;
+    return ComplexAlgebraicNumber{
+        std::move(normalizedPolynomial), rootIndex, (*disks)[rootIndex - 1]};
+}
+
+std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::isolateAll(
+    std::span<const Rational> polynomial) {
+    Polynomial normalizedPolynomial = normalized(polynomial);
+    if (normalizedPolynomial.size() <= 1)
+        return std::vector<ComplexAlgebraicNumber>{};
+    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+        return std::nullopt;
+    normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
+    const auto disks = isolateComplexDisks(normalizedPolynomial);
+    if (!disks)
+        return std::nullopt;
+    std::vector<ComplexAlgebraicNumber> roots;
+    roots.reserve(disks->size());
+    for (std::size_t i = 0; i < disks->size(); ++i)
+        roots.push_back(ComplexAlgebraicNumber{normalizedPolynomial, i + 1, (*disks)[i]});
+    return roots;
+}
+
+std::span<const Rational> ComplexAlgebraicNumber::polynomial() const noexcept { return polynomial_; }
+std::size_t ComplexAlgebraicNumber::degree() const noexcept { return polynomial_.size() - 1; }
+std::size_t ComplexAlgebraicNumber::rootIndex() const noexcept { return rootIndex_; }
+const RationalComplexDisk& ComplexAlgebraicNumber::isolatingDisk() const noexcept { return disk_; }
+
+RationalComplexDisk ComplexAlgebraicNumber::refined(std::size_t precisionBits) const {
+    if (complexDiskNarrowEnough(disk_, precisionBits))
+        return disk_;
+    const auto disks = isolateComplexDisks(polynomial_, std::min<std::size_t>(4096, precisionBits + 64));
+    if (!disks || rootIndex_ > disks->size())
+        throw std::runtime_error("Complex algebraic root refinement did not converge");
+    return (*disks)[rootIndex_ - 1];
+}
+
+
+namespace {
+
+constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
+
+[[nodiscard]] Rational determinant(std::vector<std::vector<Rational>> matrix) {
+    if (matrix.empty())
+        return Rational{BigInt{1}};
+    const std::size_t size = matrix.size();
+    Rational result{BigInt{1}};
+    bool negative = false;
+    for (std::size_t column = 0; column < size; ++column) {
+        std::size_t pivot = column;
+        while (pivot < size && matrix[pivot][column].isZero())
+            ++pivot;
+        if (pivot == size)
+            return Rational{};
+        if (pivot != column) {
+            std::swap(matrix[pivot], matrix[column]);
+            negative = !negative;
+        }
+        const Rational pivotValue = matrix[column][column];
+        result *= pivotValue;
+        for (std::size_t row = column + 1; row < size; ++row) {
+            if (matrix[row][column].isZero())
+                continue;
+            const Rational factor = matrix[row][column] / pivotValue;
+            for (std::size_t k = column + 1; k < size; ++k)
+                matrix[row][k] -= factor * matrix[column][k];
+            matrix[row][column] = Rational{};
+        }
+    }
+    return negative ? -result : result;
+}
+
+[[nodiscard]] Rational resultant(const Polynomial& lhs, const Polynomial& rhs) {
+    if (lhs.size() <= 1 || rhs.size() <= 1)
+        return Rational{};
+    const std::size_t m = lhs.size() - 1;
+    const std::size_t n = rhs.size() - 1;
+    const std::size_t size = m + n;
+    std::vector<std::vector<Rational>> matrix(size, std::vector<Rational>(size));
+    for (std::size_t row = 0; row < n; ++row)
+        for (std::size_t j = 0; j <= m; ++j)
+            matrix[row][row + j] = lhs[j];
+    for (std::size_t row = 0; row < m; ++row)
+        for (std::size_t j = 0; j <= n; ++j)
+            matrix[n + row][row + j] = rhs[j];
+    return determinant(std::move(matrix));
+}
+
+[[nodiscard]] BigInt binomialInteger(std::size_t n, std::size_t k) {
+    if (k > n)
+        return BigInt{};
+    k = std::min(k, n - k);
+    BigInt result{1};
+    for (std::size_t i = 1; i <= k; ++i) {
+        result *= BigInt::fromUnsigned(n - k + i);
+        result /= BigInt::fromUnsigned(i);
+    }
+    return result;
+}
+
+[[nodiscard]] Rational integerPowerRational(Rational base, std::size_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] Polynomial shiftedNegatedArgument(const Polynomial& polynomial, const Rational& shift) {
+    // q(shift-y) をyの昇冪係数へ展開する。
+    Polynomial result(polynomial.size());
+    for (std::size_t j = 0; j < polynomial.size(); ++j) {
+        for (std::size_t k = 0; k <= j; ++k) {
+            Rational coefficient = polynomial[j]
+                * Rational{binomialInteger(j, k)}
+                * integerPowerRational(shift, j - k);
+            if ((k & 1U) != 0)
+                coefficient = -coefficient;
+            result[k] += coefficient;
+        }
+    }
+    normalize(result);
+    return result;
+}
+
+[[nodiscard]] Polynomial multiplicationTransform(const Polynomial& polynomial, const Rational& value) {
+    // y^n q(value/y) = sum_j q_j value^j y^(n-j)
+    const std::size_t degree = polynomial.size() - 1;
+    Polynomial result(degree + 1);
+    Rational valuePower{BigInt{1}};
+    for (std::size_t j = 0; j <= degree; ++j) {
+        result[degree - j] += polynomial[j] * valuePower;
+        valuePower *= value;
+    }
+    normalize(result);
+    return result;
+}
+
+[[nodiscard]] Polynomial multiplyByLinearFactor(
+    const Polynomial& polynomial,
+    const Rational& constant) {
+    // polynomial * (x-constant)
+    Polynomial result(polynomial.size() + 1);
+    for (std::size_t i = 0; i < polynomial.size(); ++i) {
+        result[i] -= polynomial[i] * constant;
+        result[i + 1] += polynomial[i];
+    }
+    normalize(result);
+    return result;
+}
+
+[[nodiscard]] Polynomial interpolateIntegerGrid(const std::vector<Rational>& values) {
+    if (values.empty())
+        return {};
+    std::vector<Rational> differences = values;
+    std::vector<Rational> forward;
+    forward.reserve(values.size());
+    for (std::size_t order = 0; order < values.size(); ++order) {
+        forward.push_back(differences.front());
+        for (std::size_t i = 0; i + 1 < differences.size(); ++i)
+            differences[i] = differences[i + 1] - differences[i];
+        differences.pop_back();
+    }
+
+    Polynomial result(values.size());
+    Polynomial falling{Rational{BigInt{1}}};
+    BigInt factorial{1};
+    for (std::size_t k = 0; k < forward.size(); ++k) {
+        const Rational scale = forward[k] / Rational{factorial};
+        for (std::size_t i = 0; i < falling.size(); ++i)
+            result[i] += falling[i] * scale;
+        if (k + 1 < forward.size()) {
+            falling = multiplyByLinearFactor(falling, Rational{BigInt::fromUnsigned(k)});
+            factorial *= BigInt::fromUnsigned(k + 1);
+        }
+    }
+    normalize(result);
+    return result;
+}
+
+[[nodiscard]] Polynomial resultantPolynomial(
+    const Polynomial& lhs,
+    const Polynomial& rhs,
+    AlgebraicBinaryOperation operation) {
+    Polynomial right = rhs;
+    if (operation == AlgebraicBinaryOperation::Subtract) {
+        for (std::size_t i = 1; i < right.size(); i += 2)
+            right[i] = -right[i];
+        operation = AlgebraicBinaryOperation::Add;
+    }
+    else if (operation == AlgebraicBinaryOperation::Divide) {
+        std::reverse(right.begin(), right.end());
+        normalize(right); // zero rootは逆数を持たないため自然に次数から落ちる。
+        if (right.size() <= 1)
+            return {};
+        operation = AlgebraicBinaryOperation::Multiply;
+    }
+
+    const std::size_t lhsDegree = lhs.size() - 1;
+    const std::size_t rhsDegree = right.size() - 1;
+    const std::size_t degreeBound = lhsDegree * rhsDegree;
+    if (degreeBound == 0 || degreeBound > maximumAlgebraicArithmeticDegree)
+        return {};
+
+    std::vector<Rational> values;
+    values.reserve(degreeBound + 1);
+    for (std::size_t sample = 0; sample <= degreeBound; ++sample) {
+        const Rational x{BigInt::fromUnsigned(sample)};
+        Polynomial transformed = operation == AlgebraicBinaryOperation::Add
+            ? shiftedNegatedArgument(right, x)
+            : multiplicationTransform(right, x);
+        values.push_back(resultant(lhs, transformed));
+    }
+    return canonicalPolynomial(interpolateIntegerGrid(values));
+}
+
+[[nodiscard]] RationalComplexDisk asDisk(const AlgebraicNumber& value, std::size_t bits) {
+    if (const auto* real = value.asReal()) {
+        const RationalRootInterval interval = real->refined(bits);
+        const Rational two{BigInt{2}};
+        return RationalComplexDisk{
+            (interval.lower + interval.upper) / two,
+            Rational{},
+            (interval.upper - interval.lower) / two};
+    }
+    return value.asComplex()->refined(bits);
+}
+
+[[nodiscard]] Rational complexL1(const RationalComplexDisk& disk) {
+    return absolute(disk.real) + absolute(disk.imaginary);
+}
+
+[[nodiscard]] RationalComplexDisk addDisks(
+    const RationalComplexDisk& lhs,
+    const RationalComplexDisk& rhs,
+    bool subtract) {
+    return RationalComplexDisk{
+        subtract ? lhs.real - rhs.real : lhs.real + rhs.real,
+        subtract ? lhs.imaginary - rhs.imaginary : lhs.imaginary + rhs.imaginary,
+        lhs.radius + rhs.radius};
+}
+
+[[nodiscard]] RationalComplexDisk multiplyDisks(
+    const RationalComplexDisk& lhs,
+    const RationalComplexDisk& rhs) {
+    const Rational real = lhs.real * rhs.real - lhs.imaginary * rhs.imaginary;
+    const Rational imaginary = lhs.real * rhs.imaginary + lhs.imaginary * rhs.real;
+    const Rational radius = complexL1(lhs) * rhs.radius
+        + complexL1(rhs) * lhs.radius + lhs.radius * rhs.radius;
+    return RationalComplexDisk{real, imaginary, radius};
+}
+
+[[nodiscard]] std::optional<RationalComplexDisk> reciprocalDisk(
+    const RationalComplexDisk& value) {
+    const Rational absReal = absolute(value.real);
+    const Rational absImaginary = absolute(value.imaginary);
+    const Rational magnitudeLower = absReal < absImaginary ? absImaginary : absReal;
+    if (magnitudeLower <= value.radius)
+        return std::nullopt;
+    const Rational denominator = value.real * value.real + value.imaginary * value.imaginary;
+    if (denominator.isZero())
+        return std::nullopt;
+    const Rational real = value.real / denominator;
+    const Rational imaginary = -value.imaginary / denominator;
+    const Rational distanceLower = magnitudeLower - value.radius;
+    const Rational radius = value.radius / (magnitudeLower * distanceLower);
+    return RationalComplexDisk{real, imaginary, radius};
+}
+
+[[nodiscard]] std::optional<RationalComplexDisk> imageDisk(
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation,
+    std::size_t bits) {
+    const RationalComplexDisk left = asDisk(lhs, bits);
+    const RationalComplexDisk right = asDisk(rhs, bits);
+    switch (operation) {
+    case AlgebraicBinaryOperation::Add:
+        return addDisks(left, right, false);
+    case AlgebraicBinaryOperation::Subtract:
+        return addDisks(left, right, true);
+    case AlgebraicBinaryOperation::Multiply:
+        return multiplyDisks(left, right);
+    case AlgebraicBinaryOperation::Divide: {
+        const auto reciprocal = reciprocalDisk(right);
+        if (!reciprocal)
+            return std::nullopt;
+        return multiplyDisks(left, *reciprocal);
+    }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool disksIntersect(
+    const RationalComplexDisk& lhs,
+    const RationalComplexDisk& rhs) {
+    const Rational dx = lhs.real - rhs.real;
+    const Rational dy = lhs.imaginary - rhs.imaginary;
+    const Rational radius = lhs.radius + rhs.radius;
+    return dx * dx + dy * dy <= radius * radius;
+}
+
+[[nodiscard]] RationalComplexDisk intervalDisk(const RationalRootInterval& interval) {
+    const Rational two{BigInt{2}};
+    return RationalComplexDisk{
+        (interval.lower + interval.upper) / two,
+        Rational{},
+        (interval.upper - interval.lower) / two};
+}
+
+[[nodiscard]] std::optional<AlgebraicNumber> selectResultRoot(
+    const Polynomial& polynomial,
+    AlgebraicRootDomain domain,
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation) {
+    if (polynomial.size() <= 1 || polynomial.size() - 1 > maximumAlgebraicDegree)
+        return std::nullopt;
+
+    if (domain == AlgebraicRootDomain::Real) {
+        const auto roots = RealAlgebraicNumber::isolateAll(polynomial);
+        if (!roots)
+            return std::nullopt;
+        for (std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+            const auto target = imageDisk(lhs, rhs, operation, bits);
+            if (!target)
+                continue;
+            std::size_t match = 0;
+            std::size_t matchIndex = 0;
+            for (const RealAlgebraicNumber& root : *roots) {
+                if (disksIntersect(intervalDisk(root.refined(bits)), *target)) {
+                    ++match;
+                    matchIndex = root.rootIndex();
+                }
+            }
+            if (match == 1)
+                return AlgebraicNumber::create(polynomial, matchIndex, domain);
+        }
+        return std::nullopt;
+    }
+
+    const auto roots = ComplexAlgebraicNumber::isolateAll(polynomial);
+    if (!roots)
+        return std::nullopt;
+    for (std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+        const auto target = imageDisk(lhs, rhs, operation, bits);
+        if (!target)
+            continue;
+        std::size_t match = 0;
+        std::size_t matchIndex = 0;
+        for (const ComplexAlgebraicNumber& root : *roots) {
+            if (disksIntersect(root.refined(bits), *target)) {
+                ++match;
+                matchIndex = root.rootIndex();
+            }
+        }
+        if (match == 1)
+            return AlgebraicNumber::create(polynomial, matchIndex, domain);
+    }
+    return std::nullopt;
+}
+
+
+[[nodiscard]] BigInt floorRational(const Rational& value) {
+    BigInt quotient = value.numerator() / value.denominator();
+    if (value.numerator().isNegative()
+        && !(value.numerator() % value.denominator()).isZero())
+        quotient -= BigInt{1};
+    return quotient;
+}
+
+[[nodiscard]] Rational simplestPositive(const Rational& lower, const Rational& upper) {
+    if (!(Rational{} < lower) || upper < lower)
+        throw std::logic_error("Invalid positive rational interval");
+    if (lower.isInteger())
+        return lower;
+    const BigInt lowerFloor = floorRational(lower);
+    const BigInt upperFloor = floorRational(upper);
+    if (lowerFloor != upperFloor)
+        return Rational{lowerFloor + BigInt{1}};
+    const Rational integerPart{lowerFloor};
+    const Rational lowFraction = lower - integerPart;
+    const Rational highFraction = upper - integerPart;
+    if (lowFraction.isZero())
+        return lower;
+    return integerPart + Rational{BigInt{1}} /
+        simplestPositive(Rational{BigInt{1}} / highFraction,
+            Rational{BigInt{1}} / lowFraction);
+}
+
+[[nodiscard]] Rational simplestInInterval(Rational lower, Rational upper) {
+    if (upper < lower)
+        std::swap(lower, upper);
+    if (lower <= Rational{} && Rational{} <= upper)
+        return Rational{};
+    if (upper < Rational{})
+        return -simplestPositive(-upper, -lower);
+    return simplestPositive(lower, upper);
+}
+
+[[nodiscard]] RationalComplex evaluateComplex(
+    const Polynomial& polynomial,
+    const RationalComplex& value) {
+    RationalComplex result{};
+    for (auto iterator = polynomial.rbegin(); iterator != polynomial.rend(); ++iterator)
+        result = rcAdd(rcMultiply(result, value), RationalComplex{*iterator, Rational{}});
+    return result;
+}
+
+} // namespace
+
+AlgebraicNumber::AlgebraicNumber(RealAlgebraicNumber value) : value_(std::move(value)) {}
+AlgebraicNumber::AlgebraicNumber(ComplexAlgebraicNumber value) : value_(std::move(value)) {}
+
+std::optional<AlgebraicNumber> AlgebraicNumber::create(
+    std::span<const Rational> polynomial,
+    std::size_t rootIndex,
+    AlgebraicRootDomain domain) {
+    if (domain == AlgebraicRootDomain::Real) {
+        auto value = RealAlgebraicNumber::create(polynomial, rootIndex);
+        if (!value)
+            return std::nullopt;
+        return AlgebraicNumber{std::move(*value)};
+    }
+    auto value = ComplexAlgebraicNumber::create(polynomial, rootIndex);
+    if (!value)
+        return std::nullopt;
+    return AlgebraicNumber{std::move(*value)};
+}
+
+std::optional<AlgebraicNumber> AlgebraicNumber::fromRational(const Rational& value) {
+    const std::array<Rational, 2> polynomial{-value, Rational{BigInt{1}}};
+    return create(polynomial, 1, AlgebraicRootDomain::Real);
+}
+
+std::optional<AlgebraicNumber> AlgebraicNumber::fromComplexRational(
+    const Rational& real,
+    const Rational& imaginary) {
+    if (imaginary.isZero())
+        return fromRational(real);
+    const std::array<Rational, 3> polynomial{
+        real * real + imaginary * imaginary,
+        -Rational{BigInt{2}} * real,
+        Rational{BigInt{1}}};
+    const auto roots = ComplexAlgebraicNumber::isolateAll(polynomial);
+    if (!roots)
+        return std::nullopt;
+    const RationalComplexDisk point{real, imaginary, Rational{}};
+    for (const ComplexAlgebraicNumber& root : *roots)
+        if (disksIntersect(root.isolatingDisk(), point))
+            return AlgebraicNumber{root};
+    return std::nullopt;
+}
+
+std::optional<AlgebraicNumber> AlgebraicNumber::combine(
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation) {
+    Polynomial left(lhs.polynomial().begin(), lhs.polynomial().end());
+    Polynomial right(rhs.polynomial().begin(), rhs.polynomial().end());
+    if (left.size() <= 1 || right.size() <= 1)
+        return std::nullopt;
+    if ((left.size() - 1) * (right.size() - 1) > maximumAlgebraicArithmeticDegree)
+        return std::nullopt;
+
+    Polynomial result = resultantPolynomial(left, right, operation);
+    if (result.size() <= 1)
+        return std::nullopt;
+    const AlgebraicRootDomain resultDomain =
+        lhs.domain() == AlgebraicRootDomain::Real && rhs.domain() == AlgebraicRootDomain::Real
+        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
+    return selectResultRoot(result, resultDomain, lhs, rhs, operation);
+}
+
+AlgebraicRootDomain AlgebraicNumber::domain() const noexcept {
+    return std::holds_alternative<RealAlgebraicNumber>(value_)
+        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
+}
+std::span<const Rational> AlgebraicNumber::polynomial() const noexcept {
+    if (const auto* value = std::get_if<RealAlgebraicNumber>(&value_))
+        return value->polynomial();
+    return std::get<ComplexAlgebraicNumber>(value_).polynomial();
+}
+std::size_t AlgebraicNumber::rootIndex() const noexcept {
+    if (const auto* value = std::get_if<RealAlgebraicNumber>(&value_))
+        return value->rootIndex();
+    return std::get<ComplexAlgebraicNumber>(value_).rootIndex();
+}
+const RealAlgebraicNumber* AlgebraicNumber::asReal() const noexcept {
+    return std::get_if<RealAlgebraicNumber>(&value_);
+}
+const ComplexAlgebraicNumber* AlgebraicNumber::asComplex() const noexcept {
+    return std::get_if<ComplexAlgebraicNumber>(&value_);
+}
+
+std::optional<std::pair<Rational, Rational>> AlgebraicNumber::exactRationalParts() const {
+    if (const auto* real = asReal()) {
+        const RationalRootInterval interval = real->refined(192);
+        const Rational candidate = simplestInInterval(interval.lower, interval.upper);
+        if (evaluate(Polynomial{real->polynomial().begin(), real->polynomial().end()}, candidate).isZero())
+            return std::pair<Rational, Rational>{candidate, Rational{}};
+        return std::nullopt;
+    }
+
+    const auto* complex = asComplex();
+    const RationalComplexDisk disk = complex->refined(192);
+    const Rational realCandidate = simplestInInterval(
+        disk.real - disk.radius, disk.real + disk.radius);
+    const Rational imaginaryCandidate = simplestInInterval(
+        disk.imaginary - disk.radius, disk.imaginary + disk.radius);
+    const RationalComplex candidate{realCandidate, imaginaryCandidate};
+    const RationalComplex value = evaluateComplex(
+        Polynomial{complex->polynomial().begin(), complex->polynomial().end()}, candidate);
+    if (value.real.isZero() && value.imaginary.isZero())
+        return std::pair<Rational, Rational>{realCandidate, imaginaryCandidate};
+    return std::nullopt;
 }
 
 } // namespace mmcal::symbolic

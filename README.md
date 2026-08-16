@@ -505,7 +505,7 @@ N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 ```
 
-General Complex Root isolation and algebraic-field arithmetic between Root values remain future work.
+Complex roots are represented by `root[{a0,...,an},k,Complex]`, using certified isolating disks and exact Root fallback for high-degree Rational-polynomial Complex Solve. Bounded exact algebraic-field `+ - * /` between Root values and exact Rational/complex-Rational operands uses resultants plus certified root re-identification. The current candidate-degree budget is 16; full minimal-polynomial reduction, primitive-element reduction, and general algebraic equality/ordering remain deliberate future work.
 
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.

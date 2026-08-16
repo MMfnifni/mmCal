@@ -102,3 +102,21 @@ fib[0]==>0
 fib[1]==>1
 fib[2]==>1
 fib[100]==>354224848179261915075
+
+# BigInt bitwise utilities use infinite two's-complement semantics.
+bitand[-1,5]==>5
+bitor[-8,3]==>-5
+bitxor[-1,5]==>-6
+bitnot[5]==>-6
+bitshiftl[3,4]==>48
+bitshiftr[-3,1]==>-2
+bitget[-2,0]==>0
+bitget[-2,100]==>1
+bitcount[255]==>8
+bitlength[-255]==>8
+round[125,-1]==>120
+round[135,-1]==>140
+round[N[Pi,5],2]==>157/50
+fma[2,3,4]==>10
+clamp[N[Pi,20],3,4]==>3.141592653589793238
+proj[3+4I]==>3+4I

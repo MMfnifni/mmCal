@@ -199,6 +199,30 @@ void testDivision(TestRunner& tests) {
         "BigInt rejects division by zero");
 }
 
+void testBitwise(TestRunner& tests) {
+    bool matches = true;
+    for (std::int64_t lhs = -64; lhs <= 64 && matches; ++lhs) {
+        for (std::int64_t rhs = -64; rhs <= 64; ++rhs) {
+            const BigInt a{lhs};
+            const BigInt b{rhs};
+            matches = matches
+                && (a & b).toString() == std::to_string(lhs & rhs)
+                && (a | b).toString() == std::to_string(lhs | rhs)
+                && (a ^ b).toString() == std::to_string(lhs ^ rhs);
+            if (!matches)
+                break;
+        }
+        matches = matches && (~BigInt{lhs}).toString() == std::to_string(~lhs);
+    }
+    tests.expect(matches, "BigInt bitwise arithmetic follows infinite two's-complement semantics");
+
+    const BigInt minusTwo{-2};
+    tests.expect(!minusTwo.testBit(0) && minusTwo.testBit(1) && minusTwo.testBit(4096),
+        "BigInt negative bit queries sign-extend indefinitely");
+    tests.expectEqual(BigInt::parse("255").populationCount(), std::size_t{8},
+        "BigInt population count counts finite magnitude bits");
+}
+
 void testAgainstInt64(TestRunner& tests) {
     bool matches = true;
 
@@ -233,6 +257,7 @@ void runBigIntTests(TestRunner& tests) {
     testArithmetic(tests);
     testLargeMultiplication(tests);
     testDivision(tests);
+    testBitwise(tests);
     testAgainstInt64(tests);
 }
 

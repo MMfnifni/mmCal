@@ -42,11 +42,11 @@ principal branchや定義域を壊さない範囲で式を標準化する。`Add
 
 ### `symbolic`
 
-`D`, `integrate`, `limit`, 代数変形、多項式、置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。Unreleasedでは`RealAlgebraicNumber` specialized IRを追加し，exact Rational Sturm列で定義多項式の異なる実根を分離する。定義多項式はmonic square-freeへ正規化し，各RootはRational isolating intervalと1-based実根indexを持つ。これは一般Exprを新しい巨大variantへ戻すのではなく，`root[{a0,...,an},k]`というexact Call表現を必要時だけspecialized viewへ解釈する設計である。
+`D`, `integrate`, `limit`, 代数変形、多項式、置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。Unreleasedでは`AlgebraicNumber` specialized IRを追加した。実Rootはexact Rational Sturm列で定義多項式の異なる実根を分離し，Rational isolating intervalと1-based実根indexを持つ。Complex Rootは`root[{a0,...,an},k,Complex]`としてsquare-free monic polynomialの全複素根をcertified isolating diskへ分離し，決定的な1-based orderingを与える。一般Exprを巨大variantへ戻すのではなく，Root Callを必要時だけ`RealAlgebraicNumber` / `ComplexAlgebraicNumber` viewへ解釈する。さらにresultantとoperand/result isolating regionの再同定により，Root / exact Rational / exact complex Rational間のbounded exact `+ - * /`を閉じる。候補次数budgetを超える場合や結果rootを一意に証明できない場合は元のsymbolic式を保持する。
 
 ### `solver`
 
-多項式，Rational function，制約付き解集合，実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。Unreleasedでは既存のlinear/quadratic/binomial/Rational-root solverで閉じないRational係数高次多項式について，Real domainに限り`RealAlgebraicNumber`のSturm isolationをexact fallbackとして利用する。一般Complex root isolationは未実装のため，Complex全解をRootで捏造しない。Unreleasedでは`SolutionBranch::freeVariables`をsolver変数の自由変数だけでなく，`where k in Integer`のような**branch-local formal parameter**にも一般化した。実軸`sin/cos/tan`の周期解はMathRegistryのperiod / principal inverse / real rangeを利用し，solve変数に対するexact affine argumentだけをinteger-parameter familyへ展開する。formal parameterはEnvironmentのユーザー変数ではなくSolutionSet内で局所束縛され，非線形argumentやComplex全解は安全な表現がない限り未解決のまま保持する。
+多項式，Rational function，制約付き解集合，実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。Unreleasedでは既存のlinear/quadratic/binomial/Rational-root solverで閉じないRational係数高次多項式について，Real domainではSturm isolation，Complex/default domainではcertified complex root isolationをexact Root fallbackとして利用する。Complex Rootはpairwise-disjoint isolating diskを証明できた場合だけ採用し，証明できない候補をComplex全解として捏造しない。Unreleasedでは`SolutionBranch::freeVariables`をsolver変数の自由変数だけでなく，`where k in Integer`のような**branch-local formal parameter**にも一般化した。実軸`sin/cos/tan`の周期解はMathRegistryのperiod / principal inverse / real rangeを利用し，solve変数に対するexact affine argumentだけをinteger-parameter familyへ展開する。formal parameterはEnvironmentのユーザー変数ではなくSolutionSet内で局所束縛され，非線形argumentやComplex全解は安全な表現がない限り未解決のまま保持する。
 
 ### `approximation`
 
