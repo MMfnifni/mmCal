@@ -11,12 +11,14 @@
 #include "simplification/simplifier.hpp"
 #include "solver/solve_constraints.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/algebraic_expression.hpp"
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/algebra_transforms.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -61,10 +63,12 @@ using mathematics::RelationKind;
     std::vector<Rational> coefficients(
         algebraic.polynomial().begin(), algebraic.polynomial().end());
     const std::size_t coefficientCount = coefficients.size();
+    const symbolic::AlgebraicNumber cached =
+        symbolic::AlgebraicNumber::fromRealRoot(algebraic).withGeneratorField();
     return Expr::call(builtins.symbol(BuiltinId::Root), {
         Expr::rationalArray({coefficientCount}, std::move(coefficients)),
         Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}}
-    });
+    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] Expr algebraicRootExpr(
@@ -73,18 +77,20 @@ using mathematics::RelationKind;
     std::vector<Rational> coefficients(
         algebraic.polynomial().begin(), algebraic.polynomial().end());
     const std::size_t coefficientCount = coefficients.size();
+    const symbolic::AlgebraicNumber cached =
+        symbolic::AlgebraicNumber::fromComplexRoot(algebraic).withGeneratorField();
     return Expr::call(builtins.symbol(BuiltinId::Root), {
         Expr::rationalArray({coefficientCount}, std::move(coefficients)),
         Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}},
         Expr{expression::Symbol{"Complex"}}
-    });
+    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] SolutionBranch branch(
     const expression::Symbol& variable,
     Expr value,
     std::optional<std::size_t> multiplicity = std::nullopt) {
-    return SolutionBranch{{SolutionBinding{variable, std::move(value)}}, {}, multiplicity, {}};
+    return SolutionBranch{{SolutionBinding{variable, std::move(value)}}, {}, multiplicity, {}, std::nullopt};
 }
 
 
@@ -888,7 +894,8 @@ void mergeRangePieces(std::vector<RealRangePiece>& pieces) {
         {},
         std::move(predicates),
         std::nullopt,
-        {SolverVariable{variable, mathematics::NumericDomain::Real}}};
+        {SolverVariable{variable, mathematics::NumericDomain::Real}},
+        std::nullopt};
 }
 
 [[nodiscard]] SolutionSet solutionFromSignChart(
@@ -1619,6 +1626,40 @@ struct SymbolicLinearEquation final {
     return result.withAdditionalConditions(domainConditions);
 }
 
+
+[[nodiscard]] std::optional<SolutionSet> solveDirectAlgebraicBinding(
+    const Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    if (!isHead(relation, builtins, BuiltinId::Equal)
+        || relation.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const Expr& lhs = relation.asCall().arguments[0];
+    const Expr& rhs = relation.asCall().arguments[1];
+    const auto isVariable = [&](const Expr& value) {
+        return value.isSymbol() && value.asSymbol() == variable;
+    };
+
+    const Expr* candidate = nullptr;
+    if (isVariable(lhs) && !symbolic::containsSymbol(rhs, variable))
+        candidate = &rhs;
+    else if (isVariable(rhs) && !symbolic::containsSymbol(lhs, variable))
+        candidate = &lhs;
+    if (!candidate)
+        return std::nullopt;
+
+    // 7-6ではexact algebraic valueだけをdirect bindingする。Infinityや一般symbolic式まで
+    // 「Complexの解」と推測せず，既存solverへfallbackする。
+    if (!symbolic::exactAlgebraicValue(*candidate, builtins, mathematics))
+        return std::nullopt;
+
+    return SolutionSet::finite(
+        {{variable, mathematics::NumericDomain::Complex}},
+        {branch(variable, *candidate)});
+}
+
 } // namespace
 
 SolutionSet solveUnivariatePolynomialRelation(
@@ -1627,6 +1668,10 @@ SolutionSet solveUnivariatePolynomialRelation(
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
+    if (const auto direct = solveDirectAlgebraicBinding(
+            relation, variable, builtins, mathematics))
+        return *direct;
+
     const auto relationKind = relationKindOf(relation, builtins);
     if (!relationKind || *relationKind == RelationKind::Equal)
         return solvePolynomialEquation(relation, variable, builtins, mathematics, angles);
@@ -1658,7 +1703,7 @@ SolutionSet solveUnivariatePolynomialRelation(
             variables,
             {SolutionBranch{
                 {}, std::move(exclusions), std::nullopt,
-                {SolverVariable{variable, mathematics::NumericDomain::Complex}}}});
+                {SolverVariable{variable, mathematics::NumericDomain::Complex}}, std::nullopt}});
     }
 
     const Expr zeroForm = equationZeroForm(relation, builtins, mathematics, angles);

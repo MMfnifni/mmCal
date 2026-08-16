@@ -7,6 +7,7 @@
 #include "builtins/signal_processing.hpp"
 #include "builtins/linear_algebra.hpp"
 #include "linear_algebra/decomposition.hpp"
+#include "kernel/kernel_session.hpp"
 #include "evaluation/builtin_registry.hpp"
 #include "expression/expr.hpp"
 #include "formatting/expr_formatter.hpp"
@@ -17,6 +18,8 @@
 #include "numeric/rational.hpp"
 #include "numeric/number.hpp"
 #include "symbols/symbol_table.hpp"
+#include "symbolic/algebraic_number.hpp"
+#include "symbolic/number_field.hpp"
 #include "random_expression_fuzzer.hpp"
 
 #include <algorithm>
@@ -233,6 +236,57 @@ struct FourierFixture final {
     if (checksum == 0)
         std::abort();
     return std::chrono::duration<double, std::milli>(end - start).count() / iterations;
+}
+
+struct ExactFftRoundTripTiming final {
+    double firstMilliseconds = 0.0;
+    double warmMilliseconds = 0.0;
+};
+
+[[nodiscard]] ExactFftRoundTripTiming benchmarkExactFftRoundTrip(
+    std::size_t size,
+    std::size_t iterations) {
+    FourierFixture fixture;
+    const mmcal::expression::Expr input = fourierInput(size);
+    const std::array<mmcal::expression::Expr, 1> forwardArguments{input};
+
+    const auto firstStart = Clock::now();
+    const auto firstForward = mmcal::builtins::evaluateFft(
+        forwardArguments, fixture.registry, fixture.mathematics, fixture.angles, fixture.cache);
+    const std::array<mmcal::expression::Expr, 1> firstInverseArguments{firstForward};
+    const auto firstRoundTrip = mmcal::builtins::evaluateIfft(
+        firstInverseArguments, fixture.registry, fixture.mathematics, fixture.angles, fixture.cache);
+    const auto firstEnd = Clock::now();
+    if (firstRoundTrip != input)
+        std::abort();
+
+    double warmMilliseconds = 0.0;
+    for (std::size_t i = 0; i < iterations; ++i) {
+        const auto start = Clock::now();
+        const auto forward = mmcal::builtins::evaluateFft(
+            forwardArguments, fixture.registry, fixture.mathematics, fixture.angles, fixture.cache);
+        const std::array<mmcal::expression::Expr, 1> inverseArguments{forward};
+        const auto roundTrip = mmcal::builtins::evaluateIfft(
+            inverseArguments, fixture.registry, fixture.mathematics, fixture.angles, fixture.cache);
+        const auto end = Clock::now();
+        if (roundTrip != input)
+            std::abort();
+        warmMilliseconds += std::chrono::duration<double, std::milli>(end - start).count();
+    }
+
+    return ExactFftRoundTripTiming{
+        std::chrono::duration<double, std::milli>(firstEnd - firstStart).count(),
+        warmMilliseconds / static_cast<double>(iterations)};
+}
+
+void runExactCyclotomicFftBenchmark(std::size_t iterations) {
+    std::cout << "exact cyclotomic FFT round-trip\n";
+    for (const std::size_t size : std::initializer_list<std::size_t>{5, 7, 10, 12, 15, 21}) {
+        const auto timing = benchmarkExactFftRoundTrip(size, iterations);
+        std::cout << "  " << std::setw(3) << size << " points"
+                  << "  first=" << timing.firstMilliseconds << " ms"
+                  << "  warm=" << timing.warmMilliseconds << " ms\n";
+    }
 }
 
 [[nodiscard]] double benchmarkApproximateDft(
@@ -1523,6 +1577,181 @@ void runBenchmarks(bool full) {
     }
 }
 
+void runAlgebraicFieldBenchmark(std::size_t iterations) {
+    if (iterations == 0)
+        throw std::invalid_argument("Algebraic field benchmark iterations must be positive");
+
+    constexpr std::string_view expression =
+        "(root[{-2,0,1},2]+root[{-3,0,0,1},1])*(root[{-2,0,1},2]-root[{-3,0,0,1},1])";
+    constexpr std::string_view expected = "root[{1, 12, -6, 1}, 1]";
+
+    mmcal::kernel::KernelSession session;
+    double firstMilliseconds = 0.0;
+    double warmMilliseconds = 0.0;
+    for (std::size_t i = 0; i < iterations; ++i) {
+        const auto start = Clock::now();
+        const auto result = session.evaluate(expression);
+        const auto end = Clock::now();
+        if (mmcal::formatting::formatExpr(result) != expected)
+            std::abort();
+
+        const double elapsed = std::chrono::duration<double, std::milli>(end - start).count();
+        if (i == 0)
+            firstMilliseconds = elapsed;
+        else
+            warmMilliseconds += elapsed;
+    }
+
+    std::cout << "algebraic compositum reuse\n"
+              << "  expression: " << expression << '\n'
+              << "  first: " << firstMilliseconds << " ms\n";
+    if (iterations > 1)
+        std::cout << "  warm avg: " << warmMilliseconds / static_cast<double>(iterations - 1)
+                  << " ms (" << (iterations - 1) << " runs)\n";
+
+    // x^12-2はEisensteinで既約。高めのdegreeでsame-field inverse reuseを単独測定する。
+    std::vector<Rational> polynomial(13);
+    polynomial[0] = Rational{BigInt{-2}};
+    polynomial[12] = Rational{BigInt{1}};
+    const auto generator = mmcal::symbolic::AlgebraicNumber::create(
+        polynomial, 2, mmcal::symbolic::AlgebraicRootDomain::Real);
+    auto field = generator ? mmcal::symbolic::NumberFieldContext::create(*generator) : nullptr;
+    if (!field)
+        std::abort();
+
+    std::vector<Rational> lhsCoordinates(field->degree());
+    std::vector<Rational> denominatorCoordinates(field->degree());
+    for (std::size_t i = 0; i < field->degree(); ++i) {
+        lhsCoordinates[i] = Rational{BigInt::fromUnsigned(i + 1)};
+        denominatorCoordinates[i] = Rational{
+            BigInt{static_cast<std::int64_t>(i % 5) - 2}};
+    }
+    denominatorCoordinates[0] = Rational{BigInt{2}};
+    auto lhs = mmcal::symbolic::AlgebraicElement::create(field, std::move(lhsCoordinates));
+    auto denominator = mmcal::symbolic::AlgebraicElement::create(
+        field, std::move(denominatorCoordinates));
+    if (!lhs || !denominator)
+        std::abort();
+
+    const auto reciprocalStart = Clock::now();
+    const auto reciprocal = field->reciprocal(denominator->coefficients());
+    const auto reciprocalEnd = Clock::now();
+    if (!reciprocal)
+        std::abort();
+    const auto product = field->multiply(denominator->coefficients(), *reciprocal);
+    if (product.empty() || product[0] != Rational{BigInt{1}}
+        || !std::all_of(product.begin() + 1, product.end(),
+            [](const Rational& coefficient) { return coefficient.isZero(); }))
+        std::abort();
+
+    const std::size_t microIterations = std::max<std::size_t>(256, iterations * 64);
+    std::size_t checksum = 0;
+    const auto warmReciprocalStart = Clock::now();
+    for (std::size_t i = 0; i < microIterations; ++i) {
+        const auto value = field->reciprocal(denominator->coefficients());
+        if (!value)
+            std::abort();
+        checksum += value->size();
+    }
+    const auto warmReciprocalEnd = Clock::now();
+
+    const auto warmDivideStart = Clock::now();
+    for (std::size_t i = 0; i < microIterations; ++i) {
+        const auto value = lhs->divide(*denominator);
+        if (!value)
+            std::abort();
+        checksum += value->coefficients().size();
+    }
+    const auto warmDivideEnd = Clock::now();
+    if (checksum == 0)
+        std::abort();
+
+    const auto minimalPolynomialStart = Clock::now();
+    const auto minimalPolynomial = denominator->minimalPolynomial();
+    const auto minimalPolynomialEnd = Clock::now();
+    if (!minimalPolynomial || minimalPolynomial->empty())
+        std::abort();
+
+    const std::size_t minimalPolynomialIterations = std::max<std::size_t>(256, iterations * 64);
+    std::size_t minimalPolynomialChecksum = 0;
+    const auto warmMinimalPolynomialStart = Clock::now();
+    for (std::size_t i = 0; i < minimalPolynomialIterations; ++i) {
+        const auto minimal = denominator->minimalPolynomial();
+        if (!minimal || *minimal != *minimalPolynomial)
+            std::abort();
+        minimalPolynomialChecksum += minimal->size();
+    }
+    const auto warmMinimalPolynomialEnd = Clock::now();
+    if (minimalPolynomialChecksum == 0)
+        std::abort();
+
+    std::cout << "algebraic reciprocal reuse (degree 12)\n"
+              << "  first reciprocal: "
+              << std::chrono::duration<double, std::micro>(
+                     reciprocalEnd - reciprocalStart).count()
+              << " us\n"
+              << "  warm reciprocal avg: "
+              << std::chrono::duration<double, std::micro>(
+                     warmReciprocalEnd - warmReciprocalStart).count()
+                     / static_cast<double>(microIterations)
+              << " us (" << microIterations << " runs)\n"
+              << "  warm divide avg: "
+              << std::chrono::duration<double, std::micro>(
+                     warmDivideEnd - warmDivideStart).count()
+                     / static_cast<double>(microIterations)
+              << " us (" << microIterations << " runs)\n"
+              << "  first minimal polynomial: "
+              << std::chrono::duration<double, std::micro>(
+                     minimalPolynomialEnd - minimalPolynomialStart).count()
+              << " us\n"
+              << "  warm minimal polynomial avg: "
+              << std::chrono::duration<double, std::micro>(
+                     warmMinimalPolynomialEnd - warmMinimalPolynomialStart).count()
+                     / static_cast<double>(minimalPolynomialIterations)
+              << " us (" << minimalPolynomialIterations << " runs)\n";
+}
+
+void runCertifiedSpecialFunctionBenchmark(std::size_t iterations) {
+    const Rational oneThird{BigInt{1}, BigInt{3}};
+    const Rational twoThirds{BigInt{2}, BigInt{3}};
+    const Rational oneQuarter{BigInt{1}, BigInt{4}};
+
+    std::cout << "certified special functions\n";
+    for (const std::size_t bits : {80U, 160U, 320U, 640U, 1280U}) {
+        const auto betaInput = mmcal::approximation::RealInterval::fromRational(
+            oneQuarter, bits + 64);
+
+        double gammaMilliseconds = 0.0;
+        for (std::size_t i = 0; i < iterations; ++i) {
+            const auto start = Clock::now();
+            const auto value = mmcal::approximation::encloseGammaRational(oneThird, bits);
+            const auto end = Clock::now();
+            if (value.lower().toRational() <= Rational{BigInt{0}})
+                std::abort();
+            gammaMilliseconds += std::chrono::duration<double, std::milli>(end - start).count();
+        }
+
+        const std::size_t ibetaIterations = bits >= 640 ? 1 : iterations;
+        double ibetaMilliseconds = 0.0;
+        for (std::size_t i = 0; i < ibetaIterations; ++i) {
+            const auto start = Clock::now();
+            const auto value = mmcal::approximation::encloseIncompleteBetaRegularized(
+                oneThird, twoThirds, betaInput, bits);
+            const auto end = Clock::now();
+            if (value.lower().toRational() < Rational{BigInt{0}}
+                || value.upper().toRational() > Rational{BigInt{1}})
+                std::abort();
+            ibetaMilliseconds += std::chrono::duration<double, std::milli>(end - start).count();
+        }
+
+        std::cout << "  " << std::setw(4) << bits << " bit"
+                  << "  gamma[1/3]=" << gammaMilliseconds / static_cast<double>(iterations) << " ms"
+                  << "  ibeta[1/3,2/3,1/4]="
+                  << ibetaMilliseconds / static_cast<double>(ibetaIterations) << " ms\n";
+    }
+}
+
+
 void printUsage() {
     std::cout
         << "mmCal.Benchmarks [--full] [--random-only] [--benchmark-only]\n"
@@ -1531,6 +1760,9 @@ void printUsage() {
         << "  --random-only    run invariant checks only\n"
         << "  --benchmark-only run timings only\n"
         << "  --matrix-large <op> <size> [digits]\n"
+        << "  --algebraic-field [iterations]  benchmark persistent compositum/embedding reuse\n"
+        << "  --special-functions [iterations] benchmark certified gamma/ibeta scaling\n"
+        << "  --exact-cyclotomic-fft [iterations] benchmark exact non-power-of-two FFT round trips\n"
         << "    op: transpose trace ndot det ndet ninv rref rank nrank nsolve nnull lu nlu nqr nsvd neigen neigensystem\n"
         << "  --random-expressions [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--max-depth N] [--report-every N]\n"
         << "    grammar-aware semantic fuzzer; --loop stops on the first FAIL, --nostop-loop reports FAILs and continues\n";
@@ -1545,6 +1777,12 @@ int main(int argc, char** argv) {
     std::optional<std::string> largeMatrixOperation;
     std::size_t largeMatrixSize = 0;
     std::size_t largeMatrixDigits = 16;
+    bool algebraicFieldBenchmark = false;
+    std::size_t algebraicFieldIterations = 8;
+    bool specialFunctionBenchmark = false;
+    std::size_t specialFunctionIterations = 1;
+    bool exactCyclotomicFftBenchmark = false;
+    std::size_t exactCyclotomicFftIterations = 3;
     bool randomExpressions = false;
     mmcal::benchmarks::RandomExpressionFuzzerOptions expressionOptions;
     expressionOptions.seed = static_cast<std::uint64_t>(
@@ -1568,6 +1806,21 @@ int main(int argc, char** argv) {
             largeMatrixSize = static_cast<std::size_t>(std::stoull(argv[++i]));
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 largeMatrixDigits = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--algebraic-field") {
+            algebraicFieldBenchmark = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                algebraicFieldIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--special-functions") {
+            specialFunctionBenchmark = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                specialFunctionIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--exact-cyclotomic-fft") {
+            exactCyclotomicFftBenchmark = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                exactCyclotomicFftIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
         }
         else if (arg == "--random-expressions")
             randomExpressions = true;
@@ -1646,6 +1899,33 @@ int main(int argc, char** argv) {
 
     if (largeMatrixOperation) {
         runLargeMatrixBenchmark(*largeMatrixOperation, largeMatrixSize, largeMatrixDigits);
+        return 0;
+    }
+
+    if (algebraicFieldBenchmark) {
+        if (algebraicFieldIterations == 0) {
+            std::cerr << "--algebraic-field iterations must be at least 1\n";
+            return 2;
+        }
+        runAlgebraicFieldBenchmark(algebraicFieldIterations);
+        return 0;
+    }
+
+    if (specialFunctionBenchmark) {
+        if (specialFunctionIterations == 0) {
+            std::cerr << "--special-functions iterations must be at least 1\n";
+            return 2;
+        }
+        runCertifiedSpecialFunctionBenchmark(specialFunctionIterations);
+        return 0;
+    }
+
+    if (exactCyclotomicFftBenchmark) {
+        if (exactCyclotomicFftIterations == 0) {
+            std::cerr << "--exact-cyclotomic-fft iterations must be at least 1\n";
+            return 2;
+        }
+        runExactCyclotomicFftBenchmark(exactCyclotomicFftIterations);
         return 0;
     }
 

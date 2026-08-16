@@ -97,6 +97,20 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
         "exact radix-2 FFT round trip is lossless");
     tests.expectEqual(eval(session, "fft[{1,2,3}]"), eval(session, "dft[{1,2,3}]"),
         "non-power-of-two FFT falls back to exact DFT");
+    tests.expectEqual(eval(session, "ifft[fft[{1,2,3,4,5}]]"),
+        std::string{"{1, 2, 3, 4, 5}"},
+        "cyclotomic exact FFT closes a five-point round trip");
+    tests.expectEqual(eval(session, "ifft[fft[{1,2,3,4,5,6,7}]]"),
+        std::string{"{1, 2, 3, 4, 5, 6, 7}"},
+        "cyclotomic exact FFT closes a seven-point round trip");
+    tests.expectEqual(eval(session, "ifft[fft[{1,2,3,4,5,6,7,8,9,10,11,12}]]"),
+        std::string{"{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}"},
+        "cyclotomic exact FFT closes a twelve-point round trip");
+    tests.expectEqual(eval(session, "ifft[fft[{1+I,2-I,3+2I,4-3I,5+I}]]"),
+        std::string{"{1+I, 2-I, 3+2I, 4-3I, 5+I}"},
+        "cyclotomic exact FFT preserves Gaussian-rational inputs");
+    tests.expect(eval(session, "fft[{x,1,0,0,0}]").find("x") != std::string::npos,
+        "symbolic exact FFT retains the generic fallback");
     tests.expectEqual(eval(session, "convolve[{1,2},{3,4}]"), std::string{"{3, 10, 8}"},
         "convolution is exact");
     tests.expectEqual(eval(session, "convolve[{a,b},{c,d}]"),
@@ -152,9 +166,25 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
         fftEightArguments, cacheRegistry, cacheMath, cacheAngles, cache));
     tests.expectEqual(cache.planCount(), std::size_t{2},
         "FFT cache: a different radix-2 size creates a separate plan");
+
+    const expression::Expr five = expression::Expr::array(
+        {5}, {integerExpr(1), integerExpr(2), integerExpr(3), integerExpr(4), integerExpr(5)});
+    const std::array<expression::Expr, 1> fftFiveArguments{five};
+    const expression::Expr fiveTransform = builtins::evaluateFft(
+        fftFiveArguments, cacheRegistry, cacheMath, cacheAngles, cache);
+    tests.expectEqual(cache.cyclotomicFieldCount(), std::size_t{1},
+        "FFT cache: exact non-power transform creates one cyclotomic field");
+    const std::array<expression::Expr, 1> ifftFiveArguments{fiveTransform};
+    static_cast<void>(builtins::evaluateIfft(
+        ifftFiveArguments, cacheRegistry, cacheMath, cacheAngles, cache));
+    tests.expectEqual(cache.cyclotomicFieldCount(), std::size_t{1},
+        "FFT cache: inverse transform reuses the same cyclotomic field");
+
     cache.clear();
     tests.expectEqual(cache.planCount(), std::size_t{0},
         "FFT cache: plans can be cleared with evaluator lifetime semantics");
+    tests.expectEqual(cache.cyclotomicFieldCount(), std::size_t{0},
+        "FFT cache: cyclotomic fields follow evaluator lifetime semantics");
 }
 
 } // namespace mmcal::tests

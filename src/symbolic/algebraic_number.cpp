@@ -1,5 +1,7 @@
 // 実代数数のSturm分離
 #include "algebraic_number.hpp"
+#include "number_field.hpp"
+#include "rational_linear_basis.hpp"
 
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -24,6 +27,7 @@ using numeric::Rational;
 
 constexpr std::size_t maximumAlgebraicDegree = 64;
 constexpr std::size_t maximumIsolationSplits = 1'000'000;
+constexpr std::size_t maximumComparisonRefinementBits = 4096;
 
 using Polynomial = std::vector<Rational>;
 
@@ -818,6 +822,47 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::create(
         std::move(reduced.polynomial), reduced.rootIndex, std::move(reduced.interval)};
 }
 
+std::optional<RealAlgebraicNumber> RealAlgebraicNumber::createFromMinimalPolynomialInterval(
+    std::span<const Rational> polynomial,
+    RationalRootInterval interval) {
+    if (interval.upper < interval.lower)
+        return std::nullopt;
+
+    Polynomial normalizedPolynomial = normalized(polynomial);
+    if (normalizedPolynomial.size() <= 1
+        || normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+        return std::nullopt;
+    normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
+    if (normalizedPolynomial.size() > 2 && !provenIrreducibleOverQ(normalizedPolynomial))
+        return std::nullopt;
+
+    if (interval.isPoint()) {
+        if (!evaluate(normalizedPolynomial, interval.lower).isZero())
+            return std::nullopt;
+        if (normalizedPolynomial.size() != 2)
+            return std::nullopt;
+        return RealAlgebraicNumber{
+            std::move(normalizedPolynomial), 1, std::move(interval)};
+    }
+    if (evaluate(normalizedPolynomial, interval.lower).isZero()
+        || evaluate(normalizedPolynomial, interval.upper).isZero())
+        return std::nullopt;
+
+    const auto sturm = sturmSequence(normalizedPolynomial);
+    if (rootsBetween(sturm, interval.lower, interval.upper) != 1)
+        return std::nullopt;
+
+    Rational bound = cauchyBound(normalizedPolynomial);
+    Rational lowerBound = -bound;
+    while (evaluate(normalizedPolynomial, lowerBound).isZero()) {
+        bound += Rational{BigInt{1}};
+        lowerBound = -bound;
+    }
+    const std::size_t rootIndex = rootsBetween(sturm, lowerBound, interval.lower) + 1;
+    return RealAlgebraicNumber{
+        std::move(normalizedPolynomial), rootIndex, std::move(interval)};
+}
+
 std::optional<std::vector<RealAlgebraicNumber>> RealAlgebraicNumber::isolateAll(
     std::span<const Rational> polynomial) {
     Polynomial normalizedPolynomial = normalized(polynomial);
@@ -1571,6 +1616,15 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
         lhs.radius + rhs.radius};
 }
 
+[[nodiscard]] RationalComplexDisk scaleDisk(
+    const RationalComplexDisk& value,
+    const Rational& scale) {
+    return RationalComplexDisk{
+        value.real * scale,
+        value.imaginary * scale,
+        value.radius * absolute(scale)};
+}
+
 [[nodiscard]] RationalComplexDisk multiplyDisks(
     const RationalComplexDisk& lhs,
     const RationalComplexDisk& rhs) {
@@ -1634,67 +1688,6 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
 
 using RationalVector = std::vector<Rational>;
 using RationalMatrix = std::vector<RationalVector>;
-
-[[nodiscard]] std::optional<RationalVector> solveColumnCombination(
-    const std::vector<RationalVector>& columns,
-    const RationalVector& target) {
-    const std::size_t rowCount = target.size();
-    const std::size_t columnCount = columns.size();
-    if (columnCount == 0)
-        return std::all_of(target.begin(), target.end(), [](const Rational& x) { return x.isZero(); })
-            ? std::optional<RationalVector>{RationalVector{}} : std::nullopt;
-    for (const RationalVector& column : columns)
-        if (column.size() != rowCount)
-            return std::nullopt;
-
-    RationalMatrix matrix(rowCount, RationalVector(columnCount + 1));
-    for (std::size_t row = 0; row < rowCount; ++row) {
-        for (std::size_t column = 0; column < columnCount; ++column)
-            matrix[row][column] = columns[column][row];
-        matrix[row][columnCount] = target[row];
-    }
-
-    std::vector<std::size_t> pivotRows(columnCount, rowCount);
-    std::size_t pivotRow = 0;
-    for (std::size_t column = 0; column < columnCount && pivotRow < rowCount; ++column) {
-        std::size_t selected = pivotRow;
-        while (selected < rowCount && matrix[selected][column].isZero())
-            ++selected;
-        if (selected == rowCount)
-            continue;
-        if (selected != pivotRow)
-            std::swap(matrix[selected], matrix[pivotRow]);
-        const Rational pivot = matrix[pivotRow][column];
-        for (std::size_t k = column; k <= columnCount; ++k)
-            matrix[pivotRow][k] /= pivot;
-        for (std::size_t row = 0; row < rowCount; ++row) {
-            if (row == pivotRow || matrix[row][column].isZero())
-                continue;
-            const Rational factor = matrix[row][column];
-            for (std::size_t k = column; k <= columnCount; ++k)
-                matrix[row][k] -= factor * matrix[pivotRow][k];
-        }
-        pivotRows[column] = pivotRow;
-        ++pivotRow;
-    }
-
-    for (std::size_t row = 0; row < rowCount; ++row) {
-        bool allZero = true;
-        for (std::size_t column = 0; column < columnCount; ++column)
-            allZero = allZero && matrix[row][column].isZero();
-        if (allZero && !matrix[row][columnCount].isZero())
-            return std::nullopt;
-    }
-    // 呼出側は独立なbasis列だけを渡す。rank不足なら表現を一意に決められない。
-    if (std::any_of(pivotRows.begin(), pivotRows.end(),
-            [rowCount](std::size_t row) { return row == rowCount; }))
-        return std::nullopt;
-
-    RationalVector solution(columnCount);
-    for (std::size_t column = 0; column < columnCount; ++column)
-        solution[column] = matrix[pivotRows[column]][columnCount];
-    return solution;
-}
 
 [[nodiscard]] RationalVector tensorBasisElement(
     std::size_t lhsDegree,
@@ -1772,81 +1765,197 @@ using RationalMatrix = std::vector<RationalVector>;
     const Polynomial& lhsPolynomial,
     const Polynomial& rhsPolynomial) {
     const std::size_t dimension = element.size();
-    RationalVector one(dimension);
-    one.front() = Rational{BigInt{1}};
-    std::vector<RationalVector> powers;
-    powers.reserve(dimension);
-    powers.push_back(one);
-    RationalVector current = one;
+    RationalVector current(dimension);
+    current.front() = Rational{BigInt{1}};
+
+    detail::RationalLinearBasis krylovBasis(dimension);
+    if (krylovBasis.append(current))
+        return std::nullopt;
+
     for (std::size_t degree = 1; degree <= dimension; ++degree) {
         current = tensorMultiply(current, element, lhsPolynomial, rhsPolynomial);
-        if (const auto coefficients = solveColumnCombination(powers, current)) {
-            Polynomial relation(degree + 1);
-            for (std::size_t i = 0; i < degree; ++i)
-                relation[i] = -(*coefficients)[i];
-            relation[degree] = Rational{BigInt{1}};
-            return canonicalPolynomial(relation);
-        }
-        powers.push_back(current);
-    }
-    return std::nullopt;
-}
-
-[[nodiscard]] std::optional<RationalVector> tensorReciprocal(
-    const RationalVector& value,
-    const Polynomial& lhsPolynomial,
-    const Polynomial& rhsPolynomial) {
-    const std::size_t m = lhsPolynomial.size() - 1;
-    const std::size_t n = rhsPolynomial.size() - 1;
-    const std::size_t dimension = m * n;
-    std::vector<RationalVector> columns;
-    columns.reserve(dimension);
-    for (std::size_t index = 0; index < dimension; ++index) {
-        RationalVector basis(dimension);
-        basis[index] = Rational{BigInt{1}};
-        columns.push_back(tensorMultiply(value, basis, lhsPolynomial, rhsPolynomial));
-    }
-    RationalVector one(dimension);
-    one.front() = Rational{BigInt{1}};
-    return solveColumnCombination(columns, one);
-}
-
-[[nodiscard]] std::optional<RationalVector> primitiveOperationElement(
-    const RationalVector& lhs,
-    const RationalVector& rhs,
-    AlgebraicBinaryOperation operation,
-    const Polynomial& lhsPolynomial,
-    const Polynomial& rhsPolynomial) {
-    RationalVector result(lhs.size());
-    switch (operation) {
-    case AlgebraicBinaryOperation::Add:
-    case AlgebraicBinaryOperation::Subtract:
-        for (std::size_t i = 0; i < lhs.size(); ++i)
-            result[i] = operation == AlgebraicBinaryOperation::Add
-                ? lhs[i] + rhs[i] : lhs[i] - rhs[i];
-        return result;
-    case AlgebraicBinaryOperation::Multiply:
-        return tensorMultiply(lhs, rhs, lhsPolynomial, rhsPolynomial);
-    case AlgebraicBinaryOperation::Divide: {
-        const auto reciprocal = tensorReciprocal(rhs, lhsPolynomial, rhsPolynomial);
-        if (!reciprocal)
-            return std::nullopt;
-        return tensorMultiply(lhs, *reciprocal, lhsPolynomial, rhsPolynomial);
-    }
+        if (auto relation = krylovBasis.append(current))
+            return canonicalPolynomial(*relation);
     }
     return std::nullopt;
 }
 
 struct PrimitiveElementReduction final {
-    Polynomial polynomial;
-    std::vector<RationalVector> tensorPowerBasis;
+    std::shared_ptr<const NumberFieldContext> field;
+    AlgebraicElement alpha;
+    AlgebraicElement beta;
 };
+
+constexpr std::size_t maximumCachedPrimitiveElementReductions = 64;
+
+class PrimitiveElementReductionCache final {
+public:
+    [[nodiscard]] std::optional<PrimitiveElementReduction> find(
+        const AlgebraicNumber& lhs,
+        const AlgebraicNumber& rhs) {
+        std::lock_guard lock(mutex_);
+        pruneExpired();
+        for (std::size_t i = 0; i < entries_.size(); ++i) {
+            Entry& entry = entries_[i];
+            const bool direct = entry.lhs.hasSameRootIdentity(lhs)
+                && entry.rhs.hasSameRootIdentity(rhs);
+            const bool reversed = entry.lhs.hasSameRootIdentity(rhs)
+                && entry.rhs.hasSameRootIdentity(lhs);
+            if (!direct && !reversed)
+                continue;
+
+            auto field = entry.field.lock();
+            if (!field)
+                continue;
+            auto alpha = AlgebraicElement::create(
+                field, direct ? entry.alphaCoordinates : entry.betaCoordinates);
+            auto beta = AlgebraicElement::create(
+                field, direct ? entry.betaCoordinates : entry.alphaCoordinates);
+            if (!alpha || !beta)
+                continue;
+
+            if (i + 1 != entries_.size()) {
+                Entry hit = std::move(entry);
+                entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(i));
+                entries_.push_back(std::move(hit));
+            }
+            return PrimitiveElementReduction{
+                std::move(field), std::move(*alpha), std::move(*beta)};
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] PrimitiveElementReduction publish(
+        const AlgebraicNumber& lhs,
+        const AlgebraicNumber& rhs,
+        PrimitiveElementReduction reduction) {
+        std::lock_guard lock(mutex_);
+        pruneExpired();
+        for (std::size_t i = 0; i < entries_.size(); ++i) {
+            Entry& entry = entries_[i];
+            const bool direct = entry.lhs.hasSameRootIdentity(lhs)
+                && entry.rhs.hasSameRootIdentity(rhs);
+            const bool reversed = entry.lhs.hasSameRootIdentity(rhs)
+                && entry.rhs.hasSameRootIdentity(lhs);
+            if (!direct && !reversed)
+                continue;
+            auto field = entry.field.lock();
+            if (!field)
+                continue;
+            auto alpha = AlgebraicElement::create(
+                field, direct ? entry.alphaCoordinates : entry.betaCoordinates);
+            auto beta = AlgebraicElement::create(
+                field, direct ? entry.betaCoordinates : entry.alphaCoordinates);
+            if (alpha && beta)
+                return PrimitiveElementReduction{
+                    std::move(field), std::move(*alpha), std::move(*beta)};
+        }
+
+        if (entries_.size() >= maximumCachedPrimitiveElementReductions)
+            entries_.erase(entries_.begin());
+        entries_.push_back(Entry{
+            lhs.withArithmeticElement({}),
+            rhs.withArithmeticElement({}),
+            reduction.field,
+            std::vector<Rational>{
+                reduction.alpha.coefficients().begin(), reduction.alpha.coefficients().end()},
+            std::vector<Rational>{
+                reduction.beta.coefficients().begin(), reduction.beta.coefficients().end()}});
+        return reduction;
+    }
+
+private:
+    struct Entry final {
+        AlgebraicNumber lhs;
+        AlgebraicNumber rhs;
+        std::weak_ptr<const NumberFieldContext> field;
+        RationalVector alphaCoordinates;
+        RationalVector betaCoordinates;
+    };
+
+    std::mutex mutex_;
+    std::vector<Entry> entries_;
+
+    void pruneExpired() {
+        entries_.erase(
+            std::remove_if(entries_.begin(), entries_.end(),
+                [](const Entry& entry) { return entry.field.expired(); }),
+            entries_.end());
+    }
+};
+
+[[nodiscard]] PrimitiveElementReductionCache& primitiveElementReductionCache() {
+    static PrimitiveElementReductionCache cache;
+    return cache;
+}
+
+[[nodiscard]] std::optional<AlgebraicNumber> selectPrimitiveGenerator(
+    const Polynomial& polynomial,
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    std::int64_t multiplier) {
+    const AlgebraicRootDomain domain =
+        lhs.domain() == AlgebraicRootDomain::Real && rhs.domain() == AlgebraicRootDomain::Real
+        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
+    const Rational scale{BigInt{multiplier}};
+
+    if (domain == AlgebraicRootDomain::Real) {
+        const auto roots = RealAlgebraicNumber::isolateAll(polynomial);
+        if (!roots)
+            return std::nullopt;
+        for (std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+            const RationalComplexDisk target = addDisks(
+                asDisk(lhs, bits), scaleDisk(asDisk(rhs, bits), scale), false);
+            std::size_t match = 0;
+            std::size_t matchIndex = 0;
+            for (const RealAlgebraicNumber& root : *roots) {
+                const RationalRootInterval interval = root.refined(bits);
+                const Rational two{BigInt{2}};
+                const RationalComplexDisk disk{
+                    (interval.lower + interval.upper) / two,
+                    Rational{},
+                    (interval.upper - interval.lower) / two};
+                if (disksIntersect(disk, target)) {
+                    ++match;
+                    matchIndex = root.rootIndex();
+                }
+            }
+            if (match == 1)
+                return AlgebraicNumber::create(polynomial, matchIndex, domain);
+        }
+        return std::nullopt;
+    }
+
+    const auto roots = ComplexAlgebraicNumber::isolateAll(polynomial);
+    if (!roots)
+        return std::nullopt;
+    for (std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+        const RationalComplexDisk target = addDisks(
+            asDisk(lhs, bits), scaleDisk(asDisk(rhs, bits), scale), false);
+        std::size_t match = 0;
+        std::size_t matchIndex = 0;
+        for (const ComplexAlgebraicNumber& root : *roots) {
+            if (disksIntersect(root.refined(bits), target)) {
+                ++match;
+                matchIndex = root.rootIndex();
+            }
+        }
+        if (match == 1)
+            return AlgebraicNumber::create(polynomial, matchIndex, domain);
+    }
+    return std::nullopt;
+}
 
 [[nodiscard]] std::optional<PrimitiveElementReduction> primitiveElementReduction(
     const RationalVector& alpha,
     const RationalVector& beta,
     const Polynomial& lhsPolynomial,
-    const Polynomial& rhsPolynomial) {
+    const Polynomial& rhsPolynomial,
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs) {
+    if (auto cached = primitiveElementReductionCache().find(lhs, rhs))
+        return cached;
+
     const std::size_t dimension = alpha.size();
     constexpr std::int64_t candidates[] = {1, 2, -1, 3, -2, 4, -3};
     for (const std::int64_t multiplier : candidates) {
@@ -1859,70 +1968,65 @@ struct PrimitiveElementReduction final {
             || !provenIrreducibleOverQ(*polynomial))
             continue;
 
-        std::vector<RationalVector> powers;
-        powers.reserve(dimension);
+        detail::RationalLinearBasis powerBasis(dimension);
         RationalVector current(dimension);
         current.front() = Rational{BigInt{1}};
+        bool basisComplete = true;
         for (std::size_t exponent = 0; exponent < dimension; ++exponent) {
-            powers.push_back(current);
+            if (powerBasis.append(current)) {
+                basisComplete = false;
+                break;
+            }
             current = tensorMultiply(current, theta, lhsPolynomial, rhsPolynomial);
         }
-        // degree==dimensionの既約relationがあるので1,theta,...,theta^(d-1)はbasis。
-        if (!solveColumnCombination(powers, alpha)
-            || !solveColumnCombination(powers, beta))
+        if (!basisComplete || powerBasis.rank() != dimension)
             continue;
-        return PrimitiveElementReduction{*polynomial, std::move(powers)};
+
+        // degree==dimensionの既約relationがあるので1,theta,...,theta^(d-1)はbasis。
+        auto alphaCoordinates = powerBasis.coordinates(alpha);
+        auto betaCoordinates = powerBasis.coordinates(beta);
+        if (!alphaCoordinates || !betaCoordinates)
+            continue;
+
+        auto generator = selectPrimitiveGenerator(*polynomial, lhs, rhs, multiplier);
+        if (!generator)
+            continue;
+        auto field = NumberFieldContext::create(std::move(*generator));
+        if (!field)
+            continue;
+
+        auto alphaElement = AlgebraicElement::create(field, std::move(*alphaCoordinates));
+        auto betaElement = AlgebraicElement::create(field, std::move(*betaCoordinates));
+        if (!alphaElement || !betaElement)
+            continue;
+        return primitiveElementReductionCache().publish(
+            lhs, rhs, PrimitiveElementReduction{
+                std::move(field), std::move(*alphaElement), std::move(*betaElement)});
     }
     return std::nullopt;
 }
 
-[[nodiscard]] RationalVector fieldMultiply(
-    const RationalVector& lhs,
-    const RationalVector& rhs,
-    const Polynomial& minimalPolynomial) {
-    const std::size_t degree = minimalPolynomial.size() - 1;
-    if (lhs.size() != degree || rhs.size() != degree)
-        throw std::logic_error("Primitive-element field size mismatch");
-    Polynomial product(2 * degree - 1);
-    for (std::size_t i = 0; i < degree; ++i)
-        for (std::size_t j = 0; j < degree; ++j)
-            product[i + j] += lhs[i] * rhs[j];
-    for (std::int64_t exponent = static_cast<std::int64_t>(product.size()) - 1;
-         exponent >= static_cast<std::int64_t>(degree); --exponent) {
-        Rational coefficient = product[static_cast<std::size_t>(exponent)];
-        if (coefficient.isZero())
-            continue;
-        product[static_cast<std::size_t>(exponent)] = Rational{};
-        const std::size_t shift = static_cast<std::size_t>(exponent) - degree;
-        for (std::size_t k = 0; k < degree; ++k)
-            product[shift + k] -= coefficient * minimalPolynomial[k];
-    }
-    product.resize(degree);
-    return product;
+[[nodiscard]] std::optional<AlgebraicElement> rationalFieldElement(
+    const AlgebraicElement& reference,
+    const Rational& value) {
+    RationalVector coefficients(reference.field()->degree());
+    coefficients.front() = value;
+    return AlgebraicElement::create(reference.field(), std::move(coefficients));
 }
 
-[[nodiscard]] std::optional<Polynomial> fieldMinimalPolynomial(
-    const RationalVector& element,
-    const Polynomial& primitivePolynomial) {
-    const std::size_t dimension = primitivePolynomial.size() - 1;
-    if (element.size() != dimension)
-        return std::nullopt;
-    RationalVector one(dimension);
-    one.front() = Rational{BigInt{1}};
-    std::vector<RationalVector> powers;
-    powers.reserve(dimension);
-    powers.push_back(one);
-    RationalVector current = one;
-    for (std::size_t degree = 1; degree <= dimension; ++degree) {
-        current = fieldMultiply(current, element, primitivePolynomial);
-        if (const auto coefficients = solveColumnCombination(powers, current)) {
-            Polynomial relation(degree + 1);
-            for (std::size_t i = 0; i < degree; ++i)
-                relation[i] = -(*coefficients)[i];
-            relation[degree] = Rational{BigInt{1}};
-            return canonicalPolynomial(relation);
-        }
-        powers.push_back(current);
+[[nodiscard]] std::optional<AlgebraicElement> fieldOperationElement(
+    const AlgebraicElement& lhs,
+    const AlgebraicElement& rhs,
+    AlgebraicBinaryOperation operation) {
+    switch (operation) {
+    case AlgebraicBinaryOperation::Add:
+        return lhs.add(rhs);
+    case AlgebraicBinaryOperation::Subtract:
+        return lhs.subtract(rhs);
+    case AlgebraicBinaryOperation::Multiply:
+        return lhs.multiply(rhs);
+    case AlgebraicBinaryOperation::Divide:
+        return lhs.divide(rhs);
     }
     return std::nullopt;
 }
@@ -1988,6 +2092,43 @@ struct PrimitiveElementReduction final {
 }
 
 
+[[nodiscard]] std::optional<AlgebraicNumber> materializeFieldElement(
+    AlgebraicElement element,
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation) {
+    const auto minimal = element.minimalPolynomial();
+    if (!minimal || minimal->size() <= 1)
+        return std::nullopt;
+    if (!provenIrreducibleOverQ(*minimal) && minimal->size() > 2)
+        return std::nullopt;
+
+    const AlgebraicRootDomain resultDomain =
+        lhs.domain() == AlgebraicRootDomain::Real && rhs.domain() == AlgebraicRootDomain::Real
+        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
+
+    if (resultDomain == AlgebraicRootDomain::Real) {
+        for (const std::size_t bits : std::array<std::size_t, 7>{32,64,128,256,512,1024,2048}) {
+            auto interval = element.refinedRealInterval(bits);
+            if (!interval)
+                break;
+            auto root = RealAlgebraicNumber::createFromMinimalPolynomialInterval(
+                *minimal, std::move(*interval));
+            if (!root)
+                continue;
+            AlgebraicNumber result = AlgebraicNumber::fromRealRoot(std::move(*root));
+            return result.withArithmeticElement(
+                std::make_shared<const AlgebraicElement>(std::move(element)));
+        }
+    }
+
+    auto result = selectResultRoot(*minimal, resultDomain, lhs, rhs, operation);
+    if (!result)
+        return std::nullopt;
+    return result->withArithmeticElement(
+        std::make_shared<const AlgebraicElement>(std::move(element)));
+}
+
 [[nodiscard]] std::optional<AlgebraicNumber> primitiveElementCombine(
     const AlgebraicNumber& lhs,
     const AlgebraicNumber& rhs,
@@ -2007,29 +2148,17 @@ struct PrimitiveElementReduction final {
 
     const RationalVector alpha = tensorBasisElement(m, n, 1, 0);
     const RationalVector beta = tensorBasisElement(m, n, 0, 1);
-    const auto primitive = primitiveElementReduction(alpha, beta, left, right);
+    const auto primitive = primitiveElementReduction(
+        alpha, beta, left, right, lhs, rhs);
     if (!primitive)
         return std::nullopt;
 
-    const auto resultElement = primitiveOperationElement(
-        alpha, beta, operation, left, right);
+    auto resultElement = fieldOperationElement(
+        primitive->alpha, primitive->beta, operation);
     if (!resultElement)
         return std::nullopt;
-    const auto resultInPrimitiveBasis = solveColumnCombination(
-        primitive->tensorPowerBasis, *resultElement);
-    if (!resultInPrimitiveBasis)
-        return std::nullopt;
-    const auto minimal = fieldMinimalPolynomial(
-        *resultInPrimitiveBasis, primitive->polynomial);
-    if (!minimal || minimal->size() <= 1)
-        return std::nullopt;
-    if (!provenIrreducibleOverQ(*minimal) && minimal->size() > 2)
-        return std::nullopt;
-
-    const AlgebraicRootDomain resultDomain =
-        lhs.domain() == AlgebraicRootDomain::Real && rhs.domain() == AlgebraicRootDomain::Real
-        ? AlgebraicRootDomain::Real : AlgebraicRootDomain::Complex;
-    return selectResultRoot(*minimal, resultDomain, lhs, rhs, operation);
+    return materializeFieldElement(
+        std::move(*resultElement), lhs, rhs, operation);
 }
 
 
@@ -2079,6 +2208,68 @@ struct PrimitiveElementReduction final {
     return result;
 }
 
+[[nodiscard]] bool hasSamePolynomial(
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs) noexcept {
+    const auto left = lhs.polynomial();
+    const auto right = rhs.polynomial();
+    return left.size() == right.size()
+        && std::equal(left.begin(), left.end(), right.begin());
+}
+
+[[nodiscard]] bool isExactlyZero(const AlgebraicNumber& value) {
+    if (const AlgebraicElement* element = value.arithmeticElement())
+        return element->isZero();
+
+    const auto polynomial = value.polynomial();
+    if (polynomial.empty() || !polynomial.front().isZero())
+        return false;
+
+    if (const RealAlgebraicNumber* real = value.asReal()) {
+        const RationalRootInterval& interval = real->isolatingInterval();
+        return interval.lower <= Rational{} && Rational{} <= interval.upper;
+    }
+
+    const RationalComplexDisk& disk = value.asComplex()->isolatingDisk();
+    return disk.real * disk.real + disk.imaginary * disk.imaginary
+        <= disk.radius * disk.radius;
+}
+
+[[nodiscard]] std::optional<AlgebraicSign> exactRealSign(
+    const AlgebraicNumber& value) {
+    if (value.domain() != AlgebraicRootDomain::Real)
+        return std::nullopt;
+
+    if (const AlgebraicElement* element = value.arithmeticElement()) {
+        if (const auto sign = element->exactSign())
+            return sign;
+    }
+    if (isExactlyZero(value))
+        return AlgebraicSign::Zero;
+
+    const RealAlgebraicNumber* real = value.asReal();
+    if (!real)
+        return std::nullopt;
+    for (std::size_t bits = 32; bits <= maximumComparisonRefinementBits; bits *= 2) {
+        const RationalRootInterval interval = real->refined(bits);
+        if (interval.upper < Rational{})
+            return AlgebraicSign::Negative;
+        if (Rational{} < interval.lower)
+            return AlgebraicSign::Positive;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<AlgebraicElement> embedRational(
+    const AlgebraicElement& exemplar,
+    const Rational& value) {
+    std::vector<Rational> coordinates(exemplar.field()->degree());
+    if (coordinates.empty())
+        return std::nullopt;
+    coordinates.front() = value;
+    return AlgebraicElement::create(exemplar.field(), std::move(coordinates));
+}
+
 } // namespace
 
 AlgebraicNumber::AlgebraicNumber(RealAlgebraicNumber value) : value_(std::move(value)) {}
@@ -2098,6 +2289,14 @@ std::optional<AlgebraicNumber> AlgebraicNumber::create(
     if (!value)
         return std::nullopt;
     return AlgebraicNumber{std::move(*value)};
+}
+
+AlgebraicNumber AlgebraicNumber::fromRealRoot(RealAlgebraicNumber value) {
+    return AlgebraicNumber{std::move(value)};
+}
+
+AlgebraicNumber AlgebraicNumber::fromComplexRoot(ComplexAlgebraicNumber value) {
+    return AlgebraicNumber{std::move(value)};
 }
 
 std::optional<AlgebraicNumber> AlgebraicNumber::fromRational(const Rational& value) {
@@ -2128,6 +2327,58 @@ std::optional<AlgebraicNumber> AlgebraicNumber::combine(
     const AlgebraicNumber& lhs,
     const AlgebraicNumber& rhs,
     AlgebraicBinaryOperation operation) {
+    std::shared_ptr<const AlgebraicElement> leftElement = lhs.arithmeticElement_;
+    std::shared_ptr<const AlgebraicElement> rightElement = rhs.arithmeticElement_;
+
+    // 同一canonical Root identityなら，片側が保持するfield座標をそのまま共有できる。
+    // pointer identityが異なるContextを数学的に同一視する一般mergeはここでは行わない。
+    if (lhs.hasSameRootIdentity(rhs)) {
+        if (leftElement)
+            rightElement = leftElement;
+        else if (rightElement)
+            leftElement = rightElement;
+    }
+
+    // Qは任意のQ(theta)へ定数座標として埋め込める。Rational側が別の内部表現を
+    // 持っていても，既存fieldを優先して同一Context演算へ落とす。
+    if (leftElement) {
+        const auto exact = rhs.exactRationalParts();
+        if (exact && exact->second.isZero()) {
+            auto embedded = rationalFieldElement(*leftElement, exact->first);
+            auto fieldResult = embedded
+                ? fieldOperationElement(*leftElement, *embedded, operation)
+                : std::nullopt;
+            if (fieldResult) {
+                if (auto materialized = materializeFieldElement(
+                        std::move(*fieldResult), lhs, rhs, operation))
+                    return materialized;
+            }
+        }
+    }
+    if (rightElement) {
+        const auto exact = lhs.exactRationalParts();
+        if (exact && exact->second.isZero()) {
+            auto embedded = rationalFieldElement(*rightElement, exact->first);
+            auto fieldResult = embedded
+                ? fieldOperationElement(*embedded, *rightElement, operation)
+                : std::nullopt;
+            if (fieldResult) {
+                if (auto materialized = materializeFieldElement(
+                        std::move(*fieldResult), lhs, rhs, operation))
+                    return materialized;
+            }
+        }
+    }
+
+    if (leftElement && rightElement) {
+        auto fieldResult = fieldOperationElement(*leftElement, *rightElement, operation);
+        if (fieldResult) {
+            if (auto materialized = materializeFieldElement(
+                    std::move(*fieldResult), lhs, rhs, operation))
+                return materialized;
+        }
+    }
+
     if (const auto reduced = primitiveElementCombine(lhs, rhs, operation))
         return reduced;
 
@@ -2168,7 +2419,165 @@ const ComplexAlgebraicNumber* AlgebraicNumber::asComplex() const noexcept {
     return std::get_if<ComplexAlgebraicNumber>(&value_);
 }
 
+bool AlgebraicNumber::hasSameRootIdentity(const AlgebraicNumber& rhs) const noexcept {
+    if (domain() != rhs.domain() || rootIndex() != rhs.rootIndex())
+        return false;
+    return hasSamePolynomial(*this, rhs);
+}
+
+std::optional<bool> AlgebraicNumber::exactEquals(const AlgebraicNumber& rhs) const {
+    if (hasSameRootIdentity(rhs))
+        return true;
+
+    const bool samePolynomial = hasSamePolynomial(*this, rhs);
+    // 同じ根集合を同じdomainで列挙しているなら異なるindexは異なる根である。
+    if (domain() == rhs.domain() && samePolynomial)
+        return false;
+
+    // 異なるQ上既約minimal polynomialは共通根を持たない。
+    if (!samePolynomial) {
+        Polynomial leftPolynomial(polynomial().begin(), polynomial().end());
+        Polynomial rightPolynomial(rhs.polynomial().begin(), rhs.polynomial().end());
+        if (provenIrreducibleOverQ(leftPolynomial)
+            && provenIrreducibleOverQ(rightPolynomial))
+            return false;
+    }
+
+    const AlgebraicElement* leftElement = arithmeticElement();
+    const AlgebraicElement* rightElement = rhs.arithmeticElement();
+    if (leftElement && rightElement) {
+        if (const auto equal = leftElement->exactEquals(*rightElement))
+            return equal;
+    }
+
+    if (leftElement) {
+        const auto right = rhs.exactRationalParts();
+        if (right && right->second.isZero()) {
+            const auto embedded = embedRational(*leftElement, right->first);
+            if (embedded)
+                if (const auto equal = leftElement->exactEquals(*embedded))
+                    return equal;
+        }
+    }
+    if (rightElement) {
+        const auto left = exactRationalParts();
+        if (left && left->second.isZero()) {
+            const auto embedded = embedRational(*rightElement, left->first);
+            if (embedded)
+                if (const auto equal = embedded->exactEquals(*rightElement))
+                    return equal;
+        }
+    }
+
+    if (const auto left = exactRationalParts()) {
+        if (const auto right = rhs.exactRationalParts())
+            return *left == *right;
+    }
+
+    // 分離領域が既に交わらなければ，common fieldを構成せずFalseを証明できる。
+    if (const RealAlgebraicNumber* realLeft = asReal()) {
+        if (const RealAlgebraicNumber* realRight = rhs.asReal()) {
+            const RationalRootInterval& a = realLeft->isolatingInterval();
+            const RationalRootInterval& b = realRight->isolatingInterval();
+            if (a.upper < b.lower || b.upper < a.lower)
+                return false;
+        }
+    }
+    else if (const ComplexAlgebraicNumber* complexLeft = asComplex()) {
+        if (const ComplexAlgebraicNumber* complexRight = rhs.asComplex())
+            if (disksDisjoint(complexLeft->isolatingDisk(), complexRight->isolatingDisk()))
+                return false;
+    }
+
+    // 既存のbounded primitive-element/resultant machineryで差をexactに構成する。
+    // 0判定はfield座標またはrootのcertified isolationだけを使う。
+    const auto difference = combine(*this, rhs, AlgebraicBinaryOperation::Subtract);
+    if (!difference)
+        return std::nullopt;
+    return isExactlyZero(*difference);
+}
+
+std::optional<AlgebraicOrder> AlgebraicNumber::exactRealCompare(
+    const AlgebraicNumber& rhs) const {
+    if (domain() != AlgebraicRootDomain::Real
+        || rhs.domain() != AlgebraicRootDomain::Real)
+        return std::nullopt;
+    if (hasSameRootIdentity(rhs))
+        return AlgebraicOrder::Equal;
+
+    const AlgebraicElement* leftElement = arithmeticElement();
+    const AlgebraicElement* rightElement = rhs.arithmeticElement();
+    if (leftElement && rightElement
+        && leftElement->field().get() == rightElement->field().get()) {
+        const auto difference = leftElement->subtract(*rightElement);
+        const auto sign = difference ? difference->exactSign() : std::nullopt;
+        if (sign == AlgebraicSign::Negative) return AlgebraicOrder::Less;
+        if (sign == AlgebraicSign::Zero) return AlgebraicOrder::Equal;
+        if (sign == AlgebraicSign::Positive) return AlgebraicOrder::Greater;
+    }
+
+    // 異なるfieldでも実根のcertified intervalsが分離すれば即比較できる。
+    const RealAlgebraicNumber* left = asReal();
+    const RealAlgebraicNumber* right = rhs.asReal();
+    if (!left || !right)
+        return std::nullopt;
+    for (std::size_t bits = 32; bits <= maximumComparisonRefinementBits; bits *= 2) {
+        const RationalRootInterval a = left->refined(bits);
+        const RationalRootInterval b = right->refined(bits);
+        if (a.upper < b.lower) return AlgebraicOrder::Less;
+        if (b.upper < a.lower) return AlgebraicOrder::Greater;
+    }
+
+    // intervalが重なり続ける場合は差をexact algebraic valueとして構成する。
+    const auto difference = combine(*this, rhs, AlgebraicBinaryOperation::Subtract);
+    if (!difference)
+        return std::nullopt;
+    const auto sign = exactRealSign(*difference);
+    if (sign == AlgebraicSign::Negative) return AlgebraicOrder::Less;
+    if (sign == AlgebraicSign::Zero) return AlgebraicOrder::Equal;
+    if (sign == AlgebraicSign::Positive) return AlgebraicOrder::Greater;
+    return std::nullopt;
+}
+
+const AlgebraicElement* AlgebraicNumber::arithmeticElement() const noexcept {
+    return arithmeticElement_.get();
+}
+
+AlgebraicNumber AlgebraicNumber::withArithmeticElement(
+    std::shared_ptr<const AlgebraicElement> element) const {
+    AlgebraicNumber result = *this;
+    result.arithmeticElement_ = std::move(element);
+    return result;
+}
+
+AlgebraicNumber AlgebraicNumber::withGeneratorField() const {
+    if (arithmeticElement_)
+        return *this;
+
+    Polynomial definingPolynomial(polynomial().begin(), polynomial().end());
+    if (definingPolynomial.size() <= 1
+        || !provenIrreducibleOverQ(definingPolynomial))
+        return *this;
+
+    auto field = NumberFieldContext::create(*this);
+    auto element = field ? AlgebraicElement::generator(std::move(field)) : std::nullopt;
+    if (!element)
+        return *this;
+    return withArithmeticElement(
+        std::make_shared<const AlgebraicElement>(std::move(*element)));
+}
+
 std::optional<std::pair<Rational, Rational>> AlgebraicNumber::exactRationalParts() const {
+    // arithmeticElement_はminimal polynomialの既約性を証明できたRootにだけ付与する。
+    // したがって実次数>1はRationalではなく，複素次数>2はQ+iQへ退化しない。
+    // 高精度refinementで毎回それを再確認する固定費を避ける。
+    if (arithmeticElement_) {
+        const std::size_t degree = polynomial().size() - 1;
+        if ((domain() == AlgebraicRootDomain::Real && degree > 1)
+            || (domain() == AlgebraicRootDomain::Complex && degree > 2))
+            return std::nullopt;
+    }
+
     if (const auto* real = asReal()) {
         const RationalRootInterval interval = real->refined(192);
         const Rational candidate = simplestInInterval(interval.lower, interval.upper);

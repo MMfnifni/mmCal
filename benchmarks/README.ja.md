@@ -75,6 +75,22 @@ mmCal.Benchmarks --benchmark-only
 mmCal.Benchmarks --matrix-large nsvd 64 16
 ```
 
+代数体compositum / embedding再利用とsame-field reciprocal再利用を単独測定：
+
+```text
+mmCal.Benchmarks --algebraic-field 8
+```
+
+前半は同一sessionで，`(root[{-2,0,1},2]+root[{-3,0,0,1},1])*(root[{-2,0,1},2]-root[{-3,0,0,1},1])`の初回時間と2回目以降の平均を測定する。後半は12次simple extensionでextended-Euclid reciprocalの初回，cache hit時のwarm reciprocal，warm divisionに加え，minimal polynomialのfirst derivationとwarm cache hitを測定する。persistent field / primitive-element embedding cache / canonical Root materialization / reciprocal reuse / incremental Krylov minimal-polynomial derivationの性能退行を監視する用途であり，絶対性能値そのものを保証するものではない。
+
+certified Gamma / regularized incomplete Betaのprecision scalingを単独測定：
+
+```text
+mmCal.Benchmarks --special-functions 1
+```
+
+80 / 160 / 320 / 640 / 1280 bitで`gamma[1/3]`と`ibeta[1/3,2/3,1/4]`のcertified backendを直接測る。Gammaのexact Rational dispatch，static exact Bernoulli table，高精度Stirling planner，ibetaのpoint fast path / shared Beta normalizationの退行監視用である。Stirling-planや定数cacheはprocess内でwarmになるため，完全なcold-start比較では各precisionを別processでも測定する。
+
 random expression fuzzerを有限回実行：
 
 ```text
@@ -280,6 +296,18 @@ certified approximate eigenvalue / eigensystem backendを4，8，12，16次で�
 `--full`では512点まで拡大する。
 
 また非2冪長について，direct DFTとFFT/Bluesteinの実測を比較する。現在のdirect/Bluestein thresholdも，この測定から再評価する前提である。
+
+## 4.9.1 Exact Cyclotomic FFT
+
+Stage 7-7の非2冪exact Cyclotomic backendだけを短時間で測る場合：
+
+```text
+mmCal.Benchmarks --exact-cyclotomic-fft 5
+```
+
+5 / 7 / 10 / 12 / 15 / 21点について，最初の`ifft[fft[v]]` round-tripと同一`FourierTransformCache`を使ったwarm平均を表示する。結果は必ず入力Arrayとstructural equalityで一致することをbenchmark内部で確認する。
+
+このbenchmarkは`Q[t]/Phi_n(t)` quotient kernelとfield cacheの退行監視用であり，certified approximate FFTのdirect/Bluestein crossoverとは別に扱う。
 
 ## 4.10 Certified exp / log
 

@@ -92,7 +92,7 @@ integrate[x,{x,0}]==>TypeError: integrate expects a symbol or {variable, lower, 
 integrate[x,{x,0,1,2}]==>TypeError: integrate expects a symbol or {variable, lower, upper} as the second argument
 limit[x,x,0,0]==>DomainError: limit direction must be -1 for left or 1 for right
 limit[x,x,0,2]==>DomainError: limit direction must be -1 for left or 1 for right
-solve[x==1,1]==>TypeError: solve expects a symbol or symbol array as its second argument
+solve[x==1,1]==>TypeError: solve expects a symbol, symbol array, or domain as its second argument
 solve[x==1,x,foo]==>TypeError: solve constraint symbol must be Integer, Rational, Real, or Complex
 nintegrate[x,{x,0},8]==>TypeError: nintegrate iterator must be {variable, lower, upper}
 diff[x^2,x]==>TypeError: diff expects between 3 and 4 arguments

@@ -13,6 +13,7 @@
 #include <vector>
 
 namespace mmcal::solver { class SolutionSet; }
+namespace mmcal::symbolic { class AlgebraicNumber; }
 
 namespace mmcal::expression {
 
@@ -76,7 +77,14 @@ public:
         std::vector<std::size_t> shape,
         std::vector<numeric::ComplexDecimalApproximation> elements);
     [[nodiscard]] static Expr list(std::vector<Expr> elements);
-    [[nodiscard]] static Expr call(Symbol head, std::vector<Expr> arguments);
+    [[nodiscard]] static Expr call(
+        Symbol head,
+        std::vector<Expr> arguments,
+        std::shared_ptr<const symbolic::AlgebraicNumber> algebraicValue = {});
+    // 同じCallを子だけ再構築する。引数が構造的に不変ならRootの内部算術cacheも保持する。
+    [[nodiscard]] static Expr rebuildCall(
+        const CallExpr& source,
+        std::vector<Expr> arguments);
 
     [[nodiscard]] ExprKind kind() const noexcept;
     [[nodiscard]] bool isNumber() const noexcept;
@@ -240,8 +248,12 @@ struct ListExpr final {
 struct CallExpr final {
     Symbol head;
     std::vector<Expr> arguments;
+    // Rootのcanonical構造には含めない内部算術cache。
+    std::shared_ptr<const symbolic::AlgebraicNumber> algebraicValue;
 
-    [[nodiscard]] bool operator==(const CallExpr&) const = default;
+    [[nodiscard]] bool operator==(const CallExpr& rhs) const {
+        return head == rhs.head && arguments == rhs.arguments;
+    }
 };
 
 } // namespace mmcal::expression

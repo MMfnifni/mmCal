@@ -154,7 +154,7 @@ void runLowererTests(TestRunner& tests) {
         "square bracket syntax lowers to a function call");
     tests.expectEqual(lowerAndFormat("f[x]:=x+1"), std::string{"f[x]:=x+1"},
         "function definition syntax is preserved for later evaluation");
-    tests.expectEqual(lowerAndFormat("1 < x <= 3"), std::string{"And[1<x, x<=3]"},
+    tests.expectEqual(lowerAndFormat("1 < x <= 3"), std::string{"And[1 < x, x <= 3]"},
         "comparison chain lowers without losing operands");
     tests.expectEqual(lowerAndFormat("%%"), std::string{"%%"},
         "output history reference depth is preserved");

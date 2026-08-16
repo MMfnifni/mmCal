@@ -98,7 +98,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::combination, BuiltinId::Combination, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::fibonacci, BuiltinId::Fibonacci, 1, ArgumentEvaluation::All, true),
 
-    // exact/symbolic signal processing. FFT is radix-2 with exact DFT fallback.
+    // exact/symbolic signal processing. FFT uses radix-2 plus bounded cyclotomic quotient arithmetic, with generic exact DFT fallback.
     fixed(builtins::names::dft, BuiltinId::DiscreteFourierTransform, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::fft, BuiltinId::FastFourierTransform, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::ifft, BuiltinId::InverseFourierTransform, 1, ArgumentEvaluation::All, true),
@@ -224,6 +224,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::log10, BuiltinId::Log10, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::gamma, BuiltinId::Gamma, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::logGamma, BuiltinId::LogGamma, 1, ArgumentEvaluation::All, true),
+    range(builtins::names::lambertW, BuiltinId::LambertW, 1, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::erf, BuiltinId::Erf, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::erfc, BuiltinId::Erfc, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::fresnelC, BuiltinId::FresnelC, 1, ArgumentEvaluation::All, true),

@@ -26,7 +26,6 @@ mmCalculator（以下mmCal）は，研究・設計・製造などの技術用途
 
 また一般的な電卓のように入力直後から`double`へ変換せず，必要なときだけ数値近似を求める。
 
-
 ## 細かいことは置いといて実例超特急
 
 ```text
@@ -702,7 +701,6 @@ D N In Out Exit Clear Defs UnDef
 - `docs/reference.ja.md` — 函数・構文・現在仕様の詳細
 - `docs/mathematics.md` — 定義域，主値，数値計算の数学方針
 - `docs/architecture.md` — 開発者向け内部構造
-- `docs/roadmap.md` — 現在未実装の主な機能と今後の候補
 - `docs/grammar.ebnf` — 文法の機械可読な概要
 - `docs/multiprecision_implementation.ja.md` — 多倍長整数・任意精度・保証付き評価の実装詳細
 - `docs/performance_optimization.ja.md` — v1.5.1–v1.5.2で採用・棄却した高速化と実測根拠
@@ -712,11 +710,10 @@ D N In Out Exit Clear Defs UnDef
 
 ソースコードは**BSD 3-Clause License**で提供する。商用利用，改変，再配布，組込み利用を含む著作権上の許諾条件は`LICENSE`を参照。
 
-**mmCalの名称・公式ロゴ等のブランド利用は，ソースコードのライセンスとは別に`TRADEMARKS.md` / `TRADEMARKS.ja.md`で扱う。** 
+**mmCalの名称・公式ロゴ等のブランド利用は，ソースコードのライセンスとは別に`TRADEMARKS.ja.md`で扱う。**
 独立したGUI，fork，商用製品等を作ること自体を制限するものではなく，第三者製品を公式mmCalそのもの・公式認定品であるかのように表示しないための方針である。
 
 - [BSD 3-Clause License](LICENSE)
-- [Trademark and Brand Policy](TRADEMARKS.md)
 - [商標・ブランドポリシー](TRADEMARKS.ja.md)
 
 学術論文や製品等でmmCalを利用した場合，ライセンス上の追加義務ではないが，使用した旨を記載していただけると嬉しい。

@@ -12,9 +12,27 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+// exact Rational入力では元の有理値を失わず，argument shiftのrising factorialを
+// exact productとして処理する。
+[[nodiscard]] RealInterval encloseGammaRational(
+    const numeric::Rational& input,
+    std::size_t precisionBits);
+
 // C/POSIXのlgammaと同じく、実軸上の log(|Gamma(x)|)。
 [[nodiscard]] RealInterval encloseLogGammaReal(
     const RealInterval& input,
+    std::size_t precisionBits);
+
+[[nodiscard]] RealInterval encloseLogGammaRational(
+    const numeric::Rational& input,
+    std::size_t precisionBits);
+
+// Lambert W の実数branch。branch=0 は [-1/e,inf) 上のprincipal branch，
+// branch=-1 は [-1/e,0) 上のlower real branchだけを扱う。
+// 複素branchはCertifiedEvaluator側で未対応として保持する。
+[[nodiscard]] RealInterval encloseLambertWReal(
+    const RealInterval& input,
+    int branch,
     std::size_t precisionBits);
 
 [[nodiscard]] RealInterval encloseErfReal(
@@ -95,9 +113,19 @@ namespace mmcal::approximation {
     const RealInterval& b,
     std::size_t precisionBits);
 
+[[nodiscard]] RealInterval encloseBetaRational(
+    const numeric::Rational& a,
+    const numeric::Rational& b,
+    std::size_t precisionBits);
+
 [[nodiscard]] RealInterval encloseBetaLogPositive(
     const RealInterval& a,
     const RealInterval& b,
+    std::size_t precisionBits);
+
+[[nodiscard]] RealInterval encloseBetaLogRational(
+    const numeric::Rational& a,
+    const numeric::Rational& b,
     std::size_t precisionBits);
 
 // Riemann zeta。第一版certified backendは実軸s>1。

@@ -966,6 +966,31 @@ integrate[log[1-x]/x,x] -> -polylog[2,x]
 
 No general `Solve` rule invents a single principal inverse for `Ei/Si/Ci/li/polylog`: global injectivity and branch structure are not generally available. Only exact degenerations such as `polylog[0,z]` and `polylog[1,z]` are passed to the existing algebraic/logarithmic Solver.
 
+## 14.11 Lambert W
+
+```text
+lambertw[z]
+lambertw[k,z]
+```
+
+`lambertw` denotes the Lambert W function satisfying `w exp[w] == z`. The one-argument form is the principal branch `k=0`; the two-argument form specifies an integer branch `k`. It is currently introduced as an exact symbolic function, with representative exact values, differentiation, and use by the Real-domain exponential equation solver.
+
+```text
+lambertw[0] -> 0
+lambertw[E] -> 1
+lambertw[-1/E] -> -1
+lambertw[-1,-1/E] -> -1
+D[lambertw[x],x] -> lambertw[x]/(x*(1+lambertw[x]))
+```
+
+On the real axis the Solver distinguishes the real `k=0` and `k=-1` branches where required. Both real branches have a certified `N` backend that evaluates Lambert W as the monotone real inverse of `w exp[w]=z` with rigorous interval refinement. Certified numerical evaluation of general Complex branches is still not implemented; unsupported values remain exact symbolic expressions.
+
+```text
+N[lambertw[1],20] -> 0.567143290409783873
+N[lambertw[-1,-1/10],20] -> -3.5771520639572972184
+```
+
+
 ---
 
 # 15. Aggregate functions
@@ -1302,7 +1327,7 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey and non-power-of-two lengths fall back to exact DFT. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
+For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey. For non-power-of-two lengths of at least 5, inputs that can be certified as exact Rational/Gaussian Rational values or expressions in the same cyclotomic quotient are transformed in Rational power-basis coordinates of `Q[t]/Phi_n(t)`. Gaussian Rational inputs extend the conductor to `lcm(n,4)` when needed so that `I` lies in the same cyclotomic field. This lets exact `ifft[fft[v]]` close without asking the generic Simplifier to rediscover root-of-unity identities. If the current cyclotomic-degree budget of 64 is exceeded, or symbolic inputs cannot be proven to lie in the quotient field, the legacy generic exact DFT remains the fallback. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
 
 `N[fft[v],p]` does not first expand the full exact Fourier expression. `N` propagates the requested precision into the FFT call, which performs butterflies directly on certified `ComplexInterval`/BigFloat endpoints and returns decimal components only after their requested rounding is proven unique. `fft[v]` with approximate operands dispatches to the same backend.
 
@@ -1780,6 +1805,17 @@ simplify[abs[x], x >= 0]
 
 Contradictory assumptions produce DomainError.
 
+`element` can prove negative membership as well as positive membership. A non-integral exact Rational is known not to be an Integer; known irrational/transcendental constants are known not to be Rational/Integer; and an algebraic Root whose minimal degree is proven greater than one is likewise non-Rational/non-Integer.
+
+```text
+element[1/2,Integer] -> False
+element[Pi,Rational] -> False
+element[Phi,Rational] -> False
+element[root[{-2,0,1},2],Rational] -> False
+```
+
+Failure to prove membership is never converted into `False`.
+
 ---
 
 # 23. Solver
@@ -1787,11 +1823,14 @@ Contradictory assumptions produce DomainError.
 ```text
 solve[equation,x]
 solve[equation,x,domainOrConstraint]
+solve[equation,domain]
 solve[{equations...},{variables...}]
 ```
 
 The default ambient domain for equation systems is Complex.
 Ordered inequalities are handled over Real or a real subdomain.
+
+`solve[equation,domain]` is a shorthand for `Integer` / `Rational` / `Real` / `Complex` domains. It infers the solve variable only when the equation contains **exactly one** unknown user symbol. Zero or multiple candidates produce TypeError rather than a guess. Explicit-variable forms likewise reject protected constants and builtin/domain symbols such as `Pi` or `Real` as solve variables.
 
 ```text
 solve[x^2 == 1,x]
@@ -1812,6 +1851,8 @@ solve[{2x+3y==5,x-2y==9},{x,y}]
 
 `SolutionSet` distinguishes Empty / Finite / Universal / Conditional / Unresolved.
 Unsupported expressions are not misreported as having no solutions.
+
+Because `solve` is `HoldAll`, its input is not sent through the general Evaluator before classification. A dedicated **solve-safe normalization** layer canonicalizes builtin aliases and applies proof-safe Simplifier rewrites only. This avoids evaluation side effects while making equivalent spellings such as `E^x` / `exp[x]`, `ln` / `log`, and `log2` / `log10` share solver capabilities.
 
 Denominator zeros, Log definedness, rational-function holes/poles, and related constraints are retained as global conditions where possible.
 
@@ -1839,7 +1880,46 @@ solve[tanh[x]==2,x,Real]
 
 solve[exp[x]==a,x,Real]
 -> {x == log[a] if a in Real && a > 0}
+
+solve[E^x==8,x,Real]
+-> {x == log[8]}
+
+solve[ln[x]==2,x,Real]
+-> {x == exp[2]}
+
+solve[log2[x]==3,x,Real]
+-> {x == 8}
 ```
+
+### Real exponentials and Lambert W
+
+When the Real-domain solver can prove `a>0` and the exponent real, the principal power `a^u = exp[u log[a]]` is strictly positive. Zero equations therefore close to the empty set without numerical search.
+
+```text
+solve[1.1^x == 0,x,Real] -> {}
+solve[1.1^x == 0,Real]   -> {}
+solve[2^x == 8,x,Real]   -> {x == 3}
+solve[2^(2x+1) == 8,x,Real] -> {x == 1}
+solve[2^x == -1,x,Real]  -> {}
+```
+
+When the right-hand side is independent of the solve variable and the solver can prove `a>0`, `a!=1`, and `r>0`, a constant-base equation `a^u==r` is safely inverted to `u==log[a,r]` and passed to the existing polynomial solver. The rewrite is not used when its branch/domain requirements cannot be proved.
+
+The initial Lambert W classifier is deliberately limited to `a^x==x^2` with `a>0`, where the complete Real branch structure can be certified. Writing `L=log[a]`, one real root always comes from the principal branch; the two negative-argument branches `W_0` / `W_-1` are added only when `|L|<=2/E` is certified. At the branch point they coincide and are not duplicated.
+
+```text
+solve[1.1^x == x^2,x,Real]
+-> {x == -2lambertw[log[11/10]/2]/log[11/10],
+    x == -2lambertw[-log[11/10]/2]/log[11/10],
+    x == -2lambertw[-1,-log[11/10]/2]/log[11/10]}
+
+N[solve[1.1^x == x^2,x,Real],20]
+-> {x == -0.95548727594562198165,
+    x == 1.0513800237472769374,
+    x == 95.71683016840522274}
+```
+
+General `a^(b x+c)==P(x)`, complete Complex branch families, and inequalities involving Lambert W remain deferred. If branch conditions cannot be proved, the solver keeps conditional branches or an `UnresolvedSolutionSet` rather than guessing.
 
 ### Parameterized real solution families for periodic functions
 
@@ -1933,7 +2013,81 @@ root[{-2,0,1},2]+root[{-3,0,0,1},1]
 -> root[{1,-36,12,-6,-6,0,1},2]
 ```
 
-To bound both resultant and primitive-element growth, the current **algebraic-field candidate-degree budget is 16**. Complete arbitrary-degree Q-factorization, persistent number-field objects/reuse across unrelated expressions, complete algebraic equality/ordering across unrelated representations, and `rootApproximant` remain deferred. The current layer is therefore a bounded exact algebraic-field backend that performs proven minimal-polynomial and simple-extension reductions where possible, not yet a complete number-field canonicalizer.
+Once primitive-element reduction certifies a simple extension, the result does not discard that work after formatting it as `root[minpoly,k]`. Internally, `NumberFieldContext` retains the generator minimal polynomial, selected Real/Complex embedding, and reduction of `theta^d` modulo `m(theta)`, while `AlgebraicElement` retains exact Rational coordinates in the power basis. Later same-Context `+ - * /` therefore use coefficient arithmetic modulo `m(theta)` rather than rebuilding a resultant or primitive element. Individual Roots also receive a generator-field representation when Q-irreducibility is proven, so repeated arithmetic on the same Root can remain inside its original simple extension.
+
+```text
+root[{1,-1,0,0,0,1},1,Complex]^2
+-> root[{-1,1,0,-2,0,1},3,Complex]
+```
+
+The public canonical form remains `root[minpoly,k]`; field coordinates are not exposed to formatting or structural equality. `Expr::rebuildCall` preserves the internal Algebraic cache only when a Call's arguments remain structurally unchanged and invalidates it when they change, allowing Simplifier, substitution, and constraint-processing paths to retain the same field lineage safely.
+
+Stage 4 adds a bounded weak interner for `NumberFieldContext`. Independently constructed contexts share one immutable object only when they have the **same embedded generator identity**: the same minimal polynomial, Root domain, and root index. The interner owns no Contexts, stores only `weak_ptr`s, prunes expired entries, and uses a 256-entry LRU bound; misses and eviction affect performance only, never mathematical identity. Roots with different selected embeddings are not merged even when their minimal polynomials agree, and isomorphic fields expressed through different primitive generators or subfield relations are not guessed equivalent.
+
+This lets independently derived elements of the same simple extension enter the pointer-level same-field fast path. For example, the two sides below are built through separate primitive-element reductions but now multiply inside their shared field instead of re-entering a higher-degree construction:
+
+```text
+(root[{-2,0,1},2]+root[{-3,0,0,1},1])
+*(root[{-2,0,1},2]-root[{-3,0,0,1},1])
+-> root[{1,12,-6,1},1]
+```
+
+Stage 5-1 also reuses the common-field construction itself. After primitive-element reduction succeeds for a Root pair, a bounded cache of at most 64 entries retains the compositum `NumberFieldContext` and the power-basis embeddings of both operands. Reversed operand order is recognized, so sequences such as `alpha+beta` followed by `alpha-beta` do not repeat the same tensor-product / primitive-element search. The output field is referenced weakly and entries whose field has expired are discarded.
+
+For a Real field, an `AlgebraicElement` can evaluate its coordinate polynomial over the chosen generator's certified isolating interval using exact Rational interval arithmetic. A Sturm certificate proves that this interval contains exactly one root of the result minimal polynomial, and the number of roots below the interval determines the canonical root index directly. This avoids isolating every real root of the result polynomial and then repeating all-root isolation while constructing `root[minpoly,k]`; the previous isolating-region path remains a fallback when the direct certificate does not resolve the root.
+
+A value carrying a persistent field representation also already has a certified minimal polynomial. Therefore a Real value of degree greater than 1 cannot be Rational, and a Complex value of degree greater than 2 cannot lie in `Q+iQ`; `exactRationalParts` skips its former 192-bit refinement in those cases. These are proof-reuse optimizations only and do not alter canonical output or exact semantics.
+
+Stage 5-2 also reuses reciprocals inside one `NumberFieldContext`. On the first miss, the inverse of a power-basis coordinate vector `u` is computed exactly by extended Euclid in `Q[t]/(m)` and stored in a thread-safe per-field LRU capped at 16 entries. Since `inverse(inverse(u)) = u`, both directions of the pair are published together; a hit only copies the cached Rational coefficient vector. Eviction can only cause recomputation and cannot affect the mathematical result. Constant coordinates `{q,0,...}` use the canonical embedding of `Q` and return `{1/q,0,...}` directly without polynomial Euclid. A persistent multiplication-matrix cache was also measured, but on a degree-12 field it reduced a representative multiplication only from about 112 us to 101 us while costing about 228 us to build, so it is deliberately not enabled at this stage.
+
+A dedicated development benchmark is available:
+
+```text
+mmCal.Benchmarks --algebraic-field [iterations]
+```
+
+It measures first-run and warm average timings, in one session, for the compositum-reuse expression corresponding to `(sqrt[2]+cuberoot[3])*(sqrt[2]-cuberoot[3])`, and also microbenchmarks first/warm reciprocal lookup, warm division, and first/warm minimal-polynomial derivation in a degree-12 simple extension. Timings depend on compiler, build configuration, and CPU and are intended for same-environment regression monitoring rather than absolute performance guarantees.
+
+Stage 3 connects this representation to exact comparisons. `==` / `!=` compare power-basis coordinates directly inside one `NumberFieldContext`, accept an identical canonical Root identity immediately, and certify distinct root indices of one polynomial or distinct proven irreducible minimal polynomials as unequal. Remaining bounded cases may construct the exact difference through the existing primitive-element/resultant path and test zero from field coordinates or certified root isolation. Proof failure or budget overflow never becomes `False`.
+
+Mathematical `< <= > >=` is defined only for real algebraic values. In one field, the sign of `a-b` is certified by exact Rational interval evaluation of its power-basis polynomial at the chosen real embedding. Across different real fields, the certified isolating intervals are refined until they separate; exact difference construction is available as a fallback. The deterministic `Re(z)+Pi Im(z)` ordering used to enumerate Complex Roots is not a mathematical order, so `< <= > >=` on Complex algebraic values remains unevaluated.
+
+```text
+root[{-2,0,1},2] > 1
+-> True
+
+root[{-2,0,1},2] != root[{-3,0,1},2]
+-> True
+
+root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
+-> root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
+```
+
+Stage 7-6 also bridges expressions that are not syntactically Root values when their exact algebraic meaning can be certified. The current bridge covers canonical `root[...]`, exact Rational / exact complex-Rational values, `sqrt[q]` / `cbrt[q]` for safe exact-Rational real cases, `Phi`, and bounded `+ - * /` or small integer powers built from them. Formatting is not forced into Root form; comparisons, domain proofs, and Solve use the shared `AlgebraicNumber` view internally while preserving the original user-visible radical or constant expression.
+
+```text
+root[{-2,0,1},2] == sqrt[2]
+-> True
+
+root[{-2,0,0,1},1] == cbrt[2]
+-> True
+
+Phi == root[{-1,-1,1},2]
+-> True
+
+element[sqrt[2]+sqrt[3],Rational]
+-> False
+
+solve[x == sqrt[2],x,Rational]
+-> {}
+
+solve[x == sqrt[2],x,Real]
+-> {x == sqrt[2]}
+```
+
+The bridge has node and small-integer-power budgets and falls back to the previous symbolic path when conversion cannot be certified. It never guesses a minimal polynomial from an approximation. Undefined held forms such as `0^0` are not assigned a bridge-only value either; `a^0=1` is used only when exact nonzeroness of the base can be proven.
+
+To bound resultant and primitive-element growth, the current **algebraic-field candidate-degree budget is 16**. Complete arbitrary-degree Q-factorization, general number-field merging/canonicalization across different primitive generators or subfield relations, general reduction of overlapping extensions when the current simple-extension certificate fails, complete cross-context equality for unproven/nonminimal representations, ordering beyond the current refinement/algebraic-construction budgets, and `rootApproximant` remain deferred. The current layer is therefore a persistent-lineage bounded exact algebraic-field backend with exact comparison support, not yet a complete number-field canonicalizer.
 
 ---
 
@@ -1948,6 +2102,21 @@ N[expr,p]
 `N` applies recursively to Arrays. For explicit angle-unit values such as those returned by `arg`, only the numeric component is approximated and the unit is retained.
 
 Since v1.5.2, `N` is also the entry point for precision-aware evaluation. It resolves the requested precision before evaluating its first argument and keeps that precision context active while the child expression is evaluated. Ordinary builtins still follow exact-first evaluation; only explicitly supported builtins such as FFT consume the context and evaluate directly in a certified approximate domain.
+
+If whole-expression certification is unavailable, ordinary evaluated Calls / Arrays / Lists may still be traversed structurally: only numerically closed subexpressions are approximated, while free symbols and unresolved symbolic function parts remain exact. Calls with `HoldAll` / `HoldFirst`-style semantics are not blindly rebuilt, preserving their evaluation contract.
+
+```text
+N[x+Pi,20]
+-> 3.1415926535897932385+x
+
+N[sin[x]+Pi,20]
+-> 3.1415926535897932385+sin[x]
+
+N[True,20]     -> True
+N[Infinity,20] -> Infinity
+```
+
+Leaving a free symbol, Boolean, or `Infinity` exact is not itself a Warning. If an inner operation such as `D`, `limit`, `solve`, or `rref` has already emitted a more specific Warning, the enclosing `N` suppresses a redundant generic `N::unevaluated`. A mathematically existing value whose certified backend is unavailable produces `N::unsupported` and remains symbolic rather than being reported as DomainError. Thus unsupported complex Lambert W cases such as `N[lambertw[-1,-1/2],p]` remain held with a Warning, while the genuine real-branch singularity `W_-1(0)` is still a DomainError.
 
 ```text
 N[Pi,20]
@@ -2302,7 +2471,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **262 registered builtin/alias names / 244 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **263 registered builtin/alias names / 245 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2314,7 +2483,7 @@ det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigen
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
-integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
+integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, lambertw, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
 luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
@@ -2414,7 +2583,7 @@ Representative items:
 
 Further candidates:
 
-complete arbitrary-degree Q-factorization, persistent number-field reduction, general algebraic equality/ordering, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
+complete arbitrary-degree Q-factorization, general number-field merging/canonicalization across different primitive generators, complete cross-context comparison for unproven representations, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
 
 ---
 
@@ -2504,7 +2673,8 @@ A-B+C
 
 - Do not print `+ -` / `+-`; negative terms are rendered with `-`
 - Addition/subtraction forms such as `A-(B-C)` may be flattened for display to `A-B+C`
-- Do not add unnecessary spaces around `+`, `-`, `*`, `/`, `^`, or comparison operators
+- Do not add unnecessary spaces around `+`, `-`, `*`, `/`, or `^`
+- Render relation operators `==`, `!=`, `<`, `<=`, `>`, `>=` with one space on each side for readability
 - Implicit multiplication is concatenated only when lexically safe (`2x`, `2sqrt[x]`). Forms that would collide with exponent notation, such as `2exp[x]` or `2E`, are rendered explicitly as `2*exp[x]`, `2*E`
 - Preserve necessary spacing when adjacent identifiers would merge into another token (`I Pi`, `x y`)
 - When juxtaposition would be ambiguous, such as adjacent numeric tokens, use explicit `*` rather than whitespace

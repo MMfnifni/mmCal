@@ -160,7 +160,7 @@ void parseSpec(
         arguments.reserve(expression.asCall().arguments.size());
         for (const Expr& argument : expression.asCall().arguments)
             arguments.push_back(substituteExpr(argument, bindings));
-        return Expr::call(expression.asCall().head, std::move(arguments));
+        return Expr::rebuildCall(expression.asCall(), std::move(arguments));
     }
     if (expression.isArray()) {
         const auto& array = expression.asArray();
@@ -274,7 +274,9 @@ void appendUnique(mathematics::AssumptionSet& target, const mathematics::Assumpt
 
         // Complexはsolveの既定ambient domainであり、solverが構成した数値式を
         // さらに「Complexと証明できるか」で絞る必要はない。Real以下だけ検査する。
-        if (variable.domain != NumericDomain::Complex) {
+        const bool certifiedForRequestedDomain = branch.bindingsCertifiedDomain
+            && mathematics::isSubdomainOf(*branch.bindingsCertifiedDomain, variable.domain);
+        if (variable.domain != NumericDomain::Complex && !certifiedForRequestedDomain) {
             const Predicate domainPredicate = mathematics::elementOf(binding->value, variable.domain);
             const TruthValue domainTruth = domainKnowledge.prove(domainPredicate);
             if (domainTruth == TruthValue::False)

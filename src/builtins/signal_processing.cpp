@@ -10,11 +10,16 @@
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
+#include "symbolic/cyclotomic_field.hpp"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <memory>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -252,6 +257,346 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             value = divideBySize(std::move(value), n, registry, mathematics, angles);
     return data;
 }
+
+[[nodiscard]] Expr cyclotomicGeneratorExpr(
+    const symbolic::CyclotomicFieldContext& field,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    // 表示は従来のexact Fourierと同じcisを使う。計算内部だけQ[t]/Phi_n(t)へ写す。
+    return twiddle(1, field.conductor(), false, registry, mathematics, angles);
+}
+
+[[nodiscard]] std::vector<Rational> addCoordinates(
+    std::span<const Rational> lhs,
+    std::span<const Rational> rhs) {
+    if (lhs.size() != rhs.size())
+        return {};
+    std::vector<Rational> result(lhs.begin(), lhs.end());
+    for (std::size_t i = 0; i < result.size(); ++i)
+        result[i] += rhs[i];
+    return result;
+}
+
+[[nodiscard]] std::vector<Rational> negateCoordinates(std::span<const Rational> value) {
+    std::vector<Rational> result(value.begin(), value.end());
+    for (Rational& coefficient : result)
+        coefficient = -coefficient;
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<Rational>> powerCoordinates(
+    const symbolic::CyclotomicFieldContext& field,
+    std::vector<Rational> base,
+    std::uint64_t exponent) {
+    std::vector<Rational> result(field.degree());
+    result[0] = Rational{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0U)
+            result = field.multiply(result, base);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = field.multiply(base, base);
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinatesImpl(
+    const Expr& expression,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry,
+    std::size_t& remainingNodes) {
+    if (remainingNodes == 0)
+        return std::nullopt;
+    --remainingNodes;
+
+    if (expression == generator)
+        return std::vector<Rational>(field.power(1).begin(), field.power(1).end());
+
+    if (expression.isNumber()) {
+        const Number& number = expression.asNumber();
+        if (number.isReal())
+            return field.embedGaussianRational(number.asReal().toRational(), Rational{});
+        return field.embedGaussianRational(
+            number.asComplex().real.toRational(),
+            number.asComplex().imaginary.toRational());
+    }
+    if (!expression.isCall())
+        return std::nullopt;
+
+    const auto& call = expression.asCall();
+    const auto* definition = registry.find(call.head);
+    if (!definition)
+        return std::nullopt;
+    const auto child = [&](std::size_t index) {
+        return cyclotomicCoordinatesImpl(
+            call.arguments[index], field, generator, registry, remainingNodes);
+    };
+
+    switch (definition->id) {
+    case BuiltinId::Negate: {
+        if (call.arguments.size() != 1)
+            return std::nullopt;
+        auto value = child(0);
+        return value ? std::optional<std::vector<Rational>>{negateCoordinates(*value)}
+                     : std::nullopt;
+    }
+    case BuiltinId::Add: {
+        std::vector<Rational> result(field.degree());
+        for (std::size_t i = 0; i < call.arguments.size(); ++i) {
+            auto value = child(i);
+            if (!value)
+                return std::nullopt;
+            result = addCoordinates(result, *value);
+        }
+        return result;
+    }
+    case BuiltinId::Subtract: {
+        if (call.arguments.size() != 2)
+            return std::nullopt;
+        auto lhs = child(0);
+        auto rhs = child(1);
+        if (!lhs || !rhs)
+            return std::nullopt;
+        return addCoordinates(*lhs, negateCoordinates(*rhs));
+    }
+    case BuiltinId::Multiply: {
+        std::vector<Rational> result(field.degree());
+        result[0] = Rational{BigInt{1}};
+        for (std::size_t i = 0; i < call.arguments.size(); ++i) {
+            auto value = child(i);
+            if (!value)
+                return std::nullopt;
+            result = field.multiply(result, *value);
+        }
+        return result;
+    }
+    case BuiltinId::Power: {
+        if (call.arguments.size() != 2
+            || !call.arguments[1].isNumber()
+            || !call.arguments[1].asNumber().isReal()
+            || !call.arguments[1].asNumber().asReal().isInteger())
+            return std::nullopt;
+        const BigInt& exponent = call.arguments[1].asNumber().asReal().asInteger();
+        if (exponent.isNegative())
+            return std::nullopt;
+        const auto magnitude = numeric::tryToUint64(exponent);
+        if (!magnitude || *magnitude > field.conductor())
+            return std::nullopt;
+        auto base = child(0);
+        if (!base)
+            return std::nullopt;
+        return powerCoordinates(field, std::move(*base), *magnitude);
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinates(
+    const Expr& expression,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry) {
+    std::size_t remainingNodes = 256;
+    return cyclotomicCoordinatesImpl(
+        expression, field, generator, registry, remainingNodes);
+}
+
+[[nodiscard]] Expr cyclotomicPolynomialExpr(
+    std::span<const Rational> coordinates,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry) {
+    if (const auto gaussian = field.exactGaussianRational(coordinates)) {
+        if (gaussian->second.isZero())
+            return Expr{Number{gaussian->first}};
+        return Expr{Number::complex(
+            numeric::RealNumber{gaussian->first}, numeric::RealNumber{gaussian->second})};
+    }
+
+    std::vector<Expr> terms;
+    for (std::size_t exponent = 0; exponent < coordinates.size(); ++exponent) {
+        const Rational& coefficient = coordinates[exponent];
+        if (coefficient.isZero())
+            continue;
+        if (exponent == 0) {
+            terms.push_back(Expr{Number{coefficient}});
+            continue;
+        }
+
+        Expr power = exponent == 1
+            ? generator
+            : Expr::call(registry.symbol(BuiltinId::Power),
+                {generator, Expr{Number{BigInt::fromUnsigned(exponent)}}});
+        if (coefficient == Rational{BigInt{1}})
+            terms.push_back(std::move(power));
+        else if (coefficient == Rational{BigInt{-1}})
+            terms.push_back(Expr::call(
+                registry.symbol(BuiltinId::Negate), {std::move(power)}));
+        else
+            terms.push_back(Expr::call(
+                registry.symbol(BuiltinId::Multiply),
+                {Expr{Number{coefficient}}, std::move(power)}));
+    }
+
+    if (terms.empty())
+        return zero();
+    if (terms.size() == 1)
+        return std::move(terms.front());
+    return Expr::call(registry.symbol(BuiltinId::Add), std::move(terms));
+}
+
+[[nodiscard]] std::size_t multiplyModulo(
+    std::size_t lhs,
+    std::size_t rhs,
+    std::size_t modulus) noexcept {
+    if (modulus == 0)
+        return 0;
+    lhs %= modulus;
+    std::size_t result = 0;
+    while (rhs != 0) {
+        if ((rhs & 1U) != 0U)
+            result = result >= modulus - lhs ? result - (modulus - lhs) : result + lhs;
+        rhs >>= 1U;
+        if (rhs == 0)
+            break;
+        lhs = lhs >= modulus - lhs ? lhs - (modulus - lhs) : lhs + lhs;
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<std::vector<Rational>>> coordinatesForField(
+    const std::vector<Expr>& input,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry) {
+    std::vector<std::vector<Rational>> values;
+    values.reserve(input.size());
+    for (const Expr& expression : input) {
+        auto coordinates = cyclotomicCoordinates(expression, field, generator, registry);
+        if (!coordinates)
+            return std::nullopt;
+        values.push_back(std::move(*coordinates));
+    }
+    return values;
+}
+
+[[nodiscard]] std::shared_ptr<const symbolic::CyclotomicFieldContext> cachedOrCreateCyclotomicField(
+    std::size_t conductor,
+    FourierTransformCache& cache) {
+    if (symbolic::cyclotomicDegree(conductor) > 64)
+        return {};
+    if (auto existing = cache.cyclotomicField(conductor))
+        return existing;
+    auto created = symbolic::CyclotomicFieldContext::create(conductor);
+    if (created)
+        cache.rememberCyclotomicField(conductor, created);
+    return created;
+}
+
+[[nodiscard]] std::optional<std::vector<Expr>> exactCyclotomicTransform(
+    const std::vector<Expr>& input,
+    bool inverse,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    FourierTransformCache& cache) {
+    const std::size_t n = input.size();
+    if (n < 5 || isPowerOfTwo(n))
+        return std::nullopt;
+    if (n > std::numeric_limits<std::size_t>::max() / 4)
+        return std::nullopt;
+
+    bool allNumbers = true;
+    bool hasImaginaryRational = false;
+    for (const Expr& expression : input) {
+        if (!expression.isNumber()) {
+            allNumbers = false;
+            continue;
+        }
+        if (!expression.asNumber().isReal()
+            && !expression.asNumber().asComplex().imaginary.isZero())
+            hasImaginaryRational = true;
+    }
+
+    std::vector<std::size_t> conductors;
+    const std::size_t gaussianConductor = std::lcm(n, std::size_t{4});
+    if (allNumbers)
+        conductors.push_back(hasImaginaryRational ? gaussianConductor : n);
+    else {
+        for (const std::size_t conductor : {n, gaussianConductor})
+            if (std::find(conductors.begin(), conductors.end(), conductor) == conductors.end())
+                conductors.push_back(conductor);
+    }
+
+    std::shared_ptr<const symbolic::CyclotomicFieldContext> cyclotomic;
+    std::optional<std::vector<std::vector<Rational>>> values;
+    std::optional<Expr> generator;
+    for (const std::size_t conductor : conductors) {
+        auto candidate = cachedOrCreateCyclotomicField(conductor, cache);
+        if (!candidate)
+            continue;
+        Expr candidateGenerator = cyclotomicGeneratorExpr(
+            *candidate, registry, mathematics, angles);
+        auto candidateValues = coordinatesForField(
+            input, *candidate, candidateGenerator, registry);
+        if (!candidateValues)
+            continue;
+        cyclotomic = std::move(candidate);
+        values = std::move(candidateValues);
+        generator = std::move(candidateGenerator);
+        break;
+    }
+    if (!cyclotomic || !values || !generator)
+        return std::nullopt;
+
+    const std::size_t conductor = cyclotomic->conductor();
+    if (conductor % n != 0)
+        return std::nullopt;
+    const std::size_t degree = cyclotomic->degree();
+    const std::size_t rootStep = conductor / n;
+    std::vector<std::vector<Rational>> transformed(
+        n, std::vector<Rational>(degree));
+    for (std::size_t k = 0; k < n; ++k) {
+        auto& sum = transformed[k];
+        for (std::size_t j = 0; j < n; ++j) {
+            const std::size_t jk = multiplyModulo(j, k, n);
+            std::size_t exponent = rootStep * jk;
+            if (inverse && exponent != 0)
+                exponent = conductor - exponent;
+            const auto term = cyclotomic->multiply(
+                (*values)[j], cyclotomic->power(exponent));
+            for (std::size_t i = 0; i < degree; ++i)
+                sum[i] += term[i];
+        }
+        if (inverse) {
+            const Rational scale{BigInt{1}, sizeInteger(n)};
+            for (Rational& coefficient : sum)
+                coefficient *= scale;
+        }
+    }
+
+    std::vector<Expr> output;
+    output.reserve(n);
+    for (const auto& coordinates : transformed)
+        output.push_back(cyclotomicPolynomialExpr(coordinates, *cyclotomic, *generator, registry));
+    return output;
+}
+
+/*
+旧 exact FFT dispatch（Stage 7-7以前）。
+
+    return vectorExpr(radix2Transform(
+        input, inverse, registry, mathematics, angles, cache));
+
+非2冪長ではradix2Transform()がdirectTransform()へfallbackし，twiddleを
+cis[2 Pi k/n]のgeneric Exprとして構築していた。この方式はsymbolic入力のfallbackとして
+現在も残すが，exact Rational / Gaussian Rational と同一cyclotomic field由来の入力では，
+Q(zeta_n)のpower-basis座標演算へ先に落とす。変更理由は，5/7/10/12点等で同じ
+root-of-unity恒等式をSimplifierへ何度も再証明させ，ifft[fft[...]]が巨大式になるためである。
+*/
 
 [[nodiscard]] Expr vectorExpr(std::vector<Expr> elements);
 
@@ -599,14 +944,31 @@ template <class Transform>
 
 void FourierTransformCache::clear() noexcept {
     plans_.clear();
+    cyclotomicFields_.clear();
 }
 
 std::size_t FourierTransformCache::planCount() const noexcept {
     return plans_.size();
 }
 
+std::size_t FourierTransformCache::cyclotomicFieldCount() const noexcept {
+    return cyclotomicFields_.size();
+}
+
 FourierTransformCache::Plan& FourierTransformCache::plan(std::size_t size) {
     return plans_[size];
+}
+
+std::shared_ptr<const symbolic::CyclotomicFieldContext> FourierTransformCache::cyclotomicField(
+    std::size_t conductor) const {
+    const auto iterator = cyclotomicFields_.find(conductor);
+    return iterator == cyclotomicFields_.end() ? nullptr : iterator->second;
+}
+
+void FourierTransformCache::rememberCyclotomicField(
+    std::size_t conductor,
+    std::shared_ptr<const symbolic::CyclotomicFieldContext> field) {
+    cyclotomicFields_[conductor] = std::move(field);
 }
 
 Expr evaluateDft(
@@ -635,6 +997,9 @@ Expr evaluateFft(
         if (const auto result = evaluateApproximateFft(
             arguments, registry, mathematics, angles, *context))
             return *result;
+    if (const auto cyclotomic = exactCyclotomicTransform(
+            input, false, registry, mathematics, angles, cache))
+        return vectorExpr(*cyclotomic);
     return vectorExpr(radix2Transform(
         input, false, registry, mathematics, angles, cache));
 }
@@ -651,6 +1016,9 @@ Expr evaluateIfft(
         if (const auto result = evaluateApproximateIfft(
             arguments, registry, mathematics, angles, *context))
             return *result;
+    if (const auto cyclotomic = exactCyclotomicTransform(
+            input, true, registry, mathematics, angles, cache))
+        return vectorExpr(*cyclotomic);
     return vectorExpr(radix2Transform(
         input, true, registry, mathematics, angles, cache));
 }

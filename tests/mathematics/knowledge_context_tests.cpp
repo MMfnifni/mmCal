@@ -41,6 +41,60 @@ void runKnowledgeContextTests(TestRunner& tests) {
         baseKnowledge.prove(mathematics::elementOf(pi, NumericDomain::Real))
             == TruthValue::True,
         "KnowledgeContext: Pi is provably real from permanent mathematical knowledge");
+    tests.expect(
+        baseKnowledge.prove(mathematics::elementOf(pi, NumericDomain::Rational))
+            == TruthValue::False,
+        "KnowledgeContext: Pi transcendence refutes Rational membership");
+    tests.expect(
+        baseKnowledge.prove(mathematics::elementOf(pi, NumericDomain::Integer))
+            == TruthValue::False,
+        "KnowledgeContext: Pi transcendence refutes Integer membership");
+
+    const Expr half{numeric::Rational{BigInt{1}, BigInt{2}}};
+    tests.expect(
+        baseKnowledge.prove(mathematics::elementOf(half, NumericDomain::Integer))
+            == TruthValue::False,
+        "KnowledgeContext: a non-integral exact rational is provably not an integer");
+
+
+    const Expr sqrtTwo = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Sqrt), {integer(2)});
+    const Expr sqrtThree = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Sqrt), {integer(3)});
+    const Expr rootSqrtTwo = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Root), {
+            Expr::rationalArray({3}, {
+                numeric::Rational{BigInt{-2}},
+                numeric::Rational{},
+                numeric::Rational{BigInt{1}}}),
+            integer(2)});
+    tests.expect(
+        baseKnowledge.prove(mathematics::relation(
+            RelationKind::Equal, rootSqrtTwo, sqrtTwo)) == TruthValue::True,
+        "KnowledgeContext: canonical Root and equivalent radical share exact algebraic equality");
+    tests.expect(
+        baseKnowledge.prove(mathematics::relation(
+            RelationKind::Less, sqrtTwo, sqrtThree)) == TruthValue::True,
+        "KnowledgeContext: exact radical ordering reuses algebraic-number comparison");
+    tests.expect(
+        baseKnowledge.prove(mathematics::elementOf(sqrtTwo, NumericDomain::Rational))
+            == TruthValue::False,
+        "KnowledgeContext: irrational radicals are rejected from Rational by the algebraic bridge");
+
+    const Expr cbrtTwo = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Cbrt), {integer(2)});
+    const Expr rootCbrtTwo = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Root), {
+            Expr::rationalArray({4}, {
+                numeric::Rational{BigInt{-2}},
+                numeric::Rational{},
+                numeric::Rational{},
+                numeric::Rational{BigInt{1}}}),
+            integer(1)});
+    tests.expect(
+        baseKnowledge.prove(mathematics::relation(
+            RelationKind::Equal, rootCbrtTwo, cbrtTwo)) == TruthValue::True,
+        "KnowledgeContext: real cubic Root and cbrt share exact algebraic identity");
 
     const Expr imaginary{Number::complex(BigInt{0}, BigInt{1})};
     tests.expect(
@@ -84,7 +138,6 @@ void runKnowledgeContextTests(TestRunner& tests) {
         "KnowledgeContext: assumptions propagate through principal sqrt");
 
     const Expr minusTwo = integer(-2);
-    const Expr half{numeric::Rational{BigInt{1}, BigInt{2}}};
     const Expr halfPower = Expr::call(
         builtins.symbol(evaluation::BuiltinId::Power),
         {minusTwo, half});

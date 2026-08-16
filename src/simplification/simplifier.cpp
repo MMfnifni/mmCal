@@ -1495,6 +1495,7 @@ struct PositiveIntegerPower final {
     case BuiltinId::Expc:
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
+    case BuiltinId::LambertW:
     case BuiltinId::ExponentialIntegralEi:
     case BuiltinId::SineIntegralSi:
     case BuiltinId::CosineIntegralCi:
@@ -1721,11 +1722,12 @@ struct PositiveIntegerPower final {
 
         Expr rebuilt = current.expression;
         if (current.expression.isCall()) {
+            const auto& sourceCall = current.expression.asCall();
             std::vector<Expr> arguments;
-            arguments.reserve(current.expression.asCall().arguments.size());
-            for (const Expr& child : current.expression.asCall().arguments)
+            arguments.reserve(sourceCall.arguments.size());
+            for (const Expr& child : sourceCall.arguments)
                 arguments.push_back(completed.at(child.identity()));
-            rebuilt = Expr::call(current.expression.asCall().head, std::move(arguments));
+            rebuilt = Expr::rebuildCall(sourceCall, std::move(arguments));
             rebuilt = localRewrite(rebuilt, context);
         }
         else if (current.expression.isArray()) {

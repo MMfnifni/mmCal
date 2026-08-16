@@ -14,4 +14,12 @@ public:
         : std::runtime_error(std::move(message)) {}
 };
 
+// 数学的な値は存在するが，現在のcertified backendが必要な値域/branchを未実装であることを表す。
+// DomainErrorと区別し，Nは式を保持してunsupported warningへ落とす。
+class CertifiedBackendUnsupported final : public std::domain_error {
+public:
+    explicit CertifiedBackendUnsupported(std::string message)
+        : std::domain_error(std::move(message)) {}
+};
+
 } // namespace mmcal::approximation

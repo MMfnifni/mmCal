@@ -173,10 +173,10 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: Factor handles a univariate rational quadratic");
     tests.expectEqual(evaluateAndFormat(session, "collect[(x + 1)^3, x]"), std::string{"x^3+3x^2+3x+1"},
         "KernelSession: Collect uses the shared polynomial representation");
-    tests.expectEqual(evaluateAndFormat(session, "solve[x^2 == 1, x]"), std::string{"{x==1, x==-1}"},
+    tests.expectEqual(evaluateAndFormat(session, "solve[x^2 == 1, x]"), std::string{"{x == 1, x == -1}"},
         "KernelSession: Solve returns an internal SolutionSet for a quadratic");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^3 == -8, x]"),
-        std::string{"{x==-2, x==1-I sqrt[3], x==1+I sqrt[3]}"},
+        std::string{"{x == -2, x == 1-I sqrt[3], x == 1+I sqrt[3]}"},
         "KernelSession: Solve distinguishes all cube roots from principal Power");
 
     tests.expectEqual(evaluateAndFormat(session, "sqrt[8]"), std::string{"2sqrt[2]"},
@@ -188,63 +188,63 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(session, "sqrt[-8]"), std::string{"2I sqrt[2]"},
         "KernelSession: negative rational radicals normalize on the principal complex branch");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 - 8 == 0, x]"),
-        std::string{"{x==2sqrt[2], x==-2sqrt[2]}"},
+        std::string{"{x == 2sqrt[2], x == -2sqrt[2]}"},
         "KernelSession: solver roots pass through radical normalization");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 - 32 == 0, x]"),
-        std::string{"{x==4sqrt[2], x==-4sqrt[2]}"},
+        std::string{"{x == 4sqrt[2], x == -4sqrt[2]}"},
         "KernelSession: solver never leaves a reducible sqrt[32] root opaque");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 < 4, x]"),
-        std::string{"{x in Real if x>-2&&x<2}"},
+        std::string{"{x in Real if x > -2&&x < 2}"},
         "KernelSession: strict quadratic inequality returns an exact real interval branch");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 <= 4, x]"),
-        std::string{"{x in Real if x>=-2&&x<=2}"},
+        std::string{"{x in Real if x >= -2&&x <= 2}"},
         "KernelSession: non-strict quadratic inequality includes exact endpoints");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 > 4, x]"),
-        std::string{"{x in Real if x<-2, x in Real if x>2}"},
+        std::string{"{x in Real if x < -2, x in Real if x > 2}"},
         "KernelSession: quadratic inequality can return a union of real branches");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 - 8 < 0, x]"),
-        std::string{"{x in Real if x>-2sqrt[2]&&x<2sqrt[2]}"},
+        std::string{"{x in Real if x > -2sqrt[2]&&x < 2sqrt[2]}"},
         "KernelSession: inequality endpoints use canonical exact radicals");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^3 - x > 0, x]"),
-        std::string{"{x in Real if x>-1&&x<0, x in Real if x>1}"},
+        std::string{"{x in Real if x > -1&&x < 0, x in Real if x > 1}"},
         "KernelSession: higher-degree fully split polynomials use an exact sign chart");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x^2-1)*(x^2-4) >= 0, x]"),
-        std::string{"{x in Real if x<=-2, x in Real if x>=-1&&x<=1, x in Real if x>=2}"},
+        std::string{"{x in Real if x <= -2, x in Real if x >= -1&&x <= 1, x in Real if x >= 2}"},
         "KernelSession: high-degree non-strict sign charts merge roots into adjacent intervals");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 < 4, x, Integer]"),
-        std::string{"{x in Integer if x>-2&&x<2}"},
+        std::string{"{x in Integer if x > -2&&x < 2}"},
         "KernelSession: inequality solution regions can be restricted to an ordered subdomain");
     const error::CalcError complexInequality = evaluateError(session, "solve[x^2 < 4, x, Complex]");
     tests.expect(complexInequality.type() == error::CalcErrorType::Domain,
         "KernelSession: ordered inequalities reject an explicit Complex search domain");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 != 1, x]"),
-        std::string{"{x in Complex if x!=1&&x!=-1}"},
+        std::string{"{x in Complex if x != 1&&x != -1}"},
         "KernelSession: not-equal polynomial relations return an exact complement branch");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 + 1 != 0, x, Real]"),
         std::string{"All"},
         "KernelSession: Real-domain knowledge removes exclusions that are provably non-real");
     tests.expectEqual(evaluateAndFormat(session, "solve[{x > 0, x < 2}, x]"),
-        std::string{"{x in Real if x>0&&x<2}"},
+        std::string{"{x in Real if x > 0&&x < 2}"},
         "KernelSession: one-variable relation arrays are treated as conjunctions");
     tests.expectEqual(evaluateAndFormat(session, "solve[{x^2 == 1, x > 0}, x]"),
-        std::string{"{x==1}"},
+        std::string{"{x == 1}"},
         "KernelSession: equation candidates are filtered by inequality constraints exactly");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)*(x^2-2) > 0, x]"),
-        std::string{"{x in Real if x>-sqrt[2]&&x<1, x in Real if x>sqrt[2]}"},
+        std::string{"{x in Real if x > -sqrt[2]&&x < 1, x in Real if x > sqrt[2]}"},
         "KernelSession: higher-degree sign charts retain an irrational quadratic residual");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)/(x+1) > 0, x]"),
-        std::string{"{x in Real if x<-1, x in Real if x>1}"},
+        std::string{"{x in Real if x < -1, x in Real if x > 1}"},
         "KernelSession: rational-function inequalities preserve poles in the sign chart");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)/(x+1) >= 0, x]"),
-        std::string{"{x in Real if x<-1, x in Real if x>=1}"},
+        std::string{"{x in Real if x < -1, x in Real if x >= 1}"},
         "KernelSession: rational-function zeros may be closed while poles remain excluded");
     tests.expectEqual(evaluateAndFormat(session, "solve[1/(x+1) < 2, x]"),
-        std::string{"{x in Real if x<-1, x in Real if x>-1/2}"},
+        std::string{"{x in Real if x < -1, x in Real if x > -1/2}"},
         "KernelSession: rational-function conversion combines a nonzero right-hand side safely");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)/(x+1) == 0, x]"),
-        std::string{"{x==1}"},
+        std::string{"{x == 1}"},
         "KernelSession: rational equations solve the numerator while preserving denominator definedness");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)/(x-1) == 0, x]"),
         std::string{"{}"},
@@ -269,13 +269,13 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"(y+z)x+y"},
         "KernelSession: collect permits polynomial coefficients containing other variables");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^4 == 1, x]"),
-        std::string{"{x==1, x==-1, x==I, x==-I}"},
+        std::string{"{x == 1, x == -1, x == I, x == -I}"},
         "KernelSession: solve handles higher-degree binomials exactly");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^5 - x == 0, x]"),
-        std::string{"{x==0, x==1, x==-1, x==I, x==-I}"},
+        std::string{"{x == 0, x == 1, x == -1, x == I, x == -I}"},
         "KernelSession: solve deflates exact rational roots before solving the residual factor");
     tests.expectEqual(evaluateAndFormat(session, "solve[{x + y == 3, x - y == 1}, {x, y}]"),
-        std::string{"{{x==2, y==1}}"},
+        std::string{"{{x == 2, y == 1}}"},
         "KernelSession: solve handles an exact multivariable linear system");
 
     tests.expectEqual(
@@ -296,40 +296,40 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: factor recovers an expression coefficient even after evaluation distributed it");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[a*x + b == 0, x]"),
-        std::string{"cases[{x==-b/a} if a!=0; All if a==0&&b==0; {} if a==0&&b!=0]"},
+        std::string{"cases[{x == -b/a} if a != 0; All if a == 0&&b == 0; {} if a == 0&&b != 0]"},
         "KernelSession: symbolic linear solve preserves all degenerate coefficient cases");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[x^2 + b*x + c == 0, x]"),
-        std::string{"cases[{x==(-b+sqrt[b^2-4c])/2, x==(-b-sqrt[b^2-4c])/2} if b^2-4c!=0; {x==-b/2 (multiplicity 2)} if b^2-4c==0]"},
+        std::string{"cases[{x == (-b+sqrt[b^2-4c])/2, x == (-b-sqrt[b^2-4c])/2} if b^2-4c != 0; {x == -b/2 (multiplicity 2)} if b^2-4c == 0]"},
         "KernelSession: symbolic quadratic solve distinguishes distinct and repeated roots exactly");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[a*x^2 + b*x + c == 0, x]"),
-        std::string{"cases[{x==(-b+sqrt[b^2-4a c])/(2a), x==(-b-sqrt[b^2-4a c])/(2a)} if a!=0&&b^2-4a c!=0; {x==-b/(2a) (multiplicity 2)} if a!=0&&b^2-4a c==0; {x==-c/b} if a==0&&b!=0; All if a==0&&b==0&&c==0; {} if a==0&&b==0&&c!=0]"},
+        std::string{"cases[{x == (-b+sqrt[b^2-4a c])/(2a), x == (-b-sqrt[b^2-4a c])/(2a)} if a != 0&&b^2-4a c != 0; {x == -b/(2a) (multiplicity 2)} if a != 0&&b^2-4a c == 0; {x == -c/b} if a == 0&&b != 0; All if a == 0&&b == 0&&c == 0; {} if a == 0&&b == 0&&c != 0]"},
         "KernelSession: symbolic quadratic solve also preserves linear and constant degeneracies");
 
     tests.expectEqual(
         evaluateAndFormat(session, "solve[sin[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/sin[y]} if sin[y]!=0; {} if sin[y]==0]"},
+        std::string{"cases[{x == -1/sin[y]} if sin[y] != 0; {} if sin[y] == 0]"},
         "KernelSession: solver accepts parameter coefficients from entire functions and keeps zero cases");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[tan[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/tan[y]} if tan[y]!=0; {} if tan[y]==0] if cos[y]!=0"},
+        std::string{"cases[{x == -1/tan[y]} if tan[y] != 0; {} if tan[y] == 0] if cos[y] != 0"},
         "KernelSession: solver preserves tangent pole conditions for symbolic coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[sec[y]*x + 1 == 0, x]"),
-        std::string{"{x==-1/sec[y]} if cos[y]!=0"},
+        std::string{"{x == -1/sec[y]} if cos[y] != 0"},
         "KernelSession: solver preserves secant pole conditions for symbolic coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[coth[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/coth[y]} if coth[y]!=0; {} if coth[y]==0] if sinh[y]!=0"},
+        std::string{"cases[{x == -1/coth[y]} if coth[y] != 0; {} if coth[y] == 0] if sinh[y] != 0"},
         "KernelSession: solver preserves hyperbolic cotangent pole conditions");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[atanh[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/atanh[y]} if atanh[y]!=0; {} if atanh[y]==0] if 1-y^2!=0"},
+        std::string{"cases[{x == -1/atanh[y]} if atanh[y] != 0; {} if atanh[y] == 0] if 1-y^2 != 0"},
         "KernelSession: solver preserves inverse hyperbolic tangent singularities");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[(a/b)*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/(a/b)} if a/b!=0; {} if a/b==0] if b!=0"},
+        std::string{"cases[{x == -1/(a/b)} if a/b != 0; {} if a/b == 0] if b != 0"},
         "KernelSession: solver carries a symbolic denominator domain condition into the solution set");
 
     tests.expectEqual(
@@ -338,53 +338,53 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: solve can restrict the ambient solution domain to Real");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[x^2 + 1 == 0, x, Complex]"),
-        std::string{"{x==I, x==-I}"},
+        std::string{"{x == I, x == -I}"},
         "KernelSession: explicit Complex domain matches the default complex solve semantics");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[x*(x-1) == 0, x, x != 0]"),
-        std::string{"{x==1}"},
+        std::string{"{x == 1}"},
         "KernelSession: solve filters exact roots using a nonzero constraint");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[x^2 == 1, x, {Real, x > 0}]"),
-        std::string{"{x==1}"},
+        std::string{"{x == 1}"},
         "KernelSession: solve combines a domain and a relation constraint");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[0 == 0, x, x != 0]"),
-        std::string{"All if x!=0"},
+        std::string{"All if x != 0"},
         "KernelSession: universal solutions preserve a nonzero restriction");
 
     tests.expectEqual(
         evaluateAndFormat(session, "solve[{x + y == 3}, {x, y}]"),
-        std::string{"{x==3-y where y in Complex}"},
+        std::string{"{x == 3-y where y in Complex}"},
         "KernelSession: underdetermined rational linear systems return a parametric solution");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[{x + y == 3}, {x, y}, Real]"),
-        std::string{"{x==3-y where y in Real}"},
+        std::string{"{x == 3-y where y in Real}"},
         "KernelSession: parametric free variables inherit the requested Real domain");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[{x + y == 3}, {x, y}, y != 0]"),
-        std::string{"{x==3-y where y in Complex if y!=0}"},
+        std::string{"{x == 3-y where y in Complex if y != 0}"},
         "KernelSession: constraints on a free parameter remain attached to the parametric branch");
 
     tests.expectEqual(
         evaluateAndFormat(session, "solve[{a*x + y == 1, x + y == 2}, {x, y}]"),
-        std::string{"cases[{{x==-1/(a-1), y==(2a-1)/(a-1)}} if a!=1; Unresolved if a==1]"},
+        std::string{"cases[{{x == -1/(a-1), y == (2a-1)/(a-1)}} if a != 1; Unresolved if a == 1]"},
         "KernelSession: symbolic-coefficient square linear systems use an exact determinant condition");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[{a*x + y == 1, x + y == 2}, {x, y}, a != 1]"),
-        std::string{"{{x==-1/(a-1), y==(2a-1)/(a-1)} if a!=1}"},
+        std::string{"{{x == -1/(a-1), y == (2a-1)/(a-1)} if a != 1}"},
         "KernelSession: a user constraint can select the nonsingular symbolic linear-system branch");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[log[y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/log[y]} if log[y]!=0; {} if log[y]==0] if y!=0"},
+        std::string{"cases[{x == -1/log[y]} if log[y] != 0; {} if log[y] == 0] if y != 0"},
         "KernelSession: coefficient domain conditions include the principal logarithm domain");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[log[b,y]*x + 1 == 0, x]"),
-        std::string{"cases[{x==-1/log[b, y]} if log[b, y]!=0; {} if log[b, y]==0] if b!=0&&b!=1&&y!=0"},
+        std::string{"cases[{x == -1/log[b, y]} if log[b, y] != 0; {} if log[b, y] == 0] if b != 0&&b != 1&&y != 0"},
         "KernelSession: arbitrary-base logarithm propagates base/value definedness into Solver");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x == 1, x]"),
-        std::string{"{x==1}"},
+        std::string{"{x == 1}"},
         "KernelSession: canonical solve uses the solver implementation");
 
     const error::CalcError protectedConstant = evaluateError(session, "Pi := 3");
@@ -1077,7 +1077,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: D applies the default Radian scale to cis");
 
     tests.expectEqual(evaluateAndFormat(utilitySession, "solve[cbrt[y]*x+1==0,x]"),
-        std::string{"cases[{x==-1/cbrt[y]} if cbrt[y]!=0; {} if cbrt[y]==0] if y in Real"},
+        std::string{"cases[{x == -1/cbrt[y]} if cbrt[y] != 0; {} if cbrt[y] == 0] if y in Real"},
         "KernelSession: Solver inherits cbrt real-domain definedness from MathRegistry");
 
     kernel::KernelSession factorialSession;

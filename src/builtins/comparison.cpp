@@ -9,6 +9,8 @@
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/rational.hpp"
+#include "symbolic/algebraic_expression.hpp"
+#include "symbolic/algebraic_number.hpp"
 
 #include <optional>
 
@@ -96,11 +98,45 @@ struct ComplexBounds final {
         && lhs.lower == rhs.lower;
 }
 
+[[nodiscard]] std::optional<symbolic::AlgebraicNumber> algebraicValue(
+    const Expr& value,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
+    return symbolic::exactAlgebraicValue(value, registry, mathematics);
+}
+
+[[nodiscard]] std::optional<bool> algebraicOrderResult(
+    const Symbol& head,
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
+    const auto left = algebraicValue(lhs, registry, mathematics);
+    const auto right = algebraicValue(rhs, registry, mathematics);
+    if (!left || !right)
+        return std::nullopt;
+
+    const auto order = left->exactRealCompare(*right);
+    if (!order)
+        return std::nullopt;
+    if (head.view() == names::less)
+        return *order == symbolic::AlgebraicOrder::Less;
+    if (head.view() == names::lessEqual)
+        return *order != symbolic::AlgebraicOrder::Greater;
+    if (head.view() == names::greater)
+        return *order == symbolic::AlgebraicOrder::Greater;
+    if (head.view() == names::greaterEqual)
+        return *order != symbolic::AlgebraicOrder::Less;
+    return std::nullopt;
+}
+
 } // namespace
 
 Expr evaluateComparison(
     const Symbol& head,
-    std::span<const Expr> arguments) {
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
     requireBinary(arguments, head.view());
 
     const Expr& lhs = arguments[0];
@@ -127,8 +163,17 @@ Expr evaluateComparison(
             equal = lhs.asString() == rhs.asString();
         }
         else {
-            const auto leftBounds = complexInformationBounds(lhs);
-            const auto rightBounds = complexInformationBounds(rhs);
+            const auto leftAlgebraic = algebraicValue(lhs, registry, mathematics);
+            const auto rightAlgebraic = algebraicValue(rhs, registry, mathematics);
+            if (leftAlgebraic && rightAlgebraic) {
+                if (const auto exact = leftAlgebraic->exactEquals(*rightAlgebraic)) {
+                    determined = true;
+                    equal = *exact;
+                }
+            }
+
+            const auto leftBounds = determined ? std::nullopt : complexInformationBounds(lhs);
+            const auto rightBounds = determined ? std::nullopt : complexInformationBounds(rhs);
             if (leftBounds && rightBounds) {
                 if (disjoint(leftBounds->real, rightBounds->real)
                     || disjoint(leftBounds->imaginary, rightBounds->imaginary)) {
@@ -149,6 +194,10 @@ Expr evaluateComparison(
 
         return Expr{head.view() == names::equal ? equal : !equal};
     }
+
+    if (const auto algebraic = algebraicOrderResult(
+            head, lhs, rhs, registry, mathematics))
+        return Expr{*algebraic};
 
     const auto left = informationBounds(lhs);
     const auto right = informationBounds(rhs);

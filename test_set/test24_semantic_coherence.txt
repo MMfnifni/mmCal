@@ -1,0 +1,26 @@
+# Stage 7: solver-safe normalization, negative domain knowledge, structural N, diagnostics, Lambert W backend classification
+solve[E^x==8,x,Real] ==> {x == log[8]}
+solve[exp[x]==8,x,Real] ==> {x == log[8]}
+solve[2^x==8,x,Real] ==> {x == 3}
+solve[2^(2x+1)==8,x,Real] ==> {x == 1}
+solve[2^x==-1,x,Real] ==> {}
+solve[(1/2)^x==4,x,Real] ==> {x == -2}
+solve[1^x==1,x,Real] ==> All
+solve[1^x==2,x,Real] ==> {}
+solve[ln[x]==2,x,Real] ==> {x == exp[2]}
+solve[log[x]==2,x,Real] ==> {x == exp[2]}
+solve[log2[x]==3,x,Real] ==> {x == 8}
+solve[log10[x]==2,x,Real] ==> {x == 100}
+element[1/2,Integer] ==> False
+element[Pi,Rational] ==> False
+element[Phi,Rational] ==> False
+element[root[{-2,0,1},2],Rational] ==> False
+solve[x==1/2,x,Integer] ==> {}
+solve[x==Pi,x,Integer] ==> {}
+solve[x==Phi,x,Rational] ==> {}
+N[x+Pi,20] ==> 3.1415926535897932385+x
+N[sin[x]+Pi,20] ==> 3.1415926535897932385+sin[x]
+N[True,20] ==> True
+N[Infinity,20] ==> Infinity
+N[lambertw[-1,-1/2],30] ==> lambertw[-1, -1/2]
+N[lambertw[2,1],30] ==> lambertw[2, 1]

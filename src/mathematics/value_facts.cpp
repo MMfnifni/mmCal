@@ -4,6 +4,7 @@
 #include "assumption_set.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/rational.hpp"
+#include "symbolic/algebraic_number.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -102,19 +103,24 @@ using numeric::Number;
 }
 
 [[nodiscard]] ValueFacts factsForNumber(const Number& number) {
-    if (number.isComplex())
-        return ValueFacts{NumericDomain::Complex, RealSign::Unknown, true, true};
+    if (number.isComplex()) {
+        ValueFacts facts{NumericDomain::Complex, RealSign::Unknown, true, true};
+        facts.provablyNonInteger = true;
+        facts.provablyNonRational = true;
+        return facts;
+    }
 
     const auto& real = number.asReal();
-    NumericDomain domain = real.isInteger()
-        ? NumericDomain::Integer
-        : NumericDomain::Rational;
+    const bool integer = real.isInteger();
+    NumericDomain domain = integer ? NumericDomain::Integer : NumericDomain::Rational;
     RealSign sign = RealSign::Zero;
     if (real.isNegative())
         sign = RealSign::Negative;
     else if (!real.isZero())
         sign = RealSign::Positive;
-    return ValueFacts{domain, sign, true, false};
+    ValueFacts facts{domain, sign, true, false};
+    facts.provablyNonInteger = !integer;
+    return facts;
 }
 
 [[nodiscard]] ValueFacts factsForSymbol(
@@ -124,12 +130,17 @@ using numeric::Number;
         RealSign sign = RealSign::Unknown;
         if (constant->properties.positive)
             sign = RealSign::Positive;
-        return ValueFacts{
+        ValueFacts facts{
             constant->properties.real ? NumericDomain::Real : NumericDomain::Complex,
             sign,
             constant->properties.exact,
-            false
+            !constant->properties.real
         };
+        const bool irrational = constant->properties.irrational
+            || constant->properties.arithmeticClass == ArithmeticClass::Transcendental;
+        facts.provablyNonInteger = irrational || !constant->properties.real;
+        facts.provablyNonRational = irrational || !constant->properties.real;
+        return facts;
     }
 
     // 未束縛Symbolを無条件にRealと仮定すると、将来のassumption systemや複素変数を不当に狭める。
@@ -416,14 +427,25 @@ using numeric::Number;
             return ValueFacts{domain, sign, base.exact && argument(1).exact, false};
         }
 
-    case BuiltinId::Root:
-        // root[...,k]は実根，root[...,k,Complex]は複素根としてEvaluatorが検証してから残す。
-        if (call.arguments.size() == 2)
-            return ValueFacts{NumericDomain::Real, RealSign::Unknown, true, false};
+    case BuiltinId::Root: {
+        // canonical Rootはminimal polynomialへ縮約済み。degree>1ならQ上既約多項式の根なので
+        // Rationalではあり得ず，したがってIntegerでもない。
+        const bool irrational = call.algebraicValue && call.algebraicValue->polynomial().size() > 2;
+        if (call.arguments.size() == 2) {
+            ValueFacts rootFacts{NumericDomain::Real, RealSign::Unknown, true, false};
+            rootFacts.provablyNonInteger = irrational;
+            rootFacts.provablyNonRational = irrational;
+            return rootFacts;
+        }
         if (call.arguments.size() == 3 && call.arguments[2].isSymbol()
-            && call.arguments[2].asSymbol().view() == "Complex")
-            return ValueFacts{NumericDomain::Complex, RealSign::Unknown, true, false};
+            && call.arguments[2].asSymbol().view() == "Complex") {
+            ValueFacts rootFacts{NumericDomain::Complex, RealSign::Unknown, true, false};
+            rootFacts.provablyNonInteger = irrational;
+            rootFacts.provablyNonRational = irrational;
+            return rootFacts;
+        }
         return {};
+    }
 
     case BuiltinId::Cbrt:
         if (call.arguments.size() != 1 || !argument(0).isProvablyReal())
@@ -643,8 +665,16 @@ using numeric::Number;
     case BuiltinId::Log:
         if (call.arguments.size() == 1 && argument(0).isNumeric()) {
             const ValueFacts& input = argument(0);
-            if (input.isProvablyReal() && input.sign == RealSign::Positive)
-                return ValueFacts{NumericDomain::Real, RealSign::Unknown, input.exact, false};
+            if (input.isProvablyReal() && input.sign == RealSign::Positive) {
+                RealSign logSign = RealSign::Unknown;
+                if (call.arguments[0].isNumber() && call.arguments[0].asNumber().isReal()) {
+                    const auto value = call.arguments[0].asNumber().asReal().toRational();
+                    const numeric::Rational one{BigInt{1}};
+                    logSign = value == one ? RealSign::Zero
+                        : value > one ? RealSign::Positive : RealSign::Negative;
+                }
+                return ValueFacts{NumericDomain::Real, logSign, input.exact, false};
+            }
             if (input.isProvablyNegativeReal())
                 return ValueFacts{NumericDomain::Complex, RealSign::Unknown, input.exact, true};
             return ValueFacts{NumericDomain::Complex, RealSign::Unknown, input.exact, false};
@@ -756,6 +786,25 @@ using numeric::Number;
         return ValueFacts{NumericDomain::Real,
             builtin->id == BuiltinId::Beta ? RealSign::Positive : RealSign::Unknown,
             argument(0).exact && argument(1).exact, false};
+
+    case BuiltinId::LambertW: {
+        if (call.arguments.empty() || call.arguments.size() > 2)
+            return {};
+        const std::size_t valueIndex = call.arguments.size() - 1;
+        const ValueFacts& value = argument(valueIndex);
+        bool principal = call.arguments.size() == 1;
+        if (call.arguments.size() == 2 && call.arguments[0].isNumber()
+            && call.arguments[0].asNumber().isReal()
+            && call.arguments[0].asNumber().asReal().isInteger())
+            principal = call.arguments[0].asNumber().asReal().asInteger().isZero();
+        // W_0(x) は x>=0 で実かつ非負。負側のreal branch判定には -1/e 境界の
+        // 証明が必要なので、ここで「負の実数ならReal」とは推測しない。
+        if (principal && value.isProvablyReal()
+            && (value.sign == RealSign::Zero || value.sign == RealSign::Positive
+                || value.sign == RealSign::NonNegative))
+            return ValueFacts{NumericDomain::Real, value.sign, value.exact, false};
+        return ValueFacts{NumericDomain::Complex, RealSign::Unknown, value.exact, false};
+    }
 
     case BuiltinId::Exp:
         if (call.arguments.size() != 1 || !argument(0).isNumeric())

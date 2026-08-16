@@ -839,6 +839,12 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::FresnelS: {
         if (call.arguments.size() != 1)
             return std::nullopt;
+        const auto exactRational = exactRealRational(call.arguments[0]);
+        if (exactRational && definition->id == BuiltinId::Gamma)
+            return CertifiedValue{encloseGammaRational(*exactRational, precisionBits)};
+        if (exactRational && definition->id == BuiltinId::LogGamma)
+            return CertifiedValue{encloseLogGammaRational(*exactRational, precisionBits)};
+
         const auto value = encloseArgument(0);
         if (!value)
             return std::nullopt;
@@ -866,6 +872,35 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         default:
             return std::nullopt;
         }
+    }
+
+    case BuiltinId::LambertW: {
+        if (call.arguments.empty() || call.arguments.size() > 2)
+            return std::nullopt;
+
+        int branch = 0;
+        std::size_t valueIndex = 0;
+        if (call.arguments.size() == 2) {
+            const auto branchInteger = exactIntegerExponent(call.arguments[0]);
+            if (!branchInteger)
+                return std::nullopt;
+            if (*branchInteger == BigInt{0})
+                branch = 0;
+            else if (*branchInteger == BigInt{-1})
+                branch = -1;
+            else
+                throw CertifiedBackendUnsupported{
+                    "Certified complex Lambert W branches other than 0 and -1 are not implemented"};
+            valueIndex = 1;
+        }
+
+        const auto value = encloseArgument(valueIndex);
+        if (!value)
+            return std::nullopt;
+        if (!value->isReal())
+            throw CertifiedBackendUnsupported{
+                "Certified complex Lambert W evaluation is not implemented"};
+        return CertifiedValue{encloseLambertWReal(value->asReal(), branch, precisionBits)};
     }
 
     case BuiltinId::Hypergeometric1F1: {
@@ -969,6 +1004,14 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::BetaLog: {
         if (call.arguments.size() != 2)
             return std::nullopt;
+        const auto exactA = exactRealRational(call.arguments[0]);
+        const auto exactB = exactRealRational(call.arguments[1]);
+        if (exactA && exactB) {
+            if (definition->id == BuiltinId::Beta)
+                return CertifiedValue{encloseBetaRational(*exactA, *exactB, precisionBits)};
+            return CertifiedValue{encloseBetaLogRational(*exactA, *exactB, precisionBits)};
+        }
+
         const auto a = encloseArgument(0);
         const auto b = encloseArgument(1);
         if (!a || !b || !a->isReal() || !b->isReal())

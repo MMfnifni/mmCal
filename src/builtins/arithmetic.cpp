@@ -12,6 +12,7 @@
 #include <charconv>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,6 +62,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 [[nodiscard]] std::optional<symbolic::AlgebraicNumber> algebraicValue(
     const Expr& expression,
     const evaluation::BuiltinRegistry& registry) {
+    if (expression.isCall() && expression.asCall().algebraicValue)
+        return expression.asCall().algebraicValue->withGeneratorField();
     if (expression.isNumber()) {
         const Number& number = expression.asNumber();
         if (number.isReal())
@@ -100,8 +103,11 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             return std::nullopt;
         domain = symbolic::AlgebraicRootDomain::Complex;
     }
-    return symbolic::AlgebraicNumber::create(
+    auto algebraic = symbolic::AlgebraicNumber::create(
         coefficients, static_cast<std::size_t>(*index), domain);
+    if (!algebraic)
+        return std::nullopt;
+    return algebraic->withGeneratorField();
 }
 
 [[nodiscard]] Expr algebraicExpr(
@@ -124,7 +130,11 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     arguments.push_back(Expr{Number{BigInt::fromUnsigned(value.rootIndex())}});
     if (value.domain() == symbolic::AlgebraicRootDomain::Complex)
         arguments.push_back(Expr{expression::Symbol{"Complex"}});
-    return Expr::call(registry.symbol(evaluation::BuiltinId::Root), std::move(arguments));
+    const symbolic::AlgebraicNumber cached = value.withGeneratorField();
+    return Expr::call(
+        registry.symbol(evaluation::BuiltinId::Root),
+        std::move(arguments),
+        std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] std::optional<Expr> algebraicBinary(
@@ -493,6 +503,9 @@ Expr evaluatePower(
                     factor = symbolic::AlgebraicNumber::combine(
                         *factor, *factor, symbolic::AlgebraicBinaryOperation::Multiply);
             }
+            // 中間代数演算がbudget/証明不能で失敗した場合，部分結果を確定値として返さない。
+            if (power != 0)
+                result = std::nullopt;
             if (result) {
                 if (integerExponent.isNegative()) {
                     const auto one = symbolic::AlgebraicNumber::fromRational(Rational{BigInt{1}});

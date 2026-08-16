@@ -200,7 +200,7 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expect(evalError(session, "log1p[-1]").type() == error::CalcErrorType::Domain,
         "log1p rejects its exact branch singularity");
     tests.expectEqual(eval(session, "solve[log1p[y]*x+1==0,x]"),
-        std::string{"cases[{x==-1/log1p[y]} if log1p[y]!=0; {} if log1p[y]==0] if y!=-1"},
+        std::string{"cases[{x == -1/log1p[y]} if log1p[y] != 0; {} if log1p[y] == 0] if y != -1"},
         "Solver receives log1p definedness from MathRegistry");
 
     // Angle migration and generalized suffix syntax.

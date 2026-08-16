@@ -15,6 +15,7 @@
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "simplification/simplifier.hpp"
+#include "solver/solution_set.hpp"
 
 #include <algorithm>
 #include <array>
@@ -100,6 +101,7 @@ struct BeginNumericalApproximationTask final {
 
 struct FinishNumericalApproximationTask final {
     std::size_t precisionDigits = approximation::ApproximationContext::defaultDecimalDigits;
+    std::size_t warningCountBefore = 0;
 };
 
 using EvaluationTask = std::variant<
@@ -941,8 +943,17 @@ expression::Expr Evaluator::evaluateMachine(
                             precisionDigits = *requestedDigits;
                         }
 
+                        std::size_t warningCountBefore = 0;
+                        if (context_ && context_->diagnostics)
+                            warningCountBefore = static_cast<std::size_t>(std::count_if(
+                                context_->diagnostics->begin(), context_->diagnostics->end(),
+                                [](const EvaluationDiagnostic& diagnostic) {
+                                    return diagnostic.severity == DiagnosticSeverity::Warning;
+                                }));
+
                         approximationContexts_.emplace_back(precisionDigits);
-                        tasks.emplace_back(FinishNumericalApproximationTask{precisionDigits});
+                        tasks.emplace_back(FinishNumericalApproximationTask{
+                            precisionDigits, warningCountBefore});
                         tasks.emplace_back(EvaluateTask{
                             call.arguments.front(),
                             current.origins,
@@ -955,9 +966,18 @@ expression::Expr Evaluator::evaluateMachine(
                                 error::CalcErrorType::Internal,
                                 "Numerical approximation context stack is inconsistent");
 
+                        std::size_t warningCountAfter = current.warningCountBefore;
+                        if (context_ && context_->diagnostics)
+                            warningCountAfter = static_cast<std::size_t>(std::count_if(
+                                context_->diagnostics->begin(), context_->diagnostics->end(),
+                                [](const EvaluationDiagnostic& diagnostic) {
+                                    return diagnostic.severity == DiagnosticSeverity::Warning;
+                                }));
+
                         std::vector<expression::Expr> valueResult = takeResults(results, 1);
                         expression::Expr approximated = finalizeNumericalApproximation(
-                            valueResult.front(), current.precisionDigits);
+                            valueResult.front(), current.precisionDigits,
+                            warningCountAfter == current.warningCountBefore);
                         approximationContexts_.pop_back();
                         results.push_back(std::move(approximated));
                     }
@@ -1283,11 +1303,42 @@ expression::Expr Evaluator::evaluateUndefine(std::span<const expression::Expr> a
 
 expression::Expr Evaluator::finalizeNumericalApproximation(
     const expression::Expr& value,
-    std::size_t precisionDigits) {
-    // Nはscalarだけでなく配列へも要素単位に作用する。
-    // FFT/行列等のexact配列を表示用近似へ落とす際に、各builtinが独自のdigits引数を持つ必要をなくす。
-    std::function<expression::Expr(const expression::Expr&)> approximate;
-    approximate = [&](const expression::Expr& current) -> expression::Expr {
+    std::size_t precisionDigits,
+    bool warnOnFailure) {
+    // free symbolを含む式は「数値化失敗」ではなく部分数値化の対象である。
+    // protected constant/domainはfree symbolに数えず，ユーザー未知量だけを検出する。
+    std::function<bool(const expression::Expr&)> containsUnknownSymbol;
+    containsUnknownSymbol = [&](const expression::Expr& current) -> bool {
+        if (current.isSymbol()) {
+            const auto& symbol = current.asSymbol();
+            return !symbolRegistry_.contains(symbol)
+                && !registry_.contains(symbol)
+                && mathematics_.findConstant(symbol) == nullptr;
+        }
+        if (current.isCall()) {
+            for (const auto& argument : current.asCall().arguments)
+                if (containsUnknownSymbol(argument))
+                    return true;
+            return false;
+        }
+        if (current.isArray()) {
+            for (std::size_t i = 0; i < current.asArray().size(); ++i)
+                if (containsUnknownSymbol(current.asArray().element(i)))
+                    return true;
+            return false;
+        }
+        if (current.isList()) {
+            for (const auto& element : current.asList().elements)
+                if (containsUnknownSymbol(element))
+                    return true;
+        }
+        return false;
+    };
+
+    // Nはscalarだけでなく配列・SolutionSet・一般symbolic expressionへ部分的に作用する。
+    // whole-expressionのcertificationを最優先し，失敗したときだけnumeric subpart traversalへ落とす。
+    std::function<expression::Expr(const expression::Expr&, bool)> approximate;
+    approximate = [&](const expression::Expr& current, bool allowWarning) -> expression::Expr {
         // precision-aware builtinが既に近似値を返した場合、外側Nがより低い桁を要求するなら
         // certified enclosureから安全に丸め直す。より高い桁は元情報以上に増やせないため保持する。
         if (current.isDecimalApproximation())
@@ -1296,6 +1347,13 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         if (current.isComplexDecimalApproximation())
             return reduceApproximationPrecision(
                 current.asComplexDecimalApproximation(), precisionDigits);
+
+        // Boolean/StringやInfinity・domain symbol・自由変数は数値ではないため，Nの失敗ではない。
+        // Pi/E/PhiのようなMathRegistry定数だけは後段のcertified evaluatorへ送る。
+        if (current.isBoolean() || current.isString())
+            return current;
+        if (current.isSymbol() && mathematics_.findConstant(current.asSymbol()) == nullptr)
+            return current;
 
         if (current.isArray()) {
             const auto& array = current.asArray();
@@ -1319,7 +1377,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             std::vector<expression::Expr> elements;
             elements.reserve(array.size());
             for (std::size_t i = 0; i < array.size(); ++i)
-                elements.push_back(approximate(array.element(i)));
+                elements.push_back(approximate(array.element(i), allowWarning));
             return expression::Expr::array(array.shape, std::move(elements));
         }
         if (current.isList()) {
@@ -1327,8 +1385,60 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             std::vector<expression::Expr> elements;
             elements.reserve(list.elements.size());
             for (const expression::Expr& element : list.elements)
-                elements.push_back(approximate(element));
+                elements.push_back(approximate(element, allowWarning));
             return expression::braceValue(std::move(elements));
+        }
+
+        // SolutionSetは未知変数を数値化せず，各bindingの右辺だけへNを作用させる。
+        // 数値化できないparameterized solutionはexactのまま保持するため，binding内部の失敗は警告しない。
+        if (current.isSolutionSet()) {
+            const solver::SolutionSet& solutions = current.asSolutionSet();
+            std::vector<solver::SolverVariable> variables{
+                solutions.variables().begin(), solutions.variables().end()};
+
+            const auto approximateBranch = [&](const solver::SolutionBranch& source) {
+                solver::SolutionBranch result = source;
+                for (solver::SolutionBinding& binding : result.bindings)
+                    binding.value = approximate(binding.value, false);
+                return result;
+            };
+
+            solver::SolutionSet transformed = [&]() {
+                switch (solutions.kind()) {
+                case solver::SolutionSetKind::Empty:
+                    return solver::SolutionSet::empty(std::move(variables));
+                case solver::SolutionSetKind::Finite: {
+                    std::vector<solver::SolutionBranch> branches;
+                    branches.reserve(solutions.branches().size());
+                    for (const solver::SolutionBranch& branch : solutions.branches())
+                        branches.push_back(approximateBranch(branch));
+                    return solver::SolutionSet::finite(std::move(variables), std::move(branches));
+                }
+                case solver::SolutionSetKind::Universal:
+                    return solver::SolutionSet::universal(
+                        std::move(variables), solutions.conditions());
+                case solver::SolutionSetKind::Conditional: {
+                    std::vector<solver::SolutionCase> cases{
+                        solutions.cases().begin(), solutions.cases().end()};
+                    for (solver::SolutionCase& solutionCase : cases) {
+                        if (solutionCase.outcome != solver::SolutionSetKind::Finite)
+                            continue;
+                        for (solver::SolutionBranch& branch : solutionCase.branches)
+                            branch = approximateBranch(branch);
+                    }
+                    return solver::SolutionSet::conditional(std::move(variables), std::move(cases));
+                }
+                case solver::SolutionSetKind::Unresolved:
+                    return solver::SolutionSet::unresolved(
+                        std::move(variables), solutions.conditions());
+                }
+                throw std::logic_error("Unknown SolutionSet kind");
+            }();
+
+            if (solutions.kind() == solver::SolutionSetKind::Finite
+                || solutions.kind() == solver::SolutionSetKind::Conditional)
+                transformed = transformed.withAdditionalConditions(solutions.conditions());
+            return expression::Expr::solutionSet(std::move(transformed));
         }
 
         // UnitAppliedは単位文字列そのものを数値化せず、値の部分だけへNを作用させる。
@@ -1339,7 +1449,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             if (definition && definition->id == BuiltinId::UnitApplied
                 && currentCall.arguments.size() == 2 && currentCall.arguments[1].isString()) {
                 return expression::Expr::call(currentCall.head, {
-                    approximate(currentCall.arguments[0]),
+                    approximate(currentCall.arguments[0], allowWarning),
                     currentCall.arguments[1]
                 });
             }
@@ -1367,12 +1477,48 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             try {
                 const auto enclosed = certified.enclose(current, context.workingBinaryBits());
                 if (!enclosed) {
-                    emitWarning("N::unevaluated",
-                        "N could not certify a numerical value for part of the expression; it remains unevaluated");
+                    // whole expressionをcertifyできない場合だけ，通常評価型のcallのnumeric subpartへNを作用させる。
+                    // HoldAll/HoldFirst系は変数指定やiterator等の構文的引数を持つため勝手に書き換えない。
+                    if (current.isCall()) {
+                        const auto& call = current.asCall();
+                        const auto* definition = registry_.find(call.head);
+                        const bool structural = !definition
+                            || definition->argumentEvaluation == ArgumentEvaluation::All;
+                        if (structural) {
+                            std::vector<expression::Expr> arguments;
+                            arguments.reserve(call.arguments.size());
+                            bool changed = false;
+                            for (const auto& argument : call.arguments) {
+                                expression::Expr transformed = approximate(argument, false);
+                                changed = changed || !(transformed == argument);
+                                arguments.push_back(std::move(transformed));
+                            }
+                            if (changed) {
+                                expression::Expr rebuilt =
+                                    expression::Expr::rebuildCall(call, std::move(arguments));
+                                // numeric childだけが変わっても，親が閉じた未対応式のままなら
+                                // 「部分的に何か変わった」ことを成功扱いしない。再度whole-expressionを試し，
+                                // free symbolがなければ最終的に適切なN warningへ落とす。
+                                return approximate(rebuilt, allowWarning);
+                            }
+                        }
+                    }
+
+                    // 自由記号を含む式はpartial Nとして正常に保持する。完全に数値閉包なのに
+                    // backendが値を作れない場合だけgeneric warningを出す。
+                    if (allowWarning && !containsUnknownSymbol(current))
+                        emitWarning("N::unevaluated",
+                            "N could not certify a numerical value for part of the expression; it remains unevaluated");
                     return current;
                 }
                 if (const auto decimal = certifiedDecimalExpression(*enclosed, precisionDigits))
                     return *decimal;
+            }
+            catch (const approximation::CertifiedBackendUnsupported& exception) {
+                if (allowWarning)
+                    emitWarning("N::unsupported",
+                        std::string{exception.what()} + "; the expression remains unevaluated");
+                return current;
             }
             catch (const approximation::PrecisionInsufficient&) {
                 // 数学的domain errorではなく、現在の区間幅では分岐を証明できない。
@@ -1381,7 +1527,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         }
     };
 
-    return approximate(value);
+    return approximate(value, warnOnFailure);
 }
 
 const approximation::ApproximationContext* Evaluator::currentApproximationContext() const noexcept {

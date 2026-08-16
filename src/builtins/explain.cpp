@@ -179,6 +179,7 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
     case FunctionBranchRule::PrincipalCosineIntegral: return "PrincipalCosineIntegral";
     case FunctionBranchRule::PrincipalLogarithmicIntegral: return "PrincipalLogarithmicIntegral";
     case FunctionBranchRule::PrincipalPolylogarithm: return "PrincipalPolylogarithm";
+    case FunctionBranchRule::PrincipalLambertW: return "PrincipalLambertW";
     }
     return "Unknown";
 }

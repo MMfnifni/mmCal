@@ -96,7 +96,8 @@ enum class FunctionBranchRule {
     PrincipalExponentialIntegral,
     PrincipalCosineIntegral,
     PrincipalLogarithmicIntegral,
-    PrincipalPolylogarithm
+    PrincipalPolylogarithm,
+    PrincipalLambertW
 };
 
 // 函数が有限入力で値を持つために必要な追加条件。

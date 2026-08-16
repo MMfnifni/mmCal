@@ -17,6 +17,21 @@ void runValueFactsTests(TestRunner& tests) {
         && piFacts.sign == mathematics::RealSign::Positive
         && piFacts.exact,
         "ValueFacts: Pi is known exact positive real");
+    tests.expect(piFacts.provablyNonInteger && piFacts.provablyNonRational,
+        "ValueFacts: Pi transcendence implies non-integer and non-rational knowledge");
+
+    const auto half = session.evaluate("1/2");
+    const auto halfFacts = mathematics::inferValueFacts(
+        half, session.builtinRegistry(), session.mathRegistry());
+    tests.expect(halfFacts.domain == mathematics::NumericDomain::Rational
+        && halfFacts.provablyNonInteger && !halfFacts.provablyNonRational,
+        "ValueFacts: a non-integral exact rational is provably non-integer but remains rational");
+
+    const auto phi = session.evaluate("Phi");
+    const auto phiFacts = mathematics::inferValueFacts(
+        phi, session.builtinRegistry(), session.mathRegistry());
+    tests.expect(phiFacts.provablyNonInteger && phiFacts.provablyNonRational,
+        "ValueFacts: known irrational algebraic constants refute Rational and Integer membership");
 
     const auto i = session.evaluate("I");
     const auto iFacts = mathematics::inferValueFacts(

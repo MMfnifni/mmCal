@@ -31,6 +31,7 @@ enum class FunctionId {
     Expc,
     Gamma,
     LogGamma,
+    LambertW,
     Erf,
     Erfc,
     FresnelC,

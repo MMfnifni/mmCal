@@ -612,10 +612,21 @@ Expr Expr::list(std::vector<Expr> elements) {
         std::move(list))};
 }
 
-Expr Expr::call(Symbol head, std::vector<Expr> arguments) {
-    CallExpr call{std::move(head), std::move(arguments)};
+Expr Expr::call(
+    Symbol head,
+    std::vector<Expr> arguments,
+    std::shared_ptr<const symbolic::AlgebraicNumber> algebraicValue) {
+    CallExpr call{std::move(head), std::move(arguments), std::move(algebraicValue)};
     return Expr{std::make_shared<TypedNode<ExprKind::Call, CallExpr>>(
         std::move(call))};
+}
+
+Expr Expr::rebuildCall(
+    const CallExpr& source,
+    std::vector<Expr> arguments) {
+    auto algebraicValue = source.arguments == arguments
+        ? source.algebraicValue : nullptr;
+    return call(source.head, std::move(arguments), std::move(algebraicValue));
 }
 
 ExprKind Expr::kind() const noexcept {

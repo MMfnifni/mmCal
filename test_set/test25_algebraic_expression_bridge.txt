@@ -1,0 +1,17 @@
+# Stage 7-6: Root/radical/algebraic-expression bridge
+root[{-2,0,1},2]==sqrt[2] ==> True
+root[{-2,0,1},1]==-sqrt[2] ==> True
+root[{-2,0,1},2]!=sqrt[3] ==> True
+root[{-2,0,1},2]<sqrt[3] ==> True
+root[{-2,0,0,1},1]==cbrt[2] ==> True
+root[{2,0,0,1},1]==-cbrt[2] ==> True
+Phi==root[{-1,-1,1},2] ==> True
+sqrt[2]+sqrt[3]==root[{1,0,-10,0,1},4] ==> True
+element[sqrt[2],Rational] ==> False
+element[sqrt[2]+sqrt[3],Rational] ==> False
+solve[x==root[{-2,0,1},2],x,Rational] ==> {}
+solve[x==root[{-2,0,1},2],x,Real] ==> {x == root[{-2, 0, 1}, 2]}
+solve[x==sqrt[2],x,Rational] ==> {}
+solve[x==sqrt[2],x,Real] ==> {x == sqrt[2]}
+solve[x==Phi,x,Rational] ==> {}
+solve[x==Phi,x,Real] ==> {x == Phi}

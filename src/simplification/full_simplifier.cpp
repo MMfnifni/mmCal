@@ -175,7 +175,7 @@ using expression::Expr;
         arguments.reserve(call.arguments.size());
         for (const Expr& argument : call.arguments)
             arguments.push_back(proofTrigPowerRewrite(argument, context, changed));
-        current = Expr::call(call.head, std::move(arguments));
+        current = Expr::rebuildCall(call, std::move(arguments));
     }
     else if (expression.isArray()) {
         const auto& array = expression.asArray();

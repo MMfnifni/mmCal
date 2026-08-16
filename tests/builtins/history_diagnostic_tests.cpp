@@ -32,6 +32,17 @@ namespace {
     return false;
 }
 
+[[nodiscard]] std::size_t warningCount(
+    const kernel::KernelSession& session,
+    std::string_view code) {
+    std::size_t count = 0;
+    for (const auto& diagnostic : session.diagnostics())
+        if (diagnostic.severity == evaluation::DiagnosticSeverity::Warning
+            && diagnostic.code == code)
+            ++count;
+    return count;
+}
+
 } // namespace
 
 void runHistoryDiagnosticTests(TestRunner& tests) {
@@ -98,9 +109,29 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expect(hasWarning(warnings, "solve::unresolved"),
         "unresolved solve emits a warning");
 
+    const std::size_t genericWarningsBefore = warningCount(warnings, "N::unevaluated");
     static_cast<void>(warnings.evaluate("N[x,20]"));
-    tests.expect(hasWarning(warnings, "N::unevaluated"),
-        "unsupported N emits a warning");
+    tests.expect(warningCount(warnings, "N::unevaluated") == genericWarningsBefore,
+        "N keeps a free symbolic value without emitting a generic warning");
+
+    static_cast<void>(warnings.evaluate("N[lambertw[2,1],20]"));
+    tests.expect(hasWarning(warnings, "N::unsupported"),
+        "N distinguishes an existing value with an unavailable certified backend from a domain error");
+
+    kernel::KernelSession nestedWarnings;
+    static_cast<void>(nestedWarnings.evaluate("N[D[abs[x],x],20]"));
+    tests.expect(warningCount(nestedWarnings, "D::unevaluated") == 1
+            && warningCount(nestedWarnings, "N::unevaluated") == 0,
+        "outer N does not duplicate a more specific warning emitted by the inner operation");
+    static_cast<void>(nestedWarnings.evaluate("N[True,20]"));
+    static_cast<void>(nestedWarnings.evaluate("N[Infinity,20]"));
+    tests.expect(warningCount(nestedWarnings, "N::unevaluated") == 0,
+        "N treats inert Boolean and extended-real atoms as intentional symbolic values without warning");
+
+    kernel::KernelSession closedUnsupported;
+    static_cast<void>(closedUnsupported.evaluate("N[0*Infinity,20]"));
+    tests.expect(warningCount(closedUnsupported, "N::unevaluated") == 1,
+        "N still warns for a closed unsupported expression after structural child approximation");
 
     const auto exactApprox = warnings.evaluate("N[1/3,20]");
     tests.expect(exactApprox.isDecimalApproximation(),

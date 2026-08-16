@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{262},
+    tests.expectEqual(registry.size(), std::size_t{263},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -220,7 +220,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: table holds the body and binds its iterator specification");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{244},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{245},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
@@ -255,6 +255,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("convolve")
         && sourceFunctions.contains("log2") && sourceFunctions.contains("log10")
         && sourceFunctions.contains("gamma") && sourceFunctions.contains("lgamma")
+        && sourceFunctions.contains("lambertw")
         && sourceFunctions.contains("erf") && sourceFunctions.contains("erfc")
         && sourceFunctions.contains("fresnelc") && sourceFunctions.contains("fresnels")
         && sourceFunctions.contains("beta") && sourceFunctions.contains("betaln")

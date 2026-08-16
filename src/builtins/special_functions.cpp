@@ -126,6 +126,49 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         registry, mathematics, angles);
 }
 
+[[nodiscard]] Expr evaluateLambertW(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (arguments.empty() || arguments.size() > 2)
+        error::throwCalcError(error::CalcErrorType::Type, "lambertw expects one or two arguments");
+
+    const Expr& value = arguments.back();
+    BigInt branch{0};
+    if (arguments.size() == 2) {
+        const Expr& branchExpression = arguments.front();
+        if (!branchExpression.isNumber() || !branchExpression.asNumber().isReal()
+            || !branchExpression.asNumber().asReal().isInteger()) {
+            if (branchExpression.isNumber())
+                error::throwCalcError(error::CalcErrorType::Type, "lambertw branch must be an integer");
+            return hold(BuiltinId::LambertW, arguments, registry);
+        }
+        branch = branchExpression.asNumber().asReal().asInteger();
+    }
+
+    // W_0(0)=0。k!=0 の branch は0で有限値を持たないため、ここでは未評価を維持する。
+    if (branch.isZero() && value.isNumber() && value.asNumber().isReal()
+        && value.asNumber().isZero())
+        return integer(0);
+
+    // W_0(E)=1 は solver が生成する式の簡約にも有用な exact special value。
+    const auto* e = mathematics.findConstant(mathematics::ConstantId::E);
+    if (branch.isZero() && value.isSymbol() && e && value.asSymbol() == e->symbol)
+        return integer(1);
+
+    // 実branchの分岐点では W_0(-1/E)=W_-1(-1/E)=-1。
+    // certified evaluatorへ渡すと入力enclosureがbranch pointを跨ぎ得るため，exact構造を先に閉じる。
+    if ((branch.isZero() || branch == BigInt{-1}) && e) {
+        const Expr branchPoint = exact::divide(
+            integer(-1), Expr{e->symbol}, registry, mathematics, angles);
+        if (value == branchPoint)
+            return integer(-1);
+    }
+
+    return hold(BuiltinId::LambertW, arguments, registry);
+}
+
 [[nodiscard]] Expr evaluateGamma(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -815,6 +858,8 @@ Expr evaluateSpecialFunction(
         return evaluateGamma(arguments, registry, mathematics, angles);
     case BuiltinId::LogGamma:
         return evaluateLogGamma(arguments, registry, mathematics, angles);
+    case BuiltinId::LambertW:
+        return evaluateLambertW(arguments, registry, mathematics, angles);
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
         return evaluateErfLike(id, arguments, registry, mathematics, angles);

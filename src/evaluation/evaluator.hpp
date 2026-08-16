@@ -101,7 +101,8 @@ private:
         std::optional<expression::Expr> previousExpression = std::nullopt);
     [[nodiscard]] expression::Expr finalizeNumericalApproximation(
         const expression::Expr& value,
-        std::size_t precisionDigits);
+        std::size_t precisionDigits,
+        bool warnOnFailure = true);
     [[nodiscard]] const approximation::ApproximationContext* currentApproximationContext() const noexcept;
     [[nodiscard]] std::optional<source::SourceReference> originOf(
         const expression::Expr& expression) const;

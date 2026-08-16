@@ -28,7 +28,6 @@ Unlike heavyweight systems, this tool aims to be:
 
 It also does not immediately convert input to `double` as many ordinary calculators do. Numerical approximation is performed only when needed.
 
-
 ## Quick examples — details later
 
 ```text
@@ -706,7 +705,6 @@ D N In Out Exit Clear Defs UnDef
 - `docs/reference.md` — Detailed function, syntax, and current-behavior reference
 - `docs/mathematics.md` — Mathematical policy for domains, principal values, and numerical evaluation
 - `docs/architecture.md` — Internal architecture for developers
-- `docs/roadmap.en.md` — Major currently unsupported features and future candidates
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
 - `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.2, with benchmark rationale
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
@@ -716,11 +714,10 @@ D N In Out Exit Clear Defs UnDef
 
 The source code is distributed under the **BSD 3-Clause License**. See `LICENSE` for the copyright permissions governing commercial use, modification, redistribution, and incorporation into other software.
 
-**Use of the mmCal name, official logos, and related branding is addressed separately by `TRADEMARKS.md` / `TRADEMARKS.ja.md`.** The trademark policy does not prohibit independent GUIs, forks, commercial products, or other uses permitted by the BSD license; it is intended to avoid confusion about whether a third-party product is mmCal itself or is officially endorsed.
+**Use of the mmCal name, official logos, and related branding is addressed separately by `TRADEMARKS.md` .** The trademark policy does not prohibit independent GUIs, forks, commercial products, or other uses permitted by the BSD license; it is intended to avoid confusion about whether a third-party product is mmCal itself or is officially endorsed.
 
 - [BSD 3-Clause License](LICENSE)
 - [Trademark and Brand Policy](TRADEMARKS.md)
-- [Japanese Trademark and Brand Policy](TRADEMARKS.ja.md)
 
 If mmCal is used in an academic publication or product, attribution beyond the BSD requirements is not mandatory, but a factual acknowledgement is appreciated.
 

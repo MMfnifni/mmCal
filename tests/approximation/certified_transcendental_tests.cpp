@@ -3,6 +3,7 @@
 
 #include "approximation/certified_exponential.hpp"
 #include "approximation/certified_logarithm.hpp"
+#include "approximation/certified_special_functions.hpp"
 #include "approximation/certified_trigonometry.hpp"
 #include "approximation/real_interval.hpp"
 #include "numeric/big_int.hpp"
@@ -24,6 +25,21 @@ void runCertifiedTranscendentalTests(TestRunner& tests) {
         "Certified Exp: enclosure contains a high-precision E probe");
     tests.expect(expOne.termsUsed > 0,
         "Certified Exp: reports actual binary-splitting Taylor work");
+
+    const auto w0One = approximation::encloseLambertWReal(
+        approximation::RealInterval::fromRational(one, 192), 0, 160);
+    tests.expect(
+        w0One.lower().toRational() > numeric::Rational::parse("0.5671432904")
+            && w0One.upper().toRational() < numeric::Rational::parse("0.5671432905"),
+        "Certified Lambert W: principal real branch is enclosed by an independent decimal bracket");
+
+    const numeric::Rational minusOneTenth{numeric::BigInt{-1}, numeric::BigInt{10}};
+    const auto wMinusOne = approximation::encloseLambertWReal(
+        approximation::RealInterval::fromRational(minusOneTenth, 192), -1, 160);
+    tests.expect(
+        wMinusOne.lower().toRational() > numeric::Rational::parse("-3.5771520640")
+            && wMinusOne.upper().toRational() < numeric::Rational::parse("-3.5771520639"),
+        "Certified Lambert W: lower real branch is enclosed by an independent decimal bracket");
 
     const auto logTwo = approximation::encloseLogPositive(
         approximation::RealInterval::fromRational(two, 192), 192);
@@ -90,6 +106,40 @@ void runCertifiedTranscendentalTests(TestRunner& tests) {
         approximation::approximateCosTurns(hugeTurns, 50).value.text(),
         approximation::approximateCosTurns(oneSixth, 50).value.text(),
         "Certified Trig extreme: huge angle reduction preserves cosine rounding");
+
+
+    const auto gammaOne = approximation::encloseGammaReal(
+        approximation::RealInterval::fromRational(one, 192), 192);
+    tests.expect(gammaOne.isPoint() && gammaOne.lower().toRational() == one,
+        "Certified Gamma: Gamma(1) uses the exact fast path");
+
+    const numeric::Rational oneThird{numeric::BigInt{1}, numeric::BigInt{3}};
+    const auto gammaOneThird = approximation::encloseGammaReal(
+        approximation::RealInterval::fromRational(oneThird, 384), 320);
+    const auto gammaOneThirdDecimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        gammaOneThird.lower().toRational(), gammaOneThird.upper().toRational(), 49);
+    tests.expect(gammaOneThirdDecimal.has_value()
+            && gammaOneThirdDecimal->text()
+                == "2.6789385347077476336556929409746776441286893779573",
+        "Certified Gamma: interval Stirling path keeps a high-precision enclosure");
+
+    const auto gammaOneThirdExact = approximation::encloseGammaRational(oneThird, 1024);
+    const auto gammaOneThirdExactDecimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        gammaOneThirdExact.lower().toRational(), gammaOneThirdExact.upper().toRational(), 49);
+    tests.expect(gammaOneThirdExactDecimal.has_value()
+            && gammaOneThirdExactDecimal->text()
+                == "2.6789385347077476336556929409746776441286893779573",
+        "Certified Gamma: exact Rational dispatch and high-precision Stirling planner preserve the enclosure");
+
+    const numeric::Rational twoThirds{numeric::BigInt{2}, numeric::BigInt{3}};
+    const numeric::Rational oneQuarter{numeric::BigInt{1}, numeric::BigInt{4}};
+    const auto ibetaPoint = approximation::encloseIncompleteBetaRegularized(
+        oneThird, twoThirds,
+        approximation::RealInterval::fromRational(oneQuarter, 224), 160);
+    const auto ibetaDecimal = numeric::DecimalApproximation::fromCertifiedInterval(
+        ibetaPoint.lower().toRational(), ibetaPoint.upper().toRational(), 20);
+    tests.expect(ibetaDecimal.has_value() && ibetaDecimal->text() == "0.53302858123542523627",
+        "Certified ibeta: shared point normalization preserves the certified enclosure");
 }
 
 } // namespace mmcal::tests

@@ -164,6 +164,7 @@ enum class BuiltinId {
     Log10,
     Gamma,
     LogGamma,
+    LambertW,
     Erf,
     Erfc,
     FresnelC,

@@ -130,7 +130,7 @@ using numeric::Rational;
     for (const Expr& argument : call.arguments)
         arguments.push_back(expandRecursive(argument, builtins, mathematics, angles, options));
 
-    Expr rebuilt = Expr::call(call.head, arguments);
+    Expr rebuilt = Expr::rebuildCall(call, arguments);
     if (isHead(rebuilt, builtins, BuiltinId::Subtract) && arguments.size() == 2) {
         rebuilt = Expr::call(
             builtins.symbol(BuiltinId::Add),

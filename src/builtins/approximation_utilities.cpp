@@ -306,7 +306,7 @@ using numeric::RealNumber;
                 arguments.push_back(*rationalized);
             else
                 arguments.push_back(argument);
-        return Expr::call(value.asCall().head, std::move(arguments));
+        return Expr::rebuildCall(value.asCall(), std::move(arguments));
     }
     if (value.isSymbol())
         return value;

@@ -3,6 +3,7 @@
 #include "numeric/rational.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -10,6 +11,8 @@
 #include <vector>
 
 namespace mmcal::symbolic {
+
+class AlgebraicElement;
 
 struct RationalRootInterval final {
     numeric::Rational lower;
@@ -32,6 +35,11 @@ public:
     [[nodiscard]] static std::optional<RealAlgebraicNumber> create(
         std::span<const numeric::Rational> polynomial,
         std::size_t rootIndex);
+    // 既約minimal polynomialと，その根をただ1つ含む候補区間から直接構築する内部fast path。
+    // 区間の一意根性とroot indexはSturm列で再証明する。
+    [[nodiscard]] static std::optional<RealAlgebraicNumber> createFromMinimalPolynomialInterval(
+        std::span<const numeric::Rational> polynomial,
+        RationalRootInterval interval);
 
     [[nodiscard]] static std::optional<std::vector<RealAlgebraicNumber>> isolateAll(
         std::span<const numeric::Rational> polynomial);
@@ -97,9 +105,15 @@ enum class AlgebraicBinaryOperation {
     Divide
 };
 
-// Real/Complex Rootの共通exact代数数view。定義多項式とisolating regionでroot identityを保持し，
-// bounded resultant arithmeticでは演算後の候補多項式から正しいrootを再分離する。
-// primitive-element最小多項式化までは要求せず，結果多項式はsquare-free canonical formで保持する。
+enum class AlgebraicOrder {
+    Less,
+    Equal,
+    Greater
+};
+
+// Real/Complex Rootの共通exact代数数view。canonical root identityとisolating regionを保持し，
+// 証明できる場合はpersistent AlgebraicElementを内部算術表現として併置する。user-visibleな
+// root[minpoly,k] identityとfield座標は分離し，budget超過時は従来resultant経路へfallbackする。
 class AlgebraicNumber final {
 public:
     [[nodiscard]] static std::optional<AlgebraicNumber> create(
@@ -112,6 +126,8 @@ public:
     [[nodiscard]] static std::optional<AlgebraicNumber> fromComplexRational(
         const numeric::Rational& real,
         const numeric::Rational& imaginary);
+    [[nodiscard]] static AlgebraicNumber fromRealRoot(RealAlgebraicNumber value);
+    [[nodiscard]] static AlgebraicNumber fromComplexRoot(ComplexAlgebraicNumber value);
     [[nodiscard]] static std::optional<AlgebraicNumber> combine(
         const AlgebraicNumber& lhs,
         const AlgebraicNumber& rhs,
@@ -122,12 +138,22 @@ public:
     [[nodiscard]] std::size_t rootIndex() const noexcept;
     [[nodiscard]] const RealAlgebraicNumber* asReal() const noexcept;
     [[nodiscard]] const ComplexAlgebraicNumber* asComplex() const noexcept;
+    [[nodiscard]] bool hasSameRootIdentity(const AlgebraicNumber& rhs) const noexcept;
+    // exact algebraic equality。budget超過や証明不能時はnullopt。
+    [[nodiscard]] std::optional<bool> exactEquals(const AlgebraicNumber& rhs) const;
+    // 実代数数だけに定義するexact order。Complex root列挙順とは無関係。
+    [[nodiscard]] std::optional<AlgebraicOrder> exactRealCompare(const AlgebraicNumber& rhs) const;
+    [[nodiscard]] const AlgebraicElement* arithmeticElement() const noexcept;
+    [[nodiscard]] AlgebraicNumber withArithmeticElement(
+        std::shared_ptr<const AlgebraicElement> element) const;
+    [[nodiscard]] AlgebraicNumber withGeneratorField() const;
     // root自体がRationalまたはRational+i Rationalへ退化する場合だけexact成分を返す。
     [[nodiscard]] std::optional<std::pair<numeric::Rational, numeric::Rational>>
         exactRationalParts() const;
 
 private:
     std::variant<RealAlgebraicNumber, ComplexAlgebraicNumber> value_;
+    std::shared_ptr<const AlgebraicElement> arithmeticElement_;
 
     explicit AlgebraicNumber(RealAlgebraicNumber value);
     explicit AlgebraicNumber(ComplexAlgebraicNumber value);

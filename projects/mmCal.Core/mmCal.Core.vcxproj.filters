@@ -315,6 +315,18 @@
     <ClInclude Include="..\..\src\symbolic\algebraic_number.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\algebraic_expression.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\cyclotomic_field.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\number_field.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\rational_linear_basis.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
@@ -328,6 +340,9 @@
       <Filter>src\solver</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\solver\transcendental_solver.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\solver\solve_normalization.hpp">
       <Filter>src\solver</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\builtins\discrete_math.hpp">
@@ -623,6 +638,15 @@
     <ClCompile Include="..\..\src\symbolic\algebraic_number.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\algebraic_expression.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\cyclotomic_field.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\number_field.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
@@ -633,6 +657,9 @@
       <Filter>src\solver</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\solver\transcendental_solver.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\solver\solve_normalization.cpp">
       <Filter>src\solver</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\solver\solve_constraints.cpp">

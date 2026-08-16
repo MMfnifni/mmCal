@@ -38,6 +38,9 @@ struct SolutionBranch final {
     // 解族をparameter化する自由変数。連立一次方程式の未拘束solver変数に加え、
     // 周期解の整数kのようなformal parameterも保持できる。
     std::vector<SolverVariable> freeVariables;
+    // 専用solverが各bindingのdomain所属を数学的に証明済みなら、そのdomain以上への
+    // 再検査を省ける。Real証明をRational/Integer証明へ誤って強めないためboolにはしない。
+    std::optional<mathematics::NumericDomain> bindingsCertifiedDomain;
 
     [[nodiscard]] bool unconditional() const noexcept { return conditions.empty(); }
     [[nodiscard]] bool operator==(const SolutionBranch&) const = default;

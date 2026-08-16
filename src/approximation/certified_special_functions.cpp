@@ -13,8 +13,10 @@
 #include "numeric/rational.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <stdexcept>
@@ -60,6 +62,16 @@ using numeric::Rational;
     return exactInterval(rational(value), bits);
 }
 
+/*
+旧実装
+
+変更理由：
+- 初回Gamma評価だけでB0...B128をすべて生成し，20桁級でも約68 msのcold-startを払っていた。
+- 高精度側でStirling項数を増やしたい場合，単純にmaximumを256へ延ばすと生成だけで数百msへ増える。
+- Gamma/Stirlingで実際に必要なのはB_2, B_4, ...だけなので，要求された偶数Bernoulli数までexactに遅延生成する方が適している。
+
+元コード：
+
 // Akiyama-Tanigawa法でBernoulli数をexact Rationalとして一度だけ生成する。GammaのStirling剰余評価では偶数添字だけを使う。
 [[nodiscard]] const std::vector<Rational>& bernoulliNumbers() {
     static const std::vector<Rational> values = [] {
@@ -87,12 +99,176 @@ using numeric::Rational;
         * BigInt::parse(std::to_string(n - 1));
     return b[n] / Rational{denominator};
 }
+*/
+
+/*
+旧実装
+
+変更理由：
+- stateful lazy Akiyama-Tanigawaは低～中精度ではeager生成を避けられるが，
+  1000 bit級でB_128近傍へ初めて到達した際のexact Rational更新がcold-startを支配した。
+- Stirling backendが必要とするB_2...B_128は固定された厳密有理定数であり，
+  実行時に再導出する数学的必要はない。
+- したがって定数表はexact decimal numerator/denominatorとして保持し，
+  実際に参照した値だけBigInt/Rationalへlazy parseする。
+
+class BernoulliEvenCache final {
+public:
+    [[nodiscard]] Rational get(std::size_t k) {
+        std::lock_guard lock{mutex_};
+        const std::size_t targetOrder = 2 * k;
+        while (a_.size() <= targetOrder)
+            appendNext();
+        return evenValues_[k];
+    }
+
+private:
+    void appendNext() {
+        const std::size_t m = a_.size();
+        a_.push_back(Rational{
+            BigInt{1}, BigInt::fromUnsigned(static_cast<std::uint64_t>(m + 1))});
+        for (std::size_t j = m; j >= 1; --j) {
+            a_[j - 1] = Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))}
+                * (a_[j - 1] - a_[j]);
+            if (j == 1)
+                break;
+        }
+        if ((m & 1U) == 0)
+            evenValues_.push_back(a_[0]);
+    }
+
+    std::mutex mutex_;
+    std::vector<Rational> a_;
+    std::vector<Rational> evenValues_;
+};
+
+[[nodiscard]] Rational bernoulliEven(std::size_t k) {
+    static BernoulliEvenCache cache;
+    return cache.get(k);
+}
+*/
+
+struct BernoulliLiteral final {
+    const char* numerator;
+    const char* denominator;
+};
+
+constexpr std::array<BernoulliLiteral, 64> bernoulliEvenLiterals = {{
+    BernoulliLiteral{"1", "6"},
+    BernoulliLiteral{"-1", "30"},
+    BernoulliLiteral{"1", "42"},
+    BernoulliLiteral{"-1", "30"},
+    BernoulliLiteral{"5", "66"},
+    BernoulliLiteral{"-691", "2730"},
+    BernoulliLiteral{"7", "6"},
+    BernoulliLiteral{"-3617", "510"},
+    BernoulliLiteral{"43867", "798"},
+    BernoulliLiteral{"-174611", "330"},
+    BernoulliLiteral{"854513", "138"},
+    BernoulliLiteral{"-236364091", "2730"},
+    BernoulliLiteral{"8553103", "6"},
+    BernoulliLiteral{"-23749461029", "870"},
+    BernoulliLiteral{"8615841276005", "14322"},
+    BernoulliLiteral{"-7709321041217", "510"},
+    BernoulliLiteral{"2577687858367", "6"},
+    BernoulliLiteral{"-26315271553053477373", "1919190"},
+    BernoulliLiteral{"2929993913841559", "6"},
+    BernoulliLiteral{"-261082718496449122051", "13530"},
+    BernoulliLiteral{"1520097643918070802691", "1806"},
+    BernoulliLiteral{"-27833269579301024235023", "690"},
+    BernoulliLiteral{"596451111593912163277961", "282"},
+    BernoulliLiteral{"-5609403368997817686249127547", "46410"},
+    BernoulliLiteral{"495057205241079648212477525", "66"},
+    BernoulliLiteral{"-801165718135489957347924991853", "1590"},
+    BernoulliLiteral{"29149963634884862421418123812691", "798"},
+    BernoulliLiteral{"-2479392929313226753685415739663229", "870"},
+    BernoulliLiteral{"84483613348880041862046775994036021", "354"},
+    BernoulliLiteral{"-1215233140483755572040304994079820246041491", "56786730"},
+    BernoulliLiteral{"12300585434086858541953039857403386151", "6"},
+    BernoulliLiteral{"-106783830147866529886385444979142647942017", "510"},
+    BernoulliLiteral{"1472600022126335654051619428551932342241899101", "64722"},
+    BernoulliLiteral{"-78773130858718728141909149208474606244347001", "30"},
+    BernoulliLiteral{"1505381347333367003803076567377857208511438160235", "4686"},
+    BernoulliLiteral{"-5827954961669944110438277244641067365282488301844260429", "140100870"},
+    BernoulliLiteral{"34152417289221168014330073731472635186688307783087", "6"},
+    BernoulliLiteral{"-24655088825935372707687196040585199904365267828865801", "30"},
+    BernoulliLiteral{"414846365575400828295179035549542073492199375372400483487", "3318"},
+    BernoulliLiteral{"-4603784299479457646935574969019046849794257872751288919656867", "230010"},
+    BernoulliLiteral{"1677014149185145836823154509786269900207736027570253414881613", "498"},
+    BernoulliLiteral{"-2024576195935290360231131160111731009989917391198090877281083932477", "3404310"},
+    BernoulliLiteral{"660714619417678653573847847426261496277830686653388931761996983", "6"},
+    BernoulliLiteral{"-1311426488674017507995511424019311843345750275572028644296919890574047", "61410"},
+    BernoulliLiteral{"1179057279021082799884123351249215083775254949669647116231545215727922535", "272118"},
+    BernoulliLiteral{"-1295585948207537527989427828538576749659341483719435143023316326829946247", "1410"},
+    BernoulliLiteral{"1220813806579744469607301679413201203958508415202696621436215105284649447", "6"},
+    BernoulliLiteral{"-211600449597266513097597728109824233673043954389060234150638733420050668349987259", "4501770"},
+    BernoulliLiteral{"67908260672905495624051117546403605607342195728504487509073961249992947058239", "6"},
+    BernoulliLiteral{"-94598037819122125295227433069493721872702841533066936133385696204311395415197247711", "33330"},
+    BernoulliLiteral{"3204019410860907078243020782116241775491817197152717450679002501086861530836678158791", "4326"},
+    BernoulliLiteral{"-319533631363830011287103352796174274671189606078272738327103470162849568365549721224053", "1590"},
+    BernoulliLiteral{"36373903172617414408151820151593427169231298640581690038930816378281879873386202346572901", "642"},
+    BernoulliLiteral{"-3469342247847828789552088659323852541399766785760491146870005891371501266319724897592306597338057", "209191710"},
+    BernoulliLiteral{"7645992940484742892248134246724347500528752413412307906683593870759797606269585779977930217515", "1518"},
+    BernoulliLiteral{"-2650879602155099713352597214685162014443151499192509896451788427680966756514875515366781203552600109", "1671270"},
+    BernoulliLiteral{"21737832319369163333310761086652991475721156679090831360806110114933605484234593650904188618562649", "42"},
+    BernoulliLiteral{"-309553916571842976912513458033841416869004128064329844245504045721008957524571968271388199595754752259", "1770"},
+    BernoulliLiteral{"366963119969713111534947151585585006684606361080699204301059440676414485045806461889371776354517095799", "6"},
+    BernoulliLiteral{"-51507486535079109061843996857849983274095170353262675213092869167199297474922985358811329367077682677803282070131", "2328255930"},
+    BernoulliLiteral{"49633666079262581912532637475990757438722790311060139770309311793150683214100431329033113678098037968564431", "6"},
+    BernoulliLiteral{"-95876775334247128750774903107542444620578830013297336819553512729358593354435944413631943610268472689094609001", "30"},
+    BernoulliLiteral{"5556330281949274850616324408918951380525567307126747246796782304333594286400508981287241419934529638692081513802696639", "4357878"},
+    BernoulliLiteral{"-267754707742548082886954405585282394779291459592551740629978686063357792734863530145362663093519862048495908453718017", "510"},
+}};
+
+class BernoulliEvenCache final {
+public:
+    [[nodiscard]] Rational get(std::size_t k) {
+        if (k == 0 || k > bernoulliEvenLiterals.size())
+            throw std::out_of_range("Bernoulli index exceeds the certified Stirling table");
+
+        std::lock_guard lock{mutex_};
+        std::optional<Rational>& value = values_[k - 1];
+        if (!value) {
+            const BernoulliLiteral& literal = bernoulliEvenLiterals[k - 1];
+            value.emplace(
+                BigInt::parse(literal.numerator),
+                BigInt::parse(literal.denominator));
+        }
+        return *value;
+    }
+
+private:
+    std::mutex mutex_;
+    std::array<std::optional<Rational>, 64> values_;
+};
+
+[[nodiscard]] Rational bernoulliEven(std::size_t k) {
+    static BernoulliEvenCache cache;
+    return cache.get(k);
+}
+
+[[nodiscard]] Rational stirlingCoefficient(std::size_t k) {
+    const std::size_t n = 2 * k;
+    const BigInt denominator = BigInt::fromUnsigned(static_cast<std::uint64_t>(n))
+        * BigInt::fromUnsigned(static_cast<std::uint64_t>(n - 1));
+    return bernoulliEven(k) / Rational{denominator};
+}
 
 struct StirlingPlan final {
     std::size_t shift = 0;
     std::size_t omittedK = 0;
     Rational remainderBound;
 };
+
+/*
+旧実装
+
+変更理由：
+- maximumK=64固定では640 bit級でx=1/3を272段も右へ送る必要があり，recurrence productが支配的になっていた。
+- Stirling和は各項でinverseOddを更新する逐次形だったため，Horner形よりinterval multiplicationが多かった。
+- exact pointでもrecurrence productをintervalで1因子ずつ掛けており，巨大なshiftで不要なroundingと中間計算が増えていた。
+
+元コード：
 
 [[nodiscard]] StirlingPlan chooseStirlingPlan(
     const Rational& inputLower,
@@ -159,7 +335,6 @@ struct StirlingPlan final {
         inverseOdd = multiply(inverseOdd, inverseSquare, workBits);
     }
 
-    // 正実軸上のStirling級数の剰余は最初の省略項と同符号で、絶対値はその項を超えない。入力区間ではlower endpointが最大絶対値を与える。
     const Rational omittedCoefficient = stirlingCoefficient(plan.omittedK);
     const Rational bound = plan.remainderBound;
     const RealInterval remainder = omittedCoefficient.numerator().isNegative()
@@ -168,7 +343,6 @@ struct StirlingPlan final {
     result = add(result, remainder, workBits);
 
     if (plan.shift != 0) {
-        // Gamma(x+s)=Gamma(x) product_{j=0}^{s-1}(x+j)。各logを個別に取らずproductを区間で作ってから1回だけlogを取る。
         RealInterval product = exactInterval(1, workBits);
         for (std::size_t j = 0; j < plan.shift; ++j) {
             const RealInterval factor = add(
@@ -178,6 +352,287 @@ struct StirlingPlan final {
             product = multiply(product, factor, workBits);
         }
         result = subtract(result, encloseLogPositive(product, workBits).interval, workBits);
+    }
+
+    return result.roundedOutward(precisionBits);
+}
+*/
+
+
+[[nodiscard]] bool stirlingBoundMeetsBinaryThreshold(
+    const Rational& inputLower,
+    std::size_t k,
+    std::size_t shift,
+    std::size_t thresholdBits) {
+    const Rational x = inputLower
+        + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(shift))};
+    if (x < rational(4))
+        return false;
+
+    const Rational coefficient = absRational(stirlingCoefficient(k));
+    const std::uint64_t exponent = static_cast<std::uint64_t>(2 * k - 1);
+    const BigInt denominatorPower = numeric::pow(inputLower.denominator(), exponent);
+    const BigInt shiftedNumerator = inputLower.numerator()
+        + inputLower.denominator()
+            * BigInt::fromUnsigned(static_cast<std::uint64_t>(shift));
+    const BigInt shiftedPower = numeric::pow(shiftedNumerator, exponent);
+
+    BigInt lhs = coefficient.numerator().abs() * denominatorPower;
+    lhs <<= thresholdBits;
+    const BigInt rhs = coefficient.denominator() * shiftedPower;
+    return lhs <= rhs;
+}
+
+[[nodiscard]] StirlingPlan chooseHighPrecisionStirlingPlan(
+    const Rational& inputLower,
+    std::size_t precisionBits,
+    std::size_t maximumK) {
+    const std::size_t thresholdBits = checkedAdd(
+        precisionBits, 20, "Gamma precision is too large");
+
+    // 高精度ではshiftを8刻みで走査し，各候補でk=1..maximumKをexact Rational評価すると
+    // planner自身がStirling本体より高価になり得る。最大kの厳密剰余不等式をBigIntだけで判定し，
+    // doubling + binary searchで十分なshiftを直接求める。最終boundもexact Rationalで再構築する。
+    std::size_t low = 0;
+    std::size_t high = 8;
+    while (!stirlingBoundMeetsBinaryThreshold(
+        inputLower, maximumK, high, thresholdBits)) {
+        if (high >= 1'000'000 / 2)
+            throw std::overflow_error("Gamma precision requires an excessive recurrence shift");
+        high *= 2;
+    }
+
+    while (low + 1 < high) {
+        const std::size_t middle = low + (high - low) / 2;
+        if (stirlingBoundMeetsBinaryThreshold(
+            inputLower, maximumK, middle, thresholdBits))
+            high = middle;
+        else
+            low = middle;
+    }
+
+    const Rational x = inputLower
+        + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(high))};
+    const Rational coefficient = absRational(stirlingCoefficient(maximumK));
+    const std::uint64_t exponent = static_cast<std::uint64_t>(2 * maximumK - 1);
+    const BigInt numerator = coefficient.numerator().abs()
+        * numeric::pow(x.denominator(), exponent);
+    const BigInt denominator = coefficient.denominator()
+        * numeric::pow(x.numerator(), exponent);
+    return StirlingPlan{high, maximumK, Rational{numerator, denominator}};
+}
+
+
+[[nodiscard]] std::optional<StirlingPlan> findStirlingPlan(
+    const Rational& inputLower,
+    const Rational& threshold,
+    std::size_t maximumK) {
+    for (std::size_t shift = 0; shift <= 1'000'000; shift += 8) {
+        const Rational x = inputLower + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(shift))};
+        if (x < rational(4))
+            continue;
+
+        const Rational inverseSquare = rational(1) / (x * x);
+        Rational inverseOdd = rational(1) / x;
+        for (std::size_t k = 1; k <= maximumK; ++k) {
+            const Rational bound = absRational(stirlingCoefficient(k)) * inverseOdd;
+            if (bound <= threshold)
+                return StirlingPlan{shift, k, bound};
+            inverseOdd *= inverseSquare;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] StirlingPlan chooseStirlingPlan(
+    const Rational& inputLower,
+    std::size_t precisionBits) {
+    if (inputLower <= rational(0))
+        throw std::domain_error("LogGamma requires a positive interval in the Stirling backend");
+
+    struct CacheEntry final {
+        Rational inputLower;
+        std::size_t precisionBits = 0;
+        StirlingPlan plan;
+    };
+    static thread_local std::vector<CacheEntry> cache;
+    for (const CacheEntry& entry : cache) {
+        if (entry.precisionBits == precisionBits && entry.inputLower == inputLower)
+            return entry.plan;
+    }
+
+    const Rational threshold = binaryThreshold(checkedAdd(
+        precisionBits, 20, "Gamma precision is too large"));
+
+    constexpr std::size_t highPrecisionPlannerThreshold = 768;
+    if (precisionBits > highPrecisionPlannerThreshold) {
+        const StirlingPlan plan = chooseHighPrecisionStirlingPlan(
+            inputLower, precisionBits, 64);
+        constexpr std::size_t maximumCacheEntries = 16;
+        if (cache.size() == maximumCacheEntries)
+            cache.erase(cache.begin());
+        cache.push_back(CacheEntry{inputLower, precisionBits, plan});
+        return plan;
+    }
+
+    // 低～中精度で最初の小さいx候補からk=64まで総当たりすると，
+    // 最終planがk=16程度でも高次係数まで参照・interval化しやすい。precisionに応じて探索上限を絞る。
+    const std::size_t maximumK = std::min<std::size_t>(
+        64, std::max<std::size_t>(16, (precisionBits + 4) / 5));
+    const auto plan = findStirlingPlan(inputLower, threshold, maximumK);
+    if (!plan)
+        throw std::overflow_error("Gamma precision requires an excessive recurrence shift");
+
+    // planはexact Rational boundだけから決まり再利用しても意味論が変わらない。thread-local bounded cacheでmutexも共有状態も増やさない。
+    constexpr std::size_t maximumCacheEntries = 16;
+    if (cache.size() == maximumCacheEntries)
+        cache.erase(cache.begin());
+    cache.push_back(CacheEntry{inputLower, precisionBits, *plan});
+    return *plan;
+}
+
+/*
+旧実装
+
+変更理由：
+- exact Rational z=p/q の (z)_n で Rational を各nodeごとに作ると，積のたびにnormalize/GCDが走る。
+- gcd(p,q)=1なら各因子 p+qk もqと互いに素なので，分子積とq^nを別々に構築して最後に一度だけRational化できる。
+- JohanssonのGamma実装指針でも，rational rising factorialは分子・分母を未約分のままbinary splittingし，最後だけcanonicalizeするのが推奨されている。
+
+[[nodiscard]] Rational balancedRisingProduct(
+    const Rational& input,
+    std::size_t first,
+    std::size_t count) {
+    if (count == 0)
+        return rational(1);
+    if (count == 1)
+        return input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(first))};
+    const std::size_t leftCount = count / 2;
+    return balancedRisingProduct(input, first, leftCount)
+        * balancedRisingProduct(input, first + leftCount, count - leftCount);
+}
+*/
+
+[[nodiscard]] BigInt balancedArithmeticProgressionProduct(
+    const BigInt& numerator,
+    const BigInt& denominator,
+    std::size_t first,
+    std::size_t count) {
+    if (count == 0)
+        return BigInt{1};
+    if (count == 1)
+        return numerator + denominator
+            * BigInt::fromUnsigned(static_cast<std::uint64_t>(first));
+
+    const std::size_t leftCount = count / 2;
+    return balancedArithmeticProgressionProduct(
+               numerator, denominator, first, leftCount)
+        * balancedArithmeticProgressionProduct(
+               numerator, denominator, first + leftCount, count - leftCount);
+}
+
+[[nodiscard]] Rational balancedRisingProduct(
+    const Rational& input,
+    std::size_t first,
+    std::size_t count) {
+    if (count == 0)
+        return rational(1);
+
+    const BigInt numerator = balancedArithmeticProgressionProduct(
+        input.numerator(), input.denominator(), first, count);
+    const BigInt denominator = numeric::pow(
+        input.denominator(), static_cast<std::uint64_t>(count));
+    return Rational{numerator, denominator};
+}
+
+[[nodiscard]] RealInterval encloseLogGammaPositive(
+    const RealInterval& input,
+    std::size_t precisionBits,
+    const Rational* exactInput = nullptr) {
+    const BigFloat zero;
+    if (input.lower() <= zero)
+        throw std::domain_error("LogGamma positive backend requires x > 0");
+
+    // Gamma(1)=Gamma(2)=1なのでlogGammaはexactに0。Beta(a,b)でa+b=1となる場合にも効く。
+    if (exactInput) {
+        if (*exactInput == rational(1) || *exactInput == rational(2))
+            return exactInterval(0, precisionBits);
+    }
+    else if (input.isPoint()) {
+        const Rational point = input.lower().toRational();
+        if (point == rational(1) || point == rational(2))
+            return exactInterval(0, precisionBits);
+    }
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "Gamma working precision is too large");
+    const Rational planInput = exactInput ? *exactInput : input.lower().toRational();
+    const StirlingPlan plan = chooseStirlingPlan(planInput, workBits);
+
+    const Rational shiftValue{BigInt::fromUnsigned(static_cast<std::uint64_t>(plan.shift))};
+    const RealInterval shift = exactInterval(shiftValue, workBits);
+    const RealInterval x = exactInput
+        ? exactInterval(*exactInput + shiftValue, workBits)
+        : add(input.roundedOutward(workBits), shift, workBits);
+    const RealInterval logX = encloseLogPositive(x, workBits).interval;
+    const RealInterval xMinusHalf = subtract(x, exactInterval(rational(1, 2), workBits), workBits);
+
+    RealInterval result = subtract(
+        multiply(xMinusHalf, logX, workBits), x, workBits);
+
+    // 1/2 log(2 Pi)
+    const RealInterval twoPi = multiply(
+        enclosePi(workBits).interval, exactInterval(2, workBits), workBits);
+    const RealInterval halfLogTwoPi = multiply(
+        encloseLogPositive(twoPi, workBits).interval,
+        exactInterval(rational(1, 2), workBits), workBits);
+    result = add(result, halfLogTwoPi, workBits);
+
+    const RealInterval inverseX = divide(exactInterval(1, workBits), x, workBits);
+    if (plan.omittedK > 1) {
+        const RealInterval inverseSquare = multiply(inverseX, inverseX, workBits);
+        RealInterval series = exactInterval(stirlingCoefficient(plan.omittedK - 1), workBits);
+        for (std::size_t k = plan.omittedK - 1; k > 1; --k) {
+            series = add(
+                exactInterval(stirlingCoefficient(k - 1), workBits),
+                multiply(inverseSquare, series, workBits),
+                workBits);
+        }
+        result = add(result, multiply(inverseX, series, workBits), workBits);
+    }
+
+    // 正実軸上のStirling級数の剰余は最初の省略項と同符号で、絶対値はその項を超えない。入力区間ではlower endpointが最大絶対値を与える。
+    const Rational omittedCoefficient = stirlingCoefficient(plan.omittedK);
+    const Rational bound = plan.remainderBound;
+    const RealInterval remainder = omittedCoefficient.numerator().isNegative()
+        ? RealInterval::fromRationalBounds(-bound, rational(0), workBits)
+        : RealInterval::fromRationalBounds(rational(0), bound, workBits);
+    result = add(result, remainder, workBits);
+
+    if (plan.shift != 0) {
+        if (exactInput || input.isPoint()) {
+            // exact Rational identityが呼出元に残っている場合は，dyadic intervalへ落とした後の
+            // lower/upper endpointではなく元の値からrising factorialを構成する。1/3等では
+            // RealInterval::fromRationalがpointにならないため，isPoint()だけではこの経路へ入れなかった。
+            const Rational product = balancedRisingProduct(
+                exactInput ? *exactInput : input.lower().toRational(), 0, plan.shift);
+            result = subtract(
+                result,
+                encloseLogPositive(exactInterval(product, workBits), workBits).interval,
+                workBits);
+        }
+        else {
+            // 非point intervalは旧来の包含安全な逐次interval productを維持する。
+            RealInterval product = exactInterval(1, workBits);
+            for (std::size_t j = 0; j < plan.shift; ++j) {
+                const RealInterval factor = add(
+                    input.roundedOutward(workBits),
+                    exactInterval(Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))}, workBits),
+                    workBits);
+                product = multiply(product, factor, workBits);
+            }
+            result = subtract(result, encloseLogPositive(product, workBits).interval, workBits);
+        }
     }
 
     return result.roundedOutward(precisionBits);
@@ -207,6 +662,33 @@ struct StirlingPlan final {
     const RealInterval sine = encloseSinRadianInterval(piX, workBits).interval;
     if (sine.containsZero())
         throw PrecisionInsufficient{"Gamma reflection cannot yet exclude a non-positive-integer pole"};
+    const RealInterval denominator = multiply(sine, gammaComplement, workBits);
+    if (denominator.containsZero())
+        throw PrecisionInsufficient{"Gamma reflection denominator cannot yet be proven nonzero"};
+    return divide(pi, denominator, workBits).roundedOutward(precisionBits);
+}
+
+[[nodiscard]] RealInterval gammaNegativeRationalByReflection(
+    const Rational& input,
+    std::size_t precisionBits) {
+    if (input.isInteger() && input.numerator() <= BigInt{0})
+        throw std::domain_error("gamma is undefined at non-positive integers");
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "Gamma rational reflection precision is too large");
+    const Rational complement = rational(1) - input;
+    const RealInterval complementInterval = exactInterval(complement, workBits);
+    const RealInterval gammaComplement = encloseExp(
+        encloseLogGammaPositive(complementInterval, workBits, &complement),
+        workBits).interval;
+
+    // sin(Pi*x)=sin(2*Pi*(x/2))。exact Rational turnsを使い，Pi*xのinterval化と
+    // angle-reductionの情報損失を避ける。
+    const RealInterval sine = encloseSinTurns(input / rational(2), workBits).interval;
+    if (sine.containsZero())
+        throw PrecisionInsufficient{"Gamma reflection cannot yet exclude a non-positive-integer pole"};
+
+    const RealInterval pi = enclosePi(workBits).interval;
     const RealInterval denominator = multiply(sine, gammaComplement, workBits);
     if (denominator.containsZero())
         throw PrecisionInsufficient{"Gamma reflection denominator cannot yet be proven nonzero"};
@@ -534,6 +1016,110 @@ struct FresnelPair final {
     return subtract(exactInterval(1, precisionBits), pointErfSeriesPositive(x, precisionBits), precisionBits);
 }
 
+enum class LambertProductOrder {
+    BelowTarget,
+    AboveTarget
+};
+
+// f(w)=w exp(w) を point w で保証評価し，exact Rational target との大小を証明する。
+// enclosureがtargetと重なる場合だけguard precisionを増やし，所定回数で分離できなければ
+// 推測せずPrecisionInsufficientとして上位のadaptive precisionへ返す。
+[[nodiscard]] LambertProductOrder compareLambertProduct(
+    const Rational& w,
+    const Rational& target,
+    std::size_t precisionBits) {
+    std::size_t workBits = checkedAdd(
+        precisionBits, 24, "Lambert W comparison precision is too large");
+    for (std::size_t attempt = 0; attempt < 12; ++attempt) {
+        const RealInterval wInterval = exactInterval(w, workBits);
+        const RealInterval exponential = encloseExp(wInterval, workBits).interval;
+        const RealInterval product = multiply(wInterval, exponential, workBits);
+        if (product.upper().toRational() < target)
+            return LambertProductOrder::BelowTarget;
+        if (product.lower().toRational() > target)
+            return LambertProductOrder::AboveTarget;
+        workBits = checkedAdd(
+            workBits, std::max<std::size_t>(32, workBits / 2),
+            "Lambert W comparison precision is too large");
+    }
+    throw PrecisionInsufficient{"Lambert W product comparison requires more precision"};
+}
+
+[[nodiscard]] RealInterval pointLambertWReal(
+    const Rational& target,
+    int branch,
+    std::size_t precisionBits) {
+    if (branch == 0 && target.isZero())
+        return exactInterval(0, precisionBits);
+
+    Rational lower;
+    Rational upper;
+    if (branch == 0) {
+        if (target > rational(0)) {
+            lower = rational(0);
+            // W_0(x) <= x for x>=0 because exp(W_0(x))>=1.
+            upper = target;
+        }
+        else {
+            lower = rational(-1);
+            upper = rational(0);
+        }
+    }
+    else if (branch == -1) {
+        upper = rational(-1);
+        lower = rational(-2);
+        // W_-1(x) -> -infinity as x -> 0-.  Find a certified left bracket by
+        // doubling its magnitude until f(lower)>target on the decreasing branch.
+        for (std::size_t i = 0; i < 64; ++i) {
+            if (compareLambertProduct(lower, target, precisionBits)
+                == LambertProductOrder::AboveTarget)
+                break;
+            lower *= rational(2);
+            if (i == 63)
+                throw PrecisionInsufficient{"Lambert W lower branch bracket is too wide"};
+        }
+    }
+    else {
+        throw std::domain_error("Certified real Lambert W supports only branches 0 and -1");
+    }
+
+    const Rational targetWidth = binaryThreshold(checkedAdd(
+        precisionBits, 8, "Lambert W target precision is too large"));
+    const std::size_t maximumIterations = checkedAdd(
+        precisionBits, 4096, "Lambert W iteration budget is too large");
+
+    for (std::size_t iteration = 0; upper - lower > targetWidth; ++iteration) {
+        if (iteration >= maximumIterations)
+            throw PrecisionInsufficient{"Lambert W bisection did not converge"};
+        const Rational midpoint = (lower + upper) / rational(2);
+        const LambertProductOrder order = compareLambertProduct(
+            midpoint, target, precisionBits);
+
+        if (branch == 0) {
+            if (order == LambertProductOrder::BelowTarget)
+                lower = midpoint;
+            else
+                upper = midpoint;
+        }
+        else {
+            // f is strictly decreasing on (-infinity,-1].
+            if (order == LambertProductOrder::AboveTarget)
+                lower = midpoint;
+            else
+                upper = midpoint;
+        }
+    }
+
+    return RealInterval::fromRationalBounds(lower, upper, precisionBits);
+}
+
+[[nodiscard]] RealInterval lambertBranchPoint(std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "Lambert W branch-point precision is too large");
+    // -1/e = -exp(-1).  exp backendの保証区間をそのまま反転してbranch domain判定に使う。
+    return negate(encloseExp(exactInterval(-1, workBits), workBits).interval);
+}
+
 } // namespace
 
 
@@ -784,7 +1370,7 @@ enum class EllipticSeriesKind { F, E, Pi };
 
 [[nodiscard]] Rational eulerGammaRemainderBound(std::uint64_t n) {
     constexpr std::size_t omittedK = 64;
-    const Rational coefficient = absRational(bernoulliNumbers()[2 * omittedK])
+    const Rational coefficient = absRational(bernoulliEven(omittedK))
         / Rational{BigInt::fromUnsigned(2 * omittedK)};
     const BigInt nPower = numeric::pow(BigInt::fromUnsigned(n), 2 * omittedK);
     return coefficient / Rational{nPower};
@@ -821,7 +1407,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         / (nR * nR);
     Rational inverseEven = inverseSquare;
     for (std::size_t k = 1; k < 64; ++k) {
-        const Rational coefficient = bernoulliNumbers()[2 * k]
+        const Rational coefficient = bernoulliEven(k)
             / Rational{BigInt::fromUnsigned(2 * k)};
         result = add(result,
             exactInterval(coefficient * inverseEven, workBits), workBits);
@@ -995,14 +1581,6 @@ enum class EllipticSeriesKind { F, E, Pi };
         }
     }
     throw PrecisionInsufficient{"polylog series did not converge within the term limit"};
-}
-
-[[nodiscard]] Rational bernoulliEven(std::size_t k) {
-    const auto& values = bernoulliNumbers();
-    const std::size_t index = 2 * k;
-    if (index >= values.size())
-        throw std::overflow_error("special-function Bernoulli order exceeds the current certified budget");
-    return values[index];
 }
 
 [[nodiscard]] Rational rationalPowerInteger(Rational base, std::size_t exponent) {
@@ -1211,6 +1789,17 @@ struct PsiPlan final {
     return result.roundedOutward(precisionBits);
 }
 
+/*
+旧実装
+
+変更理由：
+- xがexact pointでもpublic interval wrapperからlower/upperを別々に呼び，同一計算を2回実行していた。
+- lower/upper endpointで共通なBeta(a,b) normalizationまで各回で再計算していた。
+- 代表例ibeta[1/3,2/3,1/4]では2F1よりBeta/Gamma normalizationが支配的だったため，
+  endpoint計算の共有だけでexactnessを変えず大きく短縮できる。
+
+元コード：
+
 [[nodiscard]] RealInterval pointIncompleteBetaRegularized(
     const Rational& a,
     const Rational& b,
@@ -1245,6 +1834,126 @@ struct PsiPlan final {
         exactInterval(a, workBits), exactInterval(b, workBits), workBits);
     return divide(numerator, beta, workBits).roundedOutward(precisionBits);
 }
+*/
+
+[[nodiscard]] RealInterval pointIncompleteBetaRegularized(
+    const Rational& a,
+    const Rational& b,
+    const Rational& x,
+    const RealInterval& betaNormalization,
+    std::size_t precisionBits) {
+    if (a <= rational(0) || b <= rational(0))
+        throw std::domain_error("ibeta certified backend requires a > 0 and b > 0");
+    if (x < rational(0) || x > rational(1))
+        throw std::domain_error("ibeta certified backend requires x in [0,1]");
+    if (x.isZero())
+        return exactInterval(0, precisionBits);
+    if (x == rational(1))
+        return exactInterval(1, precisionBits);
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "ibeta working precision is too large");
+    if (x > rational(1, 2)) {
+        // B(a,b)=B(b,a)なのでcomplement側でも同じnormalizationを再利用できる。
+        const RealInterval complement = pointIncompleteBetaRegularized(
+            b, a, rational(1) - x, betaNormalization, workBits);
+        return subtract(exactInterval(1, workBits), complement, workBits)
+            .roundedOutward(precisionBits);
+    }
+
+    const RealInterval logX = encloseLogPositive(exactInterval(x, workBits), workBits).interval;
+    const RealInterval xPower = encloseExp(
+        multiply(logX, exactInterval(a, workBits), workBits), workBits).interval;
+    const RealInterval hyper = encloseHypergeometric2F1Real(
+        a, rational(1) - b, a + rational(1), x, workBits);
+    const RealInterval numerator = divide(
+        multiply(xPower, hyper, workBits), exactInterval(a, workBits), workBits);
+    return divide(
+        numerator, betaNormalization.roundedOutward(workBits), workBits)
+        .roundedOutward(precisionBits);
+}
+
+RealInterval encloseGammaRational(
+    const Rational& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Gamma precision must be at least one bit");
+
+    if (input > rational(0)) {
+        const RealInterval interval = exactInterval(input, checkedAdd(
+            precisionBits, 64, "Gamma rational input precision is too large"));
+        return encloseExp(
+            encloseLogGammaPositive(interval, precisionBits, &input),
+            precisionBits).interval;
+    }
+
+    return gammaNegativeRationalByReflection(input, precisionBits);
+}
+
+RealInterval encloseLogGammaRational(
+    const Rational& input,
+    std::size_t precisionBits) {
+    if (input > rational(0)) {
+        const RealInterval interval = exactInterval(input, checkedAdd(
+            precisionBits, 64, "LogGamma rational input precision is too large"));
+        return encloseLogGammaPositive(interval, precisionBits, &input);
+    }
+
+    const RealInterval gamma = encloseGammaRational(input, checkedAdd(
+        precisionBits, 24, "lgamma rational working precision is too large"));
+    const RealInterval magnitude = absoluteInterval(gamma, checkedAdd(
+        precisionBits, 16, "lgamma rational absolute-value precision is too large"));
+    if (magnitude.containsZero())
+        throw PrecisionInsufficient{"lgamma could not yet prove Gamma away from zero"};
+    return encloseLogPositive(magnitude, precisionBits).interval;
+}
+
+RealInterval encloseLambertWReal(
+    const RealInterval& input,
+    int branch,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Lambert W precision must be at least one bit");
+    if (branch != 0 && branch != -1)
+        throw std::domain_error("Certified real Lambert W supports only branches 0 and -1");
+
+    const std::size_t domainBits = checkedAdd(
+        precisionBits, 32, "Lambert W domain precision is too large");
+    const RealInterval branchPoint = lambertBranchPoint(domainBits);
+    const Rational inputLower = input.lower().toRational();
+    const Rational inputUpper = input.upper().toRational();
+    const Rational branchPointLower = branchPoint.lower().toRational();
+    const Rational branchPointUpper = branchPoint.upper().toRational();
+
+    if (inputUpper < branchPointLower)
+        throw CertifiedBackendUnsupported{
+            "Certified complex Lambert W is not implemented for z < -1/e"};
+    if (inputLower < branchPointUpper)
+        throw PrecisionInsufficient{"Lambert W input is too close to the branch point -1/e"};
+
+    if (branch == -1) {
+        if (inputLower > rational(0))
+            throw CertifiedBackendUnsupported{
+                "Certified complex Lambert W branch -1 is not implemented for z > 0"};
+        if (inputLower == rational(0) && inputUpper == rational(0))
+            throw std::domain_error("Lambert W branch -1 is singular at z = 0");
+        if (inputUpper >= rational(0))
+            throw PrecisionInsufficient{"Lambert W branch -1 input is too close to zero"};
+    }
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 16, "Lambert W working precision is too large");
+    if (branch == 0) {
+        const RealInterval lowerValue = pointLambertWReal(inputLower, 0, workBits);
+        const RealInterval upperValue = pointLambertWReal(inputUpper, 0, workBits);
+        return RealInterval{lowerValue.lower(), upperValue.upper()}.roundedOutward(precisionBits);
+    }
+
+    // W_-1は実区間上で単調減少。入力上端が出力下端に対応する。
+    const RealInterval lowerValue = pointLambertWReal(inputUpper, -1, workBits);
+    const RealInterval upperValue = pointLambertWReal(inputLower, -1, workBits);
+    return RealInterval{lowerValue.lower(), upperValue.upper()}.roundedOutward(precisionBits);
+}
 
 RealInterval encloseGammaReal(
     const RealInterval& input,
@@ -1253,6 +1962,12 @@ RealInterval encloseGammaReal(
         throw std::invalid_argument("Gamma precision must be at least one bit");
     if (exactNonPositiveIntegerPoint(input))
         throw std::domain_error("gamma is undefined at non-positive integers");
+
+    if (input.isPoint()) {
+        const Rational point = input.lower().toRational();
+        if (point == rational(1) || point == rational(2))
+            return exactInterval(1, precisionBits);
+    }
 
     const BigFloat zero;
     if (input.lower() > zero)
@@ -1296,6 +2011,37 @@ RealInterval encloseErfcReal(
     const RealInterval lower = pointErfc(input.upper().toRational(), precisionBits);
     const RealInterval upper = pointErfc(input.lower().toRational(), precisionBits);
     return RealInterval{lower.lower(), upper.upper()};
+}
+
+[[nodiscard]] RealInterval encloseBetaLogPositiveRational(
+    const Rational& a,
+    const Rational& b,
+    std::size_t precisionBits) {
+    if (a <= rational(0) || b <= rational(0))
+        throw std::domain_error("betaln certified evaluation currently requires a > 0 and b > 0");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "Beta working precision is too large");
+    const Rational sum = a + b;
+    const RealInterval aInterval = exactInterval(a, workBits);
+    const RealInterval bInterval = exactInterval(b, workBits);
+    const RealInterval sumInterval = exactInterval(sum, workBits);
+    return subtract(
+        add(
+            encloseLogGammaPositive(aInterval, workBits, &a),
+            encloseLogGammaPositive(bInterval, workBits, &b),
+            workBits),
+        encloseLogGammaPositive(sumInterval, workBits, &sum),
+        workBits)
+        .roundedOutward(precisionBits);
+}
+
+[[nodiscard]] RealInterval encloseBetaPositiveRational(
+    const Rational& a,
+    const Rational& b,
+    std::size_t precisionBits) {
+    return encloseExp(
+        encloseBetaLogPositiveRational(a, b, precisionBits),
+        precisionBits).interval;
 }
 
 RealInterval encloseBetaLogPositive(
@@ -1443,6 +2189,20 @@ RealInterval enclosePolylogReal(
     return pointPolylogPositiveOrder(order, z, precisionBits);
 }
 
+RealInterval encloseBetaRational(
+    const Rational& a,
+    const Rational& b,
+    std::size_t precisionBits) {
+    return encloseBetaPositiveRational(a, b, precisionBits);
+}
+
+RealInterval encloseBetaLogRational(
+    const Rational& a,
+    const Rational& b,
+    std::size_t precisionBits) {
+    return encloseBetaLogPositiveRational(a, b, precisionBits);
+}
+
 RealInterval encloseBetaPositive(
     const RealInterval& a,
     const RealInterval& b,
@@ -1493,8 +2253,40 @@ RealInterval encloseIncompleteBetaRegularized(
     const Rational upper = x.upper().toRational();
     if (lower < rational(0) || upper > rational(1))
         throw std::domain_error("ibeta certified backend requires x in [0,1]");
+    /*
+    旧実装
+    exact pointでも同一endpointを2回評価し，Beta(a,b)も2回再構築していた。
+
     const RealInterval lowValue = pointIncompleteBetaRegularized(a, b, lower, precisionBits);
     const RealInterval highValue = pointIncompleteBetaRegularized(a, b, upper, precisionBits);
+    return RealInterval{lowValue.lower(), highValue.upper()};
+    */
+
+    if (lower.isZero() && upper.isZero())
+        return exactInterval(0, precisionBits);
+    if (lower == rational(1) && upper == rational(1))
+        return exactInterval(1, precisionBits);
+
+    if (lower == upper) {
+        // x<=1/2のpointは再帰しないので+40 bitで十分。complementを使うpointだけ+80 bitを確保する。
+        const std::size_t normalizationGuard = lower > rational(1, 2) ? 80 : 40;
+        const std::size_t normalizationBits = checkedAdd(
+            precisionBits, normalizationGuard, "ibeta normalization precision is too large");
+        const RealInterval betaNormalization = encloseBetaPositiveRational(
+            a, b, normalizationBits);
+        return pointIncompleteBetaRegularized(
+            a, b, lower, betaNormalization, precisionBits);
+    }
+
+    // interval endpointのどちらかがcomplementへ入っても共有できるよう+80 bitで一度だけnormalizationを作る。
+    const std::size_t normalizationBits = checkedAdd(
+        precisionBits, 80, "ibeta normalization precision is too large");
+    const RealInterval betaNormalization = encloseBetaPositiveRational(
+        a, b, normalizationBits);
+    const RealInterval lowValue = pointIncompleteBetaRegularized(
+        a, b, lower, betaNormalization, precisionBits);
+    const RealInterval highValue = pointIncompleteBetaRegularized(
+        a, b, upper, betaNormalization, precisionBits);
     return RealInterval{lowValue.lower(), highValue.upper()};
 }
 

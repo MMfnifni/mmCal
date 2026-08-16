@@ -1310,7 +1310,7 @@ struct PartialFractionBasis final {
             return std::nullopt;
         arguments.push_back(std::move(*rewritten));
     }
-    return simplify(Expr::call(expression.asCall().head, std::move(arguments)),
+    return simplify(Expr::rebuildCall(expression.asCall(), std::move(arguments)),
         builtins, mathematics, angles);
 }
 
@@ -2890,7 +2890,7 @@ struct RationalFunctionForm final {
             return std::nullopt;
         arguments.push_back(std::move(*rewritten));
     }
-    return simplify(Expr::call(expression.asCall().head, std::move(arguments)),
+    return simplify(Expr::rebuildCall(expression.asCall(), std::move(arguments)),
         builtins, mathematics, angles);
 }
 

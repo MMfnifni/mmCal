@@ -7,10 +7,15 @@
 #include "mathematics/math_registry.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
+
+namespace mmcal::symbolic {
+class CyclotomicFieldContext;
+}
 
 namespace mmcal::builtins {
 
@@ -31,10 +36,18 @@ public:
 
     void clear() noexcept;
     [[nodiscard]] std::size_t planCount() const noexcept;
+    [[nodiscard]] std::size_t cyclotomicFieldCount() const noexcept;
     [[nodiscard]] Plan& plan(std::size_t size);
+    [[nodiscard]] std::shared_ptr<const symbolic::CyclotomicFieldContext> cyclotomicField(
+        std::size_t conductor) const;
+    void rememberCyclotomicField(
+        std::size_t conductor,
+        std::shared_ptr<const symbolic::CyclotomicFieldContext> field);
 
 private:
     std::unordered_map<std::size_t, Plan> plans_;
+    std::unordered_map<std::size_t, std::shared_ptr<const symbolic::CyclotomicFieldContext>>
+        cyclotomicFields_;
 };
 
 [[nodiscard]] expression::Expr evaluateDft(

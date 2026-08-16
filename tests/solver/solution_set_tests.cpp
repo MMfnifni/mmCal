@@ -61,9 +61,9 @@ void runSolutionSetTests(TestRunner& tests) {
     const auto roots = solver::SolutionSet::finite(
         {SolverVariable{x, NumericDomain::Complex}},
         {
-            SolutionBranch{{SolutionBinding{x, integer(-2)}}, {}, std::size_t{1}, {}},
-            SolutionBranch{{SolutionBinding{x, upperRoot}}, {}, std::size_t{1}, {}},
-            SolutionBranch{{SolutionBinding{x, lowerRoot}}, {}, std::size_t{1}, {}}
+            SolutionBranch{{SolutionBinding{x, integer(-2)}}, {}, std::size_t{1}, {}, std::nullopt},
+            SolutionBranch{{SolutionBinding{x, upperRoot}}, {}, std::size_t{1}, {}, std::nullopt},
+            SolutionBranch{{SolutionBinding{x, lowerRoot}}, {}, std::size_t{1}, {}, std::nullopt}
         });
     tests.expect(
         roots.kind() == solver::SolutionSetKind::Finite
@@ -75,7 +75,7 @@ void runSolutionSetTests(TestRunner& tests) {
     nonZeroA.add(mathematics::relation(RelationKind::NotEqual, Expr{a}, integer(0)));
     const auto conditionalBranch = solver::SolutionSet::finite(
         {SolverVariable{x, NumericDomain::Complex}},
-        {SolutionBranch{{SolutionBinding{x, Expr{a}}}, nonZeroA, std::nullopt, {}}});
+        {SolutionBranch{{SolutionBinding{x, Expr{a}}}, nonZeroA, std::nullopt, {}, std::nullopt}});
     tests.expect(
         !conditionalBranch.branches().front().unconditional()
             && conditionalBranch.branches().front().conditions.size() == 1,
@@ -97,7 +97,7 @@ void runSolutionSetTests(TestRunner& tests) {
             solver::SolutionCase{
                 nonZeroA,
                 solver::SolutionSetKind::Finite,
-                {SolutionBranch{{SolutionBinding{x, integer(1)}}, {}, std::nullopt, {}}}},
+                {SolutionBranch{{SolutionBinding{x, integer(1)}}, {}, std::nullopt, {}, std::nullopt}}},
             solver::SolutionCase{zeroA, solver::SolutionSetKind::Universal, {}}
         });
     tests.expect(
@@ -106,7 +106,7 @@ void runSolutionSetTests(TestRunner& tests) {
         "SolutionSet: coefficient-dependent solver results preserve set-level cases");
     tests.expectEqual(
         formatting::formatExpr(Expr::solutionSet(conditionalSet)),
-        std::string{"cases[{x==1} if a!=0; All if a==0]"},
+        std::string{"cases[{x == 1} if a != 0; All if a == 0]"},
         "SolutionSet: conditional cases have a readable exact representation");
 
     const auto math = mathematics::MathRegistry::defaults(symbols, builtins);
@@ -126,7 +126,7 @@ void runSolutionSetTests(TestRunner& tests) {
         "PolynomialSolver: quadratic equation returns both complex-domain roots");
     tests.expectEqual(
         formatting::formatExpr(Expr::solutionSet(quadratic)),
-        std::string{"{x==1, x==-1}"},
+        std::string{"{x == 1, x == -1}"},
         "PolynomialSolver: solution sets have a readable runtime representation");
 
     const Expr cubicEquation = Expr::call(
@@ -146,7 +146,7 @@ void runSolutionSetTests(TestRunner& tests) {
         [&] {
             static_cast<void>(solver::SolutionSet::finite(
                 {SolverVariable{x, NumericDomain::Complex}},
-                {SolutionBranch{{SolutionBinding{a, integer(1)}}, {}, std::nullopt, {}}}));
+                {SolutionBranch{{SolutionBinding{a, integer(1)}}, {}, std::nullopt, {}, std::nullopt}}));
         },
         "SolutionSet: a branch cannot bind a symbol outside the solver variable list");
 }

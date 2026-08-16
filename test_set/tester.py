@@ -395,6 +395,9 @@ def main(argv=None):
     parser.add_argument("tests", nargs="*", help="test files or glob patterns")
     parser.add_argument("--exe", help="path to mmCal executable")
     parser.add_argument("--timeout", type=float, default=120.0, help="timeout per test file")
+    parser.add_argument(
+        "--timings", nargs="?", const=10, type=int, default=0, metavar="N",
+        help="show the N slowest test files by mmCal process wall time (default: 10)")
     args = parser.parse_args(argv)
 
     executable = find_executable(args.exe)
@@ -413,6 +416,7 @@ def main(argv=None):
 
     total = passed = failed = skipped = 0
     active_total = 0
+    file_timings = []
     for _path, _startup_args, cases in loaded_files:
         active_total += sum(1 for case in cases if case[2].lower() != "skip")
         skipped += sum(1 for case in cases if case[2].lower() == "skip")
@@ -432,9 +436,12 @@ def main(argv=None):
             continue
 
         try:
+            file_started = time.perf_counter()
             responses, returncode, stderr = run_session(
                 executable, startup_args, active, args.timeout
             )
+            file_elapsed_ms = (time.perf_counter() - file_started) * 1000.0
+            file_timings.append((file_elapsed_ms, test_file.name, len(active)))
         except RunnerProtocolError as exc:
             print("[RUNNER ERROR] {}: {}".format(test_file.name, exc))
             print("Aborted: this is a runner/REPL protocol error, not {} test failures.".format(len(active)))
@@ -477,6 +484,13 @@ def main(argv=None):
     if skipped:
         print("SKIP : {}".format(skipped))
     print("\nElapsed time: {:.3f} [ms]".format(elapsed_ms))
+    if args.timings > 0 and file_timings:
+        print("\nSlowest test files (mmCal process wall time):")
+        for elapsed, name, count in sorted(file_timings, reverse=True)[:args.timings]:
+            per_test = elapsed / count if count else 0.0
+            print("  {:10.3f} ms  {:8.3f} ms/test  {:4d}  {}".format(
+                elapsed, per_test, count, name
+            ))
     print("=====================")
     return 1 if failed else 0
 

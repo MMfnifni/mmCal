@@ -14,6 +14,10 @@ struct ValueFacts final {
     RealSign sign = RealSign::Unknown;
     bool exact = false;
     bool provablyNonReal = false;
+    // domainは「属すること」の上界だけでは Integer⊂Rational を否定できない。
+    // exact non-integer / irrational knowledgeを別に保持し，Element/Solver条件のFalse証明へ使う。
+    bool provablyNonInteger = false;
+    bool provablyNonRational = false;
 
     [[nodiscard]] bool isNumeric() const noexcept;
     [[nodiscard]] bool isProvablyReal() const noexcept;

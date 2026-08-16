@@ -10,7 +10,9 @@ namespace mmcal::builtins {
 
 [[nodiscard]] expression::Expr evaluateComparison(
     const expression::Symbol& head,
-    std::span<const expression::Expr> arguments);
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics);
 [[nodiscard]] expression::Expr evaluateLogicalAnd(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry);

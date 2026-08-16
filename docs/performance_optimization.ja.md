@@ -399,6 +399,50 @@ process-globalにはせずSymbol/session lifetimeを安全に保つ。
 
 ---
 
+# 15.4. exact Cyclotomic FFT — Stage 7-7
+
+## 旧 generic `cis` / Expr direct DFT — fallbackへ降格
+
+Stage 7-7以前の非2冪exact FFTは，`radix2Transform()`から`directTransform()`へfallbackし，各twiddleを`cis[-2 Pi k/n Rad]`のgeneric `Expr`として構築していた。5/7/10/12点程度でもforwardでroot-of-unity式が増え，inverseでは同じcyclotomic恒等式をSimplifierへ再証明させるため，`ifft[fft[v]]`が巨大式になり`tester.py`の`test5_matrix.txt`を支配していた。
+
+旧dispatchとgeneric DFT本体は削除せず，symbolic入力や新backendのbudget外で使うfallbackとして維持する。dispatch旧形は変更理由付きコメントで`signal_processing.cpp`に隣接保存する。
+
+## canonical `NumberFieldContext`でζ_nを持つ案 — 棄却
+
+最初の試作では一般algebraic backendをそのまま利用し，primitive root `zeta_n`をcanonical Complex Rootとして`NumberFieldContext`へ載せた。しかしFFTで必要なのは同じroot-of-unity field内の線形演算であり，generatorのroot isolation / canonical Root materializationが支配的になった。試作では5点forwardが約2.5 s，7点forwardが約19.8 sまで悪化し，ζ_7のContext初回構築だけでも約0.4 s級だったため棄却した。
+
+この結果から，FFT内部ではembedded algebraic numberとしてのroot identityを毎回要求せず，quotient ring/field arithmeticだけを使う方針へ変更した。これはSageのexact DFTがCyclotomicField上の列を扱う設計や，FLINTがcyclotomic polynomial quotient上で先に計算してからroot of unityへ評価する実装方針とも整合する。
+
+## `Q[t]/Phi_n(t)` quotient backend — 採用
+
+`CyclotomicFieldContext`はembedding/root isolationを持たず，次だけを保持する。
+
+- conductor `n`
+- exact cyclotomic polynomial `Phi_n(t)`
+- `t^degree mod Phi_n(t)` reduction
+- `t^k`のpower-basis座標
+
+5点以上の非2冪exact Rational入力はこの座標へ直接写し，DFTの加減乗算をRational vectorだけで行う。Gaussian Rationalを含む場合は必要に応じconductorを`lcm(n,4)`へ拡張し，`I=t^(3n/4)`としてexactに埋め込む。出力境界だけで従来表示と連続する単一generator `cis[-2 Pi/n Rad]`へ戻す。
+
+現budgetは`phi(n)<=64`。budget超過，またはsymbolic expressionを同じquotient fieldへ証明付きで写せない場合は旧generic exact DFTへfallbackする。近似/certified FFT経路は変更しない。
+
+GCC Release / LTO offの専用`--exact-cyclotomic-fft 5`代表値：
+
+| length | first round-trip | warm round-trip |
+|---:|---:|---:|
+| 5 | 約0.72 ms | 約0.49 ms |
+| 7 | 約1.79 ms | 約1.74 ms |
+| 10 | 約1.50 ms | 約1.33 ms |
+| 12 | 約1.44 ms | 約1.27 ms |
+| 15 | 約9.11 ms | 約9.39 ms |
+| 21 | 約41.1 ms | 約37.3 ms |
+
+`tester.py --timings`では`test5_matrix.txt`がStage 5-3時点の約1.46 sからStage 7-7後は約0.38 sへ低下した。
+
+## mixed-radix常設化 — 保留
+
+現在の非2冪cyclotomic transform本体は座標上のdirect O(n^2) DFTである。21点でもround-trip約34 msで，今回の主問題だったgeneric Expr explosionは既に解消した。mixed-radix Cooley–Tukeyやprime長Rader/Bluesteinをexact quotient座標へ追加することは可能だが，実装複雑度を増やす前により大きい対応長でcrossoverを測る。Stage 7-7では保留する。
+
 # 15.5. precision-aware `N` と certified FFT
 
 ## 旧経路 — exact FFT完成後に`N`を適用
@@ -432,7 +476,7 @@ N[fft[data],16]
 - `N`のprecision伝播は将来ほかの高cost builtinにも再利用できる
 - 非2冪のO(N^2)崖をapproximate pathではBluesteinで回避できる
 
-exact FFT自体のsymbolic expression explosionは別問題であり、この変更では意図的に残している。
+Stage 7-7以前はexact FFT自体のsymbolic expression explosionを意図的に残していた。現在は対応非2冪exact入力を上記Cyclotomic quotient backendへ送ることでこの問題を解消し，budget外・symbolic membership未証明だけgeneric Expr fallbackを維持する。
 
 ---
 
@@ -568,6 +612,212 @@ CLI側では13.63 MBの1024×1024・10桁decimal literalを`dimensions[...]`へ�
 
 結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，mmCalのcertified arbitrary-precision dense算法にとっては依然stress領域である。一方，persistent exact Arrayのrepresentation固定費はtyped-node + paged packed backing + direct builderで大きく下がった。approximate SVD/Eigen等には既に連続working bufferがあるため，次はstorage改善後のcost balanceでblock化・threadingを再評価する。
 
+
+# 15.12. persistent algebraic field Stage 5-1～5-3
+
+## compositum / embedding再利用 — 採用
+
+Stage 5-1では，同じRoot pairから一度証明したprimitive-element compositumと両operandのpower-basis embeddingをbounded cacheへ保持する。Real `AlgebraicElement`からcanonical `root[minpoly,k]`へ戻す際も，chosen generator interval上でexact Rational interval評価し，Sturm root countで該当root indexを直接証明する。全根isolationの重複と，不可能なRational / `Q+iQ`退化probeを避ける。
+
+代表式：
+
+```text
+(root[{-2,0,1},2]+root[{-3,0,0,1},1])
+*(root[{-2,0,1},2]-root[{-3,0,0,1},1])
+```
+
+Stage 4では約1.23 s/回だったが，Stage 5-1後は同一GCC Release / LTO off環境で初回約0.14～0.15 s，warm約0.02 sまで短縮した。
+
+## reciprocal reuse — 採用
+
+Stage 5-2では`Q[t]/(m)`上のextended Euclidで求めたexact reciprocalを，`NumberFieldContext`ごと最大16組のthread-safe LRUへ保持する。`inverse(inverse(x))=x`なので1 entryを双方向pairとして扱う。有理定数座標は`Q`の埋め込みを使い直接逆数化する。
+
+代表測定：
+
+| degree | 処理 | cache前 | Stage 5-2 warm |
+|---:|---|---:|---:|
+| 6 | reciprocal | 約178 us | 約0.24 us |
+| 6 | divide | 約243 us | 約84 us |
+| 12 | reciprocal | 約525 us | 約0.44 us |
+| 12 | divide | 約773 us | 約211～233 us |
+
+### persistent multiplication matrix cache — 棄却
+
+12次体で左乗算matrixを試したところ，通常乗算約112 usに対してmatrix-vector約101 usで，matrix構築自体が約228 usだった。1回あたりの短縮が約10%に留まり，同じelementによる多数回乗算がなければ償却できない。全`AlgebraicElement`へmatrix cacheを持たせる複雑性とmemory retentionに見合わないため現段階では採用しない。
+
+## incremental Krylov minimal polynomial — 採用
+
+旧`AlgebraicElement::minimalPolynomial()`は，`1,a,...,a^k`について各`k`ごとに新しいRational matrixを構築し，Gauss-Jordanを最初からやり直していた。次数`d`まで進むと，同じ独立性情報を繰り返し計算する。
+
+Stage 5-3では`1,a,a^2,...`を1列ずつ追加し，既存のexact row-echelon stateで新列だけをreduceする。最初に線形従属した
+
+```text
+c0 + c1 a + ... + a^k = 0
+```
+
+は，それ以前の`1,a,...,a^(k-1)`が独立なのでそのままminimal polynomialである。primitive-element tensor algebraでも同じincremental basisを使い，`theta`のminimal polynomialだけでなく，確立済みpower basisへの`alpha` / `beta`座標変換にも消去状態を再利用する。
+
+同一GCC Release / LTO offの代表値：
+
+| field degree | 旧repeated Gauss-Jordan | incremental Krylov first |
+|---:|---:|---:|
+| 6 | 約651 us | 約475 us |
+| 12 | 約18.9 ms | 約7.7～7.9 ms |
+
+さらに導出済みminimal polynomialをexact power-basis座標keyでfieldごと最大16 entryのthread-safe LRUへ保持する。12次のwarm hitは約0.59 usである。cache miss/evictionは再計算を増やすだけで，数学的結果は変えない。
+
+### multiplication-matrix minpoly / modular reconstruction — 保留
+
+FLINT等にはexact Rational matrixのminimal-polynomial backendがあり，有限次元代数をmultiplication matrixとして扱う方法自体は標準的である。しかし現在のmmCalはalgebraic-field候補次数をboundedに保ち，power-basis座標を既に持つ。現状の次数域ではincremental Krylovが小さな実装で十分な改善を出したため，常時multiplication matrixを作ってmatrix-minpolyへ渡す経路は追加しない。modular image + rational reconstructionやfraction-free matrix minpolyも，将来次数・係数heightが増えてfirst derivationが再び支配的になった時の候補とする。
+
+# 15.13. black-box test workload監査
+
+`test_set/tester.py`へ`--timings [N]`を追加した。各test fileについてmmCal processのwall timeを計測し，遅い順に表示する。test記述のfile I/O / parseは従来どおり総elapsed前に完了する。
+
+2026-08-16のStage 5-3 / GCC Release / LTO offで全1652 black-boxを測定した代表値：
+
+| test file | tests | wall time |
+|---|---:|---:|
+| `test16_exact_calculus_solver.txt` | 85 | 約2927 ms |
+| `test5_matrix.txt` | 105 | 約1457 ms |
+| `test9_special_func.txt` | 75 | 約297 ms |
+| `test8_calculus.txt` | 46 | 約173 ms |
+| `test22_number_field_interning.txt` | 1 | 約152 ms |
+
+`test16`はintegration / high-degree Solve / algebraic Root constructionが主なstress集合であり，`test5_matrix`は名称に反して小Matrix演算よりexact FFT/DFTの非2冪round-tripが大きな比率を占める。特に7点・12点・16点周辺のexact `ifft[fft[...]]`は今後のperformance候補として残す。`test9`では`N[ibeta[1/3,2/3,1/4],20]`と`N[gamma[1/3],20]`が相対的に重い。
+
+このtimingはtest correctnessのPASS/FAIL判定には使わず，optimization対象を選ぶためのprofiling signalとしてのみ利用する。
+
+# 15.14. certified `gamma` / `ibeta` — Step 6-1 / 6-2
+
+`tester.py --timings`で`test9_special_func.txt`を分解すると，`N[ibeta[1/3,2/3,1/4],20]`と`N[gamma[1/3],20]`が明確なhotspotだったため，両backendを直接計測して最適化した。
+
+## `ibeta` point/shared normalization — 採用
+
+旧`encloseIncompleteBetaRegularized`はexact pointでも`lower==upper`を別々に評価し，各endpointで`Beta(a,b)`まで再構築していた。2F1自体は20桁級で約1.9 msなのに対しBeta/Gamma normalizationが支配的だったため，次へ変更した。
+
+- `lower==upper`ならpointを1回だけ評価
+- interval endpoint間で`Beta(a,b)`を1回だけ構築して共有
+- complement `I_x(a,b)=1-I_{1-x}(b,a)`でも`B(a,b)=B(b,a)`を利用して同じnormalizationを共有
+- pointが`x<=1/2`なら必要guardを`+40 bit`に抑え，complementを使うpoint / intervalだけ`+80 bit`
+- `x=0,1`はnormalizationを構築せずexactに返す
+
+Stage 5-3のdirect warm probeとの代表比較：
+
+| precision | 旧 `ibeta[1/3,2/3,1/4]` | Step 6 |
+|---:|---:|---:|
+| 80 bit | 約116 ms | 約37–43 ms |
+| 160 bit | 約255 ms | 約98–117 ms |
+| 320 bit | 約835 ms | 約387–392 ms |
+| 640 bit first | 約10.3 s | 約5.3 s |
+| 640 bit warm repeat | 約10 s級 | 約1.0 s |
+
+warm repeatの追加短縮は後述のStirling-plan cacheも受ける。算法・branch contractは変更していない。
+
+## Gamma lazy Bernoulli / Horner / plan reuse — 採用
+
+旧Gamma backendではAkiyama–Tanigawa法で`B0...B128`をfirst use時に一括生成していた。また低精度でも最初の小さいshift候補で`k=1...64`を総当たりするため，最終planが小さい`k`でも高次Bernoulliまで生成しやすかった。
+
+Step 6-2では：
+
+- Akiyama–Tanigawaの内部状態を保持し，要求された`B_2k`までだけ逐次延長するthread-safe lazy cacheへ変更
+- 低～中精度のStirling探索上限を`min(64,max(16,ceil(bits/5)))`として，不要な高次Bernoulli生成を避ける
+- Stirling和を`x^-1(c1+x^-2(c2+...))`のHorner形へ変更
+- exact pointのrecurrence productをbalanced exact Rational productとして構築してからlogを1回だけ取る
+- `logGamma(1)=logGamma(2)=0`，`Gamma(1)=Gamma(2)=1`をcertified backendでも即時処理
+- `(inputLower,precisionBits)`から得たexact Stirling planをthread-local最大16 entryで再利用
+
+別process cold-startの代表値：
+
+| precision | Stage 5-3 | Step 6 |
+|---:|---:|---:|
+| 80 bit `gamma[1/3]` | 約79 ms | 約9.5 ms |
+| 160 bit | 約89 ms | 約43 ms |
+| 320 bit | 約256 ms | 約260 ms級 |
+| 640 bit | 約1.42 s | 約1.42 s級 |
+
+したがってlazy化は主に低～中精度のfirst-use taxを除去する。高精度first callの主要costは依然としてStirling/recurrence本体に残る。一方plan cacheが効く同一threadの反復では640 bit `lgamma[1/3]`が約1.36 s級から約0.34 sまで低下した。
+
+### Bernoulliを`B256`までeager生成 — 実測棄却
+
+Stirling項数を増やす前提として，旧Akiyama–Tanigawa実装を単純に`B256`まで一括拡張する案も検討した。しかしexact Rational生成だけで代表測定は`B128`約68 msに対し`B256`約560 msまで増え，低精度を含む全first useへ大きな固定費を課す。必要次数まで状態を逐次延長するlazy cacheの方が明確に有利なので，eager拡張は採用しない。
+
+### `maximumK > 64`によるshift削減 — 実測棄却
+
+分析段階では640 bit級で旧planが`shift=272, omittedK=64`へ達するため，Bernoulliをlazyに拡張して`K=80..128`を許せばshiftを減らせると予想した。実際に`K=96`まで拡張するとshiftは縮んだが，代表測定は`gamma[1/3]`約1.37 sから約2.7 sへ悪化した。
+
+原因は，高次Bernoulli係数のexact Rational生成・interval conversion・より長いStirling和のcostが，recurrence shift削減を上回ったためである。よって現backendでは`K<=64`を維持する。将来rectangular splitting，binary splitting，より効率的なBernoulli backendを導入した時だけ再評価する。
+
+### fixed-k exact binary-search plan — 実測棄却
+
+高精度で`k=64`を固定し，remainder boundをshiftに対して二分探索する案も試した。しかし巨大Rationalの`x^(2k-1)`を各probeで構築するcostが大きく，linear scanより悪化したため採用しない。現状はlow/mid precisionの`K` budget削減とplan cacheの方が効果が大きい。
+
+旧実装は`certified_special_functions.cpp`内にコメントアウトで残し，置換理由を隣接記述している。通常はdead codeを残さない方針だが，今回は算法比較と将来の再評価用に意図的に保存した。
+
+注：この節のstateful lazy Bernoulli generatorはStep 6-2時点の実装であり，Step 6-3で`B_2...B_128`のstatic exact tableへ置換された。旧generator自体は比較用コメントとして残している。
+
+# 15.15. exact Rational `Gamma` / high-precision Stirling planner — Step 6-3
+
+Step 6-2後も640 bit以上の`gamma[1/3]` / `ibeta[1/3,2/3,1/4]`を再計測したところ，算法以前に入力表現とplannerに大きな無駄が残っていた。Johansson, *Arbitrary-precision computation of the gamma function* (arXiv:2109.08392)のrational rising-factorial / Stirling parameter-selectionの整理も参照している。
+
+## exact Rational identityをcertified backendまで保持 — 採用
+
+Evaluatorでは`1/3`をexact Rationalとして保持しているが，旧経路はspecial-function backendへ入る前に`RealInterval::fromRational`へ変換していた。非dyadic Rationalはpoint intervalにならないため，Step 6-2で実装したexact rising-factorial経路が`gamma[1/3]`では実質使われていなかった。
+
+Step 6-3では：
+
+- `Gamma` / `LogGamma` / `Beta` / `BetaLog`でexact Rationalをinterval化より先に検出する
+- positive Rational `Gamma`ではoriginal `p/q`をStirling shiftまで保持する
+- `(p/q)_n`を`prod(p+qk)/q^n`としてbalanced binary productし，最後に一度だけRational化する
+- `Beta(a,b)`では`a,b,a+b`をexact Rationalのまま3つの`LogGamma`へ渡す
+- negative exact Rationalはreflectionで`1-x`をexact Rationalのまま保持し，`sin(Pi x)=sinTurns(x/2)`としてexact turn reductionを使う
+
+これにより「non-dyadic Rationalをintervalへ落としたためexact用高速路が死ぬ」という表現境界の損失を除去した。
+
+## Bernoulli `B_2...B_128` static exact table — 採用
+
+Step 6-2のstateful lazy Akiyama–Tanigawaは低精度のeager taxを避けたが，1000 bit級で初めて高いBernoulli次数へ到達した際，内部Rational stateを逐次更新するcold-startが再び大きくなった。Stirlingが現状使用する`B_2...B_128`は固定された厳密有理定数なので，numerator/denominatorのstatic decimal tableへ置換し，参照された値だけ`BigInt/Rational`へlazy parseする。旧stateful generatorは変更理由付きコメントとして隣接保存している。
+
+これは`B256`までruntime eager生成する案とは別である。高次Bernoulliを動的に大量生成する案は引き続き棄却し，現行`K<=64`に必要な既知定数だけをtable化した。
+
+## high-precision planをBigInt inequalityで直接証明 — 採用
+
+旧plannerはshiftを8ずつ増やし，各shiftで`k=1...64`のremainder boundをexact Rationalで評価していた。1000 bit級ではplanner自体が大きなcold costになる。
+
+positive Rational `x=(p+qs)/q`，Stirling coefficient `c=A/B`，`d=2k-1`に対し，
+
+```text
+|c| / x^d <= 2^-P
+```
+
+は正の整数だけを使って
+
+```text
+|A| q^d 2^P <= B (p+q s)^d
+```
+
+と同値である。768 bit超では`k=64`についてこの不等式をBigInt cross multiplicationで評価し，doubling + binary searchで十分なshiftを直接求める。最後のremainder boundもexact Rationalで再構築するため，plannerの高速化にfloating-point heuristicを使わずcertified contractを維持する。
+
+Step 6-2で棄却した「fixed-k exact Rational二分探索」は，各probeでnormalized Rational `x^(2k-1)`を構築した実装である。今回採用したのはGCD/normalizationを挟まずBigInt cross productだけを使う別実装であり，旧棄却理由と矛盾しない。
+
+## 代表測定
+
+GCC Release / LTO off，同一環境の代表値：
+
+| workload | Step 6-2 / 分析時 | Step 6-3 |
+|---|---:|---:|
+| `gamma[1/3]`, 640 bit | 約0.69 s級 | first 約65 ms / warm平均 約38 ms |
+| `gamma[1/3]`, 1280 bit first | 約1.5 s | 約0.11 s |
+| `ibeta[1/3,2/3,1/4]`, 640 bit | 約5.3 s | 約0.21 s |
+| `ibeta[1/3,2/3,1/4]`, 1280 bit | 約4.5 s | 約0.49 s |
+| `gamma[-1/3]`, 1280 bit | interval reflection経路 | 約0.15 s |
+
+通常の`--special-functions 3`では80/160/320/640 bitの`gamma[1/3]`が約4.5/7.2/13.7/37.6 ms，対応する`ibeta`が約15.8/32.2/44.3/210 msだった。1280 bitも恒久benchmarkへ追加する。
+
+## 改良Stirling主和 / Algorithm 6 — 次候補
+
+JohanssonのTheorem 3.5 / Algorithm 6は，低indexのBernoulli項とhigh-index hypergeometric tailへStirling主和を分割し，高精度で必要なBernoulli数を減らしながら高速化する。FLINT/ArbのGamma backendもimproved Stirling sumでrectangular splittingとhigh-index re-expansionを使う。現Step 6-3で1280 bit級の主要な表現/planner overheadは取れたため，次に1000 bit超～さらに高精度を伸ばす場合は単純な`K>64`や`B256` runtime生成へ戻らず，この方向を実装候補とする。
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1でVisual Studio solutionへ独立Console projectとして追加した。
@@ -589,6 +839,7 @@ mmCal.Benchmarks
 - factorial benchmark
 - decimal parse/toString benchmark
 - high-precision `Pi/exp/log` benchmark
+- certified `gamma/ibeta` precision-scaling benchmark (`--special-functions`)
 - exact/certified FFT benchmark + direct/Bluestein crossover
 - fixed-seed certified Matrix invariant（Bareiss / LU / QR / solve / nullSpace / 実・複素SVD / Eigen）
 - fixed-seed certified FFT round-trip invariant
@@ -601,6 +852,7 @@ mmCal.Benchmarks --full
 mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
 mmCal.Benchmarks --matrix-large nsvd 64 16
+mmCal.Benchmarks --special-functions 1
 ```
 
 threshold変更時は速度だけでなくrandom invariantを先に通す。
@@ -619,6 +871,11 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 | 低threshold Toom-3 | 棄却 | 512～1024 limbsでoverheadが勝つ |
 | machine `fmod`による巨大trig縮約 | 棄却 | certified semanticsを失う |
 | 全体をMachine/double化 | 方針として不採用 | exact-firstの意味論を変える |
+| persistent algebraic multiplication-matrix cache | 棄却 | 12次体で構築約228 usに対し乗算は約112→101 usに留まり，償却条件が厳しい |
+| multiplication-matrix minpoly / modular reconstruction | 保留 | 現在のbounded degreeではincremental Krylovが小さな実装で十分な改善を出す |
+| Gamma Bernoulli `B256` runtime eager生成 | 棄却 | exact Rational生成だけで約560 msのfirst-use tax。Step 6-3では`B_2...B_128`固定表へ移行したが，より高次をruntime大量生成する案は採用しない |
+| Gamma Stirling `maximumK>64` | 棄却 | 640 bit級でshiftは減るが，高次Bernoulli/Rationalと長いStirling和が勝ち約1.37 s→約2.7 sへ退行 |
+| Gamma fixed-k **Rational-power**二分探索 | 棄却 | normalized Rational `x^(2k-1)` probeが高価。Step 6-3では同じ判定をBigInt cross multiplicationへ再定式化した別方式を採用 |
 
 ---
 
@@ -635,7 +892,7 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 5. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
 6. Lehmer GCD
 7. `log`のbit-burst / AGM backend
-8. exact FFTのCyclotomic backend
+8. exact Cyclotomic FFTのmixed-radix / prime-length高速化。Stage 7-7でquotient backend自体は実装済みであり，今後は対応長拡大時のcrossoverを実測して判断する
 
 Arrayについては，単一flat packed vectorを棄却し，immutable paged backing + stride viewを採用した。approximate Matrix algorithmは既存の専用連続working bufferを維持し，persistent Array storageと無理に統合しない。BigUInt SBOは今回明示的に見送る。
 

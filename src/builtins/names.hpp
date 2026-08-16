@@ -152,6 +152,7 @@ inline constexpr std::string_view log2 = "log2";
 inline constexpr std::string_view log10 = "log10";
 inline constexpr std::string_view gamma = "gamma";
 inline constexpr std::string_view logGamma = "lgamma";
+inline constexpr std::string_view lambertW = "lambertw";
 inline constexpr std::string_view erf = "erf";
 inline constexpr std::string_view erfc = "erfc";
 inline constexpr std::string_view fresnelC = "fresnelc";

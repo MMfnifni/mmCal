@@ -31,6 +31,7 @@
 #include "simplification/simplifier.hpp"
 #include "solver/polynomial_solver.hpp"
 #include "solver/solve_constraints.hpp"
+#include "solver/solve_normalization.hpp"
 #include "solver/transcendental_solver.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/algebraic_number.hpp"
@@ -41,12 +42,68 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
 
 namespace mmcal::evaluation {
 namespace {
+
+[[nodiscard]] std::optional<mathematics::NumericDomain> solveDomainSymbol(
+    const expression::Expr& expression,
+    const symbols::SymbolRegistry& symbols) {
+    if (!expression.isSymbol())
+        return std::nullopt;
+    const auto* definition = symbols.find(expression.asSymbol());
+    if (!definition || definition->kind != symbols::PredefinedSymbolKind::MathematicalDomain)
+        return std::nullopt;
+    switch (definition->id) {
+    case symbols::PredefinedSymbolId::IntegerDomain: return mathematics::NumericDomain::Integer;
+    case symbols::PredefinedSymbolId::RationalDomain: return mathematics::NumericDomain::Rational;
+    case symbols::PredefinedSymbolId::RealDomain: return mathematics::NumericDomain::Real;
+    case symbols::PredefinedSymbolId::ComplexDomain: return mathematics::NumericDomain::Complex;
+    default: return std::nullopt;
+    }
+}
+
+void collectSolveUnknowns(
+    const expression::Expr& expression,
+    const symbols::SymbolRegistry& symbols,
+    const BuiltinRegistry& builtins,
+    std::vector<expression::Symbol>& result) {
+    if (expression.isSymbol()) {
+        const expression::Symbol& symbol = expression.asSymbol();
+        if (symbols.contains(symbol) || builtins.contains(symbol))
+            return;
+        if (std::find(result.begin(), result.end(), symbol) == result.end())
+            result.push_back(symbol);
+        return;
+    }
+    if (expression.isCall()) {
+        for (const expression::Expr& argument : expression.asCall().arguments)
+            collectSolveUnknowns(argument, symbols, builtins, result);
+        return;
+    }
+    if (expression.isArray()) {
+        for (const expression::Expr& element : expression.asArray().storedExpressions())
+            collectSolveUnknowns(element, symbols, builtins, result);
+        return;
+    }
+    if (expression.isList())
+        for (const expression::Expr& element : expression.asList().elements)
+            collectSolveUnknowns(element, symbols, builtins, result);
+}
+
+void validateSolveVariable(
+    const expression::Symbol& variable,
+    const symbols::SymbolRegistry& symbols,
+    const BuiltinRegistry& builtins) {
+    if (symbols.contains(variable) || builtins.contains(variable))
+        error::throwCalcError(
+            error::CalcErrorType::Type,
+            "solve variable must be an unprotected user symbol");
+}
 
 [[nodiscard]] bool requiresRectangularArray(BuiltinId id) noexcept {
     switch (id) {
@@ -153,10 +210,12 @@ namespace {
     std::vector<numeric::Rational> coefficients(
         algebraic.polynomial().begin(), algebraic.polynomial().end());
     const std::size_t coefficientCount = coefficients.size();
+    const symbolic::AlgebraicNumber cached =
+        symbolic::AlgebraicNumber::fromRealRoot(algebraic).withGeneratorField();
     return expression::Expr::call(registry.symbol(BuiltinId::Root), {
         expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
         expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}}
-    });
+    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] expression::Expr canonicalRootCall(
@@ -165,11 +224,13 @@ namespace {
     std::vector<numeric::Rational> coefficients(
         algebraic.polynomial().begin(), algebraic.polynomial().end());
     const std::size_t coefficientCount = coefficients.size();
+    const symbolic::AlgebraicNumber cached =
+        symbolic::AlgebraicNumber::fromComplexRoot(algebraic).withGeneratorField();
     return expression::Expr::call(registry.symbol(BuiltinId::Root), {
         expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
         expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}},
         expression::Expr{expression::Symbol{"Complex"}}
-    });
+    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] bool containsUnresolvedSolution(const solver::SolutionSet& solutions) {
@@ -215,8 +276,8 @@ expression::Expr Evaluator::dispatchBuiltin(
             emitWarning("Array::nonRectangular",
                 std::string{definition.name()}
                     + " requires a rectangular dense array; the brace value remains unevaluated");
-            return expression::Expr::call(call.head,
-                std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+            return expression::Expr::rebuildCall(
+                call, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
         }
     }
 
@@ -759,6 +820,7 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Log10:
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
+    case BuiltinId::LambertW:
     case BuiltinId::Zeta:
     case BuiltinId::Digamma:
     case BuiltinId::Trigamma:
@@ -862,7 +924,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             return *result;
         emitWarning("precision::unevaluated",
             "precision could not determine the guaranteed precision; the expression remains unevaluated");
-        return expression::Expr::call(call.head, {arguments.front()});
+        return expression::Expr::rebuildCall(call, {arguments.front()});
     }
     case BuiltinId::Explain:
         return builtins::evaluateExplain(arguments, registry_, symbolRegistry_, mathematics_);
@@ -874,14 +936,15 @@ expression::Expr Evaluator::dispatchBuiltin(
             return *result;
         emitWarning("accuracy::unevaluated",
             "accuracy could not determine the guaranteed accuracy; the expression remains unevaluated");
-        return expression::Expr::call(call.head, {arguments.front()});
+        return expression::Expr::rebuildCall(call, {arguments.front()});
     }
     case BuiltinId::Rationalize:
         if (const auto result = builtins::evaluateRationalize(arguments))
             return *result;
         emitWarning("rationalize::unevaluated",
             "rationalize could not convert part of the expression; it remains unevaluated");
-        return expression::Expr::call(call.head, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+        return expression::Expr::rebuildCall(
+            call, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
     case BuiltinId::Root: {
         if (arguments.size() < 2 || arguments.size() > 3)
             error::throwCalcError(error::CalcErrorType::Type,
@@ -968,64 +1031,92 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "solve expects equation(s), variable(s), and optional constraints");
 
         std::vector<expression::Symbol> variables;
-        if (arguments[1].isSymbol())
-            variables.push_back(arguments[1].asSymbol());
-        else if (arguments[1].isArray() && arguments[1].asArray().rank() == 1) {
-            const auto& array = arguments[1].asArray();
-            for (std::size_t i = 0; i < array.size(); ++i) {
-                const expression::Expr item = array.element(i);
-                if (!item.isSymbol())
-                    error::throwCalcError(
-                        error::CalcErrorType::Type,
-                        "solve variable array must contain only symbols");
-                if (std::find(variables.begin(), variables.end(), item.asSymbol()) != variables.end())
-                    error::throwCalcError(
-                        error::CalcErrorType::Type,
-                        "solve variable array contains a duplicate symbol");
-                variables.push_back(item.asSymbol());
-            }
-        }
-        else
-            error::throwCalcError(
-                error::CalcErrorType::Type,
-                "solve expects a symbol or symbol array as its second argument");
-
         solver::SolveConstraints constraints;
-        if (arguments.size() == 3)
-            constraints = solver::parseSolveConstraints(
-                arguments[2], variables, registry_, mathematics_, angleSemantics_);
+
+        // solve[equation, Real] 等は、方程式中の未知symbolが一意のときだけ
+        // domain指定の短縮形として受理する。複数候補から変数を推測しない。
+        const auto shorthandDomain = arguments.size() == 2
+            ? solveDomainSymbol(arguments[1], symbolRegistry_)
+            : std::nullopt;
+        if (shorthandDomain) {
+            collectSolveUnknowns(arguments[0], symbolRegistry_, registry_, variables);
+            if (variables.size() != 1) {
+                const std::string message = variables.empty()
+                    ? "solve[equation, domain] requires exactly one unknown symbol; none was found"
+                    : "solve[equation, domain] requires exactly one unknown symbol; multiple candidates were found";
+                error::throwCalcError(error::CalcErrorType::Type, message);
+            }
+            constraints.domain = *shorthandDomain;
+        }
+        else {
+            if (arguments[1].isSymbol()) {
+                validateSolveVariable(arguments[1].asSymbol(), symbolRegistry_, registry_);
+                variables.push_back(arguments[1].asSymbol());
+            }
+            else if (arguments[1].isArray() && arguments[1].asArray().rank() == 1) {
+                const auto& array = arguments[1].asArray();
+                for (std::size_t i = 0; i < array.size(); ++i) {
+                    const expression::Expr item = array.element(i);
+                    if (!item.isSymbol())
+                        error::throwCalcError(
+                            error::CalcErrorType::Type,
+                            "solve variable array must contain only symbols");
+                    validateSolveVariable(item.asSymbol(), symbolRegistry_, registry_);
+                    if (std::find(variables.begin(), variables.end(), item.asSymbol()) != variables.end())
+                        error::throwCalcError(
+                            error::CalcErrorType::Type,
+                            "solve variable array contains a duplicate symbol");
+                    variables.push_back(item.asSymbol());
+                }
+            }
+            else
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "solve expects a symbol, symbol array, or domain as its second argument");
+
+            if (arguments.size() == 3)
+                constraints = solver::parseSolveConstraints(
+                    arguments[2], variables, registry_, mathematics_, angleSemantics_);
+        }
+
+        const expression::Expr solveInput = solver::normalizeForSolve(
+            arguments[0], registry_, mathematics_, angleSemantics_, constraints.assumptions);
 
         solver::SolutionSet solutions = [&]() {
-            if (variables.size() == 1 && !arguments[0].isArray()) {
+            if (variables.size() == 1 && !solveInput.isArray()) {
                 const bool realDomain = constraints.domain
                     && mathematics::isSubdomainOf(
                         *constraints.domain, mathematics::NumericDomain::Real);
                 if (realDomain) {
+                    if (auto exponential = solver::solveRealExponentialRelation(
+                            solveInput, variables.front(), registry_, mathematics_,
+                            angleSemantics_, constraints.assumptions))
+                        return *exponential;
                     if (auto periodic = solver::solveRealPeriodicFunctionRelation(
-                            arguments[0], variables.front(), registry_, mathematics_,
+                            solveInput, variables.front(), registry_, mathematics_,
                             angleSemantics_, constraints.assumptions))
                         return *periodic;
                     if (auto transcendental = solver::solveRealInjectiveFunctionRelation(
-                            arguments[0], variables.front(), registry_, mathematics_,
+                            solveInput, variables.front(), registry_, mathematics_,
                             angleSemantics_, constraints.assumptions))
                         return *transcendental;
                 }
                 solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
-                    arguments[0], variables.front(), registry_, mathematics_, angleSemantics_);
+                    solveInput, variables.front(), registry_, mathematics_, angleSemantics_);
                 if (realDomain && (polynomial.kind() == solver::SolutionSetKind::Unresolved
                         || containsComplexAlgebraicRoot(polynomial, registry_))) {
                     if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
-                            arguments[0], variables.front(), registry_, mathematics_, angleSemantics_))
+                            solveInput, variables.front(), registry_, mathematics_, angleSemantics_))
                         return *algebraic;
                 }
                 return polynomial;
             }
 
             std::vector<expression::Expr> equations;
-            if (arguments[0].isArray() && arguments[0].asArray().rank() == 1)
-                equations = arguments[0].asArray().materialize();
+            if (solveInput.isArray() && solveInput.asArray().rank() == 1)
+                equations = solveInput.asArray().materialize();
             else
-                equations.push_back(arguments[0]);
+                equations.push_back(solveInput);
 
             // 一変数のrelation配列は論理積として扱う。等式があれば先に解いて有限候補を作り、残りをexact constraintとして絞る。
             // 等式がなければ最初の不等式からReal領域branchを作り、残りの不等式を条件として交差させる。
@@ -1085,7 +1176,8 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::GreaterEqual:
     case BuiltinId::Equal:
     case BuiltinId::NotEqual:
-        return builtins::evaluateComparison(registry_.symbol(definition.id), arguments);
+        return builtins::evaluateComparison(
+            registry_.symbol(definition.id), arguments, registry_, mathematics_);
     case BuiltinId::LogicalAnd:
         return builtins::evaluateLogicalAnd(arguments, registry_);
     case BuiltinId::Element:

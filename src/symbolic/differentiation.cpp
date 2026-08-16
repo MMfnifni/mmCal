@@ -723,6 +723,18 @@ using numeric::Rational;
         }
         break;
 
+    case BuiltinId::LambertW:
+        if ((a.size() == 1 || a.size() == 2)
+            && (a.size() == 1 || !containsVariable(a[0], variable))) {
+            const Expr& z = a.back();
+            Expr w = expression;
+            // dW_k(z)/dz = W_k(z) / (z (1 + W_k(z)))。branch indexは定数として扱う。
+            Expr kernel = divide(builtins, w, multiply(builtins, {
+                z, add(builtins, {integer(1), w})}));
+            return chain(std::move(kernel), z, variable, builtins, mathematics, angles);
+        }
+        break;
+
     case BuiltinId::Gamma:
         if (a.size() == 1) {
             Expr kernel = multiply(builtins, {

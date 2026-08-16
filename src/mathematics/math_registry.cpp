@@ -123,6 +123,12 @@ MathRegistry MathRegistry::defaults(
     registry.addFunction(evaluation::BuiltinId::LogGamma, FunctionId::LogGamma,
         FunctionParity::Neither, FunctionDomainRule::RealToReal,
         FunctionBranchRule::SingleValued, std::nullopt, FunctionDefinednessRule::GammaPoles);
+    // Lambert W は w Exp[w] = z の逆函数。1引数はprincipal branch、
+    // 2引数 lambertw[k,z] は整数branch kを明示する。初版はsymbolic exact表現を主用途とする。
+    registry.addFunction(evaluation::BuiltinId::LambertW, FunctionId::LambertW,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::PrincipalLambertW, std::nullopt,
+        FunctionDefinednessRule::SpecialPrincipal, 1, 2);
     registry.addFunction(evaluation::BuiltinId::Erf, FunctionId::Erf,
         FunctionParity::Odd, FunctionDomainRule::ComplexToComplexRealPreserving,
         FunctionBranchRule::SingleValued, std::nullopt);

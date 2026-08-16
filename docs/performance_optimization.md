@@ -260,6 +260,43 @@ Exact radix-2 transforms cache size-dependent bit-reversal and twiddle informati
 
 ---
 
+# 15.4. Exact Cyclotomic FFT — Stage 7-7
+
+## Previous generic `cis` / Expr direct DFT — retained as fallback
+
+Before Stage 7-7, exact non-power-of-two FFTs fell from `radix2Transform()` into `directTransform()`, constructing every twiddle as a generic `cis[-2 Pi k/n Rad]` expression. Even at lengths 5/7/10/12, forward transforms accumulated root-of-unity expressions and inverse transforms asked the generic Simplifier to rediscover the same cyclotomic identities, making exact round trips a major part of `test5_matrix.txt`.
+
+The old dispatch and generic DFT implementation are not deleted. They remain the fallback for symbolic inputs and cases outside the new backend budget, and the old dispatch is preserved next to the replacement as a commented reference explaining the change.
+
+## Canonical `NumberFieldContext` with ζ_n — rejected
+
+The first prototype reused the general algebraic backend and represented the primitive root `zeta_n` as a canonical Complex Root inside `NumberFieldContext`. That representation is mathematically natural, but FFT arithmetic only needs repeated linear operations in one root-of-unity field; root isolation and canonical Root materialization dominated the work. The prototype measured roughly 2.5 s for a 5-point forward transform and 19.8 s for 7 points, with first construction of the ζ_7 context alone around 0.4 s. It was rejected.
+
+The adopted design therefore performs the transform in a quotient representation without requiring an embedded root identity during the kernel. This is consistent with exact-DFT designs that operate over cyclotomic fields/quotients and evaluate the root of unity only at representation boundaries.
+
+## `Q[t]/Phi_n(t)` quotient backend — selected
+
+`CyclotomicFieldContext` stores only the conductor, exact cyclotomic polynomial, power-basis reduction, and coordinates of `t^k`. It has no root isolation or embedding object. Exact Rational inputs of non-power-of-two length at least 5 are transformed directly in Rational coordinates. Gaussian Rational inputs enlarge the conductor to `lcm(n,4)` when required, using `I=t^(3n/4)` exactly. Only the output boundary materializes the existing single generator vocabulary `cis[-2 Pi/n Rad]`.
+
+The current budget is `phi(n)<=64`. Inputs above the budget, or symbolic expressions that cannot be proven to lie in the same quotient field, fall back to the legacy generic exact DFT. The approximate/certified FFT path is unchanged.
+
+Representative GCC Release / LTO-off timings from `--exact-cyclotomic-fft 5`:
+
+| length | first round trip | warm round trip |
+|---:|---:|---:|
+| 5 | ~0.72 ms | ~0.49 ms |
+| 7 | ~1.79 ms | ~1.74 ms |
+| 10 | ~1.50 ms | ~1.33 ms |
+| 12 | ~1.44 ms | ~1.27 ms |
+| 15 | ~9.11 ms | ~9.39 ms |
+| 21 | ~41.1 ms | ~37.3 ms |
+
+`tester.py --timings` reduced `test5_matrix.txt` from about 1.46 s at the Stage-5-3 audit to about 0.38 s after Stage 7-7.
+
+## Persistent mixed-radix plan — deferred
+
+The current non-power-of-two cyclotomic kernel is still a direct O(n^2) DFT over quotient coordinates. At 21 points the measured round trip is about 34 ms and the primary generic-expression explosion has already been removed. Mixed-radix Cooley–Tukey and exact Rader/Bluestein variants remain plausible, but should be added only after larger supported lengths demonstrate a crossover that justifies the extra implementation complexity.
+
 # 15.5. Precision-aware `N` and certified FFT
 
 ## Old path — construct exact FFT first, approximate afterward
@@ -429,6 +466,174 @@ Even a pure cubic extrapolation from order 64 suggests roughly 1.6 h for `N[LU]`
 
 A dense order of 1024 is not intrinsically huge in a machine-double + BLAS setting, but it remains a stress regime for mmCal's certified arbitrary-precision dense algorithms. Persistent exact-Array representation cost is now substantially lower after typed nodes, paged packed backing, and direct builder lowering. Approximate SVD/Eigen paths already use dedicated contiguous working buffers, so blocking and selective threading should now be remeasured against the new storage balance instead of introducing another persistent-matrix type first.
 
+
+# 15.12. Persistent algebraic fields, Stages 5-1 through 5-3
+
+## Compositum / embedding reuse — adopted
+
+Stage 5-1 retains a proven primitive-element compositum and both operand power-basis embeddings for a Root pair in a bounded cache. Real `AlgebraicElement` materialization also evaluates the coordinate polynomial over the chosen generator interval and uses an exact Sturm root count to identify the canonical `root[minpoly,k]` directly. This avoids duplicate all-root isolation and impossible Rational / `Q+iQ` degeneration probes.
+
+For the representative expression
+
+```text
+(root[{-2,0,1},2]+root[{-3,0,0,1},1])
+*(root[{-2,0,1},2]-root[{-3,0,0,1},1])
+```
+
+Stage 4 took about 1.23 s per evaluation. Stage 5-1 reduced this to roughly 0.14–0.15 s on the first evaluation and about 0.02 s warm in the same GCC Release / LTO-off environment.
+
+## Reciprocal reuse — adopted
+
+Stage 5-2 memoizes exact reciprocals computed by extended Euclid in `Q[t]/(m)` in a thread-safe per-`NumberFieldContext` LRU capped at 16 reciprocal pairs. One entry is bidirectional because `inverse(inverse(x)) = x`. Rational constant coordinates invert directly through the canonical embedding of `Q`.
+
+Representative measurements:
+
+| degree | operation | before cache | Stage 5-2 warm |
+|---:|---|---:|---:|
+| 6 | reciprocal | ~178 us | ~0.24 us |
+| 6 | divide | ~243 us | ~84 us |
+| 12 | reciprocal | ~525 us | ~0.44 us |
+| 12 | divide | ~773 us | ~211–233 us |
+
+### Persistent multiplication-matrix cache — rejected
+
+For a degree-12 field, a representative ordinary multiplication took about 112 us, matrix-vector multiplication about 101 us, while constructing the left-multiplication matrix cost about 228 us. The roughly 10% per-multiply saving is not enough to amortize construction unless the same multiplier is reused many times. The memory and complexity cost of attaching such a cache to general `AlgebraicElement` values is therefore not justified at present.
+
+## Incremental Krylov minimal polynomial — adopted
+
+The old `AlgebraicElement::minimalPolynomial()` rebuilt a Rational matrix and reran Gauss-Jordan from scratch for every candidate degree in `1,a,...,a^k`, repeatedly discarding the same independence information.
+
+Stage 5-3 appends the Krylov sequence `1,a,a^2,...` one column at a time and reduces only the new column against a persistent exact row-echelon state. The first dependence
+
+```text
+c0 + c1 a + ... + a^k = 0
+```
+
+is the minimal polynomial because all earlier powers are linearly independent. The primitive-element tensor path uses the same incremental basis both for the minimal polynomial of `theta` and for conversion of `alpha` / `beta` into the established power basis.
+
+Representative GCC Release / LTO-off results:
+
+| field degree | repeated Gauss-Jordan | incremental Krylov first |
+|---:|---:|---:|
+| 6 | ~651 us | ~475 us |
+| 12 | ~18.9 ms | ~7.7–7.9 ms |
+
+Derived minimal polynomials are also retained by exact power-basis coordinate key in a thread-safe per-field LRU capped at 16 entries. A warm degree-12 hit is about 0.59 us. Cache misses and eviction only cause recomputation and cannot change the mathematical result.
+
+### Multiplication-matrix minpoly / modular reconstruction — deferred
+
+Libraries such as FLINT provide exact Rational-matrix minimal-polynomial backends, and representing a finite algebra element by its multiplication matrix is standard. mmCal already has bounded-degree power-basis coordinates, however, and incremental Krylov gives a substantial improvement with much less machinery in the current degree range. A permanent multiplication-matrix-to-matrix-minpoly path is therefore not added. Modular images with rational reconstruction and fraction-free matrix minpoly remain candidates if higher degrees or coefficient heights make first derivation dominant again.
+
+# 15.13. Black-box workload audit
+
+`test_set/tester.py` now accepts `--timings [N]`, recording mmCal process wall time for each test file and printing the slowest files. Test-file I/O and parsing remain outside the overall timed region as before.
+
+Representative Stage 5-3 / GCC Release / LTO-off results for all 1652 black-box cases on 2026-08-16:
+
+| test file | tests | wall time |
+|---|---:|---:|
+| `test16_exact_calculus_solver.txt` | 85 | ~2927 ms |
+| `test5_matrix.txt` | 105 | ~1457 ms |
+| `test9_special_func.txt` | 75 | ~297 ms |
+| `test8_calculus.txt` | 46 | ~173 ms |
+| `test22_number_field_interning.txt` | 1 | ~152 ms |
+
+`test16` is mainly a stress set for integration, high-degree Solve, and algebraic Root construction. Despite its name, much of the time in `test5_matrix` is in exact FFT/DFT non-power-of-two round trips rather than small matrix operations; exact `ifft[fft[...]]` around 7, 12, and related sizes remains a future performance target. In `test9`, `N[ibeta[1/3,2/3,1/4],20]` and `N[gamma[1/3],20]` stand out comparatively.
+
+These timings never affect PASS/FAIL semantics; they are profiling signals used only to select optimization targets.
+
+# 15.14. Certified `gamma` / `ibeta` — Step 6-1 / 6-2
+
+The `tester.py --timings` audit identified `N[ibeta[1/3,2/3,1/4],20]` and `N[gamma[1/3],20]` as clear hotspots inside `test9_special_func.txt`, so both certified backends were measured directly.
+
+## `ibeta` point/shared normalization — adopted
+
+The old interval wrapper evaluated both endpoints even when `lower == upper`, and each endpoint rebuilt `Beta(a,b)`. Since the 2F1 series itself was only about 1.9 ms at the representative 20-digit workload while Beta/Gamma normalization dominated, Step 6 now:
+
+- evaluates an exact point once;
+- computes `Beta(a,b)` once and shares it across interval endpoints;
+- reuses the same normalization through the complement identity because `B(a,b)=B(b,a)`;
+- uses only +40 guard bits for non-complement point evaluation and +80 when complement/interval evaluation requires it;
+- returns exact `x=0,1` before constructing the normalization.
+
+Representative warm/direct timings moved from roughly 116→37–43 ms at 80 bits, 255→98–117 ms at 160 bits, 835→387–392 ms at 320 bits, and about 10.3→5.3 s for the first 640-bit call. Repeated 640-bit calls fall to about 1.0 s once the Gamma plan cache is warm.
+
+## Gamma lazy Bernoulli / Horner / plan reuse — adopted
+
+The old Gamma backend eagerly generated `B0...B128` on first use. Step 6 preserves the Akiyama–Tanigawa state and extends it only to the requested even Bernoulli order under a mutex. It also limits low/mid-precision plan search to `min(64,max(16,ceil(bits/5)))`, evaluates the Stirling polynomial in Horner form, builds exact-point recurrence products as balanced Rational products, adds exact `Gamma(1)=Gamma(2)=1` / `logGamma(1)=logGamma(2)=0` fast paths, and keeps a thread-local bounded cache of exact Stirling plans.
+
+Separate-process cold timings for `gamma[1/3]` improved from about 79→9.5 ms at 80 bits and 89→43 ms at 160 bits. The 320/640-bit first-call cost is approximately unchanged; the remaining high-precision cost is in the actual Stirling/recurrence work. Repeated 640-bit `lgamma[1/3]` falls from roughly 1.36 s to about 0.34 s when the plan cache is warm.
+
+### Eager Bernoulli generation through `B256` — measured and rejected
+
+Simply extending the old Akiyama–Tanigawa initialization through `B256` was also evaluated as a prerequisite for longer Stirling sums. Exact Rational generation alone rose from roughly 68 ms through `B128` to roughly 560 ms through `B256`, imposing that fixed first-use cost even on low-precision calls. The stateful lazy cache is therefore retained instead.
+
+### `maximumK > 64` to reduce shift — measured and rejected
+
+Allowing `K=96` does reduce the large recurrence shift at roughly 640 bits, but the larger exact Bernoulli coefficients, Rational/interval conversion and longer Stirling sum outweighed that gain: the representative workload regressed from about 1.37 s to about 2.7 s. Keep `K<=64` until a rectangular/binary-splitting Stirling kernel and a cheaper high-order Bernoulli backend justify reevaluation.
+
+### fixed-k exact binary-search planning — measured and rejected
+
+A fixed `k=64` binary search over the exact remainder bound was also tested. Repeated construction of huge Rational powers `x^(2k-1)` made the planner itself slower than the existing scan, so it is not retained.
+
+The replaced implementations remain commented next to the new code in `certified_special_functions.cpp`, together with the reason for replacement, specifically for this algorithm-comparison cycle.
+
+Note: the stateful lazy Bernoulli generator described in this Step 6-2 section was subsequently replaced in Step 6-3 by a static exact `B_2...B_128` table; the generator remains only as commented comparison code.
+
+# 15.15. Exact-Rational `Gamma` / high-precision Stirling planning — Step 6-3
+
+Reprofiling the 640-bit and higher `gamma[1/3]` / `ibeta[1/3,2/3,1/4]` paths after Step 6-2 showed that major costs remained at representation boundaries and in parameter planning, before any need for a fundamentally different Gamma formula. The design was cross-checked against Fredrik Johansson, *Arbitrary-precision computation of the gamma function* (arXiv:2109.08392), especially its treatment of rational rising factorials and Stirling parameter selection.
+
+## Preserve exact Rational identity through the certified backend — adopted
+
+The evaluator knew `1/3` exactly, but the old special-function path first converted it with `RealInterval::fromRational`. A non-dyadic Rational is not a point interval, so the exact rising-factorial path added in Step 6-2 was effectively bypassed for the representative `gamma[1/3]` workload. Step 6-3 now:
+
+- detects exact Rational arguments before interval conversion for `Gamma`, `LogGamma`, `Beta`, and `BetaLog`;
+- preserves the original `p/q` through positive-Rational Gamma argument shifting;
+- forms `(p/q)_n` as a balanced binary product `prod(p+qk)/q^n` and canonicalizes one final Rational;
+- passes exact `a`, `b`, and `a+b` into the three LogGamma evaluations used by Beta;
+- preserves exact Rational identity under negative-argument reflection and evaluates `sin(Pi x)` as exact turns `sinTurns(x/2)`.
+
+## Static exact table for `B_2...B_128` — adopted
+
+The stateful lazy Akiyama–Tanigawa generator from Step 6-2 avoided low-precision eager initialization, but the first call that reached the highest Bernoulli orders still paid a large exact-Rational state-update cost. The current Stirling kernel only needs the fixed constants `B_2...B_128`, so they are stored as exact decimal numerator/denominator literals and parsed into `BigInt/Rational` only on first reference. The replaced lazy generator remains commented beside the new implementation with its replacement rationale. This does **not** revive the rejected idea of runtime eager generation through `B256`; higher dynamic Bernoulli generation remains deferred.
+
+## Certified BigInt high-precision planner — adopted
+
+The old planner advanced the shift in steps of eight and tested `k=1...64` with exact Rational arithmetic at every candidate. At 1000-bit precision this planning work itself became a large cold-start cost. For positive Rational `x=(p+qs)/q`, coefficient `c=A/B`, and `d=2k-1`, the test
+
+```text
+|c| / x^d <= 2^-P
+```
+
+is exactly equivalent to
+
+```text
+|A| q^d 2^P <= B (p+q s)^d.
+```
+
+Above 768 bits, Step 6-3 tests this integer inequality for `k=64` and finds a sufficient shift with doubling plus binary search. The final remainder bound is rebuilt as an exact Rational, so no floating heuristic weakens the certified contract.
+
+This is distinct from the fixed-k Rational-power binary search rejected in Step 6-2: that version repeatedly constructed normalized Rational powers `x^(2k-1)`. The adopted planner removes those GCD/normalization costs and compares BigInt cross products directly.
+
+## Representative measurements
+
+Representative GCC Release / LTO-off timings in the same environment:
+
+| workload | Step 6-2 / analysis baseline | Step 6-3 |
+|---|---:|---:|
+| `gamma[1/3]`, 640 bit | about 0.69 s | about 65 ms first / 38 ms warm average |
+| `gamma[1/3]`, 1280 bit first | about 1.5 s | about 0.11 s |
+| `ibeta[1/3,2/3,1/4]`, 640 bit | about 5.3 s | about 0.21 s |
+| `ibeta[1/3,2/3,1/4]`, 1280 bit | about 4.5 s | about 0.49 s |
+| `gamma[-1/3]`, 1280 bit | generic interval reflection | about 0.15 s |
+
+A normal `--special-functions 3` run gives roughly 4.5/7.2/13.7/37.6 ms for `gamma[1/3]` at 80/160/320/640 bits and about 15.8/32.2/44.3/210 ms for the corresponding `ibeta` workload. The permanent benchmark now also includes 1280 bits.
+
+## Improved Stirling main sum / Algorithm 6 — next candidate
+
+Johansson's Theorem 3.5 / Algorithm 6 splits the Stirling main sum into low-index Bernoulli terms and a re-expanded high-index hypergeometric tail, reducing the number of Bernoulli values needed at high precision. The FLINT/Arb Gamma backend likewise documents an improved Stirling sum using rectangular splitting for low-index terms and high-index re-expansion. Step 6-3 removes the dominant representation/planner overhead through the 1280-bit range; future work above this range should therefore implement this improved main-sum direction instead of simply increasing `K` or returning to runtime `B256` generation.
+
 # 16. `mmCal.Benchmarks`
 
 v1.5.1 adds a separate console project to the Visual Studio solution:
@@ -451,6 +656,7 @@ It includes:
 - multiplication/square/division threshold benchmarks;
 - factorial and decimal I/O benchmarks;
 - high-precision `Pi/exp/log` benchmarks;
+- certified `gamma/ibeta` precision-scaling benchmark (`--special-functions`);
 - fixed-seed certified Matrix invariants, including Bareiss / LU / QR / solve / nullSpace, real/complex SVD, and Eigen;
 - exact/certified FFT benchmarks and direct/Bluestein crossover measurements;
 - fixed-seed certified FFT round-trip invariants.
@@ -463,6 +669,7 @@ mmCal.Benchmarks --full
 mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
 mmCal.Benchmarks --matrix-large nsvd 64 16
+mmCal.Benchmarks --special-functions 1
 ```
 
 Correctness checks should run before accepting any new threshold solely because it benchmarks faster.
@@ -481,6 +688,11 @@ Correctness checks should run before accepting any new threshold solely because 
 | low Toom-3 threshold | rejected | overhead wins around 512–1024 limbs |
 | machine `fmod` for huge trig reduction | rejected | loses certified semantics |
 | silently converting ordinary evaluation to Machine/double | policy rejection | changes exact-first semantics |
+| persistent algebraic multiplication-matrix cache | rejected | degree-12 build cost ~228 us while multiply improved only ~112→101 us; poor amortization |
+| multiplication-matrix minpoly / modular reconstruction | deferred | incremental Krylov is sufficient in the current bounded degree range and needs much less machinery |
+| runtime eager Bernoulli generation through `B256` | rejected | exact Rational generation alone costs about 560 ms. Step 6-3 uses a fixed exact `B_2...B_128` table, but does not dynamically generate a larger range |
+| Gamma Stirling `maximumK>64` | rejected | reduced shift but high-order Bernoulli/Rational and longer Stirling work regressed the 640-bit case from ~1.37 s to ~2.7 s |
+| Gamma fixed-k **Rational-power** binary search | rejected | normalized Rational `x^(2k-1)` probes are expensive; Step 6-3 adopts a different BigInt cross-product formulation of the same certified test |
 
 ---
 
@@ -495,7 +707,7 @@ The `Expr::Node` typed-node refactor is adopted in Unreleased. It was kept as a 
 5. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
 6. Lehmer GCD.
 7. bit-burst / AGM logarithm backends.
-8. A Cyclotomic exact FFT backend.
+8. A Cyclotomic exact FFT backend. The `tester.py --timings` audit shows non-power-of-two exact FFT/iFFT round trips as a clear interactive black-box hotspot, so this priority should be revisited.
 
 The naive flat packed-Array design is rejected; immutable paged backing plus stride views is adopted. Approximate Matrix algorithms keep their existing dedicated contiguous working buffers rather than forcing persistent Array storage and algorithm temporaries into one type. BigUInt SBO is explicitly deferred for now.
 

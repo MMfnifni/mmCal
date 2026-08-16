@@ -963,6 +963,31 @@ integrate[log[1-x]/x,x] -> -polylog[2,x]
 
 を返す。一般の`Ei/Si/Ci/li/polylog`方程式にprincipal inverseを一個だけ返す`Solve`規則は持たない。大域単射性・branchを証明できないためであり、`polylog[0,z]`や`polylog[1,z]`のように既存の代数函数・`log`へexact退化した場合だけ既存Solverへ渡す。
 
+## 14.11 Lambert W
+
+```text
+lambertw[z]
+lambertw[k,z]
+```
+
+`lambertw`は`w exp[w] == z`を満たすLambert W函数である。1引数形はprincipal branch `k=0`，2引数形は整数branch `k`を明示する。現在はexact symbolic函数として導入し，代表exact値と微分，Real `solve`の指数方程式分類に利用する。
+
+```text
+lambertw[0] -> 0
+lambertw[E] -> 1
+lambertw[-1/E] -> -1
+lambertw[-1,-1/E] -> -1
+D[lambertw[x],x] -> lambertw[x]/(x*(1+lambertw[x]))
+```
+
+Real軸では`k=0`と`k=-1`の実branchをSolverが必要な範囲で区別する。両実branchにはcertified `N` backendがあり，`w exp[w]=z`の単調な実逆函数として保証区間を細分化して評価する。一般Complex branchのcertified数値評価は未実装であり，未対応入力はexact symbolic formを保持する。
+
+```text
+N[lambertw[1],20] -> 0.567143290409783873
+N[lambertw[-1,-1/10],20] -> -3.5771520639572972184
+```
+
+
 ---
 
 # 15. 集約函数
@@ -1300,7 +1325,7 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-exact入力では2冪長FFTはradix-2 Cooley–Tukey、非2冪長はexact DFTへfallbackする。通常の`fft[...]`は引き続きexact-firstであり、machine `double`へ暗黙変換しない。
+exact入力では2冪長FFTはradix-2 Cooley–Tukeyを使う。5点以上の非2冪長で入力をexact Rational/Gaussian Rationalまたは同一cyclotomic quotientの式として証明付きで写せる場合は，`Q[t]/Phi_n(t)`のRational power-basis座標上でexact変換する。Gaussian Rational入力では必要に応じconductorを`lcm(n,4)`へ拡張して`I`を同じcyclotomic fieldへ埋め込む。これにより`ifft[fft[v]]`のroot-of-unity恒等式をgeneric Simplifierへ再証明させずexactに閉じられる。cyclotomic degreeが現在のbudget 64を超える場合，またはsymbolic入力をfield座標へ証明できない場合は従来のgeneric exact DFTへfallbackする。通常の`fft[...]`は引き続きexact-firstであり、machine `double`へ暗黙変換しない。
 
 `N[fft[v],p]`では`N`が第1引数を先にexact展開せず、要求精度`p`をFFTへ伝播する。FFT側は`ComplexInterval`/BigFloat端点で直接butterflyを行い、各出力成分が要求桁へ一意に丸められることを証明してから`DecimalApproximation`を返す。近似入力を含む`fft[v]`も同じbackendへdispatchする。
 
@@ -1795,6 +1820,17 @@ simplify[abs[x], x >= 0]
 
 矛盾したassumptionはDomainError。
 
+`element`は所属を証明できる場合の`True`だけでなく，排他的な数学知識から`False`も返す。非整数exact Rationalは`Integer`でないこと，既知irrational/transcendental定数は`Rational` / `Integer`でないこと，minimal polynomial次数>1を証明済みのalgebraic Rootは`Rational` / `Integer`でないことを利用する。
+
+```text
+element[1/2,Integer] -> False
+element[Pi,Rational] -> False
+element[Phi,Rational] -> False
+element[root[{-2,0,1},2],Rational] -> False
+```
+
+証明不能は`False`へ落とさず未確定のまま保持する。
+
 ---
 
 # 23. Solver
@@ -1802,11 +1838,14 @@ simplify[abs[x], x >= 0]
 ```text
 solve[equation,x]
 solve[equation,x,domainOrConstraint]
+solve[equation,domain]
 solve[{equations...},{variables...}]
 ```
 
 既定ambient domainは等式系でComplex。
 ordered inequalityはRealまたはそのsubdomainで扱う。
+
+`solve[equation,domain]`は`domain`が`Integer` / `Rational` / `Real` / `Complex`で，方程式中の未知user symbolを**ちょうど1個**に確定できる場合だけ変数を推定する短縮形である。未知数が0個または複数なら推測せずTypeErrorとする。明示変数形でも`Pi` / `Real`等の予約・builtin symbolをsolve変数として受理しない。
 
 ```text
 solve[x^2 == 1,x]
@@ -1827,6 +1866,8 @@ solve[{2x+3y==5,x-2y==9},{x,y}]
 
 `SolutionSet`はEmpty / Finite / Universal / Conditional / Unresolvedを区別する。
 対応外の式を「解なし」と誤認しない。
+
+Solverは`HoldAll`の入力を一般Evaluatorへ流さず，専用の**solve-safe normalization**を通してから分類する。この層はbuiltin aliasをcanonical headへ揃え，証明付きSimplifier rewriteだけを適用する。そのため評価副作用を起こさずに`E^x`と`exp[x]`，`ln`と`log`，`log2` / `log10`等の表現差を解法能力差へ漏らさない。
 
 分母zero、Logのdefinedness、rational-functionのhole/pole等を可能な範囲でglobal conditionとして保持する。
 
@@ -1854,7 +1895,46 @@ solve[tanh[x]==2,x,Real]
 
 solve[exp[x]==a,x,Real]
 -> {x == log[a] if a in Real && a > 0}
+
+solve[E^x==8,x,Real]
+-> {x == log[8]}
+
+solve[ln[x]==2,x,Real]
+-> {x == exp[2]}
+
+solve[log2[x]==3,x,Real]
+-> {x == 8}
 ```
+
+### 実指数函数とLambert W
+
+Real domainで`a>0`と指数が実数であることを証明できれば，principal `a^u = exp[u log[a]]`は常に正である。このため零方程式は数値探索なしに空集合へ確定する。
+
+```text
+solve[1.1^x == 0,x,Real] -> {}
+solve[1.1^x == 0,Real]   -> {}
+solve[2^x == 8,x,Real]   -> {x == 3}
+solve[2^(2x+1) == 8,x,Real] -> {x == 1}
+solve[2^x == -1,x,Real]  -> {}
+```
+
+右辺がsolve変数を含まないconstantで，`a>0`，`a!=1`，右辺`r>0`を証明できる場合，`a^u==r`を`u==log[a,r]`へ安全に反転して既存のpolynomial solverへ渡す。branch/domainを証明できない場合はこの変形を行わない。
+
+初版のLambert W分類は，安全に全Real branchを列挙できる`a^x==x^2`（`a>0`）へ限定する。`L=log[a]`として，常に存在する1根をprincipal branchから構成し，`|L|<=2/E`がcertifiedに成立する場合だけ負引数側の`W_0` / `W_-1` branchを追加する。branch pointでは両branchが一致するため重複を返さない。
+
+```text
+solve[1.1^x == x^2,x,Real]
+-> {x == -2lambertw[log[11/10]/2]/log[11/10],
+    x == -2lambertw[-log[11/10]/2]/log[11/10],
+    x == -2lambertw[-1,-log[11/10]/2]/log[11/10]}
+
+N[solve[1.1^x == x^2,x,Real],20]
+-> {x == -0.95548727594562198165,
+    x == 1.0513800237472769374,
+    x == 95.71683016840522274}
+```
+
+一般の`a^(b x+c)==P(x)`，Complex全branch，Lambert Wを含む不等式はまだ一般化しない。branch条件を証明できない場合は条件付きbranchまたは`UnresolvedSolutionSet`を保持する。
 
 ### 実軸周期函数のparameterized solution family
 
@@ -1957,7 +2037,81 @@ root[{-2,0,1},2]+root[{-3,0,0,1},1]
 -> root[{1,-36,12,-6,-6,0,1},2]
 ```
 
-resultant・primitive-element双方の次数爆発を避けるため，現在の**algebraic-field候補次数budgetは16**。完全な任意次数Q因子分解，persistent number-field objectを跨ぐ一般primitive-element reuse，異なる表現間の完全なalgebraic equality / ordering，`rootApproximant`はまだ未実装である。したがって現在の`AlgebraicNumber`は「証明できる範囲でminimal polynomialとsimple-extension reductionまで行うbounded exact algebraic-field backend」であり，完全な代数体canonicalizerではない。
+primitive-element reductionでsimple extensionを証明できた場合は，その結果を一度`root[minpoly,k]`へ表示して終わらせず，内部では`NumberFieldContext`と`AlgebraicElement`を保持する。Contextはgeneratorのminimal polynomial，選択されたReal/Complex embedding，`theta^d mod m(theta)`のreductionをimmutable sharedで保持し，Elementはpower basis上のexact Rational座標を持つ。同一Context内の後続`+ - * /`はresultantやprimitive-element探索へ戻らず，係数演算と`mod m(theta)`だけで処理する。Q上既約性を証明できる個別Rootにもgenerator fieldを付与するため，同一Rootの連続演算も元のsimple extensionを再利用できる。
+
+```text
+root[{1,-1,0,0,0,1},1,Complex]^2
+-> root[{-1,1,0,-2,0,1},3,Complex]
+```
+
+Rootのuser-visible canonical formは従来どおり`root[minpoly,k]`であり，field座標は表示・structural equalityへ露出しない。`Expr::rebuildCall`はCallの引数が構造的に不変な場合だけ内部Algebraic cacheを継承し，引数が変わった場合はcacheを破棄する。したがってSimplifier・置換・制約処理等を跨いでも，同じRoot値のfield lineageを安全に維持できる。
+
+Stage 4では，別々のexpression lineageで構築された`NumberFieldContext`についても，**同じembedded generator identity**（同じminimal polynomial・Root domain・root index）ならbounded weak internerで同一immutable Contextを共有する。cacheはContextを所有せず`weak_ptr`だけを保持し，expired entryを随時除去する。最大256 entryのLRUとし，cache miss/evictionは性能にだけ影響し数学的結果には影響しない。minimal polynomialが同じでも選択embeddingが異なるRootは共有せず，異なるprimitive generatorで表された同型体・subfield関係を推測して統合することもしない。
+
+これにより，独立に構築された同一simple extensionの要素同士もpointer-level same-field fast pathへ入れる。例えば左右が別々にprimitive-element reductionされた次の式は，再度高次数のfield constructionへ戻らず同一体内の係数乗算でexact Rootへ閉じる。
+
+```text
+(root[{-2,0,1},2]+root[{-3,0,0,1},1])
+*(root[{-2,0,1},2]-root[{-3,0,0,1},1])
+-> root[{1,12,-6,1},1]
+```
+
+Stage 5-1では，このcommon-field construction自体も再利用する。primitive-element reductionが成功したRoot pairについて，compositumとなる`NumberFieldContext`と両operandのpower-basis embeddingを最大64 entryのbounded cacheへ保持する。cacheはRoot identityの順序反転も認識するため，`alpha+beta`の直後の`alpha-beta`のような演算で同じtensor-product / primitive-element探索を再実行しない。output fieldは`weak_ptr`で参照し，fieldが寿命を終えたentryは随時破棄する。
+
+Real fieldでは`AlgebraicElement`の係数多項式をchosen generatorのcertified isolating interval上でexact Rational interval評価できる。その区間が結果minimal polynomialの根をただ1つ含むことをSturm列で証明し，区間より下の根数からcanonical root indexを直接決定する。従来のように結果多項式の全実根をisolateして候補を走査し，その後`root[minpoly,k]`生成時にもう一度全根isolationを行う必要はない。証明に失敗した場合だけ従来のisolating-region再同定へfallbackする。
+
+さらにpersistent field representationが付いた値ではminimal polynomialの既約性が既に証明済みであるため，Real次数>1がRationalへ，Complex次数>2が`Q+iQ`へ退化しないことは次数だけで分かる。その場合`exactRationalParts`は192-bit refinementを行わず即座に非退化と判定する。これらはcanonical表現やexact semanticsを変更せず，既に得た証明を再利用する性能改善である。
+
+Stage 5-2では，同一`NumberFieldContext`内の除算で使う逆元も再利用する。power-basis座標`u`の逆元`u^-1 mod m(theta)`は最初のmiss時だけextended Euclidでexactに求め，fieldごと最大16 entryのthread-safe LRUへ座標対として保持する。`inverse(inverse(u))=u`なので逆方向も同時登録し，cache hitではRational coefficient vectorのコピーだけで済む。cache evictionは再計算を増やすだけで数学的結果には影響しない。定数座標`{q,0,...}`は`Q`からの埋め込みなので，多項式Euclidを回さず`{1/q,0,...}`を直接返す。multiplication matrixの常設cacheも検討したが，12次体の実測で行列構築約228 usに対し通常乗算112 usから行列-vector 101 us程度の短縮に留まり，十分な反復回数がないと償却できないため現段階では導入しない。
+
+開発用には次を常設している。
+
+```text
+mmCal.Benchmarks --algebraic-field [iterations]
+```
+
+これは`(sqrt[2]+cuberoot[3])*(sqrt[2]-cuberoot[3])`相当のcompositum再利用について初回とwarm平均を同一session内で測定し，併せて12次simple extension上でreciprocalのfirst/warm，warm division，minimal polynomialのfirst/warmをmicrobenchmarkする。benchmark値はcompiler / build configuration / CPUに依存するため絶対性能保証ではなく，同一環境でのregression監視に用いる。
+
+Stage 3ではこのfield表現をexact比較へ接続する。`==` / `!=`は同一`NumberFieldContext`ならpower-basis座標の完全一致で判定し，同じcanonical Root identityは即等値，同一多項式の別root indexまたは異なるQ上既約minimal polynomialはexactに不等と証明する。それだけで決まらないbounded caseでは差を既存primitive-element/resultant経路でexactに構成し，0かをfield座標またはcertified root isolationから判定する。証明不能やbudget超過を`False`へ落とすことはない。
+
+実代数数の`< <= > >=`は数学的orderとして実装する。同一fieldでは`a-b`のpower-basis座標をchosen real embeddingのisolating interval上でexact Rational interval評価し，0から分離した符号で判定する。異なるfieldでは各Real Rootのcertified isolating intervalを細分化し，区間が分離すればその時点でexactに順序を確定する。必要なら差のexact algebraic constructionへfallbackする。Complex Rootの`Re(z)+Pi Im(z)`による決定的orderingはroot enumeration専用であり，ユーザー数学としての`<`ではないため，Complex algebraic valueの`< <= > >=`は未評価のまま保持する。
+
+```text
+root[{-2,0,1},2] > 1
+-> True
+
+root[{-2,0,1},2] != root[{-3,0,1},2]
+-> True
+
+root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
+-> root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
+```
+
+Stage 7-6では，表面構文がRootでなくてもexact algebraic valueと証明できる式を同じbackendへ接続する。現在のbridge対象はcanonical `root[...]`，exact Rational / exact complex Rational，`sqrt[q]` / `cbrt[q]`（安全に実代数数として扱えるexact Rational引数），`Phi`，およびそれらのbounded `+ - * /`・小整数冪である。これにより表示形を強制的にRootへ書き換えず，内部比較・domain証明・Solveだけが共通`AlgebraicNumber` viewを利用する。
+
+```text
+root[{-2,0,1},2] == sqrt[2]
+-> True
+
+root[{-2,0,0,1},1] == cbrt[2]
+-> True
+
+Phi == root[{-1,-1,1},2]
+-> True
+
+element[sqrt[2]+sqrt[3],Rational]
+-> False
+
+solve[x == sqrt[2],x,Rational]
+-> {}
+
+solve[x == sqrt[2],x,Real]
+-> {x == sqrt[2]}
+```
+
+bridgeにはnode数と小整数冪のbudgetを設け，変換できない式は従来経路へ戻す。近似値からminimal polynomialを推測することはない。またheld式の`0^0`のように定義不能な式をbridge側だけで値へ決め打ちせず，baseの非零性をexactに証明できる場合に限って`a^0=1`を利用する。
+
+resultant・primitive-element双方の次数爆発を避けるため，現在の**algebraic-field候補次数budgetは16**。完全な任意次数Q因子分解，異なるprimitive generator / subfield関係を含む一般number-field merge・canonicalization，証明backendがsimple extensionを構成できない重なり拡大の一般reduction，未証明・非minimal表現まで含む完全なcross-context equality，現在のrefinement / algebraic construction budgetを超えるordering，`rootApproximant`はまだ未実装である。したがって現在の`AlgebraicNumber`はpersistent field lineageとbounded exact comparisonを持つ代数体backendであり，完全な代数体canonicalizerではない。
 
 ---
 
@@ -1972,6 +2126,21 @@ N[expr,p]
 Arrayへ再帰的に適用できるほか、`arg`などが返す明示角度単位では値の部分だけを近似し、単位は保持する。
 
 v1.5.2では`N`をprecision-aware evaluationの入口として扱う。第2引数の要求精度を先に確定し、第1引数の評価中はそのprecision contextを保持する。通常builtinは従来どおりexact評価され、FFTなど明示的に対応したbuiltinだけが要求精度を受け取って直接certified backendへ降りる。したがってexact-firstの意味論を全体へ暗黙に変更しない。
+
+whole-expressionをcertified数値として閉じられない場合でも，通常評価されるCall / Array / Listでは**数値閉包な部分だけ**を再帰的に近似する。自由symbolや未評価symbolic函数はexactのまま残す。`HoldAll` / `HoldFirst`等の評価属性を持つCallを勝手に再構築して保持規則を破らない。
+
+```text
+N[x+Pi,20]
+-> 3.1415926535897932385+x
+
+N[sin[x]+Pi,20]
+-> 3.1415926535897932385+sin[x]
+
+N[True,20]     -> True
+N[Infinity,20] -> Infinity
+```
+
+自由symbol，Boolean，`Infinity`等が意図的にexactのまま残ること自体はWarningではない。また内側の`D` / `limit` / `solve` / `rref`等が既に具体的なWarningを出した場合，外側`N`は重複したgeneric `N::unevaluated`を追加しない。数学値が存在するがcertified backendが未実装な場合は`N::unsupported`としてWarning＋symbolic保持とし，真のdomain violationと区別する。例えば一般Complex Lambert W backend未実装の`N[lambertw[-1,-1/2],p]`は保持される一方，実branch `W_-1(0)`は真の特異点なのでDomainErrorである。
 
 ```text
 N[Pi,20]
@@ -2344,7 +2513,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名262個 / sourceから呼出可能な名前244個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名263個 / sourceから呼出可能な名前245個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2356,7 +2525,7 @@ det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigen
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
 gamma, gcd, geomean, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
-integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
+integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, lambertw, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
 luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
@@ -2456,7 +2625,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 今後追加検討:
 
-今後は任意次数の完全Q因子分解・persistent number-field reduction・一般algebraic equality / ordering・`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
+今後は任意次数の完全Q因子分解・異なるprimitive generator間の一般number-field merge / canonicalization・未証明表現まで含む完全なcross-context algebraic comparison・`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
 
 ---
 
@@ -2546,7 +2715,8 @@ A-B+C
 
 - `+ -` / `+-`は出さず、負項を`-`として表示
 - `A-(B-C)`のような加減算は表示時だけ`A-B+C`へflattenできる
-- `+`, `-`, `*`, `/`, `^`, 比較演算子の前後に不要な空白を置かない
+- `+`, `-`, `*`, `/`, `^`の前後には不要な空白を置かない
+- 比較演算子`==`, `!=`, `<`, `<=`, `>`, `>=`はrelationを読みやすくするため前後に1空白を置く
 - implicit multiplicationは字句上安全な場合だけ連結する（`2x`, `2sqrt[x]`）。`2exp[x]`や`2E`のように指数表記と衝突する連結は`2*exp[x]`, `2*E`と明示する
 - identifier同士など連結で別tokenになる場合は必要な空白を残す（`I Pi`, `x y`）
 - 数字同士など曖昧になる場合は空白ではなく明示`*`を使う

@@ -21,6 +21,16 @@ namespace mmcal::solver {
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions = {});
 
+// 正の定数baseを持つ実指数方程式を分類する。
+// a^f(x)==0 の非零性と、初版では a^x==x^2 のLambert W閉形式を扱う。
+[[nodiscard]] std::optional<SolutionSet> solveRealExponentialRelation(
+    const expression::Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions = {});
+
 // MathRegistryで「実軸上global injective」と証明済みの函数だけを
 // principal inverseで反転する。
 [[nodiscard]] std::optional<SolutionSet> solveRealInjectiveFunctionRelation(

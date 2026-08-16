@@ -2,6 +2,8 @@
 #include "transcendental_solver.hpp"
 
 #include "mathematics/knowledge_context.hpp"
+#include "approximation/certification_error.hpp"
+#include "approximation/certified_evaluator.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
@@ -235,6 +237,143 @@ void collectSymbolNames(const Expr& expression, std::unordered_set<std::string>&
     return value.isNumber() && value.asNumber().isReal() && value.asNumber().isZero();
 }
 
+
+enum class CertifiedOrder {
+    Less,
+    Equal,
+    Greater,
+    Unknown
+};
+
+[[nodiscard]] CertifiedOrder certifiedConstantOrder(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (lhs == rhs)
+        return CertifiedOrder::Equal;
+
+    const mathematics::AssumptionSet noAssumptions;
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, noAssumptions};
+    if (knowledge.prove(mathematics::relation(RelationKind::Less, lhs, rhs)) == TruthValue::True)
+        return CertifiedOrder::Less;
+    if (knowledge.prove(mathematics::relation(RelationKind::Greater, lhs, rhs)) == TruthValue::True)
+        return CertifiedOrder::Greater;
+    if (knowledge.prove(mathematics::relation(RelationKind::Equal, lhs, rhs)) == TruthValue::True)
+        return CertifiedOrder::Equal;
+
+    // 定数だけからなる超越式の大小は、guessではなくcertified enclosureが分離した場合だけ採用する。
+    const approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
+    for (const std::size_t bits : {96U, 192U, 384U}) {
+        try {
+            const auto left = certified.enclose(lhs, bits);
+            const auto right = certified.enclose(rhs, bits);
+            if (!left || !right || !left->isReal() || !right->isReal())
+                return CertifiedOrder::Unknown;
+            const auto& l = left->asReal();
+            const auto& r = right->asReal();
+            if (l.upper() < r.lower())
+                return CertifiedOrder::Less;
+            if (l.lower() > r.upper())
+                return CertifiedOrder::Greater;
+            if (l.isPoint() && r.isPoint() && l.lower() == r.lower())
+                return CertifiedOrder::Equal;
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return CertifiedOrder::Unknown;
+        }
+    }
+    return CertifiedOrder::Unknown;
+}
+
+[[nodiscard]] bool isVariableSquare(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!expression.isCall() || expression.asCall().arguments.size() != 2)
+        return false;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::Power)
+        return false;
+    const auto& arguments = expression.asCall().arguments;
+    if (!arguments[0].isSymbol() || arguments[0].asSymbol() != variable
+        || !arguments[1].isNumber() || !arguments[1].asNumber().isReal()
+        || !arguments[1].asNumber().asReal().isInteger())
+        return false;
+    return arguments[1].asNumber().asReal().asInteger() == BigInt{2};
+}
+
+struct ExponentialPowerSide final {
+    Expr base;
+    Expr exponent;
+    Expr rhs;
+};
+
+struct BaseLogSide final {
+    Expr base;
+    Expr argument;
+    Expr rhs;
+};
+
+[[nodiscard]] std::optional<BaseLogSide> matchBaseLogSide(
+    const Expr& lhs,
+    const Expr& rhs,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!lhs.isCall() || lhs.asCall().arguments.size() != 2
+        || containsVariable(rhs, variable))
+        return std::nullopt;
+    const auto* definition = builtins.find(lhs.asCall().head);
+    if (!definition || definition->id != BuiltinId::Log)
+        return std::nullopt;
+    const auto& arguments = lhs.asCall().arguments;
+    if (containsVariable(arguments[0], variable)
+        || !containsVariable(arguments[1], variable))
+        return std::nullopt;
+    return BaseLogSide{arguments[0], arguments[1], rhs};
+}
+
+[[nodiscard]] std::optional<ExponentialPowerSide> matchExponentialPowerSide(
+    const Expr& lhs,
+    const Expr& rhs,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    // 右辺はx^2等で変数依存してよい。ここでは左辺が「定数base ^ 変数依存指数」かだけを見る。
+    if (!lhs.isCall() || lhs.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto* definition = builtins.find(lhs.asCall().head);
+    if (!definition || definition->id != BuiltinId::Power)
+        return std::nullopt;
+    const auto& arguments = lhs.asCall().arguments;
+    if (containsVariable(arguments[0], variable)
+        || !containsVariable(arguments[1], variable))
+        return std::nullopt;
+    return ExponentialPowerSide{arguments[0], arguments[1], rhs};
+}
+
+[[nodiscard]] Expr lambertW(
+    int branch,
+    Expr argument,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (branch == 0)
+        return Expr::call(builtins.symbol(BuiltinId::LambertW), {std::move(argument)});
+    return Expr::call(
+        builtins.symbol(BuiltinId::LambertW),
+        {integer(branch), std::move(argument)});
+}
+
+[[nodiscard]] SolutionBranch realBinding(
+    const expression::Symbol& variable,
+    Expr value,
+    mathematics::AssumptionSet conditions = {}) {
+    SolutionBranch branch;
+    branch.bindings.push_back(SolutionBinding{variable, std::move(value)});
+    branch.conditions = std::move(conditions);
+    branch.bindingsCertifiedDomain = mathematics::NumericDomain::Real;
+    return branch;
+}
+
 [[nodiscard]] std::optional<SolutionSet> solvePeriodicTarget(
     const Expr& argument,
     const Expr& target,
@@ -282,6 +421,169 @@ void collectSymbolNames(const Expr& expression, std::unordered_set<std::string>&
 }
 
 } // namespace
+
+std::optional<SolutionSet> solveRealExponentialRelation(
+    const Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    if (!isEqualRelation(relation, builtins))
+        return std::nullopt;
+
+    const auto& sides = relation.asCall().arguments;
+    auto matched = matchExponentialPowerSide(sides[0], sides[1], variable, builtins);
+    if (!matched)
+        matched = matchExponentialPowerSide(sides[1], sides[0], variable, builtins);
+    if (!matched)
+        return std::nullopt;
+
+    mathematics::AssumptionSet proofAssumptions = assumptions;
+    proofAssumptions.add(mathematics::elementOf(Expr{variable}, mathematics::NumericDomain::Real));
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, proofAssumptions};
+
+    // a>0 かつ実指数なら principal Power[a,u] は exp[u log[a]] と一致し常に正。
+    // 0^uや負baseを同じ規則で消すとdomain/branchを壊すため、証明できる場合だけ使う。
+    if (knowledge.prove(mathematics::relation(
+            RelationKind::Greater, matched->base, integer(0))) != TruthValue::True
+        || knowledge.prove(mathematics::elementOf(
+            matched->exponent, mathematics::NumericDomain::Real)) != TruthValue::True)
+        return std::nullopt;
+
+    if (exactZero(matched->rhs))
+        return SolutionSet::empty({SolverVariable{variable, mathematics::NumericDomain::Real}});
+
+    // a^u == d でdが変数に依存しない場合は，a>0かつa!=1の実軸上で
+    // u == log[a,d] と完全に同値。Powerを一般Evaluatorへ通さず，HoldAllのSolve内で
+    // 証明済みの単射性だけを使って指数側をpolynomial solverへ渡す。
+    if (!containsVariable(matched->rhs, variable)) {
+        const TruthValue rhsReal = knowledge.prove(mathematics::elementOf(
+            matched->rhs, mathematics::NumericDomain::Real));
+        const TruthValue rhsPositive = knowledge.prove(mathematics::relation(
+            RelationKind::Greater, matched->rhs, integer(0)));
+        if (rhsReal == TruthValue::True
+            && knowledge.prove(mathematics::relation(
+                RelationKind::LessEqual, matched->rhs, integer(0))) == TruthValue::True)
+            return SolutionSet::empty({SolverVariable{variable, mathematics::NumericDomain::Real}});
+
+        const CertifiedOrder baseToOne = certifiedConstantOrder(
+            matched->base, integer(1), builtins, mathematics, angles);
+        if (baseToOne == CertifiedOrder::Equal) {
+            const TruthValue rhsOne = knowledge.prove(mathematics::relation(
+                RelationKind::Equal, matched->rhs, integer(1)));
+            if (rhsOne == TruthValue::True)
+                return SolutionSet::universal(
+                    {SolverVariable{variable, mathematics::NumericDomain::Real}});
+            if (rhsOne == TruthValue::False)
+                return SolutionSet::empty(
+                    {SolverVariable{variable, mathematics::NumericDomain::Real}});
+            return std::nullopt;
+        }
+
+        if (rhsReal == TruthValue::True && rhsPositive == TruthValue::True
+            && baseToOne != CertifiedOrder::Unknown) {
+            Expr target = simplifyExpr(
+                Expr::call(builtins.symbol(BuiltinId::Log),
+                    {matched->base, matched->rhs}),
+                builtins, mathematics, angles, proofAssumptions);
+            Expr transformed = Expr::call(
+                builtins.symbol(BuiltinId::Equal), {matched->exponent, std::move(target)});
+            return solveUnivariatePolynomialRelation(
+                transformed, variable, builtins, mathematics, angles);
+        }
+    }
+
+    // variable-dependent RHSをLambert Wへ落とす初版は a^x == x^2 に限定する。
+    // affine指数＋constant RHSは上で処理済み。一般のnonconstant P(x)はbranch/domain条件が増えるため別段階へ送る。
+    if (!matched->exponent.isSymbol() || matched->exponent.asSymbol() != variable
+        || !isVariableSquare(matched->rhs, variable, builtins))
+        return std::nullopt;
+
+    const CertifiedOrder baseToOne = certifiedConstantOrder(
+        matched->base, integer(1), builtins, mathematics, angles);
+    if (baseToOne == CertifiedOrder::Unknown)
+        return std::nullopt;
+    if (baseToOne == CertifiedOrder::Equal) {
+        Expr transformed = Expr::call(
+            builtins.symbol(BuiltinId::Equal), {integer(1), matched->rhs});
+        return solveUnivariatePolynomialRelation(
+            transformed, variable, builtins, mathematics, angles);
+    }
+
+    Expr logBase = simplifyExpr(
+        Expr::call(builtins.symbol(BuiltinId::Log), {matched->base}),
+        builtins, mathematics, angles, proofAssumptions);
+    Expr magnitudeLog = baseToOne == CertifiedOrder::Greater
+        ? logBase
+        : simplifyExpr(
+            Expr::call(builtins.symbol(BuiltinId::Negate), {logBase}),
+            builtins, mathematics, angles, proofAssumptions);
+    Expr halfMagnitude = simplifyExpr(
+        Expr::call(builtins.symbol(BuiltinId::Divide), {magnitudeLog, integer(2)}),
+        builtins, mathematics, angles, proofAssumptions);
+    // base<1ではmagnitudeLog=-logBaseなので、-(magnitude/2)を機械的に作ると
+    // --log[a]/2という非canonical形が残り得る。符号証明済みのlogBaseから直接構成する。
+    Expr negativeHalfMagnitude = simplifyExpr(
+        Expr::call(
+            builtins.symbol(BuiltinId::Divide),
+            {baseToOne == CertifiedOrder::Greater
+                ? Expr::call(builtins.symbol(BuiltinId::Negate), {logBase})
+                : logBase,
+             integer(2)}),
+        builtins, mathematics, angles, proofAssumptions);
+    Expr scale = simplifyExpr(
+        Expr::call(builtins.symbol(BuiltinId::Divide), {integer(-2), logBase}),
+        builtins, mathematics, angles, proofAssumptions);
+
+    auto scaledW = [&](int branch, Expr argument) {
+        return simplifyExpr(
+            Expr::call(
+                builtins.symbol(BuiltinId::Multiply),
+                {scale, lambertW(branch, std::move(argument), builtins)}),
+            builtins, mathematics, angles, proofAssumptions);
+    };
+
+    std::vector<SolutionBranch> branches;
+    // 符号がbase-1と反対側の根は、W_0(|log a|/2) が正実数上で常に存在するため無条件。
+    branches.push_back(realBinding(variable, scaledW(0, halfMagnitude)));
+
+    // 同符号側の2根は -|log a|/2 >= -1/e、すなわち |log a| <= 2/e のときだけ実在する。
+    const auto* e = mathematics.findConstant(mathematics::ConstantId::E);
+    if (!e)
+        error::throwCalcError(error::CalcErrorType::Internal, "E is not registered");
+    Expr threshold = simplifyExpr(
+        Expr::call(builtins.symbol(BuiltinId::Divide), {integer(2), Expr{e->symbol}}),
+        builtins, mathematics, angles, proofAssumptions);
+    const CertifiedOrder branchCondition = certifiedConstantOrder(
+        magnitudeLog, threshold, builtins, mathematics, angles);
+
+    if (branchCondition == CertifiedOrder::Less) {
+        branches.push_back(realBinding(variable, scaledW(0, negativeHalfMagnitude)));
+        branches.push_back(realBinding(variable, scaledW(-1, negativeHalfMagnitude)));
+    }
+    else if (branchCondition == CertifiedOrder::Equal) {
+        // branch point -1/E では W_0 = W_-1 = -1。同じ実根を二重に返さない。
+        branches.push_back(realBinding(variable, scaledW(0, negativeHalfMagnitude)));
+    }
+    else if (branchCondition == CertifiedOrder::Unknown) {
+        mathematics::AssumptionSet principalCondition;
+        principalCondition.add(mathematics::relation(
+            RelationKind::LessEqual, magnitudeLog, threshold));
+        branches.push_back(realBinding(
+            variable, scaledW(0, negativeHalfMagnitude), std::move(principalCondition)));
+
+        // lower branch はbranch pointでprincipal branchと一致するので、重複回避のためstrict条件にする。
+        mathematics::AssumptionSet lowerCondition;
+        lowerCondition.add(mathematics::relation(
+            RelationKind::Less, magnitudeLog, threshold));
+        branches.push_back(realBinding(
+            variable, scaledW(-1, negativeHalfMagnitude), std::move(lowerCondition)));
+    }
+
+    return SolutionSet::finite(
+        {SolverVariable{variable, mathematics::NumericDomain::Real}}, std::move(branches));
+}
 
 std::optional<SolutionSet> solveRealPeriodicFunctionRelation(
     const Expr& relation,
@@ -411,6 +713,36 @@ std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
         return std::nullopt;
 
     const auto& sides = relation.asCall().arguments;
+
+    // log[b,u] == r は b>0, b!=1, r∈Real が証明できる場合，
+    // u == b^r へ安全に反転できる。log2/log10はSolve normalizationで
+    // このcanonical 2引数Logへ寄るため，同じknowledge pathを使う。
+    auto baseLog = matchBaseLogSide(sides[0], sides[1], variable, builtins);
+    if (!baseLog)
+        baseLog = matchBaseLogSide(sides[1], sides[0], variable, builtins);
+    if (baseLog) {
+        mathematics::AssumptionSet proofAssumptions = assumptions;
+        proofAssumptions.add(mathematics::elementOf(
+            Expr{variable}, mathematics::NumericDomain::Real));
+        const mathematics::KnowledgeContext knowledge{builtins, mathematics, proofAssumptions};
+        const CertifiedOrder baseToOne = certifiedConstantOrder(
+            baseLog->base, integer(1), builtins, mathematics, angles);
+        if (baseToOne != CertifiedOrder::Unknown && baseToOne != CertifiedOrder::Equal
+            && knowledge.prove(mathematics::relation(
+                RelationKind::Greater, baseLog->base, integer(0))) == TruthValue::True
+            && knowledge.prove(mathematics::elementOf(
+                baseLog->rhs, mathematics::NumericDomain::Real)) == TruthValue::True) {
+            Expr target = simplifyExpr(
+                Expr::call(builtins.symbol(BuiltinId::Power),
+                    {baseLog->base, baseLog->rhs}),
+                builtins, mathematics, angles, proofAssumptions);
+            Expr transformed = Expr::call(
+                builtins.symbol(BuiltinId::Equal), {baseLog->argument, std::move(target)});
+            return solveUnivariatePolynomialRelation(
+                transformed, variable, builtins, mathematics, angles);
+        }
+    }
+
     auto matched = matchFunctionSide(sides[0], sides[1], variable, mathematics);
     if (!matched)
         matched = matchFunctionSide(sides[1], sides[0], variable, mathematics);

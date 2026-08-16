@@ -3,6 +3,7 @@
 
 #include "definedness.hpp"
 #include "numeric/number.hpp"
+#include "symbolic/algebraic_expression.hpp"
 
 #include <optional>
 
@@ -43,6 +44,75 @@ using numeric::Number;
     return TruthValue::Unknown;
 }
 
+
+[[nodiscard]] TruthValue proveAlgebraicRelation(
+    RelationKind relation,
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics) {
+    const auto left = symbolic::exactAlgebraicValue(lhs, builtins, mathematics);
+    const auto right = symbolic::exactAlgebraicValue(rhs, builtins, mathematics);
+    if (!left || !right)
+        return TruthValue::Unknown;
+
+    if (relation == RelationKind::Equal || relation == RelationKind::NotEqual) {
+        const auto equal = left->exactEquals(*right);
+        if (!equal)
+            return TruthValue::Unknown;
+        return boolTruth(relation == RelationKind::Equal ? *equal : !*equal);
+    }
+
+    const auto order = left->exactRealCompare(*right);
+    if (!order)
+        return TruthValue::Unknown;
+    switch (relation) {
+    case RelationKind::Less:
+        return boolTruth(*order == symbolic::AlgebraicOrder::Less);
+    case RelationKind::LessEqual:
+        return boolTruth(*order != symbolic::AlgebraicOrder::Greater);
+    case RelationKind::Greater:
+        return boolTruth(*order == symbolic::AlgebraicOrder::Greater);
+    case RelationKind::GreaterEqual:
+        return boolTruth(*order != symbolic::AlgebraicOrder::Less);
+    case RelationKind::Equal:
+    case RelationKind::NotEqual:
+        break;
+    }
+    return TruthValue::Unknown;
+}
+
+[[nodiscard]] TruthValue proveAlgebraicDomain(
+    const Expr& expression,
+    NumericDomain domain,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics) {
+    const auto algebraic = symbolic::exactAlgebraicValue(expression, builtins, mathematics);
+    if (!algebraic)
+        return TruthValue::Unknown;
+
+    if (domain == NumericDomain::Complex)
+        return TruthValue::True;
+    if (domain == NumericDomain::Real
+        && algebraic->domain() == symbolic::AlgebraicRootDomain::Real)
+        return TruthValue::True;
+
+    if (domain != NumericDomain::Integer && domain != NumericDomain::Rational)
+        return TruthValue::Unknown;
+
+    if (const auto parts = algebraic->exactRationalParts()) {
+        if (!parts->second.isZero())
+            return TruthValue::False;
+        if (domain == NumericDomain::Rational)
+            return TruthValue::True;
+        return boolTruth(parts->first.denominator() == numeric::BigInt{1});
+    }
+
+    // degree>1のcanonical AlgebraicNumberはQ上既約minimal polynomialを持つ。
+    if (algebraic->polynomial().size() > 2)
+        return TruthValue::False;
+    return TruthValue::Unknown;
+}
 [[nodiscard]] bool isZero(const Expr& expression) {
     return expression.isNumber() && expression.asNumber().isZero();
 }
@@ -151,9 +221,15 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
             domain->expression, builtins_, mathematics_);
         if (isSubdomainOf(permanentFacts.domain, domain->domain))
             return TruthValue::True;
-        if (permanentFacts.provablyNonReal
-            && domain->domain != NumericDomain::Complex)
+        if ((domain->domain == NumericDomain::Integer && permanentFacts.provablyNonInteger)
+            || (domain->domain == NumericDomain::Rational && permanentFacts.provablyNonRational)
+            || (permanentFacts.provablyNonReal && domain->domain != NumericDomain::Complex))
             return TruthValue::False;
+
+        if (const TruthValue algebraic = proveAlgebraicDomain(
+                domain->expression, domain->domain, builtins_, mathematics_);
+            algebraic != TruthValue::Unknown)
+            return algebraic;
 
         if (assumptions_.contains(predicate))
             return TruthValue::True;
@@ -161,8 +237,9 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
         const ValueFacts valueFacts = facts(domain->expression);
         if (isSubdomainOf(valueFacts.domain, domain->domain))
             return TruthValue::True;
-        if (valueFacts.provablyNonReal
-            && domain->domain != NumericDomain::Complex)
+        if ((domain->domain == NumericDomain::Integer && valueFacts.provablyNonInteger)
+            || (domain->domain == NumericDomain::Rational && valueFacts.provablyNonRational)
+            || (valueFacts.provablyNonReal && domain->domain != NumericDomain::Complex))
             return TruthValue::False;
 
         return TruthValue::Unknown;
@@ -188,6 +265,12 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
         if (numeric != TruthValue::Unknown)
             return numeric;
     }
+
+    if (const TruthValue algebraic = proveAlgebraicRelation(
+            relationPredicate.relation, relationPredicate.lhs, relationPredicate.rhs,
+            builtins_, mathematics_);
+        algebraic != TruthValue::Unknown)
+        return algebraic;
 
     // MathRegistryに「定義域内では決して0にならない」と登録された函数は、
     // exp[z]!=0 のような非零性を局所実装へ重複記述せず証明できる。

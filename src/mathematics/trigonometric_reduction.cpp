@@ -49,6 +49,7 @@ ReducedTrigAngle reduceTrigTurns(FunctionId function, Rational turns) {
     case FunctionId::Expc:
     case FunctionId::Gamma:
     case FunctionId::LogGamma:
+    case FunctionId::LambertW:
     case FunctionId::Erf:
     case FunctionId::Erfc:
     case FunctionId::FresnelC:

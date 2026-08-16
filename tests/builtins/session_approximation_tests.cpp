@@ -152,6 +152,16 @@ void runSessionApproximationTests(TestRunner& tests) {
     tests.expectEqual(eval(approximation, "N[Phi,20]"),
         std::string{"1.6180339887498948482"},
         "N certifies Phi from its exact algebraic definition");
+    tests.expectEqual(eval(approximation, "N[x+Pi,20]"),
+        std::string{"3.1415926535897932385+x"},
+        "N structurally approximates numerically closed subexpressions while preserving free symbols");
+    tests.expectEqual(eval(approximation, "N[sin[x]+Pi,20]"),
+        std::string{"3.1415926535897932385+sin[x]"},
+        "N leaves symbolic function calls intact while approximating independent numeric parts");
+    tests.expectEqual(eval(approximation, "N[True,20]"), std::string{"True"},
+        "N leaves Boolean atoms unchanged");
+    tests.expectEqual(eval(approximation, "N[Infinity,20]"), std::string{"Infinity"},
+        "N leaves an exact Infinity atom unchanged when no finite certified enclosure is appropriate");
 
     tests.expectEqual(eval(approximation, "N[Pi*10^20,20]"),
         std::string{"314159265358979323850"},
@@ -200,13 +210,13 @@ void runSessionApproximationTests(TestRunner& tests) {
 
     tests.expectEqual(eval(approximation, "N[Pi,20]>3"), std::string{"True"},
         "ordered comparison can use an InformationEnclosure when the result is provable");
-    tests.expectEqual(eval(approximation, "N[Pi,2]>3.1"), std::string{"3.1>31/10"},
+    tests.expectEqual(eval(approximation, "N[Pi,2]>3.1"), std::string{"3.1 > 31/10"},
         "ordered comparison remains unresolved when InformationEnclosures overlap the boundary");
     tests.expectEqual(eval(approximation, "N[Pi,20]==3"), std::string{"False"},
         "approximate equality proves inequality only from disjoint InformationEnclosures");
-    tests.expectEqual(eval(approximation, "N[Pi,2]==3.1"), std::string{"3.1==31/10"},
+    tests.expectEqual(eval(approximation, "N[Pi,2]==3.1"), std::string{"3.1 == 31/10"},
         "approximate equality remains unresolved when InformationEnclosures overlap");
-    tests.expectEqual(eval(approximation, "N[Pi,2]!=3.1"), std::string{"3.1!=31/10"},
+    tests.expectEqual(eval(approximation, "N[Pi,2]!=3.1"), std::string{"3.1 != 31/10"},
         "approximate inequality remains unresolved when InformationEnclosures overlap");
     tests.expectEqual(eval(approximation, "min[N[Pi,20],3]"), std::string{"3"},
         "min accepts certified approximations when InformationEnclosures order the inputs");

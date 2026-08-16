@@ -19,7 +19,7 @@ expression::Expr substituteSymbol(
         arguments.reserve(expression.asCall().arguments.size());
         for (const expression::Expr& argument : expression.asCall().arguments)
             arguments.push_back(substituteSymbol(argument, variable, value));
-        return expression::Expr::call(expression.asCall().head, std::move(arguments));
+        return expression::Expr::rebuildCall(expression.asCall(), std::move(arguments));
     }
 
     if (expression.isArray()) {

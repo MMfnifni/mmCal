@@ -105,12 +105,12 @@ void appendEscapedString(std::string& output, std::string_view value) {
 
     const auto appendSeparator = [&]() {
         switch (relation.relation) {
-        case mathematics::RelationKind::Equal: output += "=="; break;
-        case mathematics::RelationKind::NotEqual: output += "!="; break;
-        case mathematics::RelationKind::Less: output += "<"; break;
-        case mathematics::RelationKind::LessEqual: output += "<="; break;
-        case mathematics::RelationKind::Greater: output += ">"; break;
-        case mathematics::RelationKind::GreaterEqual: output += ">="; break;
+        case mathematics::RelationKind::Equal: output += " == "; break;
+        case mathematics::RelationKind::NotEqual: output += " != "; break;
+        case mathematics::RelationKind::Less: output += " < "; break;
+        case mathematics::RelationKind::LessEqual: output += " <= "; break;
+        case mathematics::RelationKind::Greater: output += " > "; break;
+        case mathematics::RelationKind::GreaterEqual: output += " >= "; break;
         }
     };
 
@@ -169,12 +169,12 @@ void appendPredicate(
             return;
         appendExpr(output, relation->lhs, radix, precedenceComparison);
         switch (relation->relation) {
-        case mathematics::RelationKind::Equal: output += "=="; break;
-        case mathematics::RelationKind::NotEqual: output += "!="; break;
-        case mathematics::RelationKind::Less: output += "<"; break;
-        case mathematics::RelationKind::LessEqual: output += "<="; break;
-        case mathematics::RelationKind::Greater: output += ">"; break;
-        case mathematics::RelationKind::GreaterEqual: output += ">="; break;
+        case mathematics::RelationKind::Equal: output += " == "; break;
+        case mathematics::RelationKind::NotEqual: output += " != "; break;
+        case mathematics::RelationKind::Less: output += " < "; break;
+        case mathematics::RelationKind::LessEqual: output += " <= "; break;
+        case mathematics::RelationKind::Greater: output += " > "; break;
+        case mathematics::RelationKind::GreaterEqual: output += " >= "; break;
         }
         appendExpr(output, relation->rhs, radix, precedenceComparison + 1);
         return;
@@ -214,7 +214,7 @@ void appendSolutionBranches(
         for (std::size_t j = 0; j < branch.bindings.size(); ++j) {
             if (j != 0) output += ", ";
             output += branch.bindings[j].variable.name();
-            output += "==";
+            output += " == ";
             appendExpr(output, branch.bindings[j].value, radix, precedenceComparison + 1);
         }
         if (branch.bindings.size() > 1) output.push_back('}');
@@ -598,17 +598,17 @@ void appendGenericCall(std::string& output, const CallExpr& call, unsigned radix
 
 [[nodiscard]] std::string_view comparisonSeparator(std::string_view head) noexcept {
     if (head == builtins::names::less)
-        return "<";
+        return " < ";
     if (head == builtins::names::lessEqual)
-        return "<=";
+        return " <= ";
     if (head == builtins::names::greater)
-        return ">";
+        return " > ";
     if (head == builtins::names::greaterEqual)
-        return ">=";
+        return " >= ";
     if (head == builtins::names::equal)
-        return "==";
+        return " == ";
     if (head == builtins::names::notEqual)
-        return "!=";
+        return " != ";
     return {};
 }
 
