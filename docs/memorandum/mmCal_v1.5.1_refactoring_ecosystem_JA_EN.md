@@ -1,4 +1,5 @@
 # mmCal v1.5.1 と取り巻く環境を鑑みたリファクタリング指針
+
 ## Refactoring mmCal v1.5.1 in the Context of Its Surrounding Ecosystem
 
 **対象:** mmCalculator / mmCal v1.5.1  
@@ -14,18 +15,18 @@
 
 ## 0. 文書の目的
 
-本書は、mmCal v1.5.1 時点の設計を、単独のコード品質だけではなく、以下の周辺事例を踏まえて評価し、今後の拡張に耐えるためのリファクタリング方針を定めるものである。
+本書は，mmCal v1.5.1 時点の設計を，単独のコード品質だけではなく，以下の周辺事例を踏まえて評価し，今後の拡張に耐えるためのリファクタリング方針を定めるものである。
 
 主に参照した系統は次の通り。
 
 - **Eigenmath** — 小型・自己完結型 CAS を長期間維持した例
 - **Qalculate! / libqalculate** — 電卓から汎用数学エンジンへ二十年以上成長した例
 - **Mathematica 1.x** — Expression / Rule / Pattern を中核に据えた記号処理系の歴史的完成例
-- **SymPy / Maxima / Giac** — 巨大化した CAS が specialized domain、assumption、simplifier、外部数値基盤をどう分離するかの参考例
+- **SymPy / Maxima / Giac** — 巨大化した CAS が specialized domain，assumption，simplifier，外部数値基盤をどう分離するかの参考例
 
 本書の目的は「他製品へ似せる」ことではない。
 
-目的は、mmCal が現在持つ
+目的は，mmCal が現在持つ
 
 - **厳密計算優先（exact-first）**
 - **定義域・主値・未定義点を壊さない**
@@ -33,30 +34,30 @@
 - **BigInt から誤差保証付き数値評価まで自己完結する**
 - **CLI を中心に小さく理解可能な系として維持する**
 
-という性格を守りつつ、今後の機能追加で設計が崩れないようにすることである。
+という性格を守りつつ，今後の機能追加で設計が崩れないようにすることである。
 
 ---
 
 # 1. 結論
 
-mmCal v1.5.1 は、現時点で再度の全面再構築を必要としない。
+mmCal v1.5.1 は，現時点で再度の全面再構築を必要としない。
 
-v1.5.0 で行った Lexer / Parser / Lowerer / AST / Evaluator / Simplifier / Solver / CertifiedEvaluator / 数値モデルの再整理は有効であり、これを捨てる理由はない。
+v1.5.0 で行った Lexer / Parser / Lowerer / AST / Evaluator / Simplifier / Solver / CertifiedEvaluator / 数値モデルの再整理は有効であり，これを捨てる理由はない。
 
-一方、v1.5.1 までに CAS としての能力が急速に増えたことで、いくつかの「小さな不具合」に見えるものが、実際には今後の拡張性を左右する**設計上の警告灯**になっている。
+一方，v1.5.1 までに CAS としての能力が急速に増えたことで，いくつかの「小さな不具合」に見えるものが，実際には今後の拡張性を左右する**設計上の警告灯**になっている。
 
 最優先で対処すべきものは次の五つである。
 
 1. **Canonical Algebra Layer**
    - 数学的に同値な和・積・商・冪を共通の代数表現へ落とす。
 2. **EvaluationContext + EvaluationBudget**
-   - 深さだけではなく、rewrite 数、生成 node 数、整数 bit 数、候補数、working precision 等を統一管理する。
+   - 深さだけではなく，rewrite 数，生成 node 数，整数 bit 数，候補数，working precision 等を統一管理する。
 3. **AssumptionContext**
    - `x>0`, `element[x,Real]`, `x!=0` 等の知識を全アルゴリズムで共有する。
 4. **Specialized Mathematical Views / IR**
-   - generic AST だけで polynomial、rational function、linear system、series 等を処理しない。
+   - generic AST だけで polynomial，rational function，linear system，series 等を処理しない。
 5. **Declarative Rule Layer**
-   - Simplify / Integrate 等の数学知識を C++ の `if` の集合だけにせず、条件・cost・verification policy 付きの規則として整理する。
+   - Simplify / Integrate 等の数学知識を C++ の `if` の集合だけにせず，条件・cost・verification policy 付きの規則として整理する。
 
 これらは「新しい CAS を作り直す」変更ではない。
 
@@ -66,9 +67,9 @@ v1.5.0 で行った Lexer / Parser / Lowerer / AST / Evaluator / Simplifier / So
 
 # 2. v1.5.1 時点の位置付け
 
-mmCal は現在、単純な関数電卓ではない。
+mmCal は現在，単純な関数電卓ではない。
 
-最も近い分類は、
+最も近い分類は，
 
 > **from-scratch exact-first symbolic calculator / compact CAS**
 
@@ -109,13 +110,13 @@ DecimalApproximation / ComplexDecimalApproximation
 → True
 ```
 
-これは host language の `double` や binary floating point を入力意味論に持ち込まないという、mmCal の非常に強い特徴である。
+これは host language の `double` や binary floating point を入力意味論に持ち込まないという，mmCal の非常に強い特徴である。
 
 ### 2.2 誤差保証付き数値評価
 
 `N[expr,n]` は単に working precision を n 桁へ設定して文字列化する機構ではない。
 
-理想化すると、
+理想化すると，
 
 ```text
 exact expression
@@ -131,11 +132,11 @@ DecimalApproximation
 
 という構造を持つ。
 
-このため `accuracy`, `precision`, `rationalize` を、単なる表示 metadata ではなく真値との関係を持つ機能として構築できる。
+このため `accuracy`, `precision`, `rationalize` を，単なる表示 metadata ではなく真値との関係を持つ機能として構築できる。
 
 ### 2.3 記号計算
 
-v1.5 系では概ね、
+v1.5 系では概ね，
 
 ```text
 Lexer
@@ -158,7 +159,7 @@ Evaluator
 
 ### 2.4 CAS 機能
 
-v1.5.1 時点では、
+v1.5.1 時点では，
 
 - exact arithmetic
 - complex arithmetic
@@ -175,9 +176,9 @@ v1.5.1 時点では、
 - DFT / FFT / convolution
 - special-function based integration の拡張
 
-まで進み、「小型 CAS」の問題領域へ完全に入っている。
+まで進み，「小型 CAS」の問題領域へ完全に入っている。
 
-積分側でも、初等関数だけでなく、
+積分側でも，初等関数だけでなく，
 
 - `Ei`
 - `Si`, `Ci`
@@ -190,7 +191,7 @@ v1.5.1 時点では、
 
 へ接続する設計が進んでいる。
 
-この段階では、単純に built-in を増やすより、**数学知識をどう整理して共有するか**が重要になる。
+この段階では，単純に built-in を増やすより，**数学知識をどう整理して共有するか**が重要になる。
 
 ---
 
@@ -198,11 +199,11 @@ v1.5.1 時点では、
 
 ## 3.1 Eigenmath — 「複雑にならない」ことを設計する
 
-Eigenmath は 2026-08-12 の確認時点で GitHub 上に **3,420 commits** を持ちながら、現在も非常に小さな C ベース CAS として全体を追跡可能な構造を保っている。
+Eigenmath は 2026-08-12 の確認時点で GitHub 上に **3,420 commits** を持ちながら，現在も非常に小さな C ベース CAS として全体を追跡可能な構造を保っている。
 
 中心は `struct atom` である。
 
-現在の `defs.h` では、
+現在の `defs.h` では，
 
 - CONS
 - kernel symbol
@@ -212,9 +213,9 @@ Eigenmath は 2026-08-12 の確認時点で GitHub 上に **3,420 commits** を�
 - string
 - tensor
 
-を一つの atom union で表現し、算術式を binary tree として保持することが明示されている。
+を一つの atom union で表現し，算術式を binary tree として保持することが明示されている。
 
-また、
+また，
 
 ```text
 STACKSIZE = 100000
@@ -223,11 +224,11 @@ MAXBLOCKS = 2000
 MAXDIM = 24
 ```
 
-のように、runtime の制約が非常に直接的である。
+のように，runtime の制約が非常に直接的である。
 
-Evaluator も単純で、interrupt と evaluation depth を明示的に監視し、depth が 1000 を超えた場合は停止する。
+Evaluator も単純で，interrupt と evaluation depth を明示的に監視し，depth が 1000 を超えた場合は停止する。
 
-Eigenmath の長所は、抽象化の巧妙さではない。
+Eigenmath の長所は，抽象化の巧妙さではない。
 
 > **システム全体を一人の頭に収まる規模へ保つこと自体を設計原則にしている**
 
@@ -242,7 +243,7 @@ Eigenmath の長所は、抽象化の巧妙さではない。
 
 ### 真似るべきでない点
 
-mmCal は既に、
+mmCal は既に，
 
 - arbitrary precision float
 - certified interval
@@ -253,7 +254,7 @@ mmCal は既に、
 
 したがって Eigenmath の `Rational + double + generic atom` 程度まで単純化することはできない。
 
-Eigenmath は「天井を低く設定することで単純さを維持した」成功例であり、mmCal の最終形ではない。
+Eigenmath は「天井を低く設定することで単純さを維持した」成功例であり，mmCal の最終形ではない。
 
 ---
 
@@ -261,7 +262,7 @@ Eigenmath は「天井を低く設定することで単純さを維持した」�
 
 libqalculate は確認時点で GitHub 上に **2,028 commits** を持つ。
 
-現在は、
+現在は，
 
 - arbitrary precision rational / floating point
 - complex
@@ -282,7 +283,7 @@ libqalculate は確認時点で GitHub 上に **2,028 commits** を持つ。
 
 現在の必須数値基盤は **GMP + MPFR**。
 
-ソースは `Number`, `MathStructure`, `Calculator` を中心にしつつ、
+ソースは `Number`, `MathStructure`, `Calculator` を中心にしつつ，
 
 ```text
 MathStructure-calculate.cc
@@ -304,15 +305,15 @@ MathStructure-polynomial.cc
 
 #### 2004: core math code の書き直し
 
-初期の段階で expression representation、simplification、calculation を含む core math code の rewrite が行われた。
+初期の段階で expression representation，simplification，calculation を含む core math code の rewrite が行われた。
 
-これは、機能を増やし続ける前に、数学 kernel の意味論を整理した例である。
+これは，機能を増やし続ける前に，数学 kernel の意味論を整理した例である。
 
 #### 2004–2006: library 化
 
-CLI / GUI 内部の計算コードから、`libqalculate` という独立 math engine へ分離した。
+CLI / GUI 内部の計算コードから，`libqalculate` という独立 math engine へ分離した。
 
-この判断により、frontend の寿命と数学 kernel の寿命を分離できた。
+この判断により，frontend の寿命と数学 kernel の寿命を分離できた。
 
 #### 2017: CLN → GMP/MPFR
 
@@ -322,7 +323,7 @@ CLI / GUI 内部の計算コードから、`libqalculate` という独立 math e
 
 #### 2017: branch semantics の整理
 
-`cbrt[-8]` と `(-8)^(1/3)` を分離し、
+`cbrt[-8]` と `(-8)^(1/3)` を分離し，
 
 - real root function
 - principal complex power
@@ -331,7 +332,7 @@ CLI / GUI 内部の計算コードから、`libqalculate` という独立 math e
 
 #### 2017–2019: interval の目的分離
 
-interval arithmetic は一度導入して終わりではなく、
+interval arithmetic は一度導入して終わりではなく，
 
 - user-facing interval
 - uncertainty propagation
@@ -341,7 +342,7 @@ interval arithmetic は一度導入して終わりではなく、
 
 #### 近年: failure / termination が主要課題
 
-近年の release history では、
+近年の release history では，
 
 - infinite loop
 - segfault
@@ -353,9 +354,9 @@ interval arithmetic は一度導入して終わりではなく、
 
 等の修正が継続している。
 
-成熟 CAS では「函数を増やすこと」より、
+成熟 CAS では「函数を増やすこと」より，
 
-> **止まるか、壊れないか、意味を誤らないか**
+> **止まるか，壊れないか，意味を誤らないか**
 
 が支配的課題になる。
 
@@ -371,11 +372,11 @@ interval arithmetic は一度導入して終わりではなく、
 
 ### 真似るべきでない点
 
-Qalculate! は二十年以上の実用機能が `MathStructure` 等へ集積した結果、中央 object が非常に大きくなっている。
+Qalculate! は二十年以上の実用機能が `MathStructure` 等へ集積した結果，中央 object が非常に大きくなっている。
 
 現在の TODO にも "Sane and stable API" が残っている。
 
-mmCal はこの規模になる前に、
+mmCal はこの規模になる前に，
 
 - generic expression
 - mathematical domain representation
@@ -388,26 +389,26 @@ mmCal はこの規模になる前に、
 
 ## 3.3 Mathematica 1.x — rule system の力と危険性
 
-Mathematica 1.x の静的解析から得られる最大の教訓は、
+Mathematica 1.x の静的解析から得られる最大の教訓は，
 
-> **数学知識を evaluator の C kernel だけへ埋め込まず、pattern / rule layer へ移せる**
+> **数学知識を evaluator の C kernel だけへ埋め込まず，pattern / rule layer へ移せる**
 
 ことである。
 
-積分表、Series、inverse function table 等が、kernel の expression / rule runtime 上へ実装されている。
+積分表，Series，inverse function table 等が，kernel の expression / rule runtime 上へ実装されている。
 
-一方で古いソース自身に、
+一方で古いソース自身に，
 
 - pattern が integrator を大きく遅くする
 - rule が infinite loop を起こし得る
 
 という警告が残る。
 
-したがって mmCal が rule layer を導入する場合、
+したがって mmCal が rule layer を導入する場合，
 
 **Mathematica型の unrestricted rewrite engine をそのまま導入すべきではない。**
 
-必要なのは、
+必要なのは，
 
 - domain predicate
 - applicability
@@ -423,7 +424,7 @@ Mathematica 1.x の静的解析から得られる最大の教訓は、
 
 以下は「バグ一覧」ではない。
 
-今後の規模拡大で問題化する可能性が高い、構造上の弱点である。
+今後の規模拡大で問題化する可能性が高い，構造上の弱点である。
 
 ---
 
@@ -431,7 +432,7 @@ Mathematica 1.x の静的解析から得られる最大の教訓は、
 
 既に症状が出ている。
 
-数学的に同一の式が、
+数学的に同一の式が，
 
 ```text
 (cos[x]+sin[x])/2*exp[x]
@@ -445,7 +446,7 @@ Mathematica 1.x の静的解析から得られる最大の教訓は、
 
 のように異なる AST 構造として存在し得る。
 
-同様に、
+同様に，
 
 ```text
 a/b*c
@@ -455,7 +456,7 @@ a*(1/b)*c
 c*a*b^(-1)
 ```
 
-は数学的には同じ有理積を表す場合があるが、structural equality では別物になる。
+は数学的には同じ有理積を表す場合があるが，structural equality では別物になる。
 
 ### 影響
 
@@ -480,7 +481,7 @@ c*a*b^(-1)
 
 AST は構文・記号式の保存には適切である。
 
-しかし次の算法では、generic tree は必ずしも最適な表現ではない。
+しかし次の算法では，generic tree は必ずしも最適な表現ではない。
 
 - polynomial GCD
 - polynomial factorization
@@ -492,7 +493,7 @@ AST は構文・記号式の保存には適切である。
 - algebraic number
 - root isolation
 
-例えば、
+例えば，
 
 ```text
 x^100 + 2x + 1
@@ -506,11 +507,11 @@ x^100 + 2x + 1
 Polynomial<Rational>
 ```
 
-へ落とした方が、算法も計算量も明確になる。
+へ落とした方が，算法も計算量も明確になる。
 
 ### リスク
 
-generic AST だけで進むと、
+generic AST だけで進むと，
 
 ```cpp
 if (isAdd(...))
@@ -527,9 +528,9 @@ if (looksLikePolynomial(...))
 
 CertifiedEvaluator には病的に深い AST を防ぐための depth guard がある。
 
-これは必要だが、depth だけでは十分ではない。
+これは必要だが，depth だけでは十分ではない。
 
-危険な式は例えば、
+危険な式は例えば，
 
 ```text
 depth               = 20
@@ -562,7 +563,7 @@ working precision   = 1000000
 
 ### 結果型
 
-少なくとも、
+少なくとも，
 
 ```text
 Completed
@@ -580,7 +581,7 @@ Cancelled
 
 mmCal の exact-first は守るべきである。
 
-しかし、
+しかし，
 
 > exact に意味を持つこと  
 > と  
@@ -622,13 +623,13 @@ BigInt / BigFloat / interval を自前で持つこと自体は欠点ではない
 
 むしろ mmCal の重要な価値である。
 
-問題は、上位層が低層実装の詳細を直接知りすぎる場合である。
+問題は，上位層が低層実装の詳細を直接知りすぎる場合である。
 
-Qalculate! が長期運用中に CLN から GMP/MPFR へ移行できたことは、backend boundary の価値を示す。
+Qalculate! が長期運用中に CLN から GMP/MPFR へ移行できたことは，backend boundary の価値を示す。
 
 mmCal でも外部ライブラリへ移行する必要はない。
 
-むしろ、
+むしろ，
 
 > **自前 backend を長く維持するために boundary を作る**
 
@@ -640,7 +641,7 @@ mmCal でも外部ライブラリへ移行する必要はない。
 
 積分器が典型である。
 
-機能が増えるほど、
+機能が増えるほど，
 
 ```cpp
 if (isSin(...))
@@ -652,7 +653,7 @@ if (matchPolynomialTimesExp(...))
 
 という recognizer が増える。
 
-初期は読みやすいが、数百規則になると、
+初期は読みやすいが，数百規則になると，
 
 - 重複
 - precedence conflict
@@ -667,7 +668,7 @@ if (matchPolynomialTimesExp(...))
 
 完全な user-visible pattern language は不要。
 
-まず、
+まず，
 
 ```text
 Rule
@@ -684,7 +685,7 @@ Rule
 
 ## 4.7 D7 — assumption の知識共有を一級化する必要
 
-現在既に、
+現在既に，
 
 ```text
 element[x,Real]
@@ -694,7 +695,7 @@ x!=0
 
 等の条件が simplify / solve 等へ影響する。
 
-今後、
+今後，
 
 - simplify
 - solve
@@ -710,7 +711,7 @@ x!=0
 
 の全てが assumption を見る。
 
-各モジュールが独自に、
+各モジュールが独自に，
 
 ```cpp
 isKnownPositive(...)
@@ -749,7 +750,7 @@ x:
 
 ## 4.8 D8 — failure semantics を Solver 以外にも広げる必要
 
-Solver は、
+Solver は，
 
 - Empty
 - Finite
@@ -761,7 +762,7 @@ Solver は、
 
 この考え方は他の subsystem へも広げるべきである。
 
-例えば Integrate で、
+例えば Integrate で，
 
 ```text
 NoAntiderivativeKnown
@@ -773,9 +774,9 @@ CandidateRejected
 
 は異なる。
 
-現状「未評価式を返す」だけでは、ユーザーにも開発者にも理由が分かりにくい。
+現状「未評価式を返す」だけでは，ユーザーにも開発者にも理由が分かりにくい。
 
-内部 result object に reason を保持し、CLI では必要に応じて WARN として出すのがよい。
+内部 result object に reason を保持し，CLI では必要に応じて WARN として出すのがよい。
 
 ---
 
@@ -783,7 +784,7 @@ CandidateRejected
 
 CAS が大きくなると同じ subexpression を繰り返し処理する。
 
-特に、
+特に，
 
 - `D`
 - integrate candidate verification
@@ -804,7 +805,7 @@ CAS が大きくなると同じ subexpression を繰り返し処理する。
 
 UI を追加する必要はない。
 
-しかし、
+しかし，
 
 ```text
 Math Kernel
@@ -816,7 +817,7 @@ CLI
 
 Qalculate! が早期に `libqalculate` を独立させたことは参考になる。
 
-mmCal を共有ライブラリ化する必要はまだないが、
+mmCal を共有ライブラリ化する必要はまだないが，
 
 - CLI options
 - history
@@ -825,7 +826,7 @@ mmCal を共有ライブラリ化する必要はまだないが、
 
 が mathematical evaluator へ侵入しないようにする。
 
-`:fix` が presentation-only で exact Out 値を変更しない現在方針は、この意味で正しい。
+`:fix` が presentation-only で exact Out 値を変更しない現在方針は，この意味で正しい。
 
 ---
 
@@ -849,7 +850,7 @@ rationalize(exact-derived approximation) recovers source when uniquely possible
 
 random AST を大量生成して検査できる。
 
-Qalculate! が大量の random expression testing を導入した歴史は、この段階の CAS に非常に参考になる。
+Qalculate! が大量の random expression testing を導入した歴史は，この段階の CAS に非常に参考になる。
 
 ---
 
@@ -939,7 +940,7 @@ Qalculate! が大量の random expression testing を導入した歴史は、こ
 └─────────────────────────────────────────────┘
 ```
 
-重要なのは、上下関係を厳密に守ることである。
+重要なのは，上下関係を厳密に守ることである。
 
 Specialized IR は AST を置き換えない。
 
@@ -976,7 +977,7 @@ x^3
 - `Add` と `Mul` の associative / commutative な範囲を canonicalize。
 - exact numeric coefficient を集約。
 - factor exponent map を利用。
-- denominator は負 exponent として扱えるが、definedness を失わない metadata を保持。
+- denominator は負 exponent として扱えるが，definedness を失わない metadata を保持。
 - noncommutative object を将来導入する余地を残す。
 - branch-sensitive Power は conservative に扱う。
 
@@ -994,7 +995,7 @@ struct FactorPower {
 };
 ```
 
-ただし実装では、
+ただし実装では，
 
 - integer exponent
 - rational exponent
@@ -1006,7 +1007,7 @@ branch safety のため分類が必要。
 
 ## 7.3 `CanonicalAlgebraView`
 
-既存 AST を破壊的に書き換えるより、
+既存 AST を破壊的に書き換えるより，
 
 ```cpp
 auto view = CanonicalAlgebraView::tryCreate(expr, ctx);
@@ -1082,7 +1083,7 @@ struct EvaluationBudget {
 
 全てを最初から hard limit にする必要はない。
 
-まず counter を導入し、benchmark / fuzz で実態を観測してから default を決める。
+まず counter を導入し，benchmark / fuzz で実態を観測してから default を決める。
 
 ## 8.4 budget はエラーではない
 
@@ -1141,7 +1142,7 @@ x > 3
 
 ## 9.3 subsystem 間共有
 
-同じ `AssumptionContext` を、
+同じ `AssumptionContext` を，
 
 - Simplifier
 - Solver
@@ -1152,7 +1153,7 @@ x > 3
 
 へ渡す。
 
-`log[x^2] → 2log[x]` の可否と、`sqrt[x^2] → abs[x]` の可否を別々の独自判定で処理しない。
+`log[x^2] → 2log[x]` の可否と，`sqrt[x^2] → abs[x]` の可否を別々の独自判定で処理しない。
 
 ---
 
@@ -1200,7 +1201,7 @@ P(x) / Q(x)
 
 ## 10.3 LinearSystemView
 
-多変数一次式を、
+多変数一次式を，
 
 ```text
 A x = b
@@ -1212,7 +1213,7 @@ Solver が generic AST から毎回係数を拾わない。
 
 ## 10.4 SeriesData
 
-将来 `Series`, `Limit`, asymptotic, special functions を実装するなら、Mathematica 1.x の `SeriesData` に相当する dedicated representation が有力。
+将来 `Series`, `Limit`, asymptotic, special functions を実装するなら，Mathematica 1.x の `SeriesData` に相当する dedicated representation が有力。
 
 例:
 
@@ -1266,7 +1267,7 @@ SubstituteAndCheck
 IntervalCheck
 ```
 
-積分規則なら、
+積分規則なら，
 
 ```text
 DifferentiateAndCompare
@@ -1276,7 +1277,7 @@ DifferentiateAndCompare
 
 ## 11.4 cost
 
-rewrite には「正しいか」だけでなく、
+rewrite には「正しいか」だけでなく，
 
 - expression size
 - tree depth
@@ -1347,13 +1348,13 @@ Cancelled
   user interrupt
 ```
 
-この区別があれば、
+この区別があれば，
 
-> 「能力的にできなかったのか、数学的に閉じないのか分からない」
+> 「能力的にできなかったのか，数学的に閉じないのか分からない」
 
 問題を大幅に改善できる。
 
-数学的に「標準函数で表現不能」を一般に証明することは難しいため、
+数学的に「標準函数で表現不能」を一般に証明することは難しいため，
 
 `NoKnownClosedForm` と `ProvenImpossible` を混同しないことも重要。
 
@@ -1367,7 +1368,7 @@ Cancelled
 
 BigInt 等の representation detail を上位 CAS から隠す。
 
-例えば、
+例えば，
 
 ```cpp
 class Integer {
@@ -1380,7 +1381,7 @@ public:
 
 ## 13.2 algorithm backend
 
-BigUInt 内でも、
+BigUInt 内でも，
 
 ```text
 multiply
@@ -1487,7 +1488,7 @@ D(integrate(f,x),x) ≡ f
 
 ### Solver
 
-返された各有限解 `r` について、
+返された各有限解 `r` について，
 
 ```text
 f(r) == 0
@@ -1501,7 +1502,7 @@ interval が independent high-precision reference を包含することを検査
 
 ## 15.3 Differential testing
 
-開発用テストでは、
+開発用テストでは，
 
 - Python `decimal`
 - mpmath
@@ -1516,7 +1517,7 @@ interval が independent high-precision reference を包含することを検査
 
 grammar-aware random AST generator を作る。
 
-生成時に、
+生成時に，
 
 - depth
 - node count
@@ -1562,7 +1563,7 @@ formatter
 - max working precision
 - allocation count
 
-単に ms だけ測るより、**なぜ遅くなったか説明できる counter** を持つ。
+単に ms だけ測るより，**なぜ遅くなったか説明できる counter** を持つ。
 
 ---
 
@@ -1575,7 +1576,7 @@ formatter
 - current known failures を catalog 化。
 - formatter round-trip corpus を固定。
 
-**新機能追加を止める必要はないが、大規模機能追加より先に行う。**
+**新機能追加を止める必要はないが，大規模機能追加より先に行う。**
 
 ## Phase 1 — Evaluation Infrastructure
 
@@ -1627,7 +1628,7 @@ formatter
 
 まず Integrate の一部だけを移す。
 
-特に、
+特に，
 
 - affine lifting
 - direct special-function primitives
@@ -1651,22 +1652,22 @@ BudgetExceeded / Cancelled の corner case も含める。
 
 # 18. 優先度表
 
-| 項目 | 優先度 | 理由 |
-|---|---:|---|
-| Canonical Algebra | A+ | 既に equality / integrate 検証へ症状が出ている |
-| EvaluationContext / Budget | A | CAS の停止性を共通管理する基盤 |
-| AssumptionContext | A | domain / branch soundness の共有基盤 |
-| PolynomialView | A- | solver / factor / integrate 全てへ効く |
-| RationalFunctionView | A- | hole / pole を保った rational algorithms に必須 |
-| AlgorithmResult / failure reason | A- | 「解けない理由」の区別に必要 |
-| Declarative rule table | B+ | Integrate の成長前に入れたい |
-| Fuzz / property tests | B+ | 今の規模から費用対効果が急増 |
-| Numeric backend boundary | B | 長期保守性 |
-| SeriesData | B | Series / Limit / special function 拡張時 |
-| MachineEvaluator | B- | 性能用途。exact-first semantics より後 |
-| Public stable library API | C | CLI 一本なら急ぐ必要なし |
-| General pattern language | D | 複雑性が高く、現時点では不要 |
-| GUI / Notebook | 非目標 | mmCal の価値と直接関係しない |
+| 項目                             | 優先度 | 理由                                            |
+| -------------------------------- | -----: | ----------------------------------------------- |
+| Canonical Algebra                |     A+ | 既に equality / integrate 検証へ症状が出ている  |
+| EvaluationContext / Budget       |      A | CAS の停止性を共通管理する基盤                  |
+| AssumptionContext                |      A | domain / branch soundness の共有基盤            |
+| PolynomialView                   |     A- | solver / factor / integrate 全てへ効く          |
+| RationalFunctionView             |     A- | hole / pole を保った rational algorithms に必須 |
+| AlgorithmResult / failure reason |     A- | 「解けない理由」の区別に必要                    |
+| Declarative rule table           |     B+ | Integrate の成長前に入れたい                    |
+| Fuzz / property tests            |     B+ | 今の規模から費用対効果が急増                    |
+| Numeric backend boundary         |      B | 長期保守性                                      |
+| SeriesData                       |      B | Series / Limit / special function 拡張時        |
+| MachineEvaluator                 |     B- | 性能用途。exact-first semantics より後          |
+| Public stable library API        |      C | CLI 一本なら急ぐ必要なし                        |
+| General pattern language         |      D | 複雑性が高く，現時点では不要                    |
+| GUI / Notebook                   | 非目標 | mmCal の価値と直接関係しない                    |
 
 ---
 
@@ -1676,9 +1677,9 @@ BudgetExceeded / Cancelled の corner case も含める。
 
 最も大きなリスク。
 
-Eigenmath から学ぶべきなのは、抽象化を増やすこと自体に価値はないという点。
+Eigenmath から学ぶべきなのは，抽象化を増やすこと自体に価値はないという点。
 
-新 layer は、
+新 layer は，
 
 > **現在複数箇所で同じ問題が実際に発生している場合だけ追加する**
 
@@ -1686,7 +1687,7 @@ Eigenmath から学ぶべきなのは、抽象化を増やすこと自体に価�
 
 ## 19.2 canonicalization が意味を壊す
 
-特に、
+特に，
 
 - branch cuts
 - zero denominator
@@ -1702,7 +1703,7 @@ canonical algebra は「数学的に安全な範囲」を明示する。
 
 rule layer が独自 control flow を持ち始めると設計が二重化する。
 
-Rule は、
+Rule は，
 
 - match
 - condition
@@ -1728,13 +1729,13 @@ EvaluationContext
     Diagnostics
 ```
 
-とし、全設定値を一 struct に詰め込まない。
+とし，全設定値を一 struct に詰め込まない。
 
 ---
 
 # 20. 成功条件
 
-このリファクタリングは、新 function 数では評価しない。
+このリファクタリングは，新 function 数では評価しない。
 
 成功条件は以下。
 
@@ -1754,7 +1755,7 @@ EvaluationContext
 
 ### Reliability
 
-- pathological input が crash / stack overflow せず、理由付きで停止。
+- pathological input が crash / stack overflow せず，理由付きで停止。
 - random expression test で infinite rewrite を検出可能。
 - failure が `Unresolved` と `BudgetExceeded` で区別される。
 
@@ -1772,7 +1773,7 @@ mmCal は Eigenmath のように「小さいまま」を最終目標にはでき
 
 既に数値塔・solver・integrator・certified numerics がその天井を越えている。
 
-一方、Qalculate! のように中央の `MathStructure` 相当へすべてを集積すると、将来 API と意味論の整理が非常に重くなる。
+一方，Qalculate! のように中央の `MathStructure` 相当へすべてを集積すると，将来 API と意味論の整理が非常に重くなる。
 
 したがって mmCal が取るべき道は中間である。
 
@@ -1782,7 +1783,7 @@ mmCal は Eigenmath のように「小さいまま」を最終目標にはでき
 > exact semantics と execution policy を分離する。  
 > 全ての計算へ共有 context / budget / assumptions を通す。**
 
-mmCal の現在の最大の価値は、function catalog の大きさではない。
+mmCal の現在の最大の価値は，function catalog の大きさではない。
 
 ```text
 exact-first
@@ -1792,13 +1793,13 @@ self-contained
 
 という三点である。
 
-リファクタリングの目的はこの三点を強化することであり、より巨大な CAS の外観を真似ることではない。
+リファクタリングの目的はこの三点を強化することであり，より巨大な CAS の外観を真似ることではない。
 
 ---
 
 # 22. 持ち帰る設計原則
 
-最後に、周辺環境から持ち帰るべきものを短く固定する。
+最後に，周辺環境から持ち帰るべきものを短く固定する。
 
 ### Eigenmath から
 
@@ -1849,7 +1850,7 @@ self-contained
   - project news / release history
 - Mathematica 1.2.2f33 Enhanced 静的構造解析結果
 
-Git commit 数や外部プロジェクトの現況は **2026-08-12 に確認した時点**の値であり、将来変化する。
+Git commit 数や外部プロジェクトの現況は **2026-08-12 に確認した時点**の値であり，将来変化する。
 
 ---
 
@@ -3053,7 +3054,7 @@ Track not only wall time, but also:
 - maximum working precision;
 - allocation count.
 
-Performance counters should explain *why* a regression occurred.
+Performance counters should explain _why_ a regression occurred.
 
 ---
 
@@ -3124,22 +3125,22 @@ Add only when concrete performance use cases justify it.
 
 # 18. Priority table
 
-| Item | Priority | Reason |
-|---|---:|---|
-| Canonical Algebra | A+ | Existing equality/integration symptoms |
-| EvaluationContext / Budget | A | Shared termination and resource model |
-| AssumptionContext | A | Shared foundation for domain and branch safety |
-| PolynomialView | A- | Benefits solve/factor/integrate |
-| RationalFunctionView | A- | Required for safe hole/pole-aware rational algorithms |
-| AlgorithmResult / failure reasons | A- | Distinguishes inability, unknown, and resource exhaustion |
-| Declarative rule tables | B+ | Needed before integration rules proliferate further |
-| Property / fuzz testing | B+ | High leverage at current project size |
-| Numeric backend boundary | B | Long-term maintainability |
-| SeriesData | B | Needed for Series/Limit/special functions |
-| MachineEvaluator | B- | Performance layer, not semantic foundation |
-| Stable public library API | C | Not urgent for a CLI-only project |
-| General pattern language | D | High complexity, currently unnecessary |
-| GUI / Notebook | Non-goal | Not central to mmCal's value |
+| Item                              | Priority | Reason                                                    |
+| --------------------------------- | -------: | --------------------------------------------------------- |
+| Canonical Algebra                 |       A+ | Existing equality/integration symptoms                    |
+| EvaluationContext / Budget        |        A | Shared termination and resource model                     |
+| AssumptionContext                 |        A | Shared foundation for domain and branch safety            |
+| PolynomialView                    |       A- | Benefits solve/factor/integrate                           |
+| RationalFunctionView              |       A- | Required for safe hole/pole-aware rational algorithms     |
+| AlgorithmResult / failure reasons |       A- | Distinguishes inability, unknown, and resource exhaustion |
+| Declarative rule tables           |       B+ | Needed before integration rules proliferate further       |
+| Property / fuzz testing           |       B+ | High leverage at current project size                     |
+| Numeric backend boundary          |        B | Long-term maintainability                                 |
+| SeriesData                        |        B | Needed for Series/Limit/special functions                 |
+| MachineEvaluator                  |       B- | Performance layer, not semantic foundation                |
+| Stable public library API         |        C | Not urgent for a CLI-only project                         |
+| General pattern language          |        D | High complexity, currently unnecessary                    |
+| GUI / Notebook                    | Non-goal | Not central to mmCal's value                              |
 
 ---
 

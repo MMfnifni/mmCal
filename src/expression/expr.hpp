@@ -132,13 +132,13 @@ struct ArrayExpressionEntry final {
 struct ArrayExpr final {
     std::vector<std::size_t> shape;
 
-    ArrayExpr(std::vector<std::size_t> shape, std::vector<Expr> elements);
-    ArrayExpr(std::vector<std::size_t> shape, std::vector<numeric::BigInt> elements);
-    ArrayExpr(std::vector<std::size_t> shape, std::vector<numeric::Rational> elements);
-    ArrayExpr(std::vector<std::size_t> shape, std::vector<numeric::Number> elements);
-    ArrayExpr(std::vector<std::size_t> shape, std::vector<numeric::DecimalApproximation> elements);
+    ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<Expr> elements);
+    ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<numeric::BigInt> elements);
+    ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<numeric::Rational> elements);
+    ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<numeric::Number> elements);
+    ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<numeric::DecimalApproximation> elements);
     ArrayExpr(
-        std::vector<std::size_t> shape,
+        std::vector<std::size_t> arrayShape,
         std::vector<numeric::ComplexDecimalApproximation> elements);
 
     [[nodiscard]] std::size_t rank() const noexcept;
@@ -195,9 +195,9 @@ private:
     bool hasStoredExpressions_ = false;
 
     ArrayExpr(
-        std::vector<std::size_t> shape,
-        std::shared_ptr<const Storage> storage,
-        std::vector<std::size_t> strides,
+        std::vector<std::size_t> arrayShape,
+        std::shared_ptr<const Storage> backingStorage,
+        std::vector<std::size_t> arrayStrides,
         std::size_t offset,
         std::size_t elementCount,
         ArrayStorageKind storageKind,

@@ -5,7 +5,7 @@ An exact-first CLI calculator and compact CAS for engineering, research, and man
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Current release: v1.5.2**
+**Current release: v1.5.3**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -34,83 +34,65 @@ It also does not immediately convert input to `double` as many ordinary calculat
 In [1]> 999999999999999999999999999999^2
 Out[1]> 999999999999999999999999999998000000000000000000000000000001
 
-In [2]> 0.1+0.2
-Out[2]> 3/10
+In [2]> 0.1+0.2==0.3
+Out[2]> True
 
-In [3]> 0.1+0.2==0.3
-Out[3]> True
+In [3]> 1/3+1/6
+Out[3]> 1/2
 
-In [4]> 1/3+1/6
-Out[4]> 1/2
+In [4]> sqrt[72]+sin[Pi/6]
+Out[4]> 1/2+6sqrt[2]
 
-In [5]> sqrt[72]
-Out[5]> 6sqrt[2]
+In [5]> factor[expand[(x+1)^3]-1]
+Out[5]> x*(x^2+3x+3)
 
-In [6]> sin[Pi/6]
-Out[6]> 1/2
+In [6]> fullSimplify[(x^2-1)/(x-1),x!=1]
+Out[6]> 1+x
 
-In [7]> expand[(x+1)^3]
-Out[7]> x^3+3x^2+3x+1
+In [7]> simplify[sqrt[x^2],element[x,Real]]
+Out[7]> abs[x]
 
-In [8]> factor[x^2-1]
-Out[8]> (x-1)(x+1)
+In [8]> D[exp[x^2],x]
+Out[8]> 2x exp[x^2]
 
-In [9]> fullSimplify[(x^2-1)/(x-1),x!=1]
-Out[9]> 1+x
+In [9]> integrate[x^2+sin[x],{x,0,Pi}]
+Out[9]> 2+Pi^3/3
 
-In [10]> simplify[sqrt[x^2],element[x,Real]]
-Out[10]> abs[x]
+In [10]> limit[(1-cos[x])/x^2,x,0]
+Out[10]> 1/2
 
-In [11]> D[exp[x^2],x]
-Out[11]> 2x exp[x^2]
+In [11]> root[{-2,0,1},2]==sqrt[2]
+Out[11]> True
 
-In [12]> integrate[x^2+sin[x],x]
-Out[12]> x^3/3-cos[x]
+In [12]> element[sqrt[2]+sqrt[3],Rational]
+Out[12]> False
 
-In [13]> integrate[sin[x],{x,0,Pi}]
-Out[13]> 2
+In [13]> solve[1.1^x==x^2,x,Real]
+Out[13]> {x == -2lambertw[log[11/10]/2]/log[11/10], x == -2lambertw[-log[11/10]/2]/log[11/10], x == -2lambertw[-1, -log[11/10]/2]/log[11/10]}
 
-In [14]> limit[(1-cos[x])/x^2,x,0]
-Out[14]> 1/2
+In [14]> N[%,20]
+Out[14]> {x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.71683016840522274}
 
 In [15]> solve[x^2+1==0,x,Complex]
-Out[15]> {x==I,x==-I}
+Out[15]> {x == I, x == -I}
 
-In [16]> (1+I)/(1-I)
-Out[16]> I
+In [16]> A:={{1,2},{3,4}}
+Out[16]> {{1,2},{3,4}}
 
-In [17]> sqrt[-8]
-Out[17]> 2I sqrt[2]
+In [17]> det[dot[A,inverse[A]]]
+Out[17]> 1
 
-In [18]> a:=12
-Out[18]> 12
+In [18]> ifft[fft[{1,2,3,4,5,6,7}]]
+Out[18]> {1,2,3,4,5,6,7}
 
-In [19]> a^2+1
-Out[19]> 145
+In [19]> Pi
+Out[19]> Pi
 
-In [20]> @+a
-Out[20]> 157
+In [20]> N[@+x,30]
+Out[20]> 3.14159265358979323846264338328+x
 
-In [21]> A:={{1,2},{3,4}}
-Out[21]> {{1,2},{3,4}}
-
-In [22]> det[A]
-Out[22]> -2
-
-In [23]> inverse[A]
-Out[23]> {{-2,1},{3/2,-1/2}}
-
-In [24]> solveLinear[A,{5,11}]
-Out[24]> {1,2}
-
-In [25]> dot[A,inverse[A]]
-Out[25]> {{1,0},{0,1}}
-
-In [26]> Pi
-Out[26]> Pi
-
-In [27]> N[%,30]
-Out[27]> 3.14159265358979323846264338328
+In [21]> explain[N[@@,5]]
+Out[21]> {{"Kind", "DecimalApproximation"}, {"Domain", "Real"}, {"Exactness", "CertifiedApproximation"}, {"RequestedPrecisionDigits", 5}, {"DisplayedFractionalDigits", 4}, {"Rounded", True}, {"CertifiedEnclosure", {6908435304715/2199023255552, 13816870609431/4398046511104}}, {"InformationEnclosure", {62831/20000, 62833/20000}}}
 ```
 
 The following sections provide an overview only.
@@ -118,23 +100,23 @@ For function specifications and implementation details, see the [reference](docs
 
 `N` results retain certified enclosures rather than only display text. Certified decimal approximations can therefore participate in ordinary `+ - * /` together with exact Numbers; propagated uncertainty may reduce the reported accuracy, and an outer `N` never reconstructs digits that were not guaranteed by the input approximation.
 
-## v1.5.2
-
-v1.5.2 keeps the exact-first numerical foundation of v1.5.1 while substantially expanding **symbolic calculus, special functions, precision-aware numerical evaluation, Arrays, and linear algebra**.
+## v1.5.3
 
 Highlights:
 
-- function calls are now canonicalized to `name[...]`; `()` is grouping only
-- `In [n]` / `Out[n]` and the `@` / `%` shorthands provide absolute and relative history access
-- integration Knowledge now covers broader trigonometric powers, reciprocal powers, product-to-sum, bounded Weierstrass substitution, inverse-chain matching, and related families
-- added `fresnelc/fresnels`, `hypergeometric1F1/2F1`, incomplete elliptic integrals, and `Ei/Si/Ci/li/polylog`, connected to `D`, `integrate`, and certified `N` where supported
-- `N[expr,p]` is precision-aware, allowing FFT and Matrix operations to enter BigFloat/interval backends without first materializing huge exact intermediate expressions
-- `{...}` is a general brace container; rectangular values are automatically optimized into dense row-major Arrays
-- added Bareiss fraction-free elimination, `solveLinear`, `nullSpace`, LU, rectangular Householder QR, real/complex SVD, and Eigen/Schur support
-- large dense Matrix benchmarks show that at order 1024 the current Expr/Rational representation and parse/storage cost become major bottlenecks before the algorithms themselves
-- release state: internal **2027 / 2027** PASS, black-box **1504 / 1504** PASS, with fixed-seed Matrix/FFT invariants also passing
+- unified Real/Complex `root[...]`, minimal-polynomial reduction, primitive elements, persistent `NumberFieldContext` / `AlgebraicElement`, exact equality, and Real ordering
+- bridged `root[...]` with exact `sqrt` / `cbrt` / `Phi` expressions for comparison, domain reasoning, and Solve without forcing a new display form
+- added domain-short Solve forms such as `solve[equation,Real]`, solve-safe normalization, proof-gated Lambert-W exponential solving, and `N[solve[...]]`
+- promoted certified approximations to first-class numeric values with separate CertifiedEnclosure / InformationEnclosure propagation and structural partial numericalization such as `N[x+Pi,p]`
+- added `zeta`, `digamma`, `trigamma`, and `ibeta`, together with substantial high-precision Gamma/Beta backend optimization
+- added an exact Cyclotomic quotient backend for non-power-of-two FFTs, closing exact 5/7/10/12-point round trips without large root-of-unity expressions
+- replaced the large `Expr::Node` variant with typed nodes and moved dense Arrays to immutable paged packed backing plus stride views
+- added lightweight exact number theory, BigInt bit utilities, `range` / `table` / `map`, and `explain`
+- added persistent semantic fuzzing, black-box timing, and dedicated algebraic/special-function/cyclotomic FFT benchmarks, including measured rejection rationale for optimizations that did not pay off
 
-See [`CHANGELOG.md`](CHANGELOG.md) for release details and [`docs/performance_optimization.md`](docs/performance_optimization.md) for measured adoption/rejection rationale.
+Release validation: internal **2335 / 2335** PASS, black-box **1715 / 1715** PASS, Random Expression Fuzzer **100000 / 100000 PASS** with 8 threads.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for release details.
 
 ## 1. Getting started
 
@@ -148,7 +130,7 @@ mmCal --angle rad
 mmCal --angle grad --fix 8
 ```
 
-- `--fix 16`: Display results with **up to 16 digits after the decimal point**. Unnecessary trailing zeros are omitted
+- `--fix 16`: Display results with **up to 16(0..1000) digits after the decimal point**. Unnecessary trailing zeros are omitted
 - `--angle deg`: Treat trigonometric inputs without an explicit angle unit as degrees
 - `--angle rad`: Radians. This is the default
 - `--angle grad`: Gradians
@@ -430,7 +412,7 @@ integrate[exp[-x],{x,0,Infinity}]
 
 v1.5.2 expands integration as shared Knowledge rather than as isolated rules: finite-Fourier reduction for integer trigonometric powers, sec/csc recurrences for negative powers, cross-frequency product-to-sum, bounded Weierstrass substitution, inverse-chain candidates, quadratic radicals, and related families. Failure diagnostics distinguish unsupported rules, partial evaluation, missing conditions, and recognized families with no known finite closed form in the current standard-function vocabulary. Proof limitations alone do not remove a useful primitive.
 
-### Special functions added in v1.5.2
+### Special functions
 
 The following special-function foundations are connected to symbolic differentiation, integration, and certified numerical evaluation where supported:
 
@@ -442,7 +424,7 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
-Unreleased also adds `zeta`, `digamma`, `trigamma`, and the regularized incomplete beta `ibeta`, connected to representative exact reductions, derivative relations, and certified `N` on their supported real domains. Lightweight exact number theory now includes `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient`, deterministic over the `uint64` range; larger BigInts are not promoted from probable-prime evidence to certified truth.
+v1.5.3 also adds `zeta`, `digamma`, `trigamma`, and the regularized incomplete beta `ibeta`, connected to representative exact reductions, derivative relations, and certified `N` on their supported real domains. Lightweight exact number theory now includes `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient`, deterministic over the `uint64` range; larger BigInts are not promoted from probable-prime evidence to certified truth.
 
 Representative reductions include:
 
@@ -480,16 +462,16 @@ limit[1/x,x,0,-1]         -> -Infinity
 
 ```text
 solve[x^2-2==0,x]
--> {x==sqrt[2], x==-sqrt[2]}
+-> {x == sqrt[2], x == -sqrt[2]}
 
 solve[x^2<4,x,Real]
 -> {x in Real if x>-2&&x<2}
 
 solve[exp[x]==2,x,Real]
--> {x==log[2]}
+-> {x == log[2]}
 
 solve[sin[x]==0,x,Real]
--> {x==Pi k where k in Integer}
+-> {x == Pi k where k in Integer}
 ```
 
 Real periodic `sin/cos/tan` equations can now return integer-parameter families when the argument is affine in the solve variable with an exact nonzero linear coefficient. Nonlinear arguments and complete Complex-domain families are not fabricated from a principal inverse.
@@ -498,20 +480,20 @@ For higher-degree Rational-coefficient polynomials over Real, the solver can fal
 
 ```text
 solve[x^5-x+1==0,x,Real]
--> {x==root[{1,-1,0,0,0,1},1]}
+-> {x == root[{1,-1,0,0,0,1},1]}
 
 N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 ```
 
-Complex roots are represented by `root[{a0,...,an},k,Complex]`, using certified isolating disks and exact Root fallback for high-degree Rational-polynomial Complex Solve. Individual Root construction now reduces the defining polynomial to the selected proven Rational irreducible factor when bounded factorization succeeds (degree at most 16). For Root-to-Root `+ - * /`, a proof-based primitive-element path is used when the operand minimal polynomials are proven irreducible and `theta=alpha+c beta` is certified to generate an irreducible extension of product degree; otherwise arithmetic falls back to exact resultants plus certified root re-identification. General algebraic equality/ordering, `rootApproximant`, and complete Q-factorization beyond the current budget remain deliberate future work.
+Complex roots are represented by `root[{a0,...,an},k,Complex]`, using certified isolating disks and exact Root fallback for high-degree Rational-polynomial Complex Solve. Individual Root construction now reduces the defining polynomial to the selected proven Rational irreducible factor when bounded factorization succeeds (degree at most 16). For Root-to-Root `+ - * /`, a proof-based primitive-element path is used when the operand minimal polynomials are proven irreducible and `theta=alpha+c beta` is certified to generate an irreducible extension of product degree; otherwise arithmetic falls back to exact resultants plus certified root re-identification. v1.5.3 includes bounded exact algebraic equality and Real ordering. General field merging across different primitive generators/subfields, `rootApproximant`, and complete Q-factorization beyond the current budget remain deliberate future work.
 
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.
 
 ## 8. Arrays, matrices, vectors, and statistics
 
-`{...}` is a general finite brace container rather than matrix-only syntax. Values whose children share one shape are automatically optimized to the dense **shape + row-major flat storage** `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` remain general braces. Matrix functions audit rectangularity at their boundary and leave non-rectangular values unevaluated with a Warning. Only empty shapes that cannot be preserved by braces alone are formatted through `reshape`.
+`{...}` is a general finite brace container rather than matrix-only syntax. Values whose children share one shape are automatically optimized to a dense `ArrayExpr`; in v1.5.3 its physical storage uses immutable packed pages of 1024 elements while the logical layout is represented by shape / offset / strides. Transpose and selected view operations share the backing storage. Heterogeneous-shape values such as `{Q,R}` remain general braces. Matrix functions audit rectangularity at their boundary and leave non-rectangular values unevaluated with a Warning. Only empty shapes that cannot be preserved by braces alone are formatted through `reshape`.
 
 ```text
 dimensions[{{1,2,3},{4,5,6}}]
@@ -706,7 +688,7 @@ D N In Out Exit Clear Defs UnDef
 - `docs/mathematics.md` — Mathematical policy for domains, principal values, and numerical evaluation
 - `docs/architecture.md` — Internal architecture for developers
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
-- `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.2, with benchmark rationale
+- `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.3, with benchmark rationale
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
 - `CHANGELOG.md` — Major changes by release
 
@@ -723,7 +705,7 @@ If mmCal is used in an academic publication or product, attribution beyond the B
 
 ## 15. Tests and development environment
 
-At the v1.5.2 release point, this project contains 2,027 internal regression tests and 1,504 black-box tests.
+At the v1.5.3 release point, this project contains 2335 internal regression tests and 1715 black-box tests.
 They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures. A separate `mmCal.Benchmarks` project provides fixed-seed randomized correctness checks, algorithm-threshold sweeps, and performance comparisons without mixing benchmark workloads into the ordinary test suite.
 
 Primary Windows development environment:

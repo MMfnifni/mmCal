@@ -8,14 +8,14 @@
 namespace mmcal::evaluation {
 
 UserFunctionDefinition::UserFunctionDefinition(
-    expression::Symbol name,
-    std::vector<expression::Symbol> parameters,
-    expression::Expr body,
-    expression::OriginMap origins)
-    : name(std::move(name)),
-      parameters(std::move(parameters)),
-      body(std::move(body)),
-      origins(std::move(origins)) {}
+    expression::Symbol functionName,
+    std::vector<expression::Symbol> functionParameters,
+    expression::Expr functionBody,
+    expression::OriginMap functionOrigins)
+    : name(std::move(functionName)),
+      parameters(std::move(functionParameters)),
+      body(std::move(functionBody)),
+      origins(std::move(functionOrigins)) {}
 
 std::size_t UserFunctionDefinition::arity() const noexcept {
     return parameters.size();

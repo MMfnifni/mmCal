@@ -15,10 +15,10 @@ namespace mmcal::evaluation {
 
 struct UserFunctionDefinition final {
     UserFunctionDefinition(
-        expression::Symbol name,
-        std::vector<expression::Symbol> parameters,
-        expression::Expr body,
-        expression::OriginMap origins = {});
+        expression::Symbol functionName,
+        std::vector<expression::Symbol> functionParameters,
+        expression::Expr functionBody,
+        expression::OriginMap functionOrigins = {});
 
     expression::Symbol name;
     std::vector<expression::Symbol> parameters;

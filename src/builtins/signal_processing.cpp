@@ -586,7 +586,7 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 }
 
 /*
-旧 exact FFT dispatch（Stage 7-7以前）。
+旧 exact FFT dispatch（v1.5.3のcyclotomic backend導入前）。
 
     return vectorExpr(radix2Transform(
         input, inverse, registry, mathematics, angles, cache));

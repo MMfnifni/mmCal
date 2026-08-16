@@ -1,8 +1,10 @@
 # mmCal 内部構造
 
+> 対象バージョン: **v1.5.3**
+
 ## 方針
 
-mmCalは、入力をすぐ機械精度浮動小数へ変換せず、整数・有理数・記号式を可能な限り正確に保つ。近似計算、表示上の固定小数、数学的なセッション設定は別の責務として扱う。
+mmCalは，入力をすぐ機械精度浮動小数へ変換せず，整数・有理数・記号式を可能な限り正確に保つ。近似計算，表示上の固定小数，数学的なセッション設定は別の責務として扱う。
 
 依存方向は原則として次の順序を守る。
 
@@ -30,40 +32,39 @@ CoreからCLIへ依存しない。数学層からKernelSessionへ依存しない
 
 ### `expression`
 
-評価対象となるExpr、Call、Array、Symbolなどの構造を所有する。表示方法やユーザー入力位置は本体の数学値から分離する。
+評価対象となるExpr，Call，Array，Symbolなどの構造を所有する。表示方法やユーザー入力位置は本体の数学値から分離する。
 
 ### `mathematics`
 
-函数の定義域、逆函数、単調性、値域、周期、definednessなど、評価文脈に依存しない数学知識を`MathRegistry`へ集約する。`KnowledgeContext`はユーザー仮定や片側極限など局所的な事実を保持し，関係式の左右反転や安全な非零知識も共通推論として利用する。`ValueFacts`は正のdomain所属だけでなく，非整数exact Rational，既知irrational/transcendental定数，証明済み高次algebraic Root等から`NonInteger` / `NonRational`相当の排他的事実も導出し，`element`とSolver constraintの双方へ共有する。
+函数の定義域，逆函数，単調性，値域，周期，definednessなど，評価文脈に依存しない数学知識を`MathRegistry`へ集約する。`KnowledgeContext`はユーザー仮定や片側極限など局所的な事実を保持し，関係式の左右反転や安全な非零知識も共通推論として利用する。`ValueFacts`は正のdomain所属だけでなく，非整数exact Rational，既知irrational/transcendental定数，証明済み高次algebraic Root等から`NonInteger` / `NonRational`相当の排他的事実も導出し，`element`とSolver constraintの双方へ共有する。
 
 ### `simplification`
 
-principal branchや定義域を壊さない範囲で式を標準化する。`Add`はAST全域のstrict total orderingで決定的に並べ，積・除算はdefinednessを保つ範囲で係数・分子因子・分母因子へ正規化する。`FullSimplify`は複数候補を探索し、式コストで選択する。
+principal branchや定義域を壊さない範囲で式を標準化する。`Add`はAST全域のstrict total orderingで決定的に並べ，積・除算はdefinednessを保つ範囲で係数・分子因子・分母因子へ正規化する。`FullSimplify`は複数候補を探索し，式コストで選択する。
 
 ### `symbolic`
 
-`D`, `integrate`, `limit`, 代数変形、多項式、置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。Unreleasedでは`AlgebraicNumber` specialized IRを追加した。実Rootはexact Rational Sturm列で定義多項式の異なる実根を分離し，Rational isolating intervalと1-based実根indexを持つ。Complex Rootは`root[{a0,...,an},k,Complex]`としてsquare-free monic polynomialの全複素根をcertified isolating diskへ分離し，決定的な1-based orderingを与える。一般Exprを巨大variantへ戻すのではなく，Root Callを必要時だけ`RealAlgebraicNumber` / `ComplexAlgebraicNumber` viewへ解釈する。個別Root生成時にはbounded exact Q-factorizationで選択rootを含む有理既約因子を証明できた場合だけminimal polynomialへ縮約する。Root同士のfield arithmeticでは，operand minimal polynomialの既約性と`theta=alpha+c beta`の積次数既約多項式を証明できた場合にtensor-product algebraからprimitive-element power basisへexactに落とし，そのsimple extension内で結果minimal polynomialを線形従属から導く。証明済みsimple extensionは`NumberFieldContext`（minimal polynomial + chosen embedding + reduction）と`AlgebraicElement`（Rational power-basis coordinates）としてRoot Callの内部cacheへ保持し，同一field lineageの後続演算で再利用する。Q上既約性を証明できる単独Rootにもgenerator elementを付与する。Call再構築は`Expr::rebuildCall`へ集約し，引数が構造的に不変な場合だけcacheを保持するため，Formatter/structural equalityにはfield表現を露出しない。証明できない場合はresultantとoperand/result isolating regionの再同定へfallbackし，候補次数budgetを超える場合や結果rootを一意に証明できない場合は元のsymbolic式を保持する。Stage 3では数学的equalityをstructural equalityから分離し，同一field座標，同一Root identity，既約minimal polynomialの相違，必要時のbounded exact differenceで`==` / `!=`を証明する。Real orderingはsame-fieldの差をchosen embedding上でexact interval評価するか，異なるReal Rootのisolating intervalを細分化して証明する。Complex Rootの決定的列挙順は数学的`<`へ流用しない。 Stage 7-6では`symbolic::exactAlgebraicValue`を表現境界として追加し，canonical Rootだけでなくexact Rational/complex Rational，安全な`sqrt` / `cbrt`，`Phi`，およびbounded exact arithmeticを同じ`AlgebraicNumber` viewへ変換する。Comparison / KnowledgeContext / direct Solve bindingはこのviewを共有し，Formatterや元Exprのcanonical表現は変更しない。bridgeは有限node/power budgetとproof-only変換を使い，approximationから代数数を推測しない。Stage 4では同じminimal polynomial・Root domain・root indexを持つ**同一embedded generator identity**だけを，256-entry bounded LRUのthread-safe weak internerで共有する。cacheは`weak_ptr`だけを保持してContext寿命を延ばさず，evictionは性能にだけ影響する。異なるembedding，異なるprimitive generator，同型体やsubfield関係を推測する一般merge/canonicalizationは行わない。Stage 5-1では，Root pairから一度構成したprimitive-element compositumと両operand embeddingも64-entry bounded cacheで再利用する。Real `AlgebraicElement`のcanonical Root materializationは，chosen generator interval上のexact Rational interval評価とSturm root countからroot indexを直接証明し，全根isolationの重複を避ける。persistent fieldがminimal polynomialの既約性を既に証明している場合は，不可能なRational / Gaussian-rational退化を高精度refinementで再検査しない。 Stage 5-2では`NumberFieldContext`にfieldごと最大16 entryのthread-safe reciprocal LRUを追加し，同一power-basis座標の逆元をextended Euclidで繰り返し再構成しない。cacheはexact Rational座標だけを保持し，`inverse(inverse(x))=x`を利用して逆方向も同時登録する。有理定数要素は`Q`が任意のnumber fieldの部分体であることを使って多項式Euclidを経ず直接逆数化する。multiplication matrix cacheは12次体での実測上，構築費に対して通常乗算の短縮が約10%に留まったため現段階では導入しない。 Stage 5-3ではminimal polynomial導出を，各候補次数でGauss-Jordanを再構築する方式から`1,a,a^2,...`のincremental exact Krylov row-echelonへ変更し，最初の線形従属をminimal polynomialとして回収する。同じbasis stateをprimitive-element tensor algebraの`alpha` / `beta`座標変換にも再利用する。導出済みminimal polynomialはexact power-basis座標をkeyにfieldごと16-entryのthread-safe LRUへ保持する。multiplication-matrix minpolyやmodular reconstructionは，現在のbounded degreeでは実装複雑性に対する実測利益が不足するため保留する。
+`D`, `integrate`, `limit`, 代数変形，多項式，置換を実装する。積分候補の一部は`D`を検証器として利用する。v1.5.1のderivative-back harnessはrule familyを横断して検証するが，証明器の能力不足だけで既存積分を拒否しないようStrict/ResolutionOnlyを分ける。v1.5.3では`AlgebraicNumber` specialized IRを追加した。実Rootはexact Rational Sturm列で定義多項式の異なる実根を分離し，Rational isolating intervalと1-based実根indexを持つ。Complex Rootは`root[{a0,...,an},k,Complex]`としてsquare-free monic polynomialの全複素根をcertified isolating diskへ分離し，決定的な1-based orderingを与える。一般Exprを巨大variantへ戻すのではなく，Root Callを必要時だけ`RealAlgebraicNumber` / `ComplexAlgebraicNumber` viewへ解釈する。個別Root生成時にはbounded exact Q-factorizationで選択rootを含む有理既約因子を証明できた場合だけminimal polynomialへ縮約する。Root同士のfield arithmeticでは，operand minimal polynomialの既約性と`theta=alpha+c beta`の積次数既約多項式を証明できた場合にtensor-product algebraからprimitive-element power basisへexactに落とし，そのsimple extension内で結果minimal polynomialを線形従属から導く。証明済みsimple extensionは`NumberFieldContext`（minimal polynomial + chosen embedding + reduction）と`AlgebraicElement`（Rational power-basis coordinates）としてRoot Callの内部cacheへ保持し，同一field lineageの後続演算で再利用する。Q上既約性を証明できる単独Rootにもgenerator elementを付与する。Call再構築は`Expr::rebuildCall`へ集約し，引数が構造的に不変な場合だけcacheを保持するため，Formatter/structural equalityにはfield表現を露出しない。証明できない場合はresultantとoperand/result isolating regionの再同定へfallbackし，候補次数budgetを超える場合や結果rootを一意に証明できない場合は元のsymbolic式を保持する。Stage 3では数学的equalityをstructural equalityから分離し，同一field座標，同一Root identity，既約minimal polynomialの相違，必要時のbounded exact differenceで`==` / `!=`を証明する。Real orderingはsame-fieldの差をchosen embedding上でexact interval評価するか，異なるReal Rootのisolating intervalを細分化して証明する。Complex Rootの決定的列挙順は数学的`<`へ流用しない。 v1.5.3では`symbolic::exactAlgebraicValue`を表現境界として追加し，canonical Rootだけでなくexact Rational/complex Rational，安全な`sqrt` / `cbrt`，`Phi`，およびbounded exact arithmeticを同じ`AlgebraicNumber` viewへ変換する。Comparison / KnowledgeContext / direct Solve bindingはこのviewを共有し，Formatterや元Exprのcanonical表現は変更しない。bridgeは有限node/power budgetとproof-only変換を使い，approximationから代数数を推測しない。Stage 4では同じminimal polynomial・Root domain・root indexを持つ**同一embedded generator identity**だけを，256-entry bounded LRUのthread-safe weak internerで共有する。cacheは`weak_ptr`だけを保持してContext寿命を延ばさず，evictionは性能にだけ影響する。異なるembedding，異なるprimitive generator，同型体やsubfield関係を推測する一般merge/canonicalizationは行わない。Stage 5-1では，Root pairから一度構成したprimitive-element compositumと両operand embeddingも64-entry bounded cacheで再利用する。Real `AlgebraicElement`のcanonical Root materializationは，chosen generator interval上のexact Rational interval評価とSturm root countからroot indexを直接証明し，全根isolationの重複を避ける。persistent fieldがminimal polynomialの既約性を既に証明している場合は，不可能なRational / Gaussian-rational退化を高精度refinementで再検査しない。 Stage 5-2では`NumberFieldContext`にfieldごと最大16 entryのthread-safe reciprocal LRUを追加し，同一power-basis座標の逆元をextended Euclidで繰り返し再構成しない。cacheはexact Rational座標だけを保持し，`inverse(inverse(x))=x`を利用して逆方向も同時登録する。有理定数要素は`Q`が任意のnumber fieldの部分体であることを使って多項式Euclidを経ず直接逆数化する。multiplication matrix cacheは12次体での実測上，構築費に対して通常乗算の短縮が約10%に留まったため現段階では導入しない。 Stage 5-3ではminimal polynomial導出を，各候補次数でGauss-Jordanを再構築する方式から`1,a,a^2,...`のincremental exact Krylov row-echelonへ変更し，最初の線形従属をminimal polynomialとして回収する。同じbasis stateをprimitive-element tensor algebraの`alpha` / `beta`座標変換にも再利用する。導出済みminimal polynomialはexact power-basis座標をkeyにfieldごと16-entryのthread-safe LRUへ保持する。multiplication-matrix minpolyやmodular reconstructionは，現在のbounded degreeでは実装複雑性に対する実測利益が不足するため保留する。
 
 ### `solver`
 
-多項式，Rational function，制約付き解集合，実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。`solve[equation,domain]`は未知user symbolが一意な場合だけ変数を推定し，protected symbolを変数として誤受理しない。`solve`は`HoldAll`入力を一般Evaluatorへ渡さず，`solver/solve_normalization.*`でbuiltin aliasのcanonical head化と証明付きSimplifier rewriteだけを行ってから分類する。これにより`E^x` / `exp[x]`，`ln` / `log`，`log2` / `log10`等の表現差をSolver能力差へしない。Real exponential classifierは正baseの非零性，constant-base `a^u==r`の証明付き対数反転，bounded Lambert W familyを扱い，専用SolverがbindingのReal性まで証明した場合は`SolutionBranch`にcertified domainを付与して後段constraint処理へ伝える。certificateはsubdomain方向へは昇格させない。 `N[SolutionSet]`は解集合構造・未知変数・条件を保持し，数値閉包なbinding右辺だけをcertified evaluatorへ再帰投入する。Lambert Wは実branch `k=0/-1`を単調逆函数としてcertified interval評価する。複素値が存在するがcertified Complex backend未実装なbranchはbackend-unsupportedとして保持し，数学的DomainErrorとは区別する。Unreleasedでは既存のlinear/quadratic/binomial/Rational-root solverで閉じないRational係数高次多項式について，Real domainではSturm isolation，Complex/default domainではcertified complex root isolationをexact Root fallbackとして利用する。Complex Rootはpairwise-disjoint isolating diskを証明できた場合だけ採用し，証明できない候補をComplex全解として捏造しない。Unreleasedでは`SolutionBranch::freeVariables`をsolver変数の自由変数だけでなく，`where k in Integer`のような**branch-local formal parameter**にも一般化した。実軸`sin/cos/tan`の周期解はMathRegistryのperiod / principal inverse / real rangeを利用し，solve変数に対するexact affine argumentだけをinteger-parameter familyへ展開する。formal parameterはEnvironmentのユーザー変数ではなくSolutionSet内で局所束縛され，非線形argumentやComplex全解は安全な表現がない限り未解決のまま保持する。
+多項式，Rational function，制約付き解集合，実軸で安全な超越函数反転を扱う。完全解を証明できない場合は未解決状態を保持する。`solve[equation,domain]`は未知user symbolが一意な場合だけ変数を推定し，protected symbolを変数として誤受理しない。`solve`は`HoldAll`入力を一般Evaluatorへ渡さず，`solver/solve_normalization.*`でbuiltin aliasのcanonical head化と証明付きSimplifier rewriteだけを行ってから分類する。これにより`E^x` / `exp[x]`，`ln` / `log`，`log2` / `log10`等の表現差をSolver能力差へしない。Real exponential classifierは正baseの非零性，constant-base `a^u==r`の証明付き対数反転，bounded Lambert W familyを扱い，専用SolverがbindingのReal性まで証明した場合は`SolutionBranch`にcertified domainを付与して後段constraint処理へ伝える。certificateはsubdomain方向へは昇格させない。 `N[SolutionSet]`は解集合構造・未知変数・条件を保持し，数値閉包なbinding右辺だけをcertified evaluatorへ再帰投入する。Lambert Wは実branch `k=0/-1`を単調逆函数としてcertified interval評価する。複素値が存在するがcertified Complex backend未実装なbranchはbackend-unsupportedとして保持し，数学的DomainErrorとは区別する。v1.5.3では既存のlinear/quadratic/binomial/Rational-root solverで閉じないRational係数高次多項式について，Real domainではSturm isolation，Complex/default domainではcertified complex root isolationをexact Root fallbackとして利用する。Complex Rootはpairwise-disjoint isolating diskを証明できた場合だけ採用し，証明できない候補をComplex全解として捏造しない。v1.5.3では`SolutionBranch::freeVariables`をsolver変数の自由変数だけでなく，`where k in Integer`のような**branch-local formal parameter**にも一般化した。実軸`sin/cos/tan`の周期解はMathRegistryのperiod / principal inverse / real rangeを利用し，solve変数に対するexact affine argumentだけをinteger-parameter familyへ展開する。formal parameterはEnvironmentのユーザー変数ではなくSolutionSet内で局所束縛され，非線形argumentやComplex全解は安全な表現がない限り未解決のまま保持する。
 
 ### `approximation`
 
-任意精度作業値と区間演算を使い、必要桁が保証できる数値近似を生成する。`Pi`はbinary-splitting Chudnovsky，`exp/log`はbinary splittingと保証付きrange reduction，巨大Radianの三角函数はPi保証区間によるargument reductionを使う。深すぎるASTはOSのstack overflowへ到達する前に拒否する。
+任意精度作業値と区間演算を使い，必要桁が保証できる数値近似を生成する。`Pi`はbinary-splitting Chudnovsky，`exp/log`はbinary splittingと保証付きrange reduction，巨大Radianの三角函数はPi保証区間によるargument reductionを使う。深すぎるASTはOSのstack overflowへ到達する前に拒否する。
 
 v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経路を追加した。これは全評価を近似化するモードではなく，明示対応したbuiltinだけが利用する。FFTではexact Exprを展開せず，`ComplexInterval`上のradix-2/Bluestein backendへ降りる。Matrixでも同じ`ApproximationContext`を使い，expression→certified interval変換，decimalization，guard-digit refinementを共通helperへ集約する。whole-expression certified評価が閉じない通常Callでは，free symbolを含まないnumeric subtreeだけをstructuralに近似し，Hold属性を持つCallは勝手に再構築しない。表示ではexact有限小数を不要に0埋めせず，certified fixed-digit結果の末尾0列は1桁だけ残して圧縮する。
 
+v1.5.3ではexact非2冪FFT用に`CyclotomicFieldContext`を追加した。これは一般`NumberFieldContext`と異なりembedding/root isolationを持たず，cyclotomic quotient `Q[t]/Phi_n(t)`，power-basis reduction，`t^k`座標だけを保持する軽量なexact kernelである。FFT内部ではRational座標だけを加減乗算し，出力境界で一つの既存`cis[-2 Pi/n Rad]` generatorへ戻す。Gaussian Rationalは`4|conductor`となるよう必要時`lcm(n,4)`へ拡張する。degree budget超過やsymbolic membership未証明では従来generic Expr/DFTへfallbackするため，このbackendはexact-first意味論を狭めない。
 
-Stage 7-7ではexact非2冪FFT用に`CyclotomicFieldContext`を追加した。これは一般`NumberFieldContext`と異なりembedding/root isolationを持たず，cyclotomic quotient `Q[t]/Phi_n(t)`，power-basis reduction，`t^k`座標だけを保持する軽量なexact kernelである。FFT内部ではRational座標だけを加減乗算し，出力境界で一つの既存`cis[-2 Pi/n Rad]` generatorへ戻す。Gaussian Rationalは`4|conductor`となるよう必要時`lcm(n,4)`へ拡張する。degree budget超過やsymbolic membership未証明では従来generic Expr/DFTへfallbackするため，このbackendはexact-first意味論を狭めない。
-
-Unreleasedの`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,p]`の`p`は有効10進桁数であり，非zero表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，丸め半量子`0.5*10^(e-p+1)`をInformationEnclosureへ含める。backend内部のguard桁は後からAccuracyとして回収しない。通常四則演算とcertified対応scalar函数では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。ordered comparisonや`min/max`の離散判定はInformationEnclosureだけで証明できる場合に限る。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。`:fix`はこれとは独立した固定小数表示である。
+v1.5.3の`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,p]`の`p`は有効10進桁数であり，非zero表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，丸め半量子`0.5*10^(e-p+1)`をInformationEnclosureへ含める。backend内部のguard桁は後からAccuracyとして回収しない。通常四則演算とcertified対応scalar函数では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。ordered comparisonや`min/max`の離散判定はInformationEnclosureだけで証明できる場合に限る。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。`:fix`はこれとは独立した固定小数表示である。
 
 ### `linear_algebra`
 
 rank-2 Array上の線形代数algorithmをbuiltin dispatchから分離する。`MatrixView`は`ArrayExpr`の論理要素列を参照し，書換えが必要なalgorithmだけ`MatrixBuffer`へ複製する。exact Number行列はpivot loop内でExpr/Simplifierを使わない専用backend，`N`配下ではBigFloat/`ComplexInterval`系のcertified backendへ分岐する。approximate Matrix側には既に`PointMatrix` / `IntervalMatrix` / `ComplexMatrix`等の連続working bufferがあるため，永続Array storageとalgorithm temporaryは分離する。
 
-ユーザー構文の`{...}`は一般の有限brace containerとする。child shapeが一致する矩形値はdense `ArrayExpr`へ自動最適化し，shapeが異なる`{Q,R}`やragged値は`ListExpr`として保持する。Unreleasedの`ArrayExpr`は固定1024要素のimmutable pageをshared backingとして持ち，各pageをInteger / Rational / Number / DecimalApproximation / ComplexDecimalApproximation / Genericの最狭表現でpacked保持する。Array全体の意味論上の型は常に`ExprKind::Array`であり，page種別はstorage detailである。shape / offset / stridesをbackingから分離したため，transposeはstride交換だけのzero-copy view，contiguous reshapeや一部sliceもbackingを共有する。Matrix algorithmは`ArrayExpr`だけを受け取り，Evaluator dispatchの矩形性監査で`ListExpr`をWarning + 未評価へ戻す。zero-length dimensionはdense Arrayのshapeとして保持する。`dimensions`は一般braceに対して全childに共通するrectangular prefixを返し，`length` / `at`はArray/List双方を扱う。
+ユーザー構文の`{...}`は一般の有限brace containerとする。child shapeが一致する矩形値はdense `ArrayExpr`へ自動最適化し，shapeが異なる`{Q,R}`やragged値は`ListExpr`として保持する。v1.5.3の`ArrayExpr`は固定1024要素のimmutable pageをshared backingとして持ち，各pageをInteger / Rational / Number / DecimalApproximation / ComplexDecimalApproximation / Genericの最狭表現でpacked保持する。Array全体の意味論上の型は常に`ExprKind::Array`であり，page種別はstorage detailである。shape / offset / stridesをbackingから分離したため，transposeはstride交換だけのzero-copy view，contiguous reshapeや一部sliceもbackingを共有する。Matrix algorithmは`ArrayExpr`だけを受け取り，Evaluator dispatchの矩形性監査で`ListExpr`をWarning + 未評価へ戻す。zero-length dimensionはdense Arrayのshapeとして保持する。`dimensions`は一般braceに対して全childに共通するrectangular prefixを返し，`length` / `at`はArray/List双方を扱う。
 
 `ArrayBuilder`は完成済みpageをimmutable化し，promotionを現在の最大1024要素page内に限定する。したがって大規模numeric Arrayの末尾でsymbolic値が現れても，全要素をGeneric `Expr`へ再構築しない。矩形brace literalはLowererから単一builderへleafを直接投入し，numeric literalを一度`Expr`化してからpackする二重表現を避ける。
 
@@ -75,27 +76,27 @@ SVDは`linear_algebra/svd.*`へ分離し，reduced `{U,S,V}`を返す。一般�
 
 Eigenは`linear_algebra/eigen.*`へ分離する。exact pathは上三角行列の対角固有値，対角行列の標準基底，distinct-root exact Number 2×2を扱い，一般数値pathはComplex BigFloat上でHessenberg reduction → implicit shifted QR → complex Schur形へ進む。Schur vectorを蓄積し，固有vectorは上三角Schur行列からback substitutionして列として返す。停止精度は出力桁より十分厳しく設定し，元入力の`ComplexInterval`に対して`A Q-Q T`および`A v-λv`をinterval演算で監査する。一般非正規行列では固有量のcomponentwise enclosureを安易に主張せず，Schur/eigenpair relationをcertificate境界とする。重根・defective/near-defective caseで安定な独立固有vectorを作れない場合は未評価へ戻す。
 
-v1.5.2の1024×1024 dense Matrix監査では，算法より先に`Expr::Node` / Rational / parse-loweringの固定費がmemory bottleneckになることを確認した。Unreleasedの第一段階では公開`Expr` APIを維持したtyped-node化により，同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`で最大RSSを`693312 KiB`から`299668 KiB`へ約56.8%削減した。第二段階ではpersistent Arrayをimmutable paged packed backing + stride viewへ移行し，benchmark入力も`ArrayBuilder`から直接packed構築する経路へ変更した結果，同負荷の最大RSSは約`136576 KiB`（133.4 MiB），transpose本体は約0.059 msとなった。単一flat packed vector案はtransposeのdeep copyで退行したため採用していない。BigUInt/BigInt SBOは保守性を優先して今回は見送り，必要なら別experimentとして測定する。
+v1.5.2の1024×1024 dense Matrix監査では，算法より先に`Expr::Node` / Rational / parse-loweringの固定費がmemory bottleneckになることを確認した。v1.5.3の第一段階では公開`Expr` APIを維持したtyped-node化により，同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`で最大RSSを`693312 KiB`から`299668 KiB`へ約56.8%削減した。第二段階ではpersistent Arrayをimmutable paged packed backing + stride viewへ移行し，benchmark入力も`ArrayBuilder`から直接packed構築する経路へ変更した結果，同負荷の最大RSSは約`136576 KiB`（133.4 MiB），transpose本体は約0.059 msとなった。単一flat packed vector案はtransposeのdeep copyで退行したため採用していない。BigUInt/BigInt SBOは保守性を優先して今回は見送り，必要なら別experimentとして測定する。
 
 Stage 3ではexact実数（整数/Rational）行列を行ごとの分母LCMで整数行列へliftし，`IntegerMatrixBuffer`上のBareiss fraction-free eliminationへdispatchする。分母除去は共通`liftRealRows` helperへ集約し，`det`はBareissの最終pivotから復元，`rref` / `matrixRank` / `nullSpace`はfraction-free forward eliminationを共有する。`nullSpace`はfree columnを昇順に選ぶRREF basisを構成し，full column rankでもshape `{0,n}` を保持する。`inverse`は `B=D A` に対するaugmented matrix `[B|D]`，`solveLinear[A,b]`は `[A|b]` を同じkernelへ渡し，後者ではpivot候補を係数列だけに制限して整合性と一意性を判定する。これにより中間Rational生成をpivot loopからほぼ排除する。exact複素行列は現在も`Number` Gaussian backendへfallbackする。`N[solveLinear[...],p]`はexact解を先に構築せず，certified interval augmented eliminationを直接試す。一方`matrixRank` / `nullSpace`はrank deficiencyに不連続なので，exact入力ではexact pivot structureを優先し，近似入力ではintervalでpivot構造を証明できる場合だけ結果を確定する。
 
 ### `evaluation`
 
-Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参照、診断を統合する。評価器は深い通常式でC++再帰stackを消費しにくい明示task-stack方式を維持する。`N`は特殊taskとして第1引数を保持し、precisionを先に確定してから子式を評価する。precision contextはstack管理されるためnested `N`でも外側の要求精度を破壊しない。`N`開始時と子評価後のWarning数を比較し，内側函数が具体的diagnosticを既に出した場合は外側のgeneric `N::unevaluated`を抑止する。certified backend未実装は`CertifiedBackendUnsupported`で数学的domain violationから分離し，`N::unsupported`へ変換する。
+Builtin属性，Hold規則，iterator，代入，ユーザー函数，履歴参照，診断を統合する。評価器は深い通常式でC++再帰stackを消費しにくい明示task-stack方式を維持する。`N`は特殊taskとして第1引数を保持し，precisionを先に確定してから子式を評価する。precision contextはstack管理されるためnested `N`でも外側の要求精度を破壊しない。`N`開始時と子評価後のWarning数を比較し，内側函数が具体的diagnosticを既に出した場合は外側のgeneric `N::unevaluated`を抑止する。certified backend未実装は`CertifiedBackendUnsupported`で数学的domain violationから分離し，`N::unsupported`へ変換する。
 
 ### `kernel`
 
-1セッションのユーザー定義、履歴、角度設定、乱数状態、Warning/Infoを所有する。通常の`reset()`はRNGをentropy reseedする一方，benchmark/fuzzer等で独立評価を連続実行する用途には`resetForIndependentEvaluation()`を使い，定義・履歴・入力番号・diagnosticだけを初期化してRNG streamと角度設定を保持する。
+1セッションのユーザー定義，履歴，角度設定，乱数状態，Warning/Infoを所有する。通常の`reset()`はRNGをentropy reseedする一方，benchmark/fuzzer等で独立評価を連続実行する用途には`resetForIndependentEvaluation()`を使い，定義・履歴・入力番号・diagnosticだけを初期化してRNG streamと角度設定を保持する。
 
 ### `cli`
 
-標準入出力、`:fix`, `:status`, 起動時引数、console titleを担当する。`:fix`は表示だけを変え、KernelのExprや履歴を書き換えない。
+標準入出力，`:fix`, `:status`, 起動時引数，console titleを担当する。`:fix`は表示だけを変え，KernelのExprや履歴を書き換えない。
 
 ## 数学知識の共有
 
-`MathRegistry`は函数固有の安定したmetadata、`KnowledgeContext`は評価時の仮定、`ValueFacts`はExprから導出した符号・実数性などの問い合わせを担当する。
+`MathRegistry`は函数固有の安定したmetadata，`KnowledgeContext`は評価時の仮定，`ValueFacts`はExprから導出した符号・実数性などの問い合わせを担当する。
 
-`D`, `integrate`, `limit`, `solve`は別algorithmのまま維持するが、domain・inverse・range・periodicity等は可能な限り共通metadataを参照する。
+`D`, `integrate`, `limit`, `solve`は別algorithmのまま維持するが，domain・inverse・range・periodicity等は可能な限り共通metadataを参照する。
 
 ## 表示
 
@@ -103,11 +104,11 @@ Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参�
 
 - `a+(-b)`は`a-b`
 - 不要な演算子空白は出さない
-- `xy`が1つのSymbolへ読まれる場合など、字句境界が必要な積では空白を残す
+- `xy`が1つのSymbolへ読まれる場合など，字句境界が必要な積では空白を残す
 - `2exp[x]`，`Pi^0x`，Array隣接などlexer/parserと衝突する境界では明示`*`を使う
 - 優先順位・結合規則を守るため必要な括弧は残す
 
-小数表示指定はCLI presentationであり、内部の正確値を近似値へ置換しない。指定桁数へ丸めた後、表示上不要な小数部末尾の0だけを除去する。
+小数表示指定はCLI presentationであり，内部の正確値を近似値へ置換しない。指定桁数へ丸めた後，表示上不要な小数部末尾の0だけを除去する。
 
 ## stack安全性
 
@@ -121,7 +122,7 @@ Builtin属性、Hold規則、iterator、代入、ユーザー函数、履歴参�
 - solver recursion
 - formatter traversal
 
-病的入力は通常の評価失敗・未対応として処理し、OS-level stack overflowへ到達させないことを目標とする。
+病的入力は通常の評価失敗・未対応として処理し，OS-level stack overflowへ到達させないことを目標とする。
 
 ## Benchmark project
 

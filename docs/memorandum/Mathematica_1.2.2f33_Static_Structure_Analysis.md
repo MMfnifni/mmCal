@@ -2,32 +2,32 @@
 
 **対象アーカイブ:** `Mathematica_1.22.zip`  
 **実体バージョン:** `1.2.2f33 Enhanced`  
-**解析方式:** Classic Mac OSファイル構造、MacBinary/resource fork、68k `CODE` resource、可読ASCIIシンボル、同梱Mathematica言語ソース（`.m`）の静的解析  
+**解析方式:** Classic Mac OSファイル構造，MacBinary/resource fork，68k `CODE` resource，可読ASCIIシンボル，同梱Mathematica言語ソース（`.m`）の静的解析  
 **SHA-256:** `b0cd32505d41b32f9b36715b7e5615b8abfd86724ef9fa81ff49742803dc5afd`
 
 ---
 
 ## 0. この報告書の範囲と確度
 
-本報告書は、対象アーカイブを**実行せず**に解析した結果をまとめたものである。主な証拠は次の4種類である。
+本報告書は，対象アーカイブを**実行せず**に解析した結果をまとめたものである。主な証拠は次の4種類である。
 
 1. **MacBinaryヘッダとresource fork**
-   - ファイルタイプ、creator、data/resource fork長、`vers`、`SIZE`、`CODE`等を直接解析した。
+   - ファイルタイプ，creator，data/resource fork長，`vers`，`SIZE`，`CODE`等を直接解析した。
 2. **68kコードresource中の可読シンボル**
    - `oIntegrate`, `oSolve`, `BuildDispatch`, `UseDispatch`, `NewBignum`等を抽出した。
-   - これは内部機能の存在を示す強い証拠だが、可読名だけから低レベルアルゴリズムまで断定はしない。
+   - これは内部機能の存在を示す強い証拠だが，可読名だけから低レベルアルゴリズムまで断定はしない。
 3. **同梱 `.m` ソース**
-   - パターン規則、パッケージ、起動処理、積分表、Series、統計、数値近似などはソースそのものを読める。
+   - パターン規則，パッケージ，起動処理，積分表，Series，統計，数値近似などはソースそのものを読める。
 4. **Front End resourceと文字列**
-   - Notebook/Cell、local/remote kernel、通信、印刷、PostScript等の構造を確認した。
+   - Notebook/Cell，local/remote kernel，通信，印刷，PostScript等の構造を確認した。
 
-本文では、必要に応じて次の意味で表現を使い分ける。
+本文では，必要に応じて次の意味で表現を使い分ける。
 
 - **確認:** ファイルまたはソースに直接存在する。
-- **強い推定:** 複数のバイナリ/resource/source証拠からほぼ確実だが、命令単位の逆アセンブルは未実施。
+- **強い推定:** 複数のバイナリ/resource/source証拠からほぼ確実だが，命令単位の逆アセンブルは未実施。
 - **未確定:** 68k逆アセンブルまたは実行トレースが必要。
 
-したがって本報告書は「完全な逆コンパイル」ではない。しかし、**システムの責務分割、評価言語の構造、主要CAS機能の実装層、起動構造、rule layerの設計**についてはかなり深いところまで確認できる。
+したがって本報告書は「完全な逆コンパイル」ではない。しかし，**システムの責務分割，評価言語の構造，主要CAS機能の実装層，起動構造，rule layerの設計**についてはかなり深いところまで確認できる。
 
 ---
 
@@ -35,7 +35,7 @@
 
 ## 1.1 バージョン
 
-`Mathematica.bin`, `Math A.bin`, `Math B.bin`, `Math C.bin`, `Mathematica Prefs.bin` の `vers` resourceはいずれも、
+`Mathematica.bin`, `Math A.bin`, `Math B.bin`, `Math C.bin`, `Mathematica Prefs.bin` の `vers` resourceはいずれも，
 
 ```text
 1.2.2f33 Enhanced
@@ -44,9 +44,9 @@ Copyright Wolfram Research, Inc. 1988-90
 
 を保持している。
 
-したがってファイル名の `1.22` は、実体としては **Mathematica 1.2.2 build f33 Enhanced** を指す。
+したがってファイル名の `1.22` は，実体としては **Mathematica 1.2.2 build f33 Enhanced** を指す。
 
-MacBinaryの作成・更新時刻も1988～1990年に集中しており、Classic Mac版の実体を保存したものと判断できる。
+MacBinaryの作成・更新時刻も1988～1990年に集中しており，Classic Mac版の実体を保存したものと判断できる。
 
 ## 1.2 Classic Macのfork構造
 
@@ -66,46 +66,46 @@ Math C                 0 bytes
 Math C.bin              60,416 bytes
 ```
 
-0 byte側は「壊れたファイル」ではない。`Mathematica`, `Math A/B/C` は実質的にresource fork主体のClassic Macファイルであり、`.bin`側がMacBinary IIIとしてresource forkとFinder metadataを保存している。
+0 byte側は「壊れたファイル」ではない。`Mathematica`, `Math A/B/C` は実質的にresource fork主体のClassic Macファイルであり，`.bin`側がMacBinary IIIとしてresource forkとFinder metadataを保存している。
 
 確認したタイプコードは次の通り。
 
-| ファイル | Macintosh type | creator | data fork | resource fork |
-|---|---|---|---:|---:|
-| `Mathematica.bin` | `APPL` | `OMEG` | 0 | 678,522 |
-| `Math A.bin` | `OCDA` | `OMEG` | 0 | 633,884 |
-| `Math B.bin` | `OCDB` | `OMEG` | 0 | 768,057 |
-| `Math C.bin` | `OCDC` | `OMEG` | 0 | 60,275 |
-| `Mathematica Help.bin` | `TEXT` | `OMEG` | 297,713 | 281,709 |
-| `Mathematica Prefs.bin` | `OMPF` | `OMEG` | 0 | 11,528 |
+| ファイル                | Macintosh type | creator | data fork | resource fork |
+| ----------------------- | -------------- | ------- | --------: | ------------: |
+| `Mathematica.bin`       | `APPL`         | `OMEG`  |         0 |       678,522 |
+| `Math A.bin`            | `OCDA`         | `OMEG`  |         0 |       633,884 |
+| `Math B.bin`            | `OCDB`         | `OMEG`  |         0 |       768,057 |
+| `Math C.bin`            | `OCDC`         | `OMEG`  |         0 |        60,275 |
+| `Mathematica Help.bin`  | `TEXT`         | `OMEG`  |   297,713 |       281,709 |
+| `Mathematica Prefs.bin` | `OMPF`         | `OMEG`  |         0 |        11,528 |
 
 `OCDA/OCDB/OCDC` はこのアプリケーション固有の外部コード容器と考えるのが自然である。
 
 ## 1.3 同梱ソースの規模
 
-`Packages` 以下で可読な `.m` は **68ファイル、13,690行、531,029 bytes**。行数はClassic MacのCR改行をLFへ正規化して数えた。
+`Packages` 以下で可読な `.m` は **68ファイル，13,690行，531,029 bytes**。行数はClassic MacのCR改行をLFへ正規化して数えた。
 
 ディレクトリ別では次の通り。
 
-| 領域 | ファイル数 | 行数 | bytes |
-|---|---:|---:|---:|
-| `Algebra` | 4 | 484 | 14,380 |
-| `Calculus` | 5 | 1,210 | 38,353 |
-| `DataAnalysis` | 6 | 2,548 | 97,408 |
-| `DiscreteMath` | 5 | 410 | 9,750 |
-| `Examples` | 10 | 511 | 18,576 |
-| `Geometry` | 2 | 242 | 5,663 |
-| `Graphics` | 7 | 1,577 | 48,664 |
-| `LinearAlgebra` | 2 | 72 | 1,405 |
-| `Miscellaneous` | 2 | 569 | 13,023 |
-| `NumberTheory` | 3 | 103 | 2,197 |
-| `NumericalMath` | 4 | 1,604 | 56,748 |
-| `StartUp` | 14 | 4,008 | 211,580 |
-| `Utilities` | 2 | 56 | 1,277 |
-| `init.m` | 1 | 86 | 4,648 |
-| `sysinit.m` | 1 | 210 | 7,357 |
+| 領域            | ファイル数 |  行数 |   bytes |
+| --------------- | ---------: | ----: | ------: |
+| `Algebra`       |          4 |   484 |  14,380 |
+| `Calculus`      |          5 | 1,210 |  38,353 |
+| `DataAnalysis`  |          6 | 2,548 |  97,408 |
+| `DiscreteMath`  |          5 |   410 |   9,750 |
+| `Examples`      |         10 |   511 |  18,576 |
+| `Geometry`      |          2 |   242 |   5,663 |
+| `Graphics`      |          7 | 1,577 |  48,664 |
+| `LinearAlgebra` |          2 |    72 |   1,405 |
+| `Miscellaneous` |          2 |   569 |  13,023 |
+| `NumberTheory`  |          3 |   103 |   2,197 |
+| `NumericalMath` |          4 | 1,604 |  56,748 |
+| `StartUp`       |         14 | 4,008 | 211,580 |
+| `Utilities`     |          2 |    56 |   1,277 |
+| `init.m`        |          1 |    86 |   4,648 |
+| `sysinit.m`     |          1 |   210 |   7,357 |
 
-特に大きいものは、
+特に大きいものは，
 
 - `StartUp/Series.m`: 1,130行
 - `NumericalMath/Approximations.m`: 987行
@@ -118,13 +118,13 @@ Math C.bin              60,416 bytes
 
 である。
 
-この分布だけでも、1.2.2の機能の多くが単なる68k builtinではなく、**Mathematica言語自身で書かれた上位レイヤ**だったことが分かる。
+この分布だけでも，1.2.2の機能の多くが単なる68k builtinではなく，**Mathematica言語自身で書かれた上位レイヤ**だったことが分かる。
 
 ---
 
 # 2. 全体アーキテクチャ
 
-静的解析から見える全体像は、おおむね次のようになる。
+静的解析から見える全体像は，おおむね次のようになる。
 
 ```text
 ┌────────────────────────────────────────────┐
@@ -158,7 +158,7 @@ Math C.bin              60,416 bytes
         └─────────────────────────────┘
 ```
 
-重要なのは、**Front Endとkernelの分離がすでに明確**なことである。
+重要なのは，**Front Endとkernelの分離がすでに明確**なことである。
 
 ---
 
@@ -168,20 +168,20 @@ Math C.bin              60,416 bytes
 
 `Mathematica.bin` のresource forkには **471 resources / 26 resource types** が存在する。
 
-主なものは、
+主なものは，
 
-| type | count |
-|---|---:|
-| `CODE` | 59 |
-| `STR ` | 159 |
-| `STR#` | 11 |
-| `DITL` | 48 |
-| `DLOG` | 36 |
-| `MENU` | 25 |
-| `PICT` | 12 |
-| `WIND` | 6 |
-| `ICON` | 6 |
-| `ICN#` | 9 |
+| type   | count |
+| ------ | ----: |
+| `CODE` |    59 |
+| `STR ` |   159 |
+| `STR#` |    11 |
+| `DITL` |    48 |
+| `DLOG` |    36 |
+| `MENU` |    25 |
+| `PICT` |    12 |
+| `WIND` |     6 |
+| `ICON` |     6 |
+| `ICN#` |     9 |
 
 である。
 
@@ -227,11 +227,11 @@ tcp
 - `Image`: 画像
 - `Files`: ファイル管理
 
-すなわちFront Endは単なる端末ではなく、**Notebook editor + graphics/printing + kernel session manager**である。
+すなわちFront Endは単なる端末ではなく，**Notebook editor + graphics/printing + kernel session manager**である。
 
 ## 3.3 local / remote kernel
 
-Front End内の文字列には明示的に、
+Front End内の文字列には明示的に，
 
 ```text
 No Kernel
@@ -239,7 +239,7 @@ Local Kernel
 Remote Kernel
 ```
 
-があり、さらに、
+があり，さらに，
 
 ```text
 Do you really want to quit the local kernel?
@@ -252,7 +252,7 @@ Automatically start local kernel
 
 またCODE resourceに`MathTalk`, `Telecom`, `tcp`がある。
 
-これは、1.2.2時点ですでに、
+これは，1.2.2時点ですでに，
 
 ```text
 Notebook Front End
@@ -264,7 +264,7 @@ Notebook Front End
 
 ## 3.4 外部kernelファイルのロード
 
-Front End内には、
+Front End内には，
 
 ```text
 Please locate the file "Math A".
@@ -273,18 +273,18 @@ If you can't find this file, you won't be able to evaluate any expressions ...
 
 という文字列が `Math A/B/C` それぞれについて存在する。
 
-したがって `Math A/B/C` は付属データではなく、**ローカル評価器を成立させる必須コードセグメント**である。
+したがって `Math A/B/C` は付属データではなく，**ローカル評価器を成立させる必須コードセグメント**である。
 
 ## 3.5 メモリ要求
 
-`SIZE` resourceは、
+`SIZE` resourceは，
 
 - preferred: **3,145,728 bytes = 3 MB**
 - minimum: **524,288 bytes = 512 KB**
 
 を指定している。
 
-当時のMacintoshアプリとして、Front Endとローカルkernelをひとつのセッションで扱うための比較的大きなメモリモデルだったことが分かる。
+当時のMacintoshアプリとして，Front Endとローカルkernelをひとつのセッションで扱うための比較的大きなメモリモデルだったことが分かる。
 
 ---
 
@@ -292,18 +292,18 @@ If you can't find this file, you won't be able to evaluate any expressions ...
 
 ## 4.1 68k CODE resource
 
-| ファイル | CODE数 | CODE総bytes |
-|---|---:|---:|
-| `Math A.bin` | 51 | 632,230 |
-| `Math B.bin` | 56 | 766,308 |
-| `Math C.bin` | 4 | 59,722 |
-| **計** | **111** | **1,458,260** |
+| ファイル     |  CODE数 |   CODE総bytes |
+| ------------ | ------: | ------------: |
+| `Math A.bin` |      51 |       632,230 |
+| `Math B.bin` |      56 |       766,308 |
+| `Math C.bin` |       4 |        59,722 |
+| **計**       | **111** | **1,458,260** |
 
-Front Endの512 KBとは別に、約1.46 MBの68kコードが外部kernelセグメントとして存在する。
+Front Endの512 KBとは別に，約1.46 MBの68kコードが外部kernelセグメントとして存在する。
 
 ## 4.2 `Math A`
 
-可読シンボルから、主に次の領域が確認できる。
+可読シンボルから，主に次の領域が確認できる。
 
 - polynomial / algebra:
   - `oFactor`, `oApart`, `oTogether`, `oResultant`
@@ -418,11 +418,11 @@ ProbablePrimeQ
 
 Hypergeometric, Legendre, Jacobi, Hermite, Laguerre, elliptic functions等。
 
-このため `Math B` は、**一般評価器・rule runtimeと多数の数学builtinが同居する主要kernelセグメント**とみられる。
+このため `Math B` は，**一般評価器・rule runtimeと多数の数学builtinが同居する主要kernelセグメント**とみられる。
 
 ## 4.4 `Math C`
 
-`Math C` は約60 KBしかなく、可読operator名も少ない。
+`Math C` は約60 KBしかなく，可読operator名も少ない。
 
 ```text
 oAiryAi
@@ -436,9 +436,9 @@ oMinus
 oSubtract
 ```
 
-したがって、**Airy/Bessel系の専門数値コードを分離したセグメント**である可能性が高い。
+したがって，**Airy/Bessel系の専門数値コードを分離したセグメント**である可能性が高い。
 
-`Plus`等が同居する理由は逆アセンブルなしには確定できないため、単純に「算術kernel」とは断定しない。
+`Plus`等が同居する理由は逆アセンブルなしには確定できないため，単純に「算術kernel」とは断定しない。
 
 ---
 
@@ -446,7 +446,7 @@ oSubtract
 
 ## 5.1 `sysinit.m`
 
-`Packages/sysinit.m` 自身が、kernel起動時に必ず評価され、これがないとkernelは起動しないと記している。
+`Packages/sysinit.m` 自身が，kernel起動時に必ず評価され，これがないとkernelは起動しないと記している。
 
 実際のboot sequenceは概ね次の通り。
 
@@ -467,7 +467,7 @@ Needs["StartUp`LinearProgramming`"]
 End[]
 ```
 
-その後Front End専用の `FE`` contextを作り、
+その後Front End専用の `FE`` contextを作り，
 
 - `$Display = "stdout"`
 - completion用 `FE`FC`
@@ -476,9 +476,9 @@ End[]
 
 等を定義する。
 
-さらにMac版では`Quit`/`Exit`を直接kernel終了に使わせず、Front EndのFile menuを使うよう差し替えている。
+さらにMac版では`Quit`/`Exit`を直接kernel終了に使わせず，Front EndのFile menuを使うよう差し替えている。
 
-最後に、
+最後に，
 
 ```text
 $Path = Join[$Path, {StringJoin[First[$Path], ":StartUp"]}]
@@ -489,7 +489,7 @@ $Path = Join[$Path, {StringJoin[First[$Path], ":StartUp"]}]
 
 ## 5.2 `init.m`
 
-`init.m`はユーザー向け初期化ファイルで、
+`init.m`はユーザー向け初期化ファイルで，
 
 - `$Path`追加
 - default ViewPoint
@@ -499,7 +499,7 @@ $Path = Join[$Path, {StringJoin[First[$Path], ":StartUp"]}]
 
 ## 5.3 `.m`でありNotebookでもある
 
-`sysinit.m`や`init.m`には、
+`sysinit.m`や`init.m`には，
 
 ```text
 fontset = ...
@@ -508,41 +508,41 @@ fontset = ...
 
 といったFront Endのcell/style metadataがコメント領域に大量に含まれている。
 
-つまり同じファイルが、
+つまり同じファイルが，
 
 - kernelからは**Mathematica source**
 - Front Endからは**整形されたNotebook-like文書**
 
 として機能する。
 
-さらに14個の`.m`には`.m.bin`も同梱され、data forkのsourceに加えてresource fork側のMac固有情報まで保存されている。
+さらに14個の`.m`には`.m.bin`も同梱され，data forkのsourceに加えてresource fork側のMac固有情報まで保存されている。
 
-これは当時の「コードと文書の融合」が単なる理念ではなく、ファイル形式にも表れている。
+これは当時の「コードと文書の融合」が単なる理念ではなく，ファイル形式にも表れている。
 
 ---
 
 # 6. 評価言語の中核構造
 
-この版を理解する上で最も重要なのは、数学builtin一覧ではなく**評価runtime**である。
+この版を理解する上で最も重要なのは，数学builtin一覧ではなく**評価runtime**である。
 
-同梱source全体では、おおよそ次の構文が使われている。
+同梱source全体では，おおよそ次の構文が使われている。
 
-| 構文 | 出現数 |
-|---|---:|
-| `:=` | 1,172 |
-| `/;` | 454 |
-| `:>` | 338 |
-| `/:` | 461 |
-| `Block[` | 380 |
-| `Function[` | 63 |
-| `While[` | 42 |
-| `Dispatch[` | 10 |
+| 構文        | 出現数 |
+| ----------- | -----: |
+| `:=`        |  1,172 |
+| `/;`        |    454 |
+| `:>`        |    338 |
+| `/:`        |    461 |
+| `Block[`    |    380 |
+| `Function[` |     63 |
+| `While[`    |     42 |
+| `Dispatch[` |     10 |
 
-数値は単純文字列countであり構文木解析ではないが、設計傾向を見るには十分である。
+数値は単純文字列countであり構文木解析ではないが，設計傾向を見るには十分である。
 
 ## 6.1 Set / SetDelayed / UpSet / TagSet
 
-kernelには、
+kernelには，
 
 ```text
 oSet
@@ -554,9 +554,9 @@ oTagUnset
 
 が存在する。
 
-つまり定義は単なる「symbol tableへの値代入」ではなく、**式patternに対するruleをsymbolへ関連付ける仕組み**としてkernelの中心にある。
+つまり定義は単なる「symbol tableへの値代入」ではなく，**式patternに対するruleをsymbolへ関連付ける仕組み**としてkernelの中心にある。
 
-後世の`OwnValues`, `DownValues`等の公開API名は、このbuildの`info.m`には見当たらない。一方バイナリには、
+後世の`OwnValues`, `DownValues`等の公開API名は，このbuildの`info.m`には見当たらない。一方バイナリには，
 
 ```text
 ValueCell
@@ -565,9 +565,9 @@ FreeValue
 CopyValueList
 ```
 
-があり、内部には明確なrule/value storageが存在する。
+があり，内部には明確なrule/value storageが存在する。
 
-この版では、ユーザー側の introspection は主に `Definition[symbol]` として提供されている。
+この版では，ユーザー側の introspection は主に `Definition[symbol]` として提供されている。
 
 ## 6.2 pattern engine
 
@@ -585,7 +585,7 @@ CopyValueList
 - `Rule`
 - `RuleDelayed`
 
-バイナリ側にも、
+バイナリ側にも，
 
 ```text
 scanPattern
@@ -618,9 +618,9 @@ CheckCondition
 - `ReadProtected`
 - `Constant`
 
-特に`Flat`, `OneIdentity`, `Orderless`について、usage text自身が「pattern matchingで考慮される」と記している。
+特に`Flat`, `OneIdentity`, `Orderless`について，usage text自身が「pattern matchingで考慮される」と記している。
 
-これは重要で、pattern matcherが単なるtree wildcard matchingではなく、
+これは重要で，pattern matcherが単なるtree wildcard matchingではなく，
 
 ```text
 head attributes
@@ -636,9 +636,9 @@ CASとしての強さはこの層に大きく依存している。
 
 ## 6.4 Holdと評価制御
 
-kernelには`oHold`, `oRelease`, `Condition`, `SetDelayed`等があり、source側でも`HoldFirst/HoldAll`が使用される。
+kernelには`oHold`, `oRelease`, `Condition`, `SetDelayed`等があり，source側でも`HoldFirst/HoldAll`が使用される。
 
-例として、
+例として，
 
 ```mathematica
 Attributes[Movie] = {HoldFirst};
@@ -648,19 +648,19 @@ Attributes[ValueQ] = {HoldAll};
 
 等が確認できる。
 
-したがって「函数を呼ぶ前に全引数を評価する」という単純なcall semanticsではなく、**headごとにargument evaluation policyが変わる**。
+したがって「函数を呼ぶ前に全引数を評価する」という単純なcall semanticsではなく，**headごとにargument evaluation policyが変わる**。
 
 ## 6.5 Dispatch — rule tableのコンパイル
 
-公開関数として、
+公開関数として，
 
 ```text
 Dispatch[{lhs1->rhs1, lhs2->rhs2, ...}]
 ```
 
-があり、usageには「optimized dispatch table representation」と明記されている。
+があり，usageには「optimized dispatch table representation」と明記されている。
 
-さらにバイナリには、
+さらにバイナリには，
 
 ```text
 CreateDispatch
@@ -672,7 +672,7 @@ UpdateDispatch
 
 が存在する。
 
-`Algebra/Trigonometry.m`では実際に、
+`Algebra/Trigonometry.m`では実際に，
 
 ```mathematica
 TrigCanonicalRel = Dispatch[TrigCanonicalRel]
@@ -683,21 +683,21 @@ TrigCanonical[e_] := e //. TrigCanonicalRel
 
 これは非常に重要である。
 
-**数学知識は可読rule listとして記述し、実行時には専用dispatch表へ変換する**という二段構成が、すでに1.2.2で成立している。
+**数学知識は可読rule listとして記述し，実行時には専用dispatch表へ変換する**という二段構成が，すでに1.2.2で成立している。
 
 ## 6.6 Block中心のスコープ
 
 同梱sourceでは`Block[`が約380回使われる。
 
-一方、少なくとも本buildのusage table、kernel operator文字列、同梱sourceには`Module`が確認できない。
+一方，少なくとも本buildのusage table，kernel operator文字列，同梱sourceには`Module`が確認できない。
 
-したがってこの時代のパッケージ実装は、
+したがってこの時代のパッケージ実装は，
 
 - `BeginPackage`
 - ``Private` context`
 - `Block`
 
-を中心に構成されており、後年一般化するlexical local symbol生成よりも、**context分離 + dynamic localization**が主要技法だったと考えられる。
+を中心に構成されており，後年一般化するlexical local symbol生成よりも，**context分離 + dynamic localization**が主要技法だったと考えられる。
 
 ---
 
@@ -705,7 +705,7 @@ TrigCanonical[e_] := e //. TrigCanonicalRel
 
 同梱sourceには約40個の`BeginPackage[...]`が存在する。
 
-典型構造は、
+典型構造は，
 
 ```text
 BeginPackage["DataAnalysis`ContinuousDistributions`",
@@ -724,7 +724,7 @@ EndPackage[]
 
 である。
 
-この構造には、
+この構造には，
 
 1. public context
 2. dependency context
@@ -733,7 +733,7 @@ EndPackage[]
 
 が一体化している。
 
-つまりpackage systemは単なるファイル読み込み規約ではなく、**symbol namespaceそのものがmodule system**である。
+つまりpackage systemは単なるファイル読み込み規約ではなく，**symbol namespaceそのものがmodule system**である。
 
 ---
 
@@ -741,25 +741,25 @@ EndPackage[]
 
 ## 8.1 `info.m`
 
-`StartUp/info.m`には、
+`StartUp/info.m`には，
 
 - 648個の`::usage` assignment
 - 647 unique symbols
 
 を確認した。
 
-graphicsからpattern、solver、numerics、I/O、control flowまで、大半のSystem symbolのusageがここへ集約されている。
+graphicsからpattern，solver，numerics，I/O，control flowまで，大半のSystem symbolのusageがここへ集約されている。
 
 ## 8.2 `msg.m`
 
-`StartUp/msg.m`には、
+`StartUp/msg.m`には，
 
 - 441 message assignments
 - 439 unique `symbol::tag`
 
 を確認した。
 
-たとえば、
+たとえば，
 
 ```text
 Solve::ifun
@@ -770,7 +770,7 @@ Graphics::...
 
 のような診断が数学コードと分離されている。
 
-つまりこの版ですでに、
+つまりこの版ですでに，
 
 ```text
 machine code / algorithm
@@ -811,7 +811,7 @@ RaiseAccuracy
 LowerAccuracy
 ```
 
-公開側には、
+公開側には，
 
 ```text
 N
@@ -827,11 +827,11 @@ Chop
 
 が存在する。
 
-従って任意精度計算は、上位packageで多桁decimalを模倣しているのではなく、**kernel内部のnumber representationと評価dispatchに組み込まれている**。
+従って任意精度計算は，上位packageで多桁decimalを模倣しているのではなく，**kernel内部のnumber representationと評価dispatchに組み込まれている**。
 
 ## 9.2 型組合せ別演算
 
-バイナリには、
+バイナリには，
 
 ```text
 PlusII
@@ -847,11 +847,11 @@ TimesCC
 
 のような名前が残る。
 
-I/F/R/Cの正確な内部type対応は逆アセンブルしない限り断定しないが、少なくとも**operand型の組合せごとに算術経路を分けるdispatch**が存在した可能性が極めて高い。
+I/F/R/Cの正確な内部type対応は逆アセンブルしない限り断定しないが，少なくとも**operand型の組合せごとに算術経路を分けるdispatch**が存在した可能性が極めて高い。
 
 ## 9.3 ここからは分からないこと
 
-静的文字列だけでは、
+静的文字列だけでは，
 
 - bignum limb幅
 - radix
@@ -893,9 +893,9 @@ Decompose
 
 ## 10.1 `GroebnerBasis` は薄いwrapper
 
-興味深いことに、`StartUp/GroebnerBasis.m` は20行程度しかない。
+興味深いことに，`StartUp/GroebnerBasis.m` は20行程度しかない。
 
-実装は概念的に、
+実装は概念的に，
 
 ```text
 GroebnerBasis
@@ -909,11 +909,11 @@ AlgebraicRulesData
 
 という構成である。
 
-つまりGroebner basisを独立した巨大algorithmとして公開APIへ直結させるのではなく、**一般的なalgebraic rule生成器の結果を再利用している**。
+つまりGroebner basisを独立した巨大algorithmとして公開APIへ直結させるのではなく，**一般的なalgebraic rule生成器の結果を再利用している**。
 
-`AlgebraicRulesData`はopaque capsuleに近い内部表現であり、`GroebnerBasis.m`ではその第6要素へアクセスしている。
+`AlgebraicRulesData`はopaque capsuleに近い内部表現であり，`GroebnerBasis.m`ではその第6要素へアクセスしている。
 
-内部データ形式の厳密な意味までは未確定だが、solverとGroebner処理が共通代数基盤を共有していることは強く示唆される。
+内部データ形式の厳密な意味までは未確定だが，solverとGroebner処理が共通代数基盤を共有していることは強く示唆される。
 
 ---
 
@@ -921,7 +921,7 @@ AlgebraicRulesData
 
 ## 11.1 kernel側の入口
 
-`Math A`には、
+`Math A`には，
 
 ```text
 oMainSolve
@@ -935,9 +935,9 @@ TryLinearSolve
 
 等がある。
 
-`info.m`では`MainSolve`を、SolveとEliminateが呼び出すunderlying functionと明記している。
+`info.m`では`MainSolve`を，SolveとEliminateが呼び出すunderlying functionと明記している。
 
-したがって構造は概ね、
+したがって構造は概ね，
 
 ```text
 Solve / Eliminate
@@ -954,7 +954,7 @@ Solve / Eliminate
 
 ## 11.2 transcendental solutionは意図的に不完全性を通知
 
-`msg.m`には、
+`msg.m`には，
 
 ```text
 Solve::ifun =
@@ -964,21 +964,21 @@ so some solutions may not be found."
 
 がある。
 
-また、
+また，
 
 ```text
 Solve::tdep
 Solve::dinv
 ```
 
-等があり、
+等があり，
 
 - transcendental dependence
 - inverse functionsを適用できない複数argument依存
 
 を区別している。
 
-これはsolverが「何でも代数的に解く」のではなく、
+これはsolverが「何でも代数的に解く」のではなく，
 
 ```text
 algebraic core
@@ -992,7 +992,7 @@ incompleteness warning
 
 ## 11.3 inverse function table
 
-`StartUp/InverseFunctions.m`には、
+`StartUp/InverseFunctions.m`には，
 
 ```text
 Sin ↔ ArcSin
@@ -1001,7 +1001,7 @@ Tan ↔ ArcTan
 Log ↔ Exp
 ```
 
-だけでなく、Jacobi elliptic functionsのinverse mappingまで定義されている。
+だけでなく，Jacobi elliptic functionsのinverse mappingまで定義されている。
 
 つまりinverse knowledgeの一部はkernel hard-codeではなく**symbolic tableとして外出し**されている。
 
@@ -1011,7 +1011,7 @@ Log ↔ Exp
 
 同梱ソースで最も興味深い部分の一つである。
 
-`StartUp/IntegralTables.m`は798行あり、
+`StartUp/IntegralTables.m`は798行あり，
 
 - `:>` 約253
 - `/;` 約151
@@ -1022,7 +1022,7 @@ Log ↔ Exp
 
 ## 12.1 rule groupを段階化
 
-主なrule tableは、
+主なrule tableは，
 
 ```text
 IntBase
@@ -1058,7 +1058,7 @@ TrigCanonicalRel
 
 である。
 
-これは積分器が、
+これは積分器が，
 
 ```text
 normalization
@@ -1073,22 +1073,22 @@ normalization
 
 ## 12.2 rule tableの保護
 
-冒頭に、
+冒頭に，
 
 ```mathematica
 Attributes[Lock] = HoldAll
 Lock[x_] := Attributes[x] = {Protected, Locked}
 ```
 
-があり、各table構築後に`Lock[...]`している。
+があり，各table構築後に`Lock[...]`している。
 
-つまり数学規則は可変なMathematica expressionとして構築される一方、完成後は**Protected + Lockedで固定**する。
+つまり数学規則は可変なMathematica expressionとして構築される一方，完成後は**Protected + Lockedで固定**する。
 
 可読性と実行時安全性を両立する発想である。
 
 ## 12.3 三角積分
 
-`PureTrigInt`には、
+`PureTrigInt`には，
 
 - 基本三角函数
 - sec/csc
@@ -1098,13 +1098,13 @@ Lock[x_] := Attributes[x] = {Protected, Locked}
 
 が明示的に存在する。
 
-たとえば正の偶数冪`Sin[X]^n`, `Cos[X]^n`にはdouble-factorialを使った一般ruleがあり、個々の指数を列挙していない。
+たとえば正の偶数冪`Sin[X]^n`, `Cos[X]^n`にはdouble-factorialを使った一般ruleがあり，個々の指数を列挙していない。
 
 ## 12.4 affine argument lifting
 
 特に興味深いruleが `TrigInt` にある。
 
-概念的には、
+概念的には，
 
 ```text
 Int[f[a X + b]^n]
@@ -1120,7 +1120,7 @@ X → a X+b
 
 とする。
 
-ソースにはその直前に、歴史的に実に味わい深い、
+ソースにはその直前に，歴史的に実に味わい深い，
 
 ```text
 (* tags don't work arrgh! *)
@@ -1128,17 +1128,17 @@ X → a X+b
 
 というコメントまで残っている。
 
-これは、個別patternを増殖させる代わりに、**argumentのaffine structureを一度標準形へ持ち上げて再利用する**設計である。
+これは，個別patternを増殖させる代わりに，**argumentのaffine structureを一度標準形へ持ち上げて再利用する**設計である。
 
 ## 12.5 half-angle rationalization
 
-`IntToTan` / `IntFromTan`では、
+`IntToTan` / `IntFromTan`では，
 
 ```text
 T = Tan[X/2]
 ```
 
-として、
+として，
 
 ```text
 Sin[X] → 2T/(1+T^2)
@@ -1148,11 +1148,11 @@ Tan[X] → ...
 
 へ変換する。
 
-つまり三角積分の一部は、**Weierstrass substitutionでrational problemへ落とす**経路を明示的に持つ。
+つまり三角積分の一部は，**Weierstrass substitutionでrational problemへ落とす**経路を明示的に持つ。
 
 ## 12.6 特殊函数への着地
 
-`IntMatchInt`には、
+`IntMatchInt`には，
 
 - `LogIntegral`
 - `PolyLog`
@@ -1180,19 +1180,19 @@ exp(ax) sin(bx)^n
 
 など。
 
-つまりrule tableは単なるlookupではなく、**漸化式として実行されるterm-rewriting program**である。
+つまりrule tableは単なるlookupではなく，**漸化式として実行されるterm-rewriting program**である。
 
 ## 12.8 performance hazardを作者自身が管理
 
-ソースには、
+ソースには，
 
 ```text
 CAUTION: Patterns with a head of Plus ... can greatly slow the integrator
 ```
 
-とあり、実際に一部ruleをコメントアウトしている。
+とあり，実際に一部ruleをコメントアウトしている。
 
-さらに`TrigCanonicalRel`には、
+さらに`TrigCanonicalRel`には，
 
 ```text
 CAUTION: This rule can lead to an infinite loop
@@ -1200,7 +1200,7 @@ CAUTION: This rule can lead to an infinite loop
 
 として無効化されたruleが複数ある。
 
-rule systemの問題はすでに明確に認識されており、
+rule systemの問題はすでに明確に認識されており，
 
 - match cost
 - rewrite loop
@@ -1210,7 +1210,7 @@ rule systemの問題はすでに明確に認識されており、
 
 ## 12.9 branch-sensitiveなheuristic
 
-`IntMatchIn`には、
+`IntMatchIn`には，
 
 ```text
 Log[a b] → Log[a] + Log[b]
@@ -1219,13 +1219,13 @@ Log[a^r] → r Log[a]
 
 型の入力簡約が存在する。
 
-複素数領域では一般にbranch-sensitiveであるため、この時代のintegratorが**coverageを広げるため比較的大胆なnormalizationを局所的に利用していた**ことが分かる。
+複素数領域では一般にbranch-sensitiveであるため，この時代のintegratorが**coverageを広げるため比較的大胆なnormalizationを局所的に利用していた**ことが分かる。
 
 ---
 
 # 13. Definite integration
 
-`Calculus/DefiniteIntegrate.m`は951行で、冒頭から、
+`Calculus/DefiniteIntegrate.m`は951行で，冒頭から，
 
 > still under development and has not been tested as fully as it might
 
@@ -1235,7 +1235,7 @@ Log[a^r] → r Log[a]
 
 ## 13.1 protocol
 
-`PiecewiseIntegrate[f,{x,xmin,xmax}]` は、
+`PiecewiseIntegrate[f,{x,xmin,xmax}]` は，
 
 1. `{ok, notok}`
 2. `Fail`
@@ -1267,7 +1267,7 @@ pole / singularity探索
 
 ## 13.3 singularity detection
 
-`DefinitePoles`はexpression structureを調べ、
+`DefinitePoles`はexpression structureを調べ，
 
 - polynomial
 - rational
@@ -1281,7 +1281,7 @@ pole / singularity探索
 
 ## 13.4 negative cache
 
-`DefiniteFailures`は空listから始まり、一度失敗した `{f,x,xmin,xmax}` を保存する。
+`DefiniteFailures`は空listから始まり，一度失敗した `{f,x,xmin,xmax}` を保存する。
 
 次回同じ入力が来ると早期に`DefiniteFail`へ落とす。
 
@@ -1289,7 +1289,7 @@ pole / singularity探索
 
 ## 13.5 numeric comparisonへの依存
 
-point sortingや区間判定の一部では、
+point sortingや区間判定の一部では，
 
 ```text
 N[x] == N[y]
@@ -1299,7 +1299,7 @@ N[x] > N[y]
 
 を使う。
 
-またソース自身が、
+またソース自身が，
 
 ```text
 This is an O(n^2) sort.
@@ -1307,23 +1307,23 @@ This is an O(n^2) sort.
 
 と明記するsort routineを持つ。
 
-この部分は非常に実務的で、理想化されたsymbolic orderingではなく、**singularity候補が少数であることを前提にした小規模heuristic code**である。
+この部分は非常に実務的で，理想化されたsymbolic orderingではなく，**singularity候補が少数であることを前提にした小規模heuristic code**である。
 
 ## 13.6 endpoint fallbackの危険を自覚
 
-symbolic endpointsでは、
+symbolic endpointsでは，
 
 ```text
 Limit[int, x->xmax] - Limit[int, x->xmin]
 ```
 
-へ戻る場合があるが、そのとき
+へ戻る場合があるが，そのとき
 
 > singularities may be missed
 
 というwarningを出す。
 
-つまりシステム自身がfallbackの数学的限界を認識し、message systemを通じて露出させる。
+つまりシステム自身がfallbackの数学的限界を認識し，message systemを通じて露出させる。
 
 ---
 
@@ -1331,11 +1331,11 @@ Limit[int, x->xmax] - Limit[int, x->xmin]
 
 ## 14.1 Dはkernel builtin
 
-`oD`がMath A/B双方に見え、Series sourceでも普通に`D`を利用する。
+`oD`がMath A/B双方に見え，Series sourceでも普通に`D`を利用する。
 
 ## 14.2 `SeriesData` はfirst-class symbolic object
 
-`info.m`の定義は、
+`info.m`の定義は，
 
 ```text
 SeriesData[x, x0, {a0,a1,...}, nmin, nmax, den]
@@ -1343,7 +1343,7 @@ SeriesData[x, x0, {a0,a1,...}, nmin, nmax, den]
 
 である。
 
-ここでpowerは、
+ここでpowerは，
 
 ```text
 nmin/den, (nmin+1)/den, ..., nmax/den
@@ -1351,11 +1351,11 @@ nmin/den, (nmin+1)/den, ..., nmax/den
 
 となる。
 
-つまり単なるTaylor polynomialではなく、**fractional powersを表現できるseries container**になっている。構造上はPuiseux型展開も扱える。
+つまり単なるTaylor polynomialではなく，**fractional powersを表現できるseries container**になっている。構造上はPuiseux型展開も扱える。
 
 ## 14.3 `Series.m` の規模
 
-`StartUp/Series.m`は1,130行あり、
+`StartUp/Series.m`は1,130行あり，
 
 - `/:` 95回
 - `:=` 138回
@@ -1390,7 +1390,7 @@ CosIntegral
 
 ## 14.4 「函数がSeriesを知る」設計
 
-典型的には、
+典型的には，
 
 ```text
 SpecialFunction /:
@@ -1402,17 +1402,17 @@ SpecialFunction /:
 
 というUpValue形式。
 
-これは中央の`Series`に全特殊函数のcaseを書き込むのではなく、**各symbolが自分のseries protocolを持つ**設計である。
+これは中央の`Series`に全特殊函数のcaseを書き込むのではなく，**各symbolが自分のseries protocolを持つ**設計である。
 
 ## 14.5 微分方程式による級数生成
 
 Airy/Besselなどでは`diffeq...`系内部helperが使われる。
 
-つまり特殊函数の展開係数をformula tableだけで列挙するのではなく、**満たす微分方程式からseries recurrenceを構成する**経路がある。
+つまり特殊函数の展開係数をformula tableだけで列挙するのではなく，**満たす微分方程式からseries recurrenceを構成する**経路がある。
 
 ## 14.6 InverseSeries
 
-`InverseSeries`はNewton iterationを利用し、
+`InverseSeries`はNewton iterationを利用し，
 
 ```text
 i = 2
@@ -1423,7 +1423,7 @@ while i < n:
 
 と精度次数を倍増させる。
 
-形式冪級数の逆函数計算に、**Newton doubling**をすでに利用している。
+形式冪級数の逆函数計算に，**Newton doubling**をすでに利用している。
 
 ---
 
@@ -1472,7 +1472,7 @@ BesselI/J/K/Y
 
 。
 
-さらに`StartUp/Series.m`, `StartUp/Elliptic.m`, `InverseFunctions.m`, `IntegralTables.m`が、
+さらに`StartUp/Series.m`, `StartUp/Elliptic.m`, `InverseFunctions.m`, `IntegralTables.m`が，
 
 - symbolic identities
 - series
@@ -1482,7 +1482,7 @@ BesselI/J/K/Y
 
 を付加する。
 
-したがって特殊函数systemは、
+したがって特殊函数systemは，
 
 ```text
 numeric/kernel implementation
@@ -1496,7 +1496,7 @@ symbolic knowledge layer
 
 # 16. Linear Algebra
 
-kernel側で確認できる主なものは、
+kernel側で確認できる主なものは，
 
 ```text
 Det
@@ -1521,16 +1521,16 @@ IdentityMatrix
 
 。
 
-`LinearAlgebra` packageはむしろ小さく、
+`LinearAlgebra` packageはむしろ小さく，
 
 - `Cross.m`
 - `Vectors.m`
 
 のみ。
 
-これは基本的な行列演算、高度な固有値/SVD等を**kernelへかなり深く入れている**ことを示す。
+これは基本的な行列演算，高度な固有値/SVD等を**kernelへかなり深く入れている**ことを示す。
 
-`ZeroTest` optionのusageも存在し、symbolic elementを含むlinear algebraで「何を0とみなすか」を函数として差し替えられる設計になっている。
+`ZeroTest` optionのusageも存在し，symbolic elementを含むlinear algebraで「何を0とみなすか」を函数として差し替えられる設計になっている。
 
 ---
 
@@ -1538,7 +1538,7 @@ IdentityMatrix
 
 ## 17.1 `ConstrainedMin / Max`
 
-Math Aには、
+Math Aには，
 
 ```text
 oConstrainedMin
@@ -1549,7 +1549,7 @@ oConstrainedMax
 
 ## 17.2 `LinearProgramming` はwrapper
 
-`StartUp/LinearProgramming.m`は47行程度で、
+`StartUp/LinearProgramming.m`は47行程度で，
 
 ```text
 LinearProgramming
@@ -1559,9 +1559,9 @@ ConstrainedMin
 
 へ変換している。
 
-これは特殊問題のpublic APIを、より一般的なoptimization primitiveへreductionする設計。
+これは特殊問題のpublic APIを，より一般的なoptimization primitiveへreductionする設計。
 
-なお`AreWeValid`内に、
+なお`AreWeValid`内に，
 
 ```text
 length1 = Length[vector1]
@@ -1569,15 +1569,15 @@ length1 = Length[vector1]
 If[Length1 != length4, ...]
 ```
 
-という **`length1` / `Length1` の不一致**があり、静的には明らかなtypoに見える。
+という **`length1` / `Length1` の不一致**があり，静的には明らかなtypoに見える。
 
-実際のdump済み定義で修正されている可能性までは否定できないが、同梱sourceそのものにはこの粗さが残る。
+実際のdump済み定義で修正されている可能性までは否定できないが，同梱sourceそのものにはこの粗さが残る。
 
 ---
 
 # 18. Numerical algorithms package
 
-`NumericalMath/Approximations.m`は987行で、次を実装する。
+`NumericalMath/Approximations.m`は987行で，次を実装する。
 
 - `Pade`
 - `EconomizedRationalApproximation`
@@ -1586,7 +1586,7 @@ If[Length1 != length4, ...]
 - `GeneralRationalInterpolation`
 - `GeneralMiniMaxApproximation`
 
-内部では、
+内部では，
 
 - Chebyshev polynomial
 - LinearSolve
@@ -1597,7 +1597,7 @@ If[Length1 != length4, ...]
 
 を組み合わせる。
 
-これは「数値算法は全部native codeで高速化」という構成ではなく、**高級数値算法そのものをMathematica languageで組み立てる**思想を示す。
+これは「数値算法は全部native codeで高速化」という構成ではなく，**高級数値算法そのものをMathematica languageで組み立てる**思想を示す。
 
 ---
 
@@ -1607,27 +1607,27 @@ If[Length1 != length4, ...]
 
 特にソースコメントが面白い。
 
-ODE式を毎step、
+ODE式を毎step，
 
 ```text
 f /. Thread[vars -> vals]
 ```
 
-で置換する代わりに、一度、
+で置換する代わりに，一度，
 
 ```text
 Function[Release[vars], Release[f]]
 ```
 
-へ変換し、`Apply`で評価する。
+へ変換し，`Apply`で評価する。
 
-コメントでは明示的に、
+コメントでは明示的に，
 
 > This saves time
 
 としている。
 
-つまり作者は、
+つまり作者は，
 
 - symbolic replacementは便利だが高コスト
 - 評価回数が多い数値loopではfunction化する
@@ -1640,7 +1640,7 @@ Function[Release[vars], Release[f]]
 
 この領域は初期Mathematicaのexpression modelを理解する非常に良い例である。
 
-`ContinuousDistributions.m`は、
+`ContinuousDistributions.m`は，
 
 ```text
 BetaDistribution[alpha,beta]
@@ -1651,7 +1651,7 @@ StudentTDistribution[n]
 
 を単なるtagではなく**first-class symbolic object**として扱う。
 
-そしてUpValueで、
+そしてUpValueで，
 
 ```text
 BetaDistribution /: Density[BetaDistribution[a,b], x] := ...
@@ -1663,7 +1663,7 @@ BetaDistribution /: Random[...] := ...
 
 というprotocolを持たせる。
 
-これは現代的な用語なら、
+これは現代的な用語なら，
 
 ```text
 object = expression head + parameters
@@ -1672,7 +1672,7 @@ methods = tagged rewrite rules / upvalues
 
 に近い。
 
-継承class hierarchyを導入せず、**symbolic dispatchだけでobject protocolを作っている**点が重要。
+継承class hierarchyを導入せず，**symbolic dispatchだけでobject protocolを作っている**点が重要。
 
 ## 20.1 Continuous distributions
 
@@ -1713,7 +1713,7 @@ methods = tagged rewrite rules / upvalues
 
 ## 20.3 protocol
 
-`DescriptiveFunctions.m`側が、
+`DescriptiveFunctions.m`側が，
 
 ```text
 Density
@@ -1737,7 +1737,7 @@ Quantile
 
 # 21. Discrete mathematics / number theory
 
-package layerには、
+package layerには，
 
 - Gosper summation
 - combinatorial functions
@@ -1750,7 +1750,7 @@ package layerには、
 
 がある。
 
-一方kernelにも、
+一方kernelにも，
 
 ```text
 Prime
@@ -1770,7 +1770,7 @@ Multinomial
 
 等がある。
 
-ここでも**低レベル/頻用primitiveをkernel、特殊algorithmをpackage**という境界が見える。
+ここでも**低レベル/頻用primitiveをkernel，特殊algorithmをpackage**という境界が見える。
 
 ---
 
@@ -1778,7 +1778,7 @@ Multinomial
 
 ## 22.1 kernel側
 
-`Math A/B`には、
+`Math A/B`には，
 
 ```text
 Plot
@@ -1798,7 +1798,7 @@ Show
 
 ## 22.2 package側
 
-`Graphics` directoryだけで1,577行あり、
+`Graphics` directoryだけで1,577行あり，
 
 - Animation
 - color spaces
@@ -1814,7 +1814,7 @@ Show
 
 ## 22.3 Front End側
 
-一方Front EndのCODEには、
+一方Front EndのCODEには，
 
 ```text
 Post / Post2 / Post3
@@ -1826,7 +1826,7 @@ ViewPt
 
 がある。
 
-従って強い推定として、
+従って強い推定として，
 
 ```text
 Kernel:
@@ -1842,7 +1842,7 @@ Front End:
 
 # 23. Notebook / Cell model
 
-Front End string/resourceには、
+Front End string/resourceには，
 
 - Cell
 - Notebook
@@ -1857,7 +1857,7 @@ Front End string/resourceには、
 
 の操作が大量に存在する。
 
-Undo/Redo文字列だけでも、
+Undo/Redo文字列だけでも，
 
 ```text
 Undo Cut Cells
@@ -1870,7 +1870,7 @@ Undo Cell Form Change
 
 がある。
 
-したがってNotebookは単なる「テキスト欄 + output欄」ではなく、
+したがってNotebookは単なる「テキスト欄 + output欄」ではなく，
 
 ```text
 document
@@ -1888,7 +1888,7 @@ document
 
 # 24. Front End と kernel のプロトコル
 
-`sysinit.m`はFront End contextに、
+`sysinit.m`はFront End contextに，
 
 ```text
 FE`FC
@@ -1898,11 +1898,11 @@ FE`FT
 
 を定義する。
 
-`FC`はcompletion、`FT`はfunction template生成用。
+`FC`はcompletion，`FT`はfunction template生成用。
 
 これらは`Names`, `ToExpression`, `::usage`, `Out`等の通常のkernel機能を使ってFront Endへ情報を返す。
 
-つまりFront End専用機能の一部ですら、
+つまりFront End専用機能の一部ですら，
 
 ```text
 GUI request
@@ -1916,7 +1916,7 @@ stdout/protocol
 
 として構築されている。
 
-これは「kernel APIを別物として大量に作る」より、**symbolic language自身をUI protocolにも再利用する**設計である。
+これは「kernel APIを別物として大量に作る」より，**symbolic language自身をUI protocolにも再利用する**設計である。
 
 ---
 
@@ -1924,7 +1924,7 @@ stdout/protocol
 
 この版では失敗がひとつのmechanismに統一されているわけではない。
 
-少なくとも、
+少なくとも，
 
 - unevaluated expression
 - `Fail`
@@ -1937,17 +1937,17 @@ stdout/protocol
 
 を使い分ける。
 
-これは型付きexception systemではなく、**symbolic evaluatorに馴染む複数のfailure channel**である。
+これは型付きexception systemではなく，**symbolic evaluatorに馴染む複数のfailure channel**である。
 
-良い面は、数学的に未評価の式をそのまま値として保持できること。
+良い面は，数学的に未評価の式をそのまま値として保持できること。
 
-悪い面は、packageごとにfailure protocolが異なりやすいことである。
+悪い面は，packageごとにfailure protocolが異なりやすいことである。
 
 ---
 
 # 26. 実装者が認識していた危険箇所
 
-ソースコメントには、驚くほど率直に実装上の危険が残されている。
+ソースコメントには，驚くほど率直に実装上の危険が残されている。
 
 ### rewrite performance
 
@@ -1988,13 +1988,13 @@ convergence failureを`Fail`で扱う多数のbranchを持つ。
 
 これらは単なる「未完成さ」の証拠ではない。
 
-むしろ、**汎用symbolic evaluator上でアルゴリズムを書くと、termination / match complexity / canonicalization / numerical fallbackが主要問題になる**ことを、開発者が非常に早い段階から経験していた証拠である。
+むしろ，**汎用symbolic evaluator上でアルゴリズムを書くと，termination / match complexity / canonicalization / numerical fallbackが主要問題になる**ことを，開発者が非常に早い段階から経験していた証拠である。
 
 ---
 
 # 27. 静的解析から推定できるEvaluatorの概念構造
 
-バイナリには、
+バイナリには，
 
 ```text
 eval
@@ -2010,7 +2010,7 @@ argeval
 
 等がある。
 
-pattern側には、
+pattern側には，
 
 ```text
 gmatch_pattern
@@ -2021,7 +2021,7 @@ CheckCondition
 
 。
 
-dispatch/value側には、
+dispatch/value側には，
 
 ```text
 ValueCell
@@ -2032,7 +2032,7 @@ UpdateDispatch
 
 。
 
-これらから、厳密なcall graphではないが概念的には、
+これらから，厳密なcall graphではないが概念的には，
 
 ```text
 Input expression
@@ -2064,7 +2064,7 @@ normal result / unevaluated result / message
 
 # 28. この版で特に重要な「kernel vs language」境界
 
-静的解析から見える最も本質的な設計は、機能ごとにnative codeかMathematicaかを固定するのではなく、次のように分けていること。
+静的解析から見える最も本質的な設計は，機能ごとにnative codeかMathematicaかを固定するのではなく，次のように分けていること。
 
 ## kernelへ置くもの
 
@@ -2098,9 +2098,9 @@ normal result / unevaluated result / message
 - units
 - domain-specific discrete math
 
-この境界の要点は、
+この境界の要点は，
 
-> **「高速なprimitiveはkernel、数学知識とcompositionはlanguage」**
+> **「高速なprimitiveはkernel，数学知識とcompositionはlanguage」**
 
 である。
 
@@ -2112,7 +2112,7 @@ normal result / unevaluated result / message
 
 `StartUp`は単なるstartup helperではない。
 
-4,008行の中に、
+4,008行の中に，
 
 - attributes helper
 - formatting
@@ -2128,19 +2128,19 @@ normal result / unevaluated result / message
 
 が入っている。
 
-したがって`StartUp`は「起動時設定」というより、
+したがって`StartUp`は「起動時設定」というより，
 
 **System contextへ注入される標準symbolic knowledge base**
 
 に近い。
 
-`sysinit.m`から直接loadされない`IntegralTables.m`や`Series.m`が存在する点については、build/dump時に取り込まれるか、visible `sysinit`外のbootstrapでloadされる可能性が高い。ここは実行traceまたはkernel dump解析なしには断定しない。
+`sysinit.m`から直接loadされない`IntegralTables.m`や`Series.m`が存在する点については，build/dump時に取り込まれるか，visible `sysinit`外のbootstrapでloadされる可能性が高い。ここは実行traceまたはkernel dump解析なしには断定しない。
 
 ---
 
 # 30. 現時点で未確定の内部
 
-このアーカイブだけでも構造はかなり分かるが、次は逆アセンブル領域。
+このアーカイブだけでも構造はかなり分かるが，次は逆アセンブル領域。
 
 1. expression objectのメモリlayout
 2. symbol table / hash table構造
@@ -2158,13 +2158,13 @@ normal result / unevaluated result / message
 14. local/remote kernel protocol packet format
 15. graphics expressionからFront End rendererへのwire format
 
-これらは`CODE` resourceの68k disassemblyと、可能なら実行時traceで追うべき項目である。
+これらは`CODE` resourceの68k disassemblyと，可能なら実行時traceで追うべき項目である。
 
 ---
 
 # 31. 構造解析上の主要結論
 
-Mathematica 1.2.2f33 Enhancedは、静的に見ても「巨大な数学函数集」ではない。
+Mathematica 1.2.2f33 Enhancedは，静的に見ても「巨大な数学函数集」ではない。
 
 中心は次の五層である。
 
@@ -2176,7 +2176,7 @@ Mathematica 1.2.2f33 Enhancedは、静的に見ても「巨大な数学函数集
 5. Notebook Front End / kernel communication
 ```
 
-そして数学機能はこの上へ、
+そして数学機能はこの上へ，
 
 ```text
 hard-coded algorithm
@@ -2187,7 +2187,7 @@ hard-coded algorithm
 
 として積み上げられる。
 
-特に重要なのは、**Mathematica言語自体が製品の拡張言語ではなく、製品本体を実装する言語でもある**こと。
+特に重要なのは，**Mathematica言語自体が製品の拡張言語ではなく，製品本体を実装する言語でもある**こと。
 
 - trig simplifierがrule list
 - integratorの大部分がrule list
@@ -2197,17 +2197,17 @@ hard-coded algorithm
 - numerical algorithmsがMathematica source
 - Front End補完さえsymbolic kernel commandを使う
 
-という事実が、そのことを直接示す。
+という事実が，そのことを直接示す。
 
 ---
 
 # 32. 現代のCAS/数式処理系へ持ち帰る価値が高いもの
 
-最後に、この構造から一般化して持ち帰る価値が高い設計を挙げる。
+最後に，この構造から一般化して持ち帰る価値が高い設計を挙げる。
 
-## 32.1 「数学函数」より先に、式を扱う一般runtimeを強くする
+## 32.1 「数学函数」より先に，式を扱う一般runtimeを強くする
 
-個々の`Sin`, `Integrate`, `Solve`を増やす前に、
+個々の`Sin`, `Integrate`, `Solve`を増やす前に，
 
 - expression
 - head
@@ -2220,7 +2220,7 @@ hard-coded algorithm
 
 を強くする。
 
-これらが十分一般的なら、数学機能のかなりの部分を**データと規則として記述できる**。
+これらが十分一般的なら，数学機能のかなりの部分を**データと規則として記述できる**。
 
 ## 32.2 可読ruleと実行用dispatchを分離する
 
@@ -2234,13 +2234,13 @@ optimized matcher structure
 evaluation
 ```
 
-とすれば、数学知識の保守性と速度を同時に取りやすい。
+とすれば，数学知識の保守性と速度を同時に取りやすい。
 
-rule engineを導入するなら、最初からこの二段構造を考える価値がある。
+rule engineを導入するなら，最初からこの二段構造を考える価値がある。
 
 ## 32.3 rule tableはfamilyごとに分割する
 
-`IntegralTables.m`の、
+`IntegralTables.m`の，
 
 ```text
 IntBase
@@ -2254,18 +2254,18 @@ IntMatchInt
 
 という構造は優秀。
 
-巨大な一枚rule listより、
+巨大な一枚rule listより，
 
 - preprocessing
 - family-specific rules
 - fallback
 - postprocessing
 
-へ分離した方が、性能・termination・debuggabilityを管理しやすい。
+へ分離した方が，性能・termination・debuggabilityを管理しやすい。
 
 ## 32.4 generic transformationでcoverageを稼ぐ
 
-affine argument liftingのように、
+affine argument liftingのように，
 
 ```text
 f[a x+b]
@@ -2275,7 +2275,7 @@ f[x]用の既存知識を再利用
 
 する。
 
-個別caseを100個増やすより、**問題を既知のcanonical familyへ写像する変換**を1個作る方が強い。
+個別caseを100個増やすより，**問題を既知のcanonical familyへ写像する変換**を1個作る方が強い。
 
 ## 32.5 数学objectは専用classでなく「式 + protocol」でも作れる
 
@@ -2285,7 +2285,7 @@ distribution implementationは好例。
 NormalDistribution[mu,sigma]
 ```
 
-を単なるASTとして保持し、
+を単なるASTとして保持し，
 
 ```text
 Mean[...]
@@ -2295,7 +2295,7 @@ Quantile[...]
 
 へのruleをheadへ関連付ける。
 
-この方式は、
+この方式は，
 
 - series
 - distributions
@@ -2308,7 +2308,7 @@ Quantile[...]
 
 ## 32.6 `SeriesData`のような中間表現をfirst-classにする
 
-Taylor係数を毎函数が独自vectorで持つより、
+Taylor係数を毎函数が独自vectorで持つより，
 
 ```text
 SeriesData[var, center, coefficients, min, max, denominator]
@@ -2318,7 +2318,7 @@ SeriesData[var, center, coefficients, min, max, denominator]
 
 その上で各函数がprotocolを追加する。
 
-これは、
+これは，
 
 - Series
 - Limit
@@ -2332,7 +2332,7 @@ SeriesData[var, center, coefficients, min, max, denominator]
 
 全てをnative codeへ入れる必要はない。
 
-kernel側は、
+kernel側は，
 
 - exact primitives
 - robust evaluator
@@ -2343,7 +2343,7 @@ kernel側は、
 
 高水準の数学知識はsource ruleとして置く。
 
-この分離により、数学機能を**再コンパイルなしで読め、直せ、追加できる**。
+この分離により，数学機能を**再コンパイルなしで読め，直せ，追加できる**。
 
 ## 32.8 failureをcacheする
 
@@ -2351,11 +2351,11 @@ kernel側は、
 
 「高価なsymbolic attemptが失敗した」という情報も計算結果である。
 
-同じ式に同じ重い探索を繰り返させないnegative cacheは、CASでは非常に効く。
+同じ式に同じ重い探索を繰り返させないnegative cacheは，CASでは非常に効く。
 
 ## 32.9 rewrite systemにはterminationとcostの設計を最初から入れる
 
-1.2.2のsourceがすでに、
+1.2.2のsourceがすでに，
 
 - infinite loop
 - slow Plus pattern
@@ -2364,7 +2364,7 @@ kernel側は、
 
 に苦労している。
 
-rule engineを作るなら、
+rule engineを作るなら，
 
 - rule priority
 - cost
@@ -2378,13 +2378,13 @@ rule engineを作るなら、
 
 ## 32.10 繰り返し数値評価ではsymbolic substitutionを避ける
 
-RungeKuttaの、
+RungeKuttaの，
 
 ```text
 式を毎回replace
 ```
 
-ではなく、
+ではなく，
 
 ```text
 一度callable functionへ変換
@@ -2392,7 +2392,7 @@ RungeKuttaの、
 
 する最適化は現在でも本質的。
 
-symbolic representationとhot numerical loopの間に、**lowering / compilation / callableization**の境界を持つべきである。
+symbolic representationとhot numerical loopの間に，**lowering / compilation / callableization**の境界を持つべきである。
 
 ## 32.11 documentationとmessageをcodeから分離する
 
@@ -2402,11 +2402,11 @@ symbolic representationとhot numerical loopの間に、**lowering / compilation
 - diagnostics
 - implementation
 
-を分ければ、数学コード本体を読みやすく保てる。
+を分ければ，数学コード本体を読みやすく保てる。
 
 ## 32.12 Front Endをkernelの特権APIへ依存させすぎない
 
-補完やtemplate取得を、
+補完やtemplate取得を，
 
 ```text
 Names
@@ -2416,19 +2416,19 @@ ToExpression
 
 等の通常のsymbolic commandで実現している。
 
-可能な限り、UIも**公開言語semanticsを再利用**すると、kernel/frontendの結合が弱くなる。
+可能な限り，UIも**公開言語semanticsを再利用**すると，kernel/frontendの結合が弱くなる。
 
 ## 32.13 「全部を一つの層で解く」を避ける
 
 この版の最も大きな教訓はこれである。
 
-SolveもIntegrateもSeriesも、
+SolveもIntegrateもSeriesも，
 
 ```text
 native coreだけ
 ```
 
-でも、
+でも，
 
 ```text
 rulesだけ
@@ -2440,7 +2440,7 @@ rulesだけ
 
 の組合せで作られている。
 
-汎用CASでは、このhybrid構造が極めて合理的である。
+汎用CASでは，このhybrid構造が極めて合理的である。
 
 ---
 
@@ -2448,76 +2448,76 @@ rulesだけ
 
 行数はCR改行を正規化後に計数。Public symbols欄は各ファイル内の`::usage` assignmentから先頭のみ抽出。
 
-| file | lines | bytes | public symbols（抜粋） |
-|---|---:|---:|---|
-| `Algebra/CountRoots.m` | 54 | 1,546 | CountRoots |
-| `Algebra/GosperSum.m` | 118 | 3,484 | GosperSum |
-| `Algebra/ReIm.m` | 116 | 2,583 | — |
-| `Algebra/Trigonometry.m` | 196 | 6,767 | TrigCanonical, TrigFactor, TrigReduce, TrigToComplex, ComplexToTrig |
-| `Calculus/DefiniteIntegrate.m` | 951 | 31,764 | $PiecewiseIntegrate |
-| `Calculus/InverseLaplace.m` | 25 | 631 | InverseLaplace |
-| `Calculus/Laplace.m` | 46 | 1,049 | Laplace |
-| `Calculus/ODE.m` | 5 | 104 | — |
-| `Calculus/VectorAnalysis.m` | 183 | 4,805 | Coordinates, ScaleFactors, Cartesian, Cylindrical, Spherical, Parabolic ほか10 |
-| `DataAnalysis/ConfidenceIntervals.m` | 582 | 23,701 | PopulationMean, PopulationMeanInterval, PopulationVariance, PopulationVarianceInterval, PopulationMeanDifference, PopulationMeanDifferenceInterval ほか20 |
-| `DataAnalysis/ContinuousDistributions.m` | 798 | 31,739 | BetaDistribution, CauchyDistribution, ChiDistribution, ChiSquareDistribution, ExponentialDistribution, ExtremeValueDistribution ほか11 |
-| `DataAnalysis/DataManipulation.m` | 270 | 9,256 | Column, ColumnTake, ColumnDrop, ColumnJoin, RowJoin, DropNonNumeric ほか14 |
-| `DataAnalysis/DescriptiveFunctions.m` | 79 | 3,229 | Density, CumulativeDensity, Mean, Variance, StandardDeviation, Skewness ほか4 |
-| `DataAnalysis/DescriptiveStatistics.m` | 222 | 5,865 | LocationReport, GeometricMean, HarmonicMean, RootMeanSquare, TrimmedMean, InterpolatedQuantile ほか14 |
-| `DataAnalysis/DiscreteDistributions.m` | 597 | 23,618 | BernoulliDistribution, BetaBinomialDistribution, BetaPascalDistribution, BinomialDistribution, DiscreteUniformDistribution, DiscreteWeibullDistribution ほか4 |
-| `DiscreteMath/ClebschGordan.m` | 113 | 2,726 | Clebsch, Wigner, Racah |
-| `DiscreteMath/CombinatorialFunctions.m` | 59 | 1,284 | Subfactorial, CatalanNumber, Fibonacci, Hofstadter |
-| `DiscreteMath/CombinatorialSimplification.m` | 35 | 827 | — |
-| `DiscreteMath/Permutations.m` | 69 | 1,351 | PermutationQ, ToCycles, FromCycles, RandomPermutation |
-| `DiscreteMath/Tree.m` | 134 | 3,562 | MakeTree, TreeFind, TreePlot, ExprPlot |
-| `Examples/CellularAutomata.m` | 65 | 1,576 | UpdateCA, EvolveCA, ShowCA, NumberedRule, CenterSpot |
-| `Examples/CollatzProblem.m` | 18 | 439 | Collatz |
-| `Examples/CrystalStructure.m` | 76 | 3,661 | — |
-| `Examples/EllipticCurves.m` | 112 | 6,924 | — |
-| `Examples/Factor.m` | 75 | 1,516 | — |
-| `Examples/FunctionalProgramming.m` | 19 | 355 | — |
-| `Examples/ModularArithmetic.m` | 63 | 1,817 | — |
-| `Examples/Mortgages.m` | 25 | 758 | — |
-| `Examples/RingTheory.m` | 30 | 825 | — |
-| `Examples/RungeKutta.m` | 28 | 705 | RungeKutta |
-| `Geometry/Polytopes.m` | 182 | 4,090 | Vertices, Edges, Faces, Coordinates, Area, Inscribed ほか4 |
-| `Geometry/Rotations.m` | 60 | 1,573 | RotationMatrix2D, Rotate2D, RotationMatrix3D, Rotate3D |
-| `Graphics/Animation.m` | 201 | 7,906 | Animation, Animate, Movie, MoviePlot, MoviePlot3D, MovieDensityPlot ほか7 |
-| `Graphics/Colors.m` | 137 | 3,887 | CMYColor, YIQColor, HSBColor, HLSColor |
-| `Graphics/Graphics.m` | 501 | 14,297 | LinearScale, LogScale, UnitScale, PiScale, MultipleListPlot, TextListPlot ほか14 |
-| `Graphics/ParametricPlot3D.m` | 164 | 4,758 | ParametricPlot3D, PointParametricPlot3D, SpaceCurve, PointSpaceCurve, SphericalPlot3D |
-| `Graphics/Polyhedra.m` | 174 | 6,481 | Polyhedron, Vertices, Faces, Polyhedra, Icosahedron, Dodecahedron ほか4 |
-| `Graphics/Shapes.m` | 204 | 6,736 | Shapes, Cylinder, Cone, Torus, Sphere, MoebiusStrip ほか7 |
-| `Graphics/ThreeScript.m` | 196 | 4,599 | ThreeScript |
-| `LinearAlgebra/Cross.m` | 18 | 351 | Cross |
-| `LinearAlgebra/Vectors.m` | 54 | 1,054 | — |
-| `Miscellaneous/PhysicalConstants.m` | 84 | 1,884 | — |
-| `Miscellaneous/Units.m` | 485 | 11,139 | Convert, ConvertTemperature, SI, MKS, Meter, Kilogram ほか11 |
-| `NumberTheory/ContinuedFractions.m` | 44 | 872 | ContinuedFraction, ContinuedFractionForm |
-| `NumberTheory/IntegerRoots.m` | 28 | 759 | BreakRoots |
-| `NumberTheory/Recognize.m` | 31 | 566 | Recognize |
-| `NumericalMath/Approximations.m` | 987 | 36,711 | Pade, EconomizedRationalApproximation, RationalInterpolation, MiniMaxApproximation, GeneralRationalInterpolation, GeneralMiniMaxApproximation |
-| `NumericalMath/InverseStatisticalFunctions.m` | 319 | 8,497 | Erfc, InverseErf, InverseErfc, InverseGammaRegularized, InverseBetaRegularized |
-| `NumericalMath/ListIntegrate.m` | 78 | 2,443 | ListIntegrate |
-| `NumericalMath/RungeKutta.m` | 220 | 9,097 | RungeKutta, PlotODESolution |
-| `StartUp/Attributes.m` | 38 | 1,055 | ClearAttributes, SetAttributes |
-| `StartUp/Digits.m` | 45 | 1,111 | Digits |
-| `StartUp/Edit.m` | 389 | 7,352 | Edit, EditIn, EditDef, Recall |
-| `StartUp/Elliptic.m` | 324 | 11,764 | EllipticF, JacobiSN, JacobiSD, JacobiSC, JacobiCS, JacobiCN ほか22 |
-| `StartUp/Formats.m` | 25 | 637 | ComplexInfinity |
-| `StartUp/GroebnerBasis.m` | 20 | 447 | GroebnerBasis |
-| `StartUp/IntegralTables.m` | 798 | 27,713 | SinIntegral, CosIntegral |
-| `StartUp/InverseFunctions.m` | 37 | 1,029 | — |
-| `StartUp/LinearProgramming.m` | 47 | 1,308 | LinearProgramming |
-| `StartUp/RunThrough.m` | 39 | 746 | RunThrough |
-| `StartUp/Series.m` | 1,130 | 38,959 | InverseSeries |
-| `StartUp/ValueQ.m` | 17 | 330 | ValueQ |
-| `StartUp/info.m` | 654 | 88,361 | Graphics, Graphics3D, ContourGraphics, DensityGraphics, SurfaceGraphics, Show ほか642 |
-| `StartUp/msg.m` | 445 | 30,768 | — |
-| `Utilities/Record.m` | 9 | 102 | — |
-| `Utilities/ShowTime.m` | 47 | 1,175 | ShowTime |
-| `init.m` | 86 | 4,648 | — |
-| `sysinit.m` | 210 | 7,357 | — |
+| file                                          | lines |  bytes | public symbols（抜粋）                                                                                                                                        |
+| --------------------------------------------- | ----: | -----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Algebra/CountRoots.m`                        |    54 |  1,546 | CountRoots                                                                                                                                                    |
+| `Algebra/GosperSum.m`                         |   118 |  3,484 | GosperSum                                                                                                                                                     |
+| `Algebra/ReIm.m`                              |   116 |  2,583 | —                                                                                                                                                             |
+| `Algebra/Trigonometry.m`                      |   196 |  6,767 | TrigCanonical, TrigFactor, TrigReduce, TrigToComplex, ComplexToTrig                                                                                           |
+| `Calculus/DefiniteIntegrate.m`                |   951 | 31,764 | $PiecewiseIntegrate                                                                                                                                           |
+| `Calculus/InverseLaplace.m`                   |    25 |    631 | InverseLaplace                                                                                                                                                |
+| `Calculus/Laplace.m`                          |    46 |  1,049 | Laplace                                                                                                                                                       |
+| `Calculus/ODE.m`                              |     5 |    104 | —                                                                                                                                                             |
+| `Calculus/VectorAnalysis.m`                   |   183 |  4,805 | Coordinates, ScaleFactors, Cartesian, Cylindrical, Spherical, Parabolic ほか10                                                                                |
+| `DataAnalysis/ConfidenceIntervals.m`          |   582 | 23,701 | PopulationMean, PopulationMeanInterval, PopulationVariance, PopulationVarianceInterval, PopulationMeanDifference, PopulationMeanDifferenceInterval ほか20     |
+| `DataAnalysis/ContinuousDistributions.m`      |   798 | 31,739 | BetaDistribution, CauchyDistribution, ChiDistribution, ChiSquareDistribution, ExponentialDistribution, ExtremeValueDistribution ほか11                        |
+| `DataAnalysis/DataManipulation.m`             |   270 |  9,256 | Column, ColumnTake, ColumnDrop, ColumnJoin, RowJoin, DropNonNumeric ほか14                                                                                    |
+| `DataAnalysis/DescriptiveFunctions.m`         |    79 |  3,229 | Density, CumulativeDensity, Mean, Variance, StandardDeviation, Skewness ほか4                                                                                 |
+| `DataAnalysis/DescriptiveStatistics.m`        |   222 |  5,865 | LocationReport, GeometricMean, HarmonicMean, RootMeanSquare, TrimmedMean, InterpolatedQuantile ほか14                                                         |
+| `DataAnalysis/DiscreteDistributions.m`        |   597 | 23,618 | BernoulliDistribution, BetaBinomialDistribution, BetaPascalDistribution, BinomialDistribution, DiscreteUniformDistribution, DiscreteWeibullDistribution ほか4 |
+| `DiscreteMath/ClebschGordan.m`                |   113 |  2,726 | Clebsch, Wigner, Racah                                                                                                                                        |
+| `DiscreteMath/CombinatorialFunctions.m`       |    59 |  1,284 | Subfactorial, CatalanNumber, Fibonacci, Hofstadter                                                                                                            |
+| `DiscreteMath/CombinatorialSimplification.m`  |    35 |    827 | —                                                                                                                                                             |
+| `DiscreteMath/Permutations.m`                 |    69 |  1,351 | PermutationQ, ToCycles, FromCycles, RandomPermutation                                                                                                         |
+| `DiscreteMath/Tree.m`                         |   134 |  3,562 | MakeTree, TreeFind, TreePlot, ExprPlot                                                                                                                        |
+| `Examples/CellularAutomata.m`                 |    65 |  1,576 | UpdateCA, EvolveCA, ShowCA, NumberedRule, CenterSpot                                                                                                          |
+| `Examples/CollatzProblem.m`                   |    18 |    439 | Collatz                                                                                                                                                       |
+| `Examples/CrystalStructure.m`                 |    76 |  3,661 | —                                                                                                                                                             |
+| `Examples/EllipticCurves.m`                   |   112 |  6,924 | —                                                                                                                                                             |
+| `Examples/Factor.m`                           |    75 |  1,516 | —                                                                                                                                                             |
+| `Examples/FunctionalProgramming.m`            |    19 |    355 | —                                                                                                                                                             |
+| `Examples/ModularArithmetic.m`                |    63 |  1,817 | —                                                                                                                                                             |
+| `Examples/Mortgages.m`                        |    25 |    758 | —                                                                                                                                                             |
+| `Examples/RingTheory.m`                       |    30 |    825 | —                                                                                                                                                             |
+| `Examples/RungeKutta.m`                       |    28 |    705 | RungeKutta                                                                                                                                                    |
+| `Geometry/Polytopes.m`                        |   182 |  4,090 | Vertices, Edges, Faces, Coordinates, Area, Inscribed ほか4                                                                                                    |
+| `Geometry/Rotations.m`                        |    60 |  1,573 | RotationMatrix2D, Rotate2D, RotationMatrix3D, Rotate3D                                                                                                        |
+| `Graphics/Animation.m`                        |   201 |  7,906 | Animation, Animate, Movie, MoviePlot, MoviePlot3D, MovieDensityPlot ほか7                                                                                     |
+| `Graphics/Colors.m`                           |   137 |  3,887 | CMYColor, YIQColor, HSBColor, HLSColor                                                                                                                        |
+| `Graphics/Graphics.m`                         |   501 | 14,297 | LinearScale, LogScale, UnitScale, PiScale, MultipleListPlot, TextListPlot ほか14                                                                              |
+| `Graphics/ParametricPlot3D.m`                 |   164 |  4,758 | ParametricPlot3D, PointParametricPlot3D, SpaceCurve, PointSpaceCurve, SphericalPlot3D                                                                         |
+| `Graphics/Polyhedra.m`                        |   174 |  6,481 | Polyhedron, Vertices, Faces, Polyhedra, Icosahedron, Dodecahedron ほか4                                                                                       |
+| `Graphics/Shapes.m`                           |   204 |  6,736 | Shapes, Cylinder, Cone, Torus, Sphere, MoebiusStrip ほか7                                                                                                     |
+| `Graphics/ThreeScript.m`                      |   196 |  4,599 | ThreeScript                                                                                                                                                   |
+| `LinearAlgebra/Cross.m`                       |    18 |    351 | Cross                                                                                                                                                         |
+| `LinearAlgebra/Vectors.m`                     |    54 |  1,054 | —                                                                                                                                                             |
+| `Miscellaneous/PhysicalConstants.m`           |    84 |  1,884 | —                                                                                                                                                             |
+| `Miscellaneous/Units.m`                       |   485 | 11,139 | Convert, ConvertTemperature, SI, MKS, Meter, Kilogram ほか11                                                                                                  |
+| `NumberTheory/ContinuedFractions.m`           |    44 |    872 | ContinuedFraction, ContinuedFractionForm                                                                                                                      |
+| `NumberTheory/IntegerRoots.m`                 |    28 |    759 | BreakRoots                                                                                                                                                    |
+| `NumberTheory/Recognize.m`                    |    31 |    566 | Recognize                                                                                                                                                     |
+| `NumericalMath/Approximations.m`              |   987 | 36,711 | Pade, EconomizedRationalApproximation, RationalInterpolation, MiniMaxApproximation, GeneralRationalInterpolation, GeneralMiniMaxApproximation                 |
+| `NumericalMath/InverseStatisticalFunctions.m` |   319 |  8,497 | Erfc, InverseErf, InverseErfc, InverseGammaRegularized, InverseBetaRegularized                                                                                |
+| `NumericalMath/ListIntegrate.m`               |    78 |  2,443 | ListIntegrate                                                                                                                                                 |
+| `NumericalMath/RungeKutta.m`                  |   220 |  9,097 | RungeKutta, PlotODESolution                                                                                                                                   |
+| `StartUp/Attributes.m`                        |    38 |  1,055 | ClearAttributes, SetAttributes                                                                                                                                |
+| `StartUp/Digits.m`                            |    45 |  1,111 | Digits                                                                                                                                                        |
+| `StartUp/Edit.m`                              |   389 |  7,352 | Edit, EditIn, EditDef, Recall                                                                                                                                 |
+| `StartUp/Elliptic.m`                          |   324 | 11,764 | EllipticF, JacobiSN, JacobiSD, JacobiSC, JacobiCS, JacobiCN ほか22                                                                                            |
+| `StartUp/Formats.m`                           |    25 |    637 | ComplexInfinity                                                                                                                                               |
+| `StartUp/GroebnerBasis.m`                     |    20 |    447 | GroebnerBasis                                                                                                                                                 |
+| `StartUp/IntegralTables.m`                    |   798 | 27,713 | SinIntegral, CosIntegral                                                                                                                                      |
+| `StartUp/InverseFunctions.m`                  |    37 |  1,029 | —                                                                                                                                                             |
+| `StartUp/LinearProgramming.m`                 |    47 |  1,308 | LinearProgramming                                                                                                                                             |
+| `StartUp/RunThrough.m`                        |    39 |    746 | RunThrough                                                                                                                                                    |
+| `StartUp/Series.m`                            | 1,130 | 38,959 | InverseSeries                                                                                                                                                 |
+| `StartUp/ValueQ.m`                            |    17 |    330 | ValueQ                                                                                                                                                        |
+| `StartUp/info.m`                              |   654 | 88,361 | Graphics, Graphics3D, ContourGraphics, DensityGraphics, SurfaceGraphics, Show ほか642                                                                         |
+| `StartUp/msg.m`                               |   445 | 30,768 | —                                                                                                                                                             |
+| `Utilities/Record.m`                          |     9 |    102 | —                                                                                                                                                             |
+| `Utilities/ShowTime.m`                        |    47 |  1,175 | ShowTime                                                                                                                                                      |
+| `init.m`                                      |    86 |  4,648 | —                                                                                                                                                             |
+| `sysinit.m`                                   |   210 |  7,357 | —                                                                                                                                                             |
 
 ---
 
@@ -2564,10 +2564,9 @@ rulesだけ
 
 # 付録C. `o...`形式で抽出できたkernel operator識別子
 
-`Math A/B/C`からASCII文字列として抽出し、`o[A-Z]...` に一致したものは**393 unique identifiers**。
+`Math A/B/C`からASCII文字列として抽出し，`o[A-Z]...` に一致したものは**393 unique identifiers**。
 
 これは「393 builtins」と同義ではない。debug/internal/operator wrapperを含む可能性がある。しかしkernel機能の分布を見る資料として有用である。
-
 
 ### Math A.bin — 160 identifiers
 
@@ -2627,7 +2626,6 @@ oUpSet, oUpdate, oValue, oVecTester, oVectorQ, oWhich, oWhile, oWrite, oWriteStr
 oAiryAi, oBesselI, oBesselJ, oBesselK, oBesselY, oMinus, oNumberQ, oPlus, oSubtract
 ```
 
-
 ---
 
 # 付録D. 解析に用いた特に重要なsource
@@ -2637,7 +2635,7 @@ oAiryAi, oBesselI, oBesselJ, oBesselK, oBesselY, oMinus, oNumberQ, oPlus, oSubtr
 1. `Packages/StartUp/IntegralTables.m`
    - rule-driven integrator本体の知識層。
 2. `Packages/Calculus/DefiniteIntegrate.m`
-   - symbolic/internal integrator境界、pole handling、failure cache。
+   - symbolic/internal integrator境界，pole handling，failure cache。
 3. `Packages/StartUp/Series.m`
    - `SeriesData`, special-function protocol, Newton series reversion。
 4. `Packages/Algebra/Trigonometry.m`
@@ -2653,16 +2651,17 @@ oAiryAi, oBesselI, oBesselJ, oBesselK, oBesselY, oMinus, oNumberQ, oPlus, oSubtr
 9. `Packages/NumericalMath/Approximations.m`
    - 高水準数値algorithmを言語自身で実装する例。
 10. `Packages/NumericalMath/RungeKutta.m`
-   - symbolic evaluation costを意識した数値loop設計。
+
+- symbolic evaluation costを意識した数値loop設計。
 
 ---
 
 ## 解析メモ
 
-この報告書は、対象アーカイブの**static evidenceのみ**から作成した。  
-特に68k machine code内部については、symbol stringsから責務はかなり推定できる一方、具体的algorithmを断定していない。
+この報告書は，対象アーカイブの**static evidenceのみ**から作成した。  
+特に68k machine code内部については，symbol stringsから責務はかなり推定できる一方，具体的algorithmを断定していない。
 
-次段階で最も情報量が大きいのは、`Math A/B/C` の`CODE` resourceを個別抽出し、68k disassemblerへ掛けて、
+次段階で最も情報量が大きいのは，`Math A/B/C` の`CODE` resourceを個別抽出し，68k disassemblerへ掛けて，
 
 ```text
 ValueCell

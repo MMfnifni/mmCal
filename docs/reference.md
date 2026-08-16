@@ -2,17 +2,22 @@
 
 This document is the detailed specification of **mmCal as implemented**.
 For a user-oriented introduction, see the root-level `README.md`.
+
+> Target version: **v1.5.3**
+
 This document changes with each version; retrieve older versions from the Git history when needed.
 
 ## 0. Unchanging Principles
 
 ### Design Principles
+
 Be rigorous.
 Do everything from scratch.
 Explicitly state any approximations.
 Admit when you don’t know something.
 
 ### Distribution Principles
+
 Distribute only the executable file included in this book.
 Open source under the BSD 3-Clause License.
 
@@ -134,18 +139,18 @@ The evaluator does not rely solely on heuristic stopping conditions such as "the
 
 Current protected predefined symbols:
 
-| Name | Meaning |
-|---|---|
-| `Pi` | Circle constant. Exact transcendental constant |
-| `E` | Base of the natural logarithm. Exact transcendental constant |
-| `Phi` | Golden ratio. Exact algebraic constant |
-| `I` | Imaginary unit |
-| `True`, `False` | Boolean values |
-| `Integer` | Integer domain |
-| `Rational` | Rational domain |
-| `Real` | Real domain |
-| `Complex` | Complex domain |
-| `Infinity` | Infinite-precision sentinel returned by `precision/accuracy` for exact values. Automatic extended-real arithmetic simplification remains limited |
+| Name            | Meaning                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Pi`            | Circle constant. Exact transcendental constant                                                                                                   |
+| `E`             | Base of the natural logarithm. Exact transcendental constant                                                                                     |
+| `Phi`           | Golden ratio. Exact algebraic constant                                                                                                           |
+| `I`             | Imaginary unit                                                                                                                                   |
+| `True`, `False` | Boolean values                                                                                                                                   |
+| `Integer`       | Integer domain                                                                                                                                   |
+| `Rational`      | Rational domain                                                                                                                                  |
+| `Real`          | Real domain                                                                                                                                      |
+| `Complex`       | Complex domain                                                                                                                                   |
+| `Infinity`      | Infinite-precision sentinel returned by `precision/accuracy` for exact values. Automatic extended-real arithmetic simplification remains limited |
 
 The legacy constants `Tau`, `NA`, and `ESP` are no longer predefined.
 
@@ -172,7 +177,7 @@ Using the legacy parenthesized form such as `sin(x)` on a known function name is
 {{1,2},{3,4}}
 ```
 
-Internally, dense values use `ArrayExpr`. In Unreleased builds, numeric values may live in immutable packed pages while shape/offset/strides form a separate layout, allowing transpose and some reshape/slice operations to share the backing storage. This is an implementation detail and does not create new user-visible Array types.
+Internally, dense values use `ArrayExpr`. In v1.5.3, numeric values may live in immutable packed pages while shape/offset/strides form a separate layout, allowing transpose and some reshape/slice operations to share the backing storage. This is an implementation detail and does not create new user-visible Array types.
 
 ## 4.3 Variables and user-defined functions
 
@@ -427,20 +432,20 @@ simplify[sqrt[x^2], x >= 0]
 
 # 7. Basic mathematical and complex functions
 
-| Function | Description | Example |
-|---|---|---|
-| `sqrt[x]` | Principal square root | `sqrt[-4] -> 2I` |
-| `cbrt[x]` | Real cube root, real domain | `cbrt[-8] -> -2` |
-| `abs[z]` | Absolute value / complex magnitude | `abs[3+4I] -> 5` |
-| `sign[z]` | Real sign / complex `z/abs[z]` | `sign[3+4I] -> 3/5+4/5I` |
-| `re[z]` | Real part | `re[3+4I] -> 3` |
-| `im[z]` | Imaginary part | `im[3+4I] -> 4` |
-| `conj[z]` | Complex conjugate | `conj[3+4I] -> 3-4I` |
-| `arg[z]` | Principal argument | `arg[-1] -> Pi Rad` |
-| `hypot[x,y]` | Exact `sqrt[x^2+y^2]` | `hypot[3,4] -> 5` |
-| `cis[x]` | `cos[x]+I sin[x]` | `cis[Pi/3] -> 1/2 + I sqrt[3]/2` |
-| `polar[r,t]` | `r cis[t]` | `polar[2,Pi/3]` |
-| `nextpow2[x]` | Smallest `n` such that `2^n >= x` | `nextpow2[9] -> 4` |
+| Function      | Description                        | Example                          |
+| ------------- | ---------------------------------- | -------------------------------- |
+| `sqrt[x]`     | Principal square root              | `sqrt[-4] -> 2I`                 |
+| `cbrt[x]`     | Real cube root, real domain        | `cbrt[-8] -> -2`                 |
+| `abs[z]`      | Absolute value / complex magnitude | `abs[3+4I] -> 5`                 |
+| `sign[z]`     | Real sign / complex `z/abs[z]`     | `sign[3+4I] -> 3/5+4/5I`         |
+| `re[z]`       | Real part                          | `re[3+4I] -> 3`                  |
+| `im[z]`       | Imaginary part                     | `im[3+4I] -> 4`                  |
+| `conj[z]`     | Complex conjugate                  | `conj[3+4I] -> 3-4I`             |
+| `arg[z]`      | Principal argument                 | `arg[-1] -> Pi Rad`              |
+| `hypot[x,y]`  | Exact `sqrt[x^2+y^2]`              | `hypot[3,4] -> 5`                |
+| `cis[x]`      | `cos[x]+I sin[x]`                  | `cis[Pi/3] -> 1/2 + I sqrt[3]/2` |
+| `polar[r,t]`  | `r cis[t]`                         | `polar[2,Pi/3]`                  |
+| `nextpow2[x]` | Smallest `n` such that `2^n >= x`  | `nextpow2[9] -> 4`               |
 
 Compatibility aliases:
 
@@ -456,13 +461,13 @@ rect -> polar
 
 # 8. Exponential and logarithmic functions
 
-| Function | Semantics |
-|---|---|
-| `exp[x]` | Entire complex exponential |
-| `log[x]` | Principal natural logarithm |
-| `log[b,x]` | Principal `Log[x]/Log[b]` |
-| `log2[x]` | `log[2,x]` frontend |
-| `log10[x]` | `log[10,x]` frontend |
+| Function   | Semantics                                 |
+| ---------- | ----------------------------------------- |
+| `exp[x]`   | Entire complex exponential                |
+| `log[x]`   | Principal natural logarithm               |
+| `log[b,x]` | Principal `Log[x]/Log[b]`                 |
+| `log2[x]`  | `log[2,x]` frontend                       |
+| `log10[x]` | `log[10,x]` frontend                      |
 | `expm1[x]` | Stable evaluation of `exp[x]-1` near zero |
 | `log1p[x]` | Stable evaluation of `log[1+x]` near zero |
 
@@ -908,7 +913,6 @@ integrate[1/sqrt[1-x^4],x]
 
 The final quartic reduction is a correct local primitive, but the current `fullSimplify` cannot always prove the corresponding `sin[asin[x]]` and principal-square-root product identity globally. The derivative-back harness therefore monitors it in ResolutionOnly mode instead of reducing integration capability because of a proof-engine limitation. General elliptic equations also remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
 
-
 ## 14.10 Ei / Si / Ci / li / Polylogarithm
 
 The principal special functions commonly required by symbolic integration are exposed as
@@ -989,7 +993,6 @@ On the real axis the Solver distinguishes the real `k=0` and `k=-1` branches whe
 N[lambertw[1],20] -> 0.567143290409783873
 N[lambertw[-1,-1/10],20] -> -3.5771520639572972184
 ```
-
 
 ---
 
@@ -1204,7 +1207,7 @@ normalize[v]
 trace[A]
 ```
 
-At Stage 2, `dot` supports rank-1 and rank-2 Arrays.
+`dot` supports rank-1 and rank-2 Arrays.
 
 ```text
 dot[{1,2,3},{4,5,6}] -> 32
@@ -1334,6 +1337,7 @@ For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey. For non-power-of
 The approximate path uses radix-2 for power-of-two sizes and Bluestein convolution for sufficiently large non-power-of-two sizes. Small non-power-of-two transforms keep direct DFT because its constant factor wins there; the current measured crossover policy uses direct evaluation below 96 points and should be remeasured with `mmCal.Benchmarks` on MSVC.
 
 ---
+
 # 19. Symbolic and numerical differentiation
 
 ## 19.1 `D`
@@ -1396,7 +1400,7 @@ This is not a separate finite-difference formula. mmCal first constructs an exac
 
 ```text
 diff[x^2,x,3]
--> 6.0000000000000000
+-> 6.0
 ```
 
 ---
@@ -1950,7 +1954,7 @@ The Complex domain likewise does not fabricate complete solution sets from princ
 
 ### Exact algebraic roots: `root` / `AlgebraicNumber`
 
-Unreleased builds extend `root` from exact real roots to certified exact real and complex roots without forcing radical expansions.
+v1.5.3 extend `root` from exact real roots to certified exact real and complex roots without forcing radical expansions.
 
 ```text
 root[{a0,a1,...,an},k]
@@ -2022,7 +2026,7 @@ root[{1,-1,0,0,0,1},1,Complex]^2
 
 The public canonical form remains `root[minpoly,k]`; field coordinates are not exposed to formatting or structural equality. `Expr::rebuildCall` preserves the internal Algebraic cache only when a Call's arguments remain structurally unchanged and invalidates it when they change, allowing Simplifier, substitution, and constraint-processing paths to retain the same field lineage safely.
 
-Stage 4 adds a bounded weak interner for `NumberFieldContext`. Independently constructed contexts share one immutable object only when they have the **same embedded generator identity**: the same minimal polynomial, Root domain, and root index. The interner owns no Contexts, stores only `weak_ptr`s, prunes expired entries, and uses a 256-entry LRU bound; misses and eviction affect performance only, never mathematical identity. Roots with different selected embeddings are not merged even when their minimal polynomials agree, and isomorphic fields expressed through different primitive generators or subfield relations are not guessed equivalent.
+v1.5.3 adds a bounded weak interner for `NumberFieldContext`. Independently constructed contexts share one immutable object only when they have the **same embedded generator identity**: the same minimal polynomial, Root domain, and root index. The interner owns no Contexts, stores only `weak_ptr`s, prunes expired entries, and uses a 256-entry LRU bound; misses and eviction affect performance only, never mathematical identity. Roots with different selected embeddings are not merged even when their minimal polynomials agree, and isomorphic fields expressed through different primitive generators or subfield relations are not guessed equivalent.
 
 This lets independently derived elements of the same simple extension enter the pointer-level same-field fast path. For example, the two sides below are built through separate primitive-element reductions but now multiply inside their shared field instead of re-entering a higher-degree construction:
 
@@ -2032,13 +2036,13 @@ This lets independently derived elements of the same simple extension enter the 
 -> root[{1,12,-6,1},1]
 ```
 
-Stage 5-1 also reuses the common-field construction itself. After primitive-element reduction succeeds for a Root pair, a bounded cache of at most 64 entries retains the compositum `NumberFieldContext` and the power-basis embeddings of both operands. Reversed operand order is recognized, so sequences such as `alpha+beta` followed by `alpha-beta` do not repeat the same tensor-product / primitive-element search. The output field is referenced weakly and entries whose field has expired are discarded.
+v1.5.3 also reuses the common-field construction itself. After primitive-element reduction succeeds for a Root pair, a bounded cache of at most 64 entries retains the compositum `NumberFieldContext` and the power-basis embeddings of both operands. Reversed operand order is recognized, so sequences such as `alpha+beta` followed by `alpha-beta` do not repeat the same tensor-product / primitive-element search. The output field is referenced weakly and entries whose field has expired are discarded.
 
 For a Real field, an `AlgebraicElement` can evaluate its coordinate polynomial over the chosen generator's certified isolating interval using exact Rational interval arithmetic. A Sturm certificate proves that this interval contains exactly one root of the result minimal polynomial, and the number of roots below the interval determines the canonical root index directly. This avoids isolating every real root of the result polynomial and then repeating all-root isolation while constructing `root[minpoly,k]`; the previous isolating-region path remains a fallback when the direct certificate does not resolve the root.
 
 A value carrying a persistent field representation also already has a certified minimal polynomial. Therefore a Real value of degree greater than 1 cannot be Rational, and a Complex value of degree greater than 2 cannot lie in `Q+iQ`; `exactRationalParts` skips its former 192-bit refinement in those cases. These are proof-reuse optimizations only and do not alter canonical output or exact semantics.
 
-Stage 5-2 also reuses reciprocals inside one `NumberFieldContext`. On the first miss, the inverse of a power-basis coordinate vector `u` is computed exactly by extended Euclid in `Q[t]/(m)` and stored in a thread-safe per-field LRU capped at 16 entries. Since `inverse(inverse(u)) = u`, both directions of the pair are published together; a hit only copies the cached Rational coefficient vector. Eviction can only cause recomputation and cannot affect the mathematical result. Constant coordinates `{q,0,...}` use the canonical embedding of `Q` and return `{1/q,0,...}` directly without polynomial Euclid. A persistent multiplication-matrix cache was also measured, but on a degree-12 field it reduced a representative multiplication only from about 112 us to 101 us while costing about 228 us to build, so it is deliberately not enabled at this stage.
+v1.5.3 also reuses reciprocals inside one `NumberFieldContext`. On the first miss, the inverse of a power-basis coordinate vector `u` is computed exactly by extended Euclid in `Q[t]/(m)` and stored in a thread-safe per-field LRU capped at 16 entries. Since `inverse(inverse(u)) = u`, both directions of the pair are published together; a hit only copies the cached Rational coefficient vector. Eviction can only cause recomputation and cannot affect the mathematical result. Constant coordinates `{q,0,...}` use the canonical embedding of `Q` and return `{1/q,0,...}` directly without polynomial Euclid. A persistent multiplication-matrix cache was also measured, but on a degree-12 field it reduced a representative multiplication only from about 112 us to 101 us while costing about 228 us to build, so it is deliberately not enabled at this stage.
 
 A dedicated development benchmark is available:
 
@@ -2048,7 +2052,7 @@ mmCal.Benchmarks --algebraic-field [iterations]
 
 It measures first-run and warm average timings, in one session, for the compositum-reuse expression corresponding to `(sqrt[2]+cuberoot[3])*(sqrt[2]-cuberoot[3])`, and also microbenchmarks first/warm reciprocal lookup, warm division, and first/warm minimal-polynomial derivation in a degree-12 simple extension. Timings depend on compiler, build configuration, and CPU and are intended for same-environment regression monitoring rather than absolute performance guarantees.
 
-Stage 3 connects this representation to exact comparisons. `==` / `!=` compare power-basis coordinates directly inside one `NumberFieldContext`, accept an identical canonical Root identity immediately, and certify distinct root indices of one polynomial or distinct proven irreducible minimal polynomials as unequal. Remaining bounded cases may construct the exact difference through the existing primitive-element/resultant path and test zero from field coordinates or certified root isolation. Proof failure or budget overflow never becomes `False`.
+v1.5.3 connects this representation to exact comparisons. `==` / `!=` compare power-basis coordinates directly inside one `NumberFieldContext`, accept an identical canonical Root identity immediately, and certify distinct root indices of one polynomial or distinct proven irreducible minimal polynomials as unequal. Remaining bounded cases may construct the exact difference through the existing primitive-element/resultant path and test zero from field coordinates or certified root isolation. Proof failure or budget overflow never becomes `False`.
 
 Mathematical `< <= > >=` is defined only for real algebraic values. In one field, the sign of `a-b` is certified by exact Rational interval evaluation of its power-basis polynomial at the chosen real embedding. Across different real fields, the certified isolating intervals are refined until they separate; exact difference construction is available as a fallback. The deterministic `Re(z)+Pi Im(z)` ordering used to enumerate Complex Roots is not a mathematical order, so `< <= > >=` on Complex algebraic values remains unevaluated.
 
@@ -2063,7 +2067,7 @@ root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
 -> root[{1,0,1},1,Complex] < root[{1,0,1},2,Complex]
 ```
 
-Stage 7-6 also bridges expressions that are not syntactically Root values when their exact algebraic meaning can be certified. The current bridge covers canonical `root[...]`, exact Rational / exact complex-Rational values, `sqrt[q]` / `cbrt[q]` for safe exact-Rational real cases, `Phi`, and bounded `+ - * /` or small integer powers built from them. Formatting is not forced into Root form; comparisons, domain proofs, and Solve use the shared `AlgebraicNumber` view internally while preserving the original user-visible radical or constant expression.
+v1.5.3 also bridges expressions that are not syntactically Root values when their exact algebraic meaning can be certified. The current bridge covers canonical `root[...]`, exact Rational / exact complex-Rational values, `sqrt[q]` / `cbrt[q]` for safe exact-Rational real cases, `Phi`, and bounded `+ - * /` or small integer powers built from them. Formatting is not forced into Root form; comparisons, domain proofs, and Solve use the shared `AlgebraicNumber` view internally while preserving the original user-visible radical or constant expression.
 
 ```text
 root[{-2,0,1},2] == sqrt[2]
@@ -2156,7 +2160,7 @@ The InformationEnclosure is not a probability distribution or a statistical conf
 
 Ordinary `+ - * /` and unary `-` propagate both intervals independently. Exact `Number` operands enter both paths as identical point intervals.
 
-In Unreleased builds, `DecimalApproximation` / `ComplexDecimalApproximation` are first-class leaves for the certified scalar evaluator. Functions with interval backends, including `sin`, `exp`, `log`, `sqrt`, hyperbolic/inverse functions, `gamma`, `erf`, `Ei`, `Si`, and `Ci`, propagate both enclosures independently. Functions such as `log2`, `log10`, and `fract` that rewrite to supported primitives re-enter the same path after rewriting. Ordered comparisons and discrete selectors such as `min` / `max` are resolved only when the **InformationEnclosure alone** proves the result, preventing hidden guard digits from leaking through Boolean decisions. Backends that currently require exact Rational parameters, including parts of `1F1` / `2F1`, elliptic functions, and `polylog`, remain conservatively unevaluated for unsupported approximate parameters.
+In v1.5.3, `DecimalApproximation` / `ComplexDecimalApproximation` are first-class leaves for the certified scalar evaluator. Functions with interval backends, including `sin`, `exp`, `log`, `sqrt`, hyperbolic/inverse functions, `gamma`, `erf`, `Ei`, `Si`, and `Ci`, propagate both enclosures independently. Functions such as `log2`, `log10`, and `fract` that rewrite to supported primitives re-enter the same path after rewriting. Ordered comparisons and discrete selectors such as `min` / `max` are resolved only when the **InformationEnclosure alone** proves the result, preventing hidden guard digits from leaking through Boolean decisions. Backends that currently require exact Rational parameters, including parts of `1F1` / `2F1`, elliptic functions, and `polylog`, remain conservatively unevaluated for unsupported approximate parameters.
 
 ```text
 N[Pi,20] + 1/3
@@ -2437,31 +2441,31 @@ Therefore a DomainError or random-number consumption in the unselected branch do
 
 # 28. Major aliases
 
-| Alias | Canonical |
-|---|---|
-| `pow` | `Power` |
-| `fact` | `Factorial` |
-| `fract` | `frac` |
-| `ln` | `log` |
-| `real` | `re` |
-| `imag` | `im` |
-| `mag` | `abs` |
-| `unit`, `csgn` | `sign` |
-| `rect` | `polar` |
-| `ave` | `mean` |
-| `matmul`, `mmul`, `vdot` | `dot` |
-| `mtranspose` | `transpose` |
-| `mget` | `at` |
-| `mdet` | `det` |
-| `minverse` | `inverse` |
-| `rank`, `mrank` | `matrixRank` |
-| `mtrace` | `trace` |
-| `mrows` | `rows` |
-| `mcols` | `cols` |
-| `mdiag` | `diag` |
-| `vnorm`, `vlength` | `norm` |
-| `vdistance` | `veuclidean` |
-| `vnormalize`, `vunit` | `normalize` |
+| Alias                    | Canonical    |
+| ------------------------ | ------------ |
+| `pow`                    | `Power`      |
+| `fact`                   | `Factorial`  |
+| `fract`                  | `frac`       |
+| `ln`                     | `log`        |
+| `real`                   | `re`         |
+| `imag`                   | `im`         |
+| `mag`                    | `abs`        |
+| `unit`, `csgn`           | `sign`       |
+| `rect`                   | `polar`      |
+| `ave`                    | `mean`       |
+| `matmul`, `mmul`, `vdot` | `dot`        |
+| `mtranspose`             | `transpose`  |
+| `mget`                   | `at`         |
+| `mdet`                   | `det`        |
+| `minverse`               | `inverse`    |
+| `rank`, `mrank`          | `matrixRank` |
+| `mtrace`                 | `trace`      |
+| `mrows`                  | `rows`       |
+| `mcols`                  | `cols`       |
+| `mdiag`                  | `diag`       |
+| `vnorm`, `vlength`       | `norm`       |
+| `vdistance`              | `veuclidean` |
+| `vnormalize`, `vunit`    | `normalize`  |
 
 Aliases are not separate implementations; they resolve to the same `BuiltinId`. Mathematical metadata and Solver rules are therefore not duplicated.
 

@@ -1793,7 +1793,7 @@ guard += growth
 
 # 32. `DecimalApproximation`
 
-これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + 二重enclosure metadata**である。Unreleasedではこの値を数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
+これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + 二重enclosure metadata**である。v1.5.3ではこの値を数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
 
 保持内容:
 
@@ -2238,7 +2238,7 @@ std::vector<std::uint32_t> limbs_;
 
 ## 39.4 x86-64 GCCでの参考`sizeof`
 
-以下はv1.5.2正式版時点のsourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。Unreleasedではtyped-node化に加え，`DecimalApproximation`へInformationEnclosure用Rational boundsを追加したため，近似値型の現在サイズはこのrelease時点表から変化している。`Expr::Node`には全kind共通の544 B payloadを持たなくなった。
+以下はv1.5.2正式版時点のsourceをx86-64 GCCで測った**参考値**であり，MSVC ABIや将来実装の仕様ではない。v1.5.3ではtyped-node化に加え，`DecimalApproximation`へInformationEnclosure用Rational boundsを追加したため，近似値型の現在サイズはこのrelease時点表から変化している。`Expr::Node`には全kind共通の544 B payloadを持たなくなった。
 
 | 型 | `sizeof`参考値 | 主な理由 |
 |---|---:|---|
@@ -2251,7 +2251,7 @@ std::vector<std::uint32_t> limbs_;
 | `DecimalApproximation` | 248 B | text + metadata + Rational bounds |
 | `ComplexDecimalApproximation` | 536 B | real/imag approximate metadata |
 | `Expr` handle | 16 B | `shared_ptr` |
-| `Expr::Node::Value`相当variant（v1.5.2正式版） | 544 B | 最大alternativeをinline保持。Unreleasedで廃止 |
+| `Expr::Node::Value`相当variant（v1.5.2正式版） | 544 B | 最大alternativeをinline保持。v1.5.3で廃止 |
 
 InformationEnclosure追加後の同じx86-64 GCC環境での参考値は，`DecimalApproximation = 376 B`，`ComplexDecimalApproximation = 792 B`。これはexact Rational boundsを2本追加したためであり，typed-node化後はこの増加が他kindのNode固定費へ波及しない。
 
@@ -2279,7 +2279,7 @@ std::variant<
 
 をinline保持していた。`std::variant`は最大alternativeを入れられる領域を全Nodeへ確保するため，小整数`1`のNodeでも`ComplexDecimalApproximation`級の箱を払っていた。
 
-Unreleasedでは公開`Expr` APIを変えず，内部を次の形へ単独refactorした。
+v1.5.3では公開`Expr` APIを変えず，内部を次の形へ単独refactorした。
 
 ```text
 Expr
@@ -2304,13 +2304,13 @@ Expr
 | representation | 最大RSS | `transpose`本体 |
 |---|---:|---:|
 | v1.5.2形式の巨大variant Node | 693312 KiB（約677.1 MiB） | 181.7 ms |
-| Unreleased typed node | 299668 KiB（約292.6 MiB） | 157.4 ms |
+| v1.5.3 typed node | 299668 KiB（約292.6 MiB） | 157.4 ms |
 
 最大RSSは約384.4 MiB，**56.8%削減**した。timingは単発測定なので性能保証とはしないが，memoryについては当初想定どおり`Expr::Node`固定費が主要因だったことを強く裏付ける。
 
 typed-node後にpersistent Array representationを別段階で監査した。単純な`vector<Rational>` packed化は保存時の固定費を減らす一方，transpose等で100万個のRational/BigIntをdeep copyし，1024×1024 direct-packed transposeが約650～675 msまで退行したため棄却した。
 
-採用したUnreleased表現は，固定1024要素pageのimmutable shared backingとshape / offset / stridesを分離する。pageはInteger / Rational / Number / DecimalApproximation / ComplexDecimalApproximation / Genericのいずれかをpacked保持する。transposeはshape/stride交換だけ，contiguous reshapeと一部sliceもbackingを共有する。`ArrayBuilder`は現在pageだけをpromotionするため，末尾でsymbolic値が現れても完成済みnumeric pageを再構築しない。
+採用したv1.5.3表現は，固定1024要素pageのimmutable shared backingとshape / offset / stridesを分離する。pageはInteger / Rational / Number / DecimalApproximation / ComplexDecimalApproximation / Genericのいずれかをpacked保持する。transposeはshape/stride交換だけ，contiguous reshapeと一部sliceもbackingを共有する。`ArrayBuilder`は現在pageだけをpromotionするため，末尾でsymbolic値が現れても完成済みnumeric pageを再構築しない。
 
 同一系統のGCC Release/LTO-off `--matrix-large transpose 1024 16`では，builderからexact Rationalを直接構築する現経路で最大RSS `136576 KiB`（約133.4 MiB），transpose本体約0.059 msだった。P1 typed-node時点の約292.6 MiBからさらに減ったが，benchmark fixture自体も「Expr全量構築→Array化」からdirect builderへ変更しているため，typed-node比較のような単一変更A/Bではなく**persistent storage + construction path全体の改善値**として扱う。
 
@@ -2466,7 +2466,7 @@ Gamma / erf等を5000～10000桁まで振り，逐次級数やinterval object生
 
 ## 42.5 representation最適化
 
-v1.5.2の大行列監査で，算術algorithmよりrepresentation固定費が先に壁になる領域が確認された。Unreleasedでは第一段階の`Expr::Node` kind別typed-node化を完了し，1024×1024 Rational Matrixで最大RSS約56.8%削減を確認した。第二段階ではpersistent `ArrayExpr`をimmutable paged packed backing + stride viewへ移行し，矩形numeric braceをdirect `ArrayBuilder`へloweringする経路も導入した。
+v1.5.2の大行列監査で，算術algorithmよりrepresentation固定費が先に壁になる領域が確認された。v1.5.3では第一段階の`Expr::Node` kind別typed-node化を完了し，1024×1024 Rational Matrixで最大RSS約56.8%削減を確認した。第二段階ではpersistent `ArrayExpr`をimmutable paged packed backing + stride viewへ移行し，矩形numeric braceをdirect `ArrayBuilder`へloweringする経路も導入した。
 
 page容量は1024要素で，promotionは現在page内だけに限定する。完成済みpageは共有されるため，100万要素の末尾がsymbolicになっても過去100万要素をGenericへ再包装しない。transpose / contiguous reshape / eligible sliceはbacking共有を利用する。
 
@@ -2714,9 +2714,9 @@ certified decimal result
 
 性能面では，schoolbook/Karatsuba/Toom-3，専用square，Knuth/Burnikel–Ziegler，10進divide-and-conquer，Chudnovsky，binary-splitting exp/logまで入り，単純な「自作BigInt」の域はかなり越えている。
 
-v1.5.2の1024 dense Matrix監査では，次のbottleneckが算術algorithmだけではなく**representation**であることも明確になった。そこでUnreleasedの第一段階として`Expr::Node`の巨大variant固定費をkind別typed nodeへ分離した。同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`では最大RSSが`693312 KiB`から`299668 KiB`へ低下し，約384.4 MiB / **56.8%削減**した。公開`Expr` API，node identity，structural equalityは維持している。
+v1.5.2の1024 dense Matrix監査では，次のbottleneckが算術algorithmだけではなく**representation**であることも明確になった。そこでv1.5.3の第一段階として`Expr::Node`の巨大variant固定費をkind別typed nodeへ分離した。同一GCC Release/LTO-offの1024×1024 Rational Matrix `transpose`では最大RSSが`693312 KiB`から`299668 KiB`へ低下し，約384.4 MiB / **56.8%削減**した。公開`Expr` API，node identity，structural equalityは維持している。
 
-続くUnreleased段階ではnumeric `ArrayExpr`もimmutable paged packed backingへ移行した。単純flat packed案はtransposeのdeep copyで退行したため棄却し，page共有 + stride viewを採用した。`ArrayBuilder`のpromotion costは最大1 pageへ制限し，Lowererも矩形numeric braceではleafをbuilderへ直接流す。これによりstorage節約とExpr identity sharingの長所を両立させる。
+続くv1.5.3段階ではnumeric `ArrayExpr`もimmutable paged packed backingへ移行した。単純flat packed案はtransposeのdeep copyで退行したため棄却し，page共有 + stride viewを採用した。`ArrayBuilder`のpromotion costは最大1 pageへ制限し，Lowererも矩形numeric braceではleafをbuilderへ直接流す。これによりstorage節約とExpr identity sharingの長所を両立させる。
 
 残るrepresentation課題はsmall BigIntのheap allocationとparser AST側の巨大brace temporaryである。したがって次段の性能改善でも，
 

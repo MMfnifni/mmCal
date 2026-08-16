@@ -25,8 +25,8 @@ using PageStorage = std::variant<
     std::vector<Expr>>;
 
 struct ArrayPage final {
-    explicit ArrayPage(PageStorage storage)
-        : storage(std::move(storage)) {}
+    explicit ArrayPage(PageStorage pageStorage)
+        : storage(std::move(pageStorage)) {}
 
     PageStorage storage;
 
@@ -475,16 +475,16 @@ struct ArrayBuilder::State final {
 };
 
 struct Expr::Node {
-    explicit Node(ExprKind kind) noexcept
-        : kind(kind) {}
+    explicit Node(ExprKind nodeKind) noexcept
+        : kind(nodeKind) {}
 
     ExprKind kind;
 };
 
 template <ExprKind Kind, class Value>
 struct Expr::TypedNode final : Node {
-    explicit TypedNode(Value value)
-        : Node(Kind), value(std::move(value)) {}
+    explicit TypedNode(Value nodeValue)
+        : Node(Kind), value(std::move(nodeValue)) {}
 
     Value value;
 };
@@ -815,75 +815,75 @@ ArrayExpr ArrayBuilder::finish(std::vector<std::size_t> shape) {
         hasExpressions};
 }
 
-ArrayExpr::ArrayExpr(std::vector<std::size_t> shape, std::vector<Expr> elements) {
+ArrayExpr::ArrayExpr(std::vector<std::size_t> arrayShape, std::vector<Expr> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (Expr& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
+    std::vector<std::size_t> arrayShape,
     std::vector<numeric::BigInt> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (auto& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
+    std::vector<std::size_t> arrayShape,
     std::vector<numeric::Rational> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (auto& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
+    std::vector<std::size_t> arrayShape,
     std::vector<numeric::Number> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (auto& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
+    std::vector<std::size_t> arrayShape,
     std::vector<numeric::DecimalApproximation> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (auto& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
+    std::vector<std::size_t> arrayShape,
     std::vector<numeric::ComplexDecimalApproximation> elements) {
     ArrayBuilder builder;
     builder.reserve(elements.size());
     for (auto& element : elements)
         builder.append(std::move(element));
-    *this = builder.finish(std::move(shape));
+    *this = builder.finish(std::move(arrayShape));
 }
 
 ArrayExpr::ArrayExpr(
-    std::vector<std::size_t> shape,
-    std::shared_ptr<const Storage> storage,
-    std::vector<std::size_t> strides,
+    std::vector<std::size_t> arrayShape,
+    std::shared_ptr<const Storage> backingStorage,
+    std::vector<std::size_t> arrayStrides,
     std::size_t offset,
     std::size_t elementCount,
     ArrayStorageKind storageKind,
     bool hasStoredExpressions)
-    : shape(std::move(shape)),
-      storage_(std::move(storage)),
-      strides_(std::move(strides)),
+    : shape(std::move(arrayShape)),
+      storage_(std::move(backingStorage)),
+      strides_(std::move(arrayStrides)),
       offset_(offset),
       elementCount_(elementCount),
       storageKind_(storageKind),

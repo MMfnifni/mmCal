@@ -33,6 +33,7 @@
 #include "solver/solve_constraints.hpp"
 #include "solver/solve_normalization.hpp"
 #include "solver/transcendental_solver.hpp"
+#include "symbolic/algebraic_expression.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/differentiation.hpp"
@@ -171,66 +172,6 @@ void validateSolveVariable(
         }
     }
     return false;
-}
-
-[[nodiscard]] std::optional<std::vector<numeric::Rational>> rootCoefficients(
-    const expression::Expr& expression) {
-    if (!expression.isArray() || expression.asArray().rank() != 1)
-        return std::nullopt;
-    const auto& array = expression.asArray();
-    std::vector<numeric::Rational> coefficients;
-    coefficients.reserve(array.size());
-    for (std::size_t i = 0; i < array.size(); ++i) {
-        const expression::Expr value = array.element(i);
-        if (!value.isNumber() || !value.asNumber().isReal())
-            return std::nullopt;
-        coefficients.push_back(value.asNumber().asReal().toRational());
-    }
-    while (!coefficients.empty() && coefficients.back().isZero())
-        coefficients.pop_back();
-    return coefficients;
-}
-
-[[nodiscard]] std::optional<std::size_t> rootIndex(const expression::Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal()
-        || !expression.asNumber().asReal().isInteger())
-        return std::nullopt;
-    const numeric::BigInt& integer = expression.asNumber().asReal().asInteger();
-    if (integer.isNegative() || integer.isZero())
-        return std::nullopt;
-    const auto value = numeric::tryToUint64(integer);
-    if (!value || *value > std::numeric_limits<std::size_t>::max())
-        return std::nullopt;
-    return static_cast<std::size_t>(*value);
-}
-
-[[nodiscard]] expression::Expr canonicalRootCall(
-    const symbolic::RealAlgebraicNumber& algebraic,
-    const BuiltinRegistry& registry) {
-    std::vector<numeric::Rational> coefficients(
-        algebraic.polynomial().begin(), algebraic.polynomial().end());
-    const std::size_t coefficientCount = coefficients.size();
-    const symbolic::AlgebraicNumber cached =
-        symbolic::AlgebraicNumber::fromRealRoot(algebraic).withGeneratorField();
-    return expression::Expr::call(registry.symbol(BuiltinId::Root), {
-        expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
-        expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}}
-    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
-}
-
-[[nodiscard]] expression::Expr canonicalRootCall(
-    const symbolic::ComplexAlgebraicNumber& algebraic,
-    const BuiltinRegistry& registry) {
-    std::vector<numeric::Rational> coefficients(
-        algebraic.polynomial().begin(), algebraic.polynomial().end());
-    const std::size_t coefficientCount = coefficients.size();
-    const symbolic::AlgebraicNumber cached =
-        symbolic::AlgebraicNumber::fromComplexRoot(algebraic).withGeneratorField();
-    return expression::Expr::call(registry.symbol(BuiltinId::Root), {
-        expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
-        expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}},
-        expression::Expr{expression::Symbol{"Complex"}}
-    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
 }
 
 [[nodiscard]] bool containsUnresolvedSolution(const solver::SolutionSet& solutions) {
@@ -949,8 +890,8 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments.size() < 2 || arguments.size() > 3)
             error::throwCalcError(error::CalcErrorType::Type,
                 "root expects root[coefficients,index] or root[coefficients,index,Complex]");
-        const auto coefficients = rootCoefficients(arguments[0]);
-        const auto index = rootIndex(arguments[1]);
+        const auto coefficients = symbolic::rootPolynomialCoefficients(arguments[0]);
+        const auto index = symbolic::positiveRootIndex(arguments[1]);
         if (!coefficients || coefficients->size() < 2 || !index)
             error::throwCalcError(error::CalcErrorType::Type,
                 "root expects exact real Rational coefficients and a positive integer index");
@@ -969,13 +910,13 @@ expression::Expr Evaluator::dispatchBuiltin(
             if (!algebraic)
                 error::throwCalcError(error::CalcErrorType::Domain,
                     "complex root index is invalid or root isolation exceeded the current budget");
-            return canonicalRootCall(*algebraic, registry_);
+            return symbolic::makeCanonicalRootExpression(*algebraic, registry_);
         }
         const auto algebraic = symbolic::RealAlgebraicNumber::create(*coefficients, *index);
         if (!algebraic)
             error::throwCalcError(error::CalcErrorType::Domain,
                 "root index is invalid or the polynomial exceeds the current algebraic degree limit");
-        return canonicalRootCall(*algebraic, registry_);
+        return symbolic::makeCanonicalRootExpression(*algebraic, registry_);
     }
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify: {

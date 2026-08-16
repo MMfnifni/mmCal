@@ -1,8 +1,8 @@
 # mmCal 高速化・算法選定記録
 
-この文書は、v1.5.1で行った高速化について、**何を採用したか、何を比較したが棄却したか、なぜその判断をしたか**を残すための記録である。
+この文書は，各バージョンで行った高速化について，**何を採用したか，何を比較したが棄却したか，なぜその判断をしたか**を残すための記録である。
 
-速度だけでなく、mmCalの基本契約である
+速度だけでなく，mmCalの基本契約である
 
 - exact arithmetic
 - principal branch / definedness / domain
@@ -12,7 +12,7 @@
 
 を壊さないことを採用条件とする。
 
-benchmark値はCPU/compiler/allocator/cacheに依存する。以下は開発時のGCC系環境で得た代表値であり、普遍的な性能保証ではない。Visual Studio / MSVCを含む別環境では`mmCal.Benchmarks`で再測定する。
+benchmark値はCPU/compiler/allocator/cacheに依存する。以下は開発時のGCC系環境で得た代表値であり，普遍的な性能保証ではない。Visual Studio / MSVCを含む別環境では`mmCal.Benchmarks`で再測定する。
 
 ---
 
@@ -39,7 +39,7 @@ benchmark値はCPU/compiler/allocator/cacheに依存する。以下は開発時�
 
 ## 2.2 Karatsuba — 採用
 
-初期threshold sweepでは8～16 limbsからKaratsubaへ入れると明確に退行した。一方、32～48 limbs以降で利益が安定した。
+初期threshold sweepでは8～16 limbsからKaratsubaへ入れると明確に退行した。一方，32～48 limbs以降で利益が安定した。
 
 v1.5.1既定値:
 
@@ -52,13 +52,13 @@ Karatsuba crossover ≈ 48 limbs
 
 代表値:
 
-| operand | schoolbook | adaptive | speedup |
-|---:|---:|---:|---:|
-| 128 limbs | 約9.5 µs | 約6.9 µs | 約1.4x |
-| 256 limbs | 約38 µs | 約21 µs | 約1.8x |
-| 512 limbs | 約151 µs | 約63 µs | 約2.4x |
+|   operand | schoolbook | adaptive | speedup |
+| --------: | ---------: | -------: | ------: |
+| 128 limbs |   約9.5 µs | 約6.9 µs |  約1.4x |
+| 256 limbs |    約38 µs |  約21 µs |  約1.8x |
+| 512 limbs |   約151 µs |  約63 µs |  約2.4x |
 
-factorialにもproduct tree経由で波及し、代表測定では
+factorialにもproduct tree経由で波及し，代表測定では
 
 ```text
 10000!  約4.4 ms → 約2.0 ms
@@ -79,7 +79,7 @@ top-level Toom-3   ≈ 1280 limbs
 recursive Toom-3   ≈ 448 limbs
 ```
 
-512～1024 limbs付近ではToom-3のevaluation/interpolation overheadが勝つcaseがあるため、早過ぎるdispatchは避けた。
+512～1024 limbs付近ではToom-3のevaluation/interpolation overheadが勝つcaseがあるため，早過ぎるdispatchは避けた。
 
 代表値ではKaratsuba-only比で
 
@@ -94,13 +94,13 @@ recursive Toom-3   ≈ 448 limbs
 
 v1.5.1では未導入。
 
-Toom-3よりさらに巨大な領域では候補になるが、interactive用途でcrossoverが十分に現れるまで複雑化しない。将来は`mmCal.Benchmarks`でToom-4とFFT/NTTのthresholdを測って判断する。
+Toom-3よりさらに巨大な領域では候補になるが，interactive用途でcrossoverが十分に現れるまで複雑化しない。将来は`mmCal.Benchmarks`でToom-4とFFT/NTTのthresholdを測って判断する。
 
 ---
 
 # 3. Dedicated square
 
-`x*x`は一般乗算と異なりcross termが対称なので、専用squareを採用した。
+`x*x`は一般乗算と異なりcross termが対称なので，専用squareを採用した。
 
 - small: symmetric schoolbook square
 - large: Karatsuba square
@@ -116,7 +116,7 @@ Toom-3よりさらに巨大な領域では候補になるが、interactive用途
 
 ## Toom-3 square — 棄却
 
-専用Toom-3 squareも実装して比較したが、現在のthreshold域ではKaratsuba squareより遅かった。
+専用Toom-3 squareも実装して比較したが，現在のthreshold域ではKaratsuba squareより遅かった。
 
 理由:
 
@@ -146,7 +146,7 @@ allocator削減より
 
 のcostが勝ったため棄却した。
 
-MSVC allocatorでは結果が変わる可能性があるため、将来再測定は可能。
+MSVC allocatorでは結果が変わる可能性があるため，将来再測定は可能。
 
 ---
 
@@ -154,7 +154,7 @@ MSVC allocatorでは結果が変わる可能性があるため、将来再測定
 
 ## Balanced product tree — 維持
 
-既存の`productRange()`はbalanced treeで同程度の大きさのBigInt同士を掛けるため、adaptive multiplicationとの相性が良かった。
+既存の`productRange()`はbalanced treeで同程度の大きさのBigInt同士を掛けるため，adaptive multiplicationとの相性が良かった。
 
 追加した軽量最適化:
 
@@ -163,7 +163,7 @@ MSVC allocatorでは結果が変わる可能性があるため、将来再測定
 
 ## Prime-Swing — 棄却
 
-Prime-Swingも実装し、初版で見つかったprime exponent重複計算等も修正した上で比較した。
+Prime-Swingも実装し，初版で見つかったprime exponent重複計算等も修正した上で比較した。
 
 それでも代表値は
 
@@ -173,11 +173,11 @@ product tree  約0.59 s
 Prime-Swing   約1.5 s
 ```
 
-で、現BigInt backendでは既存product treeが速かった。
+で，現BigInt backendでは既存product treeが速かった。
 
 したがって「一般に高級な算法だから」という理由では採用しなかった。
 
-将来、prime処理や乗算backendが変われば再評価対象。
+将来，prime処理や乗算backendが変われば再評価対象。
 
 ---
 
@@ -185,7 +185,7 @@ Prime-Swing   約1.5 s
 
 ## 6.1 Knuth normalized long division — 維持
 
-小～中サイズでは低overheadで、Burnikel–Zieglerのbase caseとして優秀なため削除しない。
+小～中サイズでは低overheadで，Burnikel–Zieglerのbase caseとして優秀なため削除しない。
 
 ## 6.2 Burnikel–Ziegler — 採用
 
@@ -211,7 +211,7 @@ GCC環境では約32 limbs以降で利益が安定した。商が小さいcase�
 
 ## 6.3 Power-of-two division — 採用
 
-`x / 2^k`を一般divisionへ流さず、
+`x / 2^k`を一般divisionへ流さず，
 
 ```text
 quotient  = x >> k
@@ -228,13 +228,13 @@ remainder = low k bits
 
 ## Euclidean GCD — 維持
 
-Burnikel–Zieglerの高速化をそのまま利用できるため、既存Euclidean `%`を維持した。
+Burnikel–Zieglerの高速化をそのまま利用できるため，既存Euclidean `%`を維持した。
 
 ## Binary GCD — 棄却
 
-Stein binary GCDを実装・比較したが、現BigIntでは約4～30倍遅いcaseがあった。
+Stein binary GCDを実装・比較したが，現BigIntでは約4～30倍遅いcaseがあった。
 
-shift/subtraction回数と大きなtemporary処理が多く、現在の高速divisionを使うEuclidに勝てなかった。
+shift/subtraction回数と大きなtemporary処理が多く，現在の高速divisionを使うEuclidに勝てなかった。
 
 次候補はLehmer GCD。
 
@@ -242,15 +242,15 @@ shift/subtraction回数と大きなtemporary処理が多く、現在の高速div
 
 # 8. Decimal conversion
 
-巨大factorialの計算本体を高速化すると、次にbinary-limb→decimal conversionが支配的になった。
+巨大factorialの計算本体を高速化すると，次にbinary-limb→decimal conversionが支配的になった。
 
 ## 8.1 `10^9` chunk — 採用
 
-旧実装の`/10` 1桁ずつを、`/10^9` 9桁ずつへ変更。
+旧実装の`/10` 1桁ずつを，`/10^9` 9桁ずつへ変更。
 
 `40000!`で約6秒から約0.5秒級まで改善。
 
-parse側も9桁chunk化し、巨大decimal parseを大幅に短縮した。
+parse側も9桁chunk化し，巨大decimal parseを大幅に短縮した。
 
 ## 8.2 Divide-and-conquer decimal conversion — 採用
 
@@ -266,7 +266,7 @@ D&C                  約0.19 s
 
 元実装比で約30倍級。
 
-formatter固有overheadはこの規模でも小さく、主costはBigInt→decimal自体だった。
+formatter固有overheadはこの規模でも小さく，主costはBigInt→decimal自体だった。
 
 ---
 
@@ -282,9 +282,9 @@ formatter固有overheadはこの規模でも小さく、主costはBigInt→decim
 
 # 10. BigFloat extreme exponent gap
 
-旧加算は常にcommon exponentへexact alignmentし、`1 + 2^-5000000`でも巨大left shiftを作った。
+旧加算は常にcommon exponentへexact alignmentし，`1 + 2^-5000000`でも巨大left shiftを作った。
 
-v1.5.1では、要求precisionと符号から結果を一意に証明できるcaseだけfast pathへ入れる。
+v1.5.1では，要求precisionと符号から結果を一意に証明できるcaseだけfast pathへ入れる。
 
 全rounding mode:
 
@@ -295,7 +295,7 @@ TowardNegative
 TowardZero
 ```
 
-を扱い、曖昧な場合は旧exact alignmentへfallbackする。
+を扱い，曖昧な場合は旧exact alignmentへfallbackする。
 
 代表値:
 
@@ -312,7 +312,7 @@ TowardZero
 
 ## Machin formula — 旧referenceへ降格
 
-v1.5.0のMachin公式は保証構造が単純だったが、10000桁級で約12秒まで伸びた。
+v1.5.0のMachin公式は保証構造が単純だったが，10000桁級で約12秒まで伸びた。
 
 ## Binary-splitting Chudnovsky — 採用
 
@@ -323,7 +323,7 @@ N[Pi,10000]
 約12.3 s → 約0.4 s
 ```
 
-高桁既知値と照合し、certified enclosureの契約を維持した。
+高桁既知値と照合し，certified enclosureの契約を維持した。
 
 ---
 
@@ -335,7 +335,7 @@ N[Pi,10000]
 
 ## Binary splitting + certified range reduction — 採用
 
-小さいRationalはexact binary splitting、大きい分子・分母はfixed-precision interval binary splittingへ切り替える。
+小さいRationalはexact binary splitting，大きい分子・分母はfixed-precision interval binary splittingへ切り替える。
 
 代表値:
 
@@ -343,7 +343,7 @@ N[Pi,10000]
 N[E,5000]  数秒級 → 約0.1 s級
 ```
 
-一般Rationalでも深めのrange reductionを行い、中間項の成長を抑える。
+一般Rationalでも深めのrange reductionを行い，中間項の成長を抑える。
 
 ---
 
@@ -356,7 +356,7 @@ N[E,5000]  数秒級 → 約0.1 s級
 ## Binary splitting + sqrt range reduction — 採用
 
 - `log[2]`等の小係数: exact binary splitting
-- 高bit mantissa: certified sqrtを複数回行って1近傍へ縮約し、interval binary splitting
+- 高bit mantissa: certified sqrtを複数回行って1近傍へ縮約し，interval binary splitting
 
 代表値:
 
@@ -371,7 +371,7 @@ N[log[123456789/987654321],5000]  約22 s → 約3 s級
 
 # 14. 巨大Radianの三角函数
 
-旧経路では巨大な生Radian Rationalを小区間へ落とさずTaylor評価し、
+旧経路では巨大な生Radian Rationalを小区間へ落とさずTaylor評価し，
 
 ```text
 N[sin[10^6],20]
@@ -381,9 +381,9 @@ N[sin[10^6],20]
 
 ## Certified argument reduction — 採用
 
-`double fmod`は使わず、Piの保証区間から`x/(Pi/2)`の象限integerを一意に証明し、小区間へ縮約する。
+`double fmod`は使わず，Piの保証区間から`x/(Pi/2)`の象限integerを一意に証明し，小区間へ縮約する。
 
-point Rationalだけでなく、`10^6 sqrt[2]`のような保証区間入力にも適用する。
+point Rationalだけでなく，`10^6 sqrt[2]`のような保証区間入力にも適用する。
 
 変更後は`10^6`～`10^12`級の代表入力が対話的時間へ戻った。
 
@@ -391,9 +391,9 @@ point Rationalだけでなく、`10^6 sqrt[2]`のような保証区間入力に�
 
 # 15. FFT plan cache
 
-exact radix-2 FFTでは同じtransform sizeでbit-reversalとtwiddleを何度も構築するため、Evaluator/session内でplanをcacheする。
+exact radix-2 FFTでは同じtransform sizeでbit-reversalとtwiddleを何度も構築するため，Evaluator/session内でplanをcacheする。
 
-cache対象は入力結果ではなく、size依存のplan情報。
+cache対象は入力結果ではなく，size依存のplan情報。
 
 process-globalにはせずSymbol/session lifetimeを安全に保つ。
 
@@ -429,13 +429,13 @@ Stage 7-7以前の非2冪exact FFTは，`radix2Transform()`から`directTransfor
 GCC Release / LTO offの専用`--exact-cyclotomic-fft 5`代表値：
 
 | length | first round-trip | warm round-trip |
-|---:|---:|---:|
-| 5 | 約0.72 ms | 約0.49 ms |
-| 7 | 約1.79 ms | 約1.74 ms |
-| 10 | 約1.50 ms | 約1.33 ms |
-| 12 | 約1.44 ms | 約1.27 ms |
-| 15 | 約9.11 ms | 約9.39 ms |
-| 21 | 約41.1 ms | 約37.3 ms |
+| -----: | ---------------: | --------------: |
+|      5 |        約0.72 ms |       約0.49 ms |
+|      7 |        約1.79 ms |       約1.74 ms |
+|     10 |        約1.50 ms |       約1.33 ms |
+|     12 |        約1.44 ms |       約1.27 ms |
+|     15 |        約9.11 ms |       約9.39 ms |
+|     21 |        約41.1 ms |       約37.3 ms |
 
 `tester.py --timings`では`test5_matrix.txt`がStage 5-3時点の約1.46 sからStage 7-7後は約0.38 sへ低下した。
 
@@ -447,17 +447,17 @@ GCC Release / LTO offの専用`--exact-cyclotomic-fft 5`代表値：
 
 ## 旧経路 — exact FFT完成後に`N`を適用
 
-従来の`N`は引数を通常評価してから呼ばれていたため、
+従来の`N`は引数を通常評価してから呼ばれていたため，
 
 ```text
 N[fft[data],16]
 ```
 
-でもまず巨大なexact Fourier式を構築し、その後に各成分を近似していた。FFT本体が`Expr`のexact multiply/add/Simplifierをbutterflyごとに通るため、近似値しか要らない場合にもsymbolic costを全額支払っていた。
+でもまず巨大なexact Fourier式を構築し，その後に各成分を近似していた。FFT本体が`Expr`のexact multiply/add/Simplifierをbutterflyごとに通るため，近似値しか要らない場合にもsymbolic costを全額支払っていた。
 
 ## precision-aware evaluation — 採用
 
-`N`の第1引数を保持し、precisionを先に確定する。FFT dispatch時にprecision contextが存在すれば、`double`ではなく`ComplexInterval`/BigFloat端点で直接transformする。exactな`fft[...]`の経路は変更しない。
+`N`の第1引数を保持し，precisionを先に確定する。FFT dispatch時にprecision contextが存在すれば，`double`ではなく`ComplexInterval`/BigFloat端点で直接transformする。exactな`fft[...]`の経路は変更しない。
 
 代表benchmark（同一GCC Release環境。当時の旧`N`仕様で16 fractional digits）:
 
@@ -467,7 +467,7 @@ N[fft[data],16]
 128 points  exact ~327.6 ms  certified ~13.1 ms
 ```
 
-非2冪のcertified FFTではdirect DFTとBluesteinを比較し、65点ではdirectが約60 ms、127点ではBluesteinが約199 msでdirect約217 msを上回った。現在は96点未満をdirect、それ以上をBluesteinへ送る。これは数学定数ではなく現benchmark環境のpolicy値なので、MSVCでは再測定する。
+非2冪のcertified FFTではdirect DFTとBluesteinを比較し，65点ではdirectが約60 ms，127点ではBluesteinが約199 msでdirect約217 msを上回った。現在は96点未満をdirect，それ以上をBluesteinへ送る。これは数学定数ではなく現benchmark環境のpolicy値なので，MSVCでは再測定する。
 
 採用理由:
 
@@ -484,7 +484,7 @@ Stage 7-7以前はexact FFT自体のsymbolic expression explosionを意図的に
 
 ## flat Array + exact Number backend — 採用
 
-v1.5.2では行列専用のnested containerを増やさず，既存Arrayの`shape + row-major flat storage`を基盤とした。`MatrixView`はArrayをzero-copy参照し，Gaussian / Gauss-Jordan等で書換えが必要な場合だけflat `MatrixBuffer`へ複製する。これはv1.5.2 release時点の設計であり，Unreleasedではpersistent Arrayのphysical storageをimmutable paged backing + stride viewへ置換している。
+v1.5.2では行列専用のnested containerを増やさず，既存Arrayの`shape + row-major flat storage`を基盤とした。`MatrixView`はArrayをzero-copy参照し，Gaussian / Gauss-Jordan等で書換えが必要な場合だけflat `MatrixBuffer`へ複製する。これはv1.5.2 release時点の設計であり，v1.5.3ではpersistent Arrayのphysical storageをimmutable paged backing + stride viewへ置換している。
 
 exact Number行列ではpivot loopからExpr生成とSimplifier呼出しを外し，`Number`を直接累積・消去する。`dot`も全要素がNumberならcellごとの積和を`Number`だけで処理し，symbolicの場合のみExprを構築する。
 
@@ -494,17 +494,17 @@ exact Number行列ではpivot loopからExpr生成とSimplifier呼出しを外�
 
 `N[det[A],p]`等はexact結果を完成してから近似せず，FFTと同じ`ApproximationContext`を受けて`ComplexInterval` backendへ直接dispatchする。expression→interval変換，decimalization，guard-digit増加はFFTと共通化した。
 
-`matrixRank`はexact入力ではexact eliminationを優先する。近似backendではmachine epsilonを用いず、intervalが0を含むがexact zeroでもないpivotは`PrecisionInsufficient`としてguard precisionを増やす。full rank等を非零pivotから証明できる場合は確定するが、近似値だけからrank deficiencyを推測しない。
+`matrixRank`はexact入力ではexact eliminationを優先する。近似backendではmachine epsilonを用いず，intervalが0を含むがexact zeroでもないpivotは`PrecisionInsufficient`としてguard precisionを増やす。full rank等を非零pivotから証明できる場合は確定するが，近似値だけからrank deficiencyを推測しない。
 
 2026-08-13のRelease / LTO off計測例:
 
 | size | exact `dot` | exact `det` | exact `rref` | `N[det,16]` |
-|---:|---:|---:|---:|---:|
-| 8 | — | 0.283 ms | 0.434 ms | 1.410 ms |
-| 12 | — | 1.290 ms | 2.233 ms | 10.144 ms |
-| 16 | 0.328 ms | 3.735 ms | 5.799 ms | 22.799 ms |
-| 32 | 1.702 ms | — | — | — |
-| 64 | 16.553 ms | — | — | — |
+| ---: | ----------: | ----------: | -----------: | ----------: |
+|    8 |           — |    0.283 ms |     0.434 ms |    1.410 ms |
+|   12 |           — |    1.290 ms |     2.233 ms |   10.144 ms |
+|   16 |    0.328 ms |    3.735 ms |     5.799 ms |   22.799 ms |
+|   32 |    1.702 ms |           — |            — |           — |
+|   64 |   16.553 ms |           — |            — |           — |
 
 この段階のexact eliminationは通常Gaussian/Gauss-Jordanであり，整数/Rationalの中間分数膨張を抑えるBareiss/fraction-free eliminationはStage 3へ分離した。
 
@@ -520,13 +520,13 @@ Stage 3ではexact実数行列を行ごとの分母LCMで整数行列へliftし�
 
 pivotは数値安定性のためではなく中間BigInt growthを抑えるため，候補中でbit lengthが小さい非零値を優先する。Bareissの各除算は`BigInt::divmod`で余り0を検証し，fraction-free invariantが壊れた場合は黙ってtruncationしない。
 
-2026-08-13 Release / LTO off、同一benchmark入力でStage 2 Gaussianと比較:
+2026-08-13 Release / LTO off，同一benchmark入力でStage 2 Gaussianと比較:
 
 | size | `det` Gaussian | `det` Bareiss | speedup | `rref` Gauss-Jordan | `rref` Bareiss | speedup |
-|---:|---:|---:|---:|---:|---:|---:|
-| 8 | 0.256 ms | 0.047 ms | 5.4x | 0.447 ms | 0.058 ms | 7.7x |
-| 12 | 1.241 ms | 0.109 ms | 11.4x | 2.058 ms | 0.146 ms | 14.1x |
-| 16 | 3.570 ms | 0.385 ms | 9.3x | 5.798 ms | 0.375 ms | 15.5x |
+| ---: | -------------: | ------------: | ------: | ------------------: | -------------: | ------: |
+|    8 |       0.256 ms |      0.047 ms |    5.4x |            0.447 ms |       0.058 ms |    7.7x |
+|   12 |       1.241 ms |      0.109 ms |   11.4x |            2.058 ms |       0.146 ms |   14.1x |
+|   16 |       3.570 ms |      0.385 ms |    9.3x |            5.798 ms |       0.375 ms |   15.5x |
 
 `N[det[...],p]` / `N[inverse[...],p]`等はこのexact Bareiss結果を先に作らず，Stage 2で導入したFFT共通のprecision-aware certified Matrix backendへ直接dispatchする。したがってBareiss採用はexact pathの改善であり，`N`の近似経路を後退させない。
 
@@ -539,10 +539,10 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 2026-08-13 Release / LTO offの代表値:
 
 | size | exact `LU` | `N[LU,16]` | `N[QR,16]` |
-|---:|---:|---:|---:|
-| 8 | 0.290 ms | 1.811 ms | 7.062 ms |
-| 12 | 1.315 ms | 5.355 ms | 21.218 ms |
-| 16 | 3.548 ms | 10.562 ms | 46.718 ms |
+| ---: | ---------: | ---------: | ---------: |
+|    8 |   0.290 ms |   1.811 ms |   7.062 ms |
+|   12 |   1.315 ms |   5.355 ms |  21.218 ms |
+|   16 |   3.548 ms |  10.562 ms |  46.718 ms |
 
 一般exact Householder QRはradical式の膨張が速く，同benchmark系統で2×2が約1.2 ms，3×3が約59 ms，4×4では約18秒かつformatted outputが約677 KBまで増えた。したがって一般exact QRは3×3以下へpolicy制限し，上三角行列の`{I,A}` fast pathだけ任意次数を許す。4次以上の一般用途は`N[qrDecomposition[A],p]`を推奨する。
 
@@ -552,10 +552,10 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 
 2026-08-13 Release / LTO offで`N[svd[A],16]`を複数回計測した代表値:
 
-| size | time |
-|---:|---:|
-| 4×4 | 約3.8 ms |
-| 8×8 | 約17.1 ms |
+|  size |      time |
+| ----: | --------: |
+|   4×4 |  約3.8 ms |
+|   8×8 | 約17.1 ms |
 | 12×12 | 約46.6 ms |
 | 16×16 | 約82.3 ms |
 
@@ -570,12 +570,12 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 2026-08-13 Release / LTO off，random decimal Matrix（[-1,1]，小数10桁相当）:
 
 | size | `N[eigenvalues,16]` | `N[eigensystem,16]` |
-|---:|---:|---:|
-| 4 | 13.4 ms | 14.0 ms |
-| 8 | 68.1 ms | 77.0 ms |
-| 16 | 364.8 ms | 466.3 ms |
-| 32 | 2826 ms | 3658 ms |
-| 64 | 19436 ms | >35 s（計測上限） |
+| ---: | ------------------: | ------------------: |
+|    4 |             13.4 ms |             14.0 ms |
+|    8 |             68.1 ms |             77.0 ms |
+|   16 |            364.8 ms |            466.3 ms |
+|   32 |             2826 ms |             3658 ms |
+|   64 |            19436 ms |   >35 s（計測上限） |
 
 # 15.11. large dense Matrix監査
 
@@ -583,22 +583,22 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 
 32/64次のrepresentative timing:
 
-| op | 32×32 | 64×64 |
-|---|---:|---:|
-| `N[dot,16]` | 167 ms | 1.21 s |
-| `N[det,16]` | 294 ms | 2.96 s |
-| `N[inverse,16]` | 1.22 s | 8.68 s |
-| `N[matrixRank,16]` | 400 ms | 4.16 s |
-| `N[solveLinear,16]` | 549 ms | 5.42 s |
-| `N[nullSpace,16]` | 401 ms | 4.01 s |
-| `N[LU,16]` | 147 ms | 1.41 s |
-| `N[QR,16]` | 1.47 s | 12.88 s |
-| `N[SVD,16]` | 1.40 s | 11.60 s |
+| op                  |  32×32 |   64×64 |
+| ------------------- | -----: | ------: |
+| `N[dot,16]`         | 167 ms |  1.21 s |
+| `N[det,16]`         | 294 ms |  2.96 s |
+| `N[inverse,16]`     | 1.22 s |  8.68 s |
+| `N[matrixRank,16]`  | 400 ms |  4.16 s |
+| `N[solveLinear,16]` | 549 ms |  5.42 s |
+| `N[nullSpace,16]`   | 401 ms |  4.01 s |
+| `N[LU,16]`          | 147 ms |  1.41 s |
+| `N[QR,16]`          | 1.47 s | 12.88 s |
+| `N[SVD,16]`         | 1.40 s | 11.60 s |
 | `N[eigenvalues,16]` | 2.83 s | 19.44 s |
 
 1024×1024では算法より先にrepresentation costが目立つ。C++から直接1,048,576個の10桁Rational Exprを構築したbenchmark processは入力だけで最大RSS約0.69 GB。`transpose`本体は約107 ms，`trace`本体は約60 msだった。Python形式の約14.16 MBテキストをCLIへ渡し`dimensions[...]`だけを評価した測定ではwall約10.9 s，最大RSS約1.99 GBだった。さらに1024次`N[dot,16]`は10秒上限で未完了（最大RSS約0.96 GB），`N[LU,16]`も10秒上限で未完了（最大RSS約1.59 GB）だったため，QR/SVD/Eigenの1024実走はメモリ圧迫を避けて中止した。
 
-Unreleasedの`Expr::Node` typed-node refactor後，同一x86-64 GCC / Release / LTO offで旧variant sourceと新sourceを同じ`--matrix-large transpose 1024 16`へ掛けて再比較した。旧variant版は最大RSS `693312 KiB`（約677.1 MiB），typed-node版は`299668 KiB`（約292.6 MiB）で，約384.4 MiB / **56.8%削減**。単発`transpose` timingは181.7 ms→157.4 msだったが，timingはnoiseを含むため採用根拠はRSS削減と全regression維持を主とする。
+v1.5.3の`Expr::Node` typed-node refactor後，同一x86-64 GCC / Release / LTO offで旧variant sourceと新sourceを同じ`--matrix-large transpose 1024 16`へ掛けて再比較した。旧variant版は最大RSS `693312 KiB`（約677.1 MiB），typed-node版は`299668 KiB`（約292.6 MiB）で，約384.4 MiB / **56.8%削減**。単発`transpose` timingは181.7 ms→157.4 msだったが，timingはnoiseを含むため採用根拠はRSS削減と全regression維持を主とする。
 
 第二段階ではpersistent `ArrayExpr`をfixed-size immutable pageへpackedし，shape / offset / stridesをbackingから分離した。最初に試した単一`vector<Rational>`方式は保存時のRSSは下がるものの，transposeでRational/BigIntを100万要素deep copyし，1024×1024 direct-packed transposeが約650～675 msへ退行したため棄却した。採用版は1024要素pageを`shared_ptr<const page>`で共有し，transposeをstride交換だけのview生成にした。
 
@@ -611,7 +611,6 @@ CLI側では13.63 MBの1024×1024・10桁decimal literalを`dimensions[...]`へ�
 64次値から純粋なO(n^3)を仮定した1024次の粗い外挿でも，`N[LU]`約1.6時間，`N[dot]`約1.4時間，`N[det]`約3.4時間，`N[solveLinear]`約6.2時間，`N[inverse]`約9.9時間，`N[SVD]`約13時間，`N[QR]`約15時間，`N[eigenvalues]`約22時間となる。32→64の実測指数をそのまま延長すると約1～21時間程度へ揺れるため，これらは予測値であって1024実測ではない。cache・allocator・guard precision・反復回数により悪化し得る。
 
 結論として，1024 dense自体はmachine double + BLASの世界では特別巨大な次数ではないが，mmCalのcertified arbitrary-precision dense算法にとっては依然stress領域である。一方，persistent exact Arrayのrepresentation固定費はtyped-node + paged packed backing + direct builderで大きく下がった。approximate SVD/Eigen等には既に連続working bufferがあるため，次はstorage改善後のcost balanceでblock化・threadingを再評価する。
-
 
 # 15.12. persistent algebraic field Stage 5-1～5-3
 
@@ -634,12 +633,12 @@ Stage 5-2では`Q[t]/(m)`上のextended Euclidで求めたexact reciprocalを，
 
 代表測定：
 
-| degree | 処理 | cache前 | Stage 5-2 warm |
-|---:|---|---:|---:|
-| 6 | reciprocal | 約178 us | 約0.24 us |
-| 6 | divide | 約243 us | 約84 us |
-| 12 | reciprocal | 約525 us | 約0.44 us |
-| 12 | divide | 約773 us | 約211～233 us |
+| degree | 処理       |  cache前 | Stage 5-2 warm |
+| -----: | ---------- | -------: | -------------: |
+|      6 | reciprocal | 約178 us |      約0.24 us |
+|      6 | divide     | 約243 us |        約84 us |
+|     12 | reciprocal | 約525 us |      約0.44 us |
+|     12 | divide     | 約773 us |  約211～233 us |
 
 ### persistent multiplication matrix cache — 棄却
 
@@ -660,9 +659,9 @@ c0 + c1 a + ... + a^k = 0
 同一GCC Release / LTO offの代表値：
 
 | field degree | 旧repeated Gauss-Jordan | incremental Krylov first |
-|---:|---:|---:|
-| 6 | 約651 us | 約475 us |
-| 12 | 約18.9 ms | 約7.7～7.9 ms |
+| -----------: | ----------------------: | -----------------------: |
+|            6 |                約651 us |                 約475 us |
+|           12 |               約18.9 ms |            約7.7～7.9 ms |
 
 さらに導出済みminimal polynomialをexact power-basis座標keyでfieldごと最大16 entryのthread-safe LRUへ保持する。12次のwarm hitは約0.59 usである。cache miss/evictionは再計算を増やすだけで，数学的結果は変えない。
 
@@ -676,13 +675,13 @@ FLINT等にはexact Rational matrixのminimal-polynomial backendがあり，有�
 
 2026-08-16のStage 5-3 / GCC Release / LTO offで全1652 black-boxを測定した代表値：
 
-| test file | tests | wall time |
-|---|---:|---:|
-| `test16_exact_calculus_solver.txt` | 85 | 約2927 ms |
-| `test5_matrix.txt` | 105 | 約1457 ms |
-| `test9_special_func.txt` | 75 | 約297 ms |
-| `test8_calculus.txt` | 46 | 約173 ms |
-| `test22_number_field_interning.txt` | 1 | 約152 ms |
+| test file                           | tests | wall time |
+| ----------------------------------- | ----: | --------: |
+| `test16_exact_calculus_solver.txt`  |    85 | 約2927 ms |
+| `test5_matrix.txt`                  |   105 | 約1457 ms |
+| `test9_special_func.txt`            |    75 |  約297 ms |
+| `test8_calculus.txt`                |    46 |  約173 ms |
+| `test22_number_field_interning.txt` |     1 |  約152 ms |
 
 `test16`はintegration / high-degree Solve / algebraic Root constructionが主なstress集合であり，`test5_matrix`は名称に反して小Matrix演算よりexact FFT/DFTの非2冪round-tripが大きな比率を占める。特に7点・12点・16点周辺のexact `ifft[fft[...]]`は今後のperformance候補として残す。`test9`では`N[ibeta[1/3,2/3,1/4],20]`と`N[gamma[1/3],20]`が相対的に重い。
 
@@ -704,13 +703,13 @@ FLINT等にはexact Rational matrixのminimal-polynomial backendがあり，有�
 
 Stage 5-3のdirect warm probeとの代表比較：
 
-| precision | 旧 `ibeta[1/3,2/3,1/4]` | Step 6 |
-|---:|---:|---:|
-| 80 bit | 約116 ms | 約37–43 ms |
-| 160 bit | 約255 ms | 約98–117 ms |
-| 320 bit | 約835 ms | 約387–392 ms |
-| 640 bit first | 約10.3 s | 約5.3 s |
-| 640 bit warm repeat | 約10 s級 | 約1.0 s |
+|           precision | 旧 `ibeta[1/3,2/3,1/4]` |       Step 6 |
+| ------------------: | ----------------------: | -----------: |
+|              80 bit |                約116 ms |   約37–43 ms |
+|             160 bit |                約255 ms |  約98–117 ms |
+|             320 bit |                約835 ms | 約387–392 ms |
+|       640 bit first |                約10.3 s |      約5.3 s |
+| 640 bit warm repeat |                約10 s級 |      約1.0 s |
 
 warm repeatの追加短縮は後述のStirling-plan cacheも受ける。算法・branch contractは変更していない。
 
@@ -729,12 +728,12 @@ Step 6-2では：
 
 別process cold-startの代表値：
 
-| precision | Stage 5-3 | Step 6 |
-|---:|---:|---:|
-| 80 bit `gamma[1/3]` | 約79 ms | 約9.5 ms |
-| 160 bit | 約89 ms | 約43 ms |
-| 320 bit | 約256 ms | 約260 ms級 |
-| 640 bit | 約1.42 s | 約1.42 s級 |
+|           precision | Stage 5-3 |     Step 6 |
+| ------------------: | --------: | ---------: |
+| 80 bit `gamma[1/3]` |   約79 ms |   約9.5 ms |
+|             160 bit |   約89 ms |    約43 ms |
+|             320 bit |  約256 ms | 約260 ms級 |
+|             640 bit |  約1.42 s | 約1.42 s級 |
 
 したがってlazy化は主に低～中精度のfirst-use taxを除去する。高精度first callの主要costは依然としてStirling/recurrence本体に残る。一方plan cacheが効く同一threadの反復では640 bit `lgamma[1/3]`が約1.36 s級から約0.34 sまで低下した。
 
@@ -758,7 +757,7 @@ Stirling項数を増やす前提として，旧Akiyama–Tanigawa実装を単純
 
 # 15.15. exact Rational `Gamma` / high-precision Stirling planner — Step 6-3
 
-Step 6-2後も640 bit以上の`gamma[1/3]` / `ibeta[1/3,2/3,1/4]`を再計測したところ，算法以前に入力表現とplannerに大きな無駄が残っていた。Johansson, *Arbitrary-precision computation of the gamma function* (arXiv:2109.08392)のrational rising-factorial / Stirling parameter-selectionの整理も参照している。
+Step 6-2後も640 bit以上の`gamma[1/3]` / `ibeta[1/3,2/3,1/4]`を再計測したところ，算法以前に入力表現とplannerに大きな無駄が残っていた。Johansson, _Arbitrary-precision computation of the gamma function_ (arXiv:2109.08392)のrational rising-factorial / Stirling parameter-selectionの整理も参照している。
 
 ## exact Rational identityをcertified backendまで保持 — 採用
 
@@ -804,13 +803,13 @@ Step 6-2で棄却した「fixed-k exact Rational二分探索」は，各probeで
 
 GCC Release / LTO off，同一環境の代表値：
 
-| workload | Step 6-2 / 分析時 | Step 6-3 |
-|---|---:|---:|
-| `gamma[1/3]`, 640 bit | 約0.69 s級 | first 約65 ms / warm平均 約38 ms |
-| `gamma[1/3]`, 1280 bit first | 約1.5 s | 約0.11 s |
-| `ibeta[1/3,2/3,1/4]`, 640 bit | 約5.3 s | 約0.21 s |
-| `ibeta[1/3,2/3,1/4]`, 1280 bit | 約4.5 s | 約0.49 s |
-| `gamma[-1/3]`, 1280 bit | interval reflection経路 | 約0.15 s |
+| workload                       |       Step 6-2 / 分析時 |                         Step 6-3 |
+| ------------------------------ | ----------------------: | -------------------------------: |
+| `gamma[1/3]`, 640 bit          |              約0.69 s級 | first 約65 ms / warm平均 約38 ms |
+| `gamma[1/3]`, 1280 bit first   |                 約1.5 s |                         約0.11 s |
+| `ibeta[1/3,2/3,1/4]`, 640 bit  |                 約5.3 s |                         約0.21 s |
+| `ibeta[1/3,2/3,1/4]`, 1280 bit |                 約4.5 s |                         約0.49 s |
+| `gamma[-1/3]`, 1280 bit        | interval reflection経路 |                         約0.15 s |
 
 通常の`--special-functions 3`では80/160/320/640 bitの`gamma[1/3]`が約4.5/7.2/13.7/37.6 ms，対応する`ibeta`が約15.8/32.2/44.3/210 msだった。1280 bitも恒久benchmarkへ追加する。
 
@@ -829,7 +828,7 @@ mmCal.Tests
 mmCal.Benchmarks
 ```
 
-通常testへbenchmark時間を混ぜず、CoreへProjectReferenceして次を行う。
+通常testへbenchmark時間を混ぜず，CoreへProjectReferenceして次を行う。
 
 - fixed-seed random BigInt division invariant
 - decimal round-trip
@@ -861,27 +860,27 @@ threshold変更時は速度だけでなくrandom invariantを先に通す。
 
 # 17. v1.5.1で意図的に採用しなかった一覧
 
-| 候補 | 判断 | 理由 |
-|---|---|---|
-| Prime-Swing factorial | 棄却 | 現product treeより巨大factorialで遅い |
-| binary GCD | 棄却 | Euclidean+B/Zより4～30倍遅いcase |
-| Karatsuba vector pool | 棄却 | 5～10%程度退行 |
-| Karatsuba depth scratch | 棄却 | 同様に管理costが勝る |
-| Toom-3 square | 棄却 | Karatsuba squareより遅い |
-| 低threshold Toom-3 | 棄却 | 512～1024 limbsでoverheadが勝つ |
-| machine `fmod`による巨大trig縮約 | 棄却 | certified semanticsを失う |
-| 全体をMachine/double化 | 方針として不採用 | exact-firstの意味論を変える |
-| persistent algebraic multiplication-matrix cache | 棄却 | 12次体で構築約228 usに対し乗算は約112→101 usに留まり，償却条件が厳しい |
-| multiplication-matrix minpoly / modular reconstruction | 保留 | 現在のbounded degreeではincremental Krylovが小さな実装で十分な改善を出す |
-| Gamma Bernoulli `B256` runtime eager生成 | 棄却 | exact Rational生成だけで約560 msのfirst-use tax。Step 6-3では`B_2...B_128`固定表へ移行したが，より高次をruntime大量生成する案は採用しない |
-| Gamma Stirling `maximumK>64` | 棄却 | 640 bit級でshiftは減るが，高次Bernoulli/Rationalと長いStirling和が勝ち約1.37 s→約2.7 sへ退行 |
-| Gamma fixed-k **Rational-power**二分探索 | 棄却 | normalized Rational `x^(2k-1)` probeが高価。Step 6-3では同じ判定をBigInt cross multiplicationへ再定式化した別方式を採用 |
+| 候補                                                   | 判断             | 理由                                                                                                                                      |
+| ------------------------------------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Prime-Swing factorial                                  | 棄却             | 現product treeより巨大factorialで遅い                                                                                                     |
+| binary GCD                                             | 棄却             | Euclidean+B/Zより4～30倍遅いcase                                                                                                          |
+| Karatsuba vector pool                                  | 棄却             | 5～10%程度退行                                                                                                                            |
+| Karatsuba depth scratch                                | 棄却             | 同様に管理costが勝る                                                                                                                      |
+| Toom-3 square                                          | 棄却             | Karatsuba squareより遅い                                                                                                                  |
+| 低threshold Toom-3                                     | 棄却             | 512～1024 limbsでoverheadが勝つ                                                                                                           |
+| machine `fmod`による巨大trig縮約                       | 棄却             | certified semanticsを失う                                                                                                                 |
+| 全体をMachine/double化                                 | 方針として不採用 | exact-firstの意味論を変える                                                                                                               |
+| persistent algebraic multiplication-matrix cache       | 棄却             | 12次体で構築約228 usに対し乗算は約112→101 usに留まり，償却条件が厳しい                                                                    |
+| multiplication-matrix minpoly / modular reconstruction | 保留             | 現在のbounded degreeではincremental Krylovが小さな実装で十分な改善を出す                                                                  |
+| Gamma Bernoulli `B256` runtime eager生成               | 棄却             | exact Rational生成だけで約560 msのfirst-use tax。Step 6-3では`B_2...B_128`固定表へ移行したが，より高次をruntime大量生成する案は採用しない |
+| Gamma Stirling `maximumK>64`                           | 棄却             | 640 bit級でshiftは減るが，高次Bernoulli/Rationalと長いStirling和が勝ち約1.37 s→約2.7 sへ退行                                              |
+| Gamma fixed-k **Rational-power**二分探索               | 棄却             | normalized Rational `x^(2k-1)` probeが高価。Step 6-3では同じ判定をBigInt cross multiplicationへ再定式化した別方式を採用                   |
 
 ---
 
 # 18. 次の候補
 
-`Expr::Node` typed-node化はUnreleasedで採用済み。公開APIを維持した単独refactorとしてinternal regressionとrandom fuzzerを通し，同一環境の1024 MatrixでRSS約56.8%削減を確認した。
+`Expr::Node` typed-node化はv1.5.3で採用済み。公開APIを維持した単独refactorとしてinternal regressionとrandom fuzzerを通し，同一環境の1024 MatrixでRSS約56.8%削減を確認した。
 
 次の優先度は次のように考える。
 

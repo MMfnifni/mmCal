@@ -338,7 +338,7 @@ Exact symbolic FFT expression growth is a separate problem and is intentionally 
 
 ## Flat Array + exact Number backend — selected
 
-v1.5.2 keeps matrices on the shared Array `shape + row-major flat storage` representation instead of introducing a separate nested matrix Value. `MatrixView` reads an Array without copying; algorithms that mutate their workspace use a flat `MatrixBuffer`. This describes the v1.5.2 release representation; Unreleased replaces the persistent physical storage with immutable paged backing plus strided views.
+v1.5.2 keeps matrices on the shared Array `shape + row-major flat storage` representation instead of introducing a separate nested matrix Value. `MatrixView` reads an Array without copying; algorithms that mutate their workspace use a flat `MatrixBuffer`. This describes the v1.5.2 release representation; v1.5.3 replaces the persistent physical storage with immutable paged backing plus strided views.
 
 For exact Number matrices, pivot loops operate directly on `Number` values without constructing Expr nodes or invoking the Simplifier. Numeric `dot` likewise performs each cell accumulation directly in `Number`; symbolic products are built only when necessary.
 
@@ -452,7 +452,7 @@ Representative order-32/order-64 results:
 
 At 1024x1024, representation cost becomes a primary limit before the cubic algorithms themselves. Direct construction of 1,048,576 ten-decimal Rational Expr elements reached about 0.69 GB maximum RSS; the timed transpose itself took about 107 ms and trace about 60 ms. Parsing roughly 14.16 MB of generator-style text and evaluating only `dimensions[...]` took about 10.9 s wall time and about 1.99 GB maximum RSS. A 1024-order `N[dot,16]` run did not complete within a 10 s cap and reached about 0.96 GB RSS; `N[LU,16]` likewise exceeded 10 s and reached about 1.59 GB. Further 1024 QR/SVD/Eigen runs were stopped to avoid unnecessary memory pressure.
 
-After the Unreleased `Expr::Node` typed-node refactor, an apples-to-apples x86-64 GCC Release/LTO-off rerun of `--matrix-large transpose 1024 16` measured `693312 KiB` (~677.1 MiB) maximum RSS for the legacy variant source and `299668 KiB` (~292.6 MiB) for the typed-node source: about 384.4 MiB / **56.8% less RSS**. The one-shot transpose timing changed from 181.7 ms to 157.4 ms, but timing noise is not the adoption criterion; the memory reduction plus unchanged regression semantics are.
+After the v1.5.3 `Expr::Node` typed-node refactor, an apples-to-apples x86-64 GCC Release/LTO-off rerun of `--matrix-large transpose 1024 16` measured `693312 KiB` (~677.1 MiB) maximum RSS for the legacy variant source and `299668 KiB` (~292.6 MiB) for the typed-node source: about 384.4 MiB / **56.8% less RSS**. The one-shot transpose timing changed from 181.7 ms to 157.4 ms, but timing noise is not the adoption criterion; the memory reduction plus unchanged regression semantics are.
 
 The second representation stage packs persistent `ArrayExpr` values into fixed immutable pages and separates shape/offset/strides from the backing. A first naive single-`vector<Rational>` design reduced storage overhead but made transpose deep-copy one million Rational/BigInt values; direct-packed order-1024 transpose took roughly 650–675 ms, so that design was rejected. The adopted design shares immutable 1024-element pages and makes transpose a stride-only view operation.
 
@@ -698,7 +698,7 @@ Correctness checks should run before accepting any new threshold solely because 
 
 # 18. Next candidates
 
-The `Expr::Node` typed-node refactor is adopted in Unreleased. It was kept as a standalone public-API-preserving change, passed the regression/fuzzer checks, and reduced order-1024 Matrix RSS by about 56.8% in the same-environment comparison above.
+The `Expr::Node` typed-node refactor is adopted in v1.5.3. It was kept as a standalone public-API-preserving change, passed the regression/fuzzer checks, and reduced order-1024 Matrix RSS by about 56.8% in the same-environment comparison above.
 
 1. Remeasure blocked LU / QR against the new paged packed Array cost balance.
 2. Evaluate threading thresholds only for pure numeric working kernels.

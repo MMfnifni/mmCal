@@ -57,35 +57,6 @@ using mathematics::RelationKind;
         simplification::SimplificationContext{builtins, mathematics, angles});
 }
 
-[[nodiscard]] Expr algebraicRootExpr(
-    const symbolic::RealAlgebraicNumber& algebraic,
-    const evaluation::BuiltinRegistry& builtins) {
-    std::vector<Rational> coefficients(
-        algebraic.polynomial().begin(), algebraic.polynomial().end());
-    const std::size_t coefficientCount = coefficients.size();
-    const symbolic::AlgebraicNumber cached =
-        symbolic::AlgebraicNumber::fromRealRoot(algebraic).withGeneratorField();
-    return Expr::call(builtins.symbol(BuiltinId::Root), {
-        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
-        Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}}
-    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
-}
-
-[[nodiscard]] Expr algebraicRootExpr(
-    const symbolic::ComplexAlgebraicNumber& algebraic,
-    const evaluation::BuiltinRegistry& builtins) {
-    std::vector<Rational> coefficients(
-        algebraic.polynomial().begin(), algebraic.polynomial().end());
-    const std::size_t coefficientCount = coefficients.size();
-    const symbolic::AlgebraicNumber cached =
-        symbolic::AlgebraicNumber::fromComplexRoot(algebraic).withGeneratorField();
-    return Expr::call(builtins.symbol(BuiltinId::Root), {
-        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
-        Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}},
-        Expr{expression::Symbol{"Complex"}}
-    }, std::make_shared<const symbolic::AlgebraicNumber>(cached));
-}
-
 [[nodiscard]] SolutionBranch branch(
     const expression::Symbol& variable,
     Expr value,
@@ -1752,7 +1723,7 @@ std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
         const auto canonical = symbolic::RealAlgebraicNumber::create(
             root.polynomial(), root.rootIndex());
         branches.push_back(branch(variable,
-            algebraicRootExpr(canonical ? *canonical : root, builtins)));
+            symbolic::makeCanonicalRootExpression(canonical ? *canonical : root, builtins)));
     }
     return SolutionSet::finite(variables, std::move(branches));
 }
@@ -1837,7 +1808,7 @@ SolutionSet solvePolynomialEquation(
             const auto canonical = symbolic::ComplexAlgebraicNumber::create(
                 root.polynomial(), root.rootIndex());
             branches.push_back(branch(variable,
-                algebraicRootExpr(canonical ? *canonical : root, builtins)));
+                symbolic::makeCanonicalRootExpression(canonical ? *canonical : root, builtins)));
         }
         return SolutionSet::finite(variables, std::move(branches));
     }

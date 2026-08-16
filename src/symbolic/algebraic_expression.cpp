@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -26,8 +27,8 @@ using expression::Expr;
 using numeric::BigInt;
 using numeric::Rational;
 
-constexpr std::size_t maxBridgeNodes = 64;
-constexpr std::uint64_t maxIntegerPower = 32;
+constexpr std::size_t maximumBridgeNodes = 64;
+constexpr std::uint64_t maximumIntegerPowerMagnitude = 32;
 
 [[nodiscard]] std::optional<AlgebraicNumber> rationalValue(const Rational& value) {
     return AlgebraicNumber::fromRational(value);
@@ -40,37 +41,6 @@ constexpr std::uint64_t maxIntegerPower = 32;
     return AlgebraicNumber::combine(lhs, rhs, operation);
 }
 
-
-[[nodiscard]] std::optional<std::vector<Rational>> rootCoefficients(const Expr& expression) {
-    if (!expression.isArray() || expression.asArray().rank() != 1)
-        return std::nullopt;
-
-    const auto& array = expression.asArray();
-    std::vector<Rational> coefficients;
-    coefficients.reserve(array.size());
-    for (std::size_t i = 0; i < array.size(); ++i) {
-        const Expr value = array.element(i);
-        if (!value.isNumber() || !value.asNumber().isReal())
-            return std::nullopt;
-        coefficients.push_back(value.asNumber().asReal().toRational());
-    }
-    while (!coefficients.empty() && coefficients.back().isZero())
-        coefficients.pop_back();
-    return coefficients;
-}
-
-[[nodiscard]] std::optional<std::size_t> rootIndex(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal()
-        || !expression.asNumber().asReal().isInteger())
-        return std::nullopt;
-    const BigInt& integer = expression.asNumber().asReal().asInteger();
-    if (integer.isNegative() || integer.isZero())
-        return std::nullopt;
-    const auto value = numeric::tryToUint64(integer);
-    if (!value || *value > std::numeric_limits<std::size_t>::max())
-        return std::nullopt;
-    return static_cast<std::size_t>(*value);
-}
 
 [[nodiscard]] std::optional<AlgebraicNumber> positiveRationalSquareRoot(
     const Rational& value) {
@@ -113,7 +83,7 @@ constexpr std::uint64_t maxIntegerPower = 32;
     const AlgebraicNumber& base,
     const BigInt& exponent) {
     const auto magnitude = numeric::tryToUint64(exponent.abs());
-    if (!magnitude || *magnitude > maxIntegerPower)
+    if (!magnitude || *magnitude > maximumIntegerPowerMagnitude)
         return std::nullopt;
 
     auto one = rationalValue(Rational{BigInt{1}});
@@ -200,8 +170,8 @@ constexpr std::uint64_t maxIntegerPower = 32;
     case BuiltinId::Root: {
         if (call.arguments.size() < 2 || call.arguments.size() > 3)
             return std::nullopt;
-        const auto coefficients = rootCoefficients(call.arguments[0]);
-        const auto index = rootIndex(call.arguments[1]);
+        const auto coefficients = rootPolynomialCoefficients(call.arguments[0]);
+        const auto index = positiveRootIndex(call.arguments[1]);
         if (!coefficients || coefficients->size() < 2 || !index)
             return std::nullopt;
         if (coefficients->size() == 2) {
@@ -307,11 +277,72 @@ constexpr std::uint64_t maxIntegerPower = 32;
 
 } // namespace
 
+std::optional<std::vector<Rational>> rootPolynomialCoefficients(
+    const Expr& expression) {
+    if (!expression.isArray() || expression.asArray().rank() != 1)
+        return std::nullopt;
+
+    const auto& array = expression.asArray();
+    std::vector<Rational> coefficients;
+    coefficients.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr value = array.element(i);
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        coefficients.push_back(value.asNumber().asReal().toRational());
+    }
+    while (!coefficients.empty() && coefficients.back().isZero())
+        coefficients.pop_back();
+    return coefficients;
+}
+
+std::optional<std::size_t> positiveRootIndex(const Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& integer = expression.asNumber().asReal().asInteger();
+    if (integer.isNegative() || integer.isZero())
+        return std::nullopt;
+    const auto value = numeric::tryToUint64(integer);
+    if (!value || *value > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    return static_cast<std::size_t>(*value);
+}
+
+Expr makeCanonicalRootExpression(
+    const RealAlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins) {
+    std::vector<Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    const AlgebraicNumber cached =
+        AlgebraicNumber::fromRealRoot(algebraic).withGeneratorField();
+    return Expr::call(builtins.symbol(BuiltinId::Root), {
+        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        Expr{numeric::Number{BigInt::fromUnsigned(algebraic.rootIndex())}}
+    }, std::make_shared<const AlgebraicNumber>(cached));
+}
+
+Expr makeCanonicalRootExpression(
+    const ComplexAlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins) {
+    std::vector<Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    const AlgebraicNumber cached =
+        AlgebraicNumber::fromComplexRoot(algebraic).withGeneratorField();
+    return Expr::call(builtins.symbol(BuiltinId::Root), {
+        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        Expr{numeric::Number{BigInt::fromUnsigned(algebraic.rootIndex())}},
+        Expr{expression::Symbol{"Complex"}}
+    }, std::make_shared<const AlgebraicNumber>(cached));
+}
+
 std::optional<AlgebraicNumber> exactAlgebraicValue(
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics) {
-    std::size_t remainingNodes = maxBridgeNodes;
+    std::size_t remainingNodes = maximumBridgeNodes;
     return exactAlgebraicValueImpl(
         expression, builtins, mathematics, remainingNodes);
 }

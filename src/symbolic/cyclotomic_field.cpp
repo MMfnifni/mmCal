@@ -140,14 +140,14 @@ CyclotomicFieldContext::CyclotomicFieldContext(
 
 std::shared_ptr<const CyclotomicFieldContext> CyclotomicFieldContext::create(
     std::size_t conductor) {
-    if (conductor == 0 || cyclotomicDegree(conductor) > maximumCyclotomicDegree)
+    const std::size_t expectedDegree = cyclotomicDegree(conductor);
+    if (conductor == 0 || expectedDegree == 0 || expectedDegree > maximumCyclotomicDegree)
         return {};
     const auto polynomial = cyclotomicPolynomial(conductor);
-    if (!polynomial || polynomial->size() <= 1
-        || polynomial->size() - 1 != cyclotomicDegree(conductor))
+    if (!polynomial || polynomial->size() != expectedDegree + 1)
         return {};
 
-    const std::size_t degree = polynomial->size() - 1;
+    const std::size_t degree = expectedDegree;
     std::vector<Rational> reduction(degree);
     for (std::size_t i = 0; i < degree; ++i)
         reduction[i] = -(*polynomial)[i];
