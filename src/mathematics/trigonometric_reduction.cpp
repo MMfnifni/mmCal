@@ -65,6 +65,10 @@ ReducedTrigAngle reduceTrigTurns(FunctionId function, Rational turns) {
     case FunctionId::Polylog:
     case FunctionId::Beta:
     case FunctionId::BetaLog:
+    case FunctionId::Zeta:
+    case FunctionId::Digamma:
+    case FunctionId::Trigamma:
+    case FunctionId::IncompleteBeta:
     case FunctionId::Cbrt:
     case FunctionId::Hypot:
     case FunctionId::Cis:

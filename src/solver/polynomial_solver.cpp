@@ -11,6 +11,7 @@
 #include "simplification/simplifier.hpp"
 #include "solver/solve_constraints.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/algebraic_number.hpp"
 #include "symbolic/algebra_transforms.hpp"
 
 #include <algorithm>
@@ -52,6 +53,18 @@ using mathematics::RelationKind;
     return simplification::Simplifier{}.simplify(
         expression,
         simplification::SimplificationContext{builtins, mathematics, angles});
+}
+
+[[nodiscard]] Expr algebraicRootExpr(
+    const symbolic::RealAlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins) {
+    std::vector<Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    return Expr::call(builtins.symbol(BuiltinId::Root), {
+        Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        Expr{Number{BigInt::fromUnsigned(algebraic.rootIndex())}}
+    });
 }
 
 [[nodiscard]] SolutionBranch branch(
@@ -1649,6 +1662,37 @@ SolutionSet solveUnivariatePolynomialRelation(
 
     return SolutionSet::unresolved(
         {{variable, mathematics::NumericDomain::Real}});
+}
+
+std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
+    const Expr& equation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto relation = relationKindOf(equation, builtins);
+    if (relation && *relation != RelationKind::Equal)
+        return std::nullopt;
+
+    const Expr zeroForm = equationZeroForm(equation, builtins, mathematics, angles);
+    const auto polynomial = symbolic::toRationalPolynomial(zeroForm, variable, builtins);
+    if (!polynomial || polynomial->degree() <= 2)
+        return std::nullopt;
+    if (polynomial->isZero())
+        return SolutionSet::universal({{variable, mathematics::NumericDomain::Real}});
+
+    const auto roots = symbolic::RealAlgebraicNumber::isolateAll(polynomial->coefficients());
+    if (!roots)
+        return std::nullopt;
+    const std::vector<SolverVariable> variables{{variable, mathematics::NumericDomain::Real}};
+    if (roots->empty())
+        return SolutionSet::empty(variables);
+
+    std::vector<SolutionBranch> branches;
+    branches.reserve(roots->size());
+    for (const symbolic::RealAlgebraicNumber& root : *roots)
+        branches.push_back(branch(variable, algebraicRootExpr(root, builtins)));
+    return SolutionSet::finite(variables, std::move(branches));
 }
 
 SolutionSet solvePolynomialEquation(

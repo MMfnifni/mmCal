@@ -49,6 +49,21 @@ namespace mmcal::builtins {
 [[nodiscard]] expression::Expr evaluateQuotient(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateIsPrime(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateNextPrime(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluatePreviousPrime(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateFactorInteger(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
+[[nodiscard]] expression::Expr evaluateTotient(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
 [[nodiscard]] expression::Expr evaluateNextPow2(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,

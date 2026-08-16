@@ -312,6 +312,9 @@
     <ClInclude Include="..\..\src\symbolic\symbolic_operation.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\algebraic_number.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
@@ -616,6 +619,9 @@
     </ClCompile>
     <ClCompile Include="..\..\src\simplification\simplifier.cpp">
       <Filter>src\simplification</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\algebraic_number.cpp">
+      <Filter>src\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp">
       <Filter>src\symbolic</Filter>

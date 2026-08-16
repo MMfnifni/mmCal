@@ -1798,7 +1798,7 @@ struct EllipticTrigKernel final {
     }
 
     for (std::uint64_t n = 3; n <= *order; ++n) {
-        const Expr reciprocalPower = n == 2
+        Expr reciprocalPower = n == 2
             ? same(reciprocalId)
             : power(builtins, mathematics, angles, same(reciprocalId),
                 integer(static_cast<std::int64_t>(n - 2)));
@@ -2049,6 +2049,25 @@ struct EllipticTrigKernel final {
     const auto order = positiveIntegerMagnitude(powerArguments[1]);
     if (!order || *order < 2 || *order > 4096)
         return std::nullopt;
+
+    // Gaussian exp[-a x^2] (a>0 exact Rational) は一般1F1より erf を preferred form とする。
+    // sqrt[a] はprincipal exact rootで，Dにより元のintegrandへ戻る局所原始函数を構成する。
+    if (*order == 2) {
+        const auto exactCoefficient = exactRealRational(coefficient);
+        if (exactCoefficient && *exactCoefficient < Rational{BigInt{0}}) {
+            const Rational positiveScale = -*exactCoefficient;
+            Expr sqrtScale = call(builtins, BuiltinId::Sqrt, {rational(positiveScale)});
+            Expr argument = multiply(builtins, mathematics, angles,
+                {sqrtScale, Expr{variable}});
+            Expr numerator = multiply(builtins, mathematics, angles, {
+                call(builtins, BuiltinId::Sqrt, {pi(mathematics)}),
+                call(builtins, BuiltinId::Erf, {std::move(argument)})});
+            Expr denominator = multiply(builtins, mathematics, angles,
+                {integer(2), std::move(sqrtScale)});
+            return divide(
+                builtins, mathematics, angles, std::move(numerator), std::move(denominator));
+        }
+    }
 
     // ∫ exp(c x^n) dx = x 1F1(1/n;1+1/n;c x^n)。
     // 右辺はx=0でもentireで、incomplete-Gamma表現の見かけのbranch/holeを持ち込まない。

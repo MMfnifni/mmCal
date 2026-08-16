@@ -58,6 +58,34 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
     tests.expect(evalError(session, "fib[-1]").type() == error::CalcErrorType::Domain,
         "Fibonacci rejects negative indices until a signed extension is specified");
 
+    tests.expectEqual(eval(session, "isprime[97]"), std::string{"True"},
+        "isprime proves a uint64 prime deterministically");
+    tests.expectEqual(eval(session, "isprime[561]"), std::string{"False"},
+        "isprime rejects a Carmichael composite");
+    tests.expectEqual(eval(session, "isprime[18446744073709551557]"), std::string{"True"},
+        "isprime covers the deterministic uint64 boundary region");
+    tests.expectEqual(eval(session, "nextprime[14]"), std::string{"17"},
+        "nextprime returns the next exact prime");
+    tests.expectEqual(eval(session, "prevprime[14]"), std::string{"13"},
+        "prevprime returns the previous exact prime");
+    tests.expect(evalError(session, "prevprime[2]").type() == error::CalcErrorType::Domain,
+        "prevprime rejects values without a positive predecessor prime");
+    tests.expectEqual(eval(session, "factorint[360]"), std::string{"{2, 2, 2, 3, 3, 5}"},
+        "factorint returns flattened sorted prime factors");
+    tests.expectEqual(eval(session, "factorint[-84]"), std::string{"{-1, 2, 2, 3, 7}"},
+        "factorint preserves the sign as a leading minus-one factor");
+    tests.expectEqual(eval(session, "factorint[1000036000099]"),
+        std::string{"{1000003, 1000033}"},
+        "factorint splits a nontrivial uint64 semiprime");
+    tests.expectEqual(eval(session, "totient[1]"), std::string{"1"},
+        "totient one is exact");
+    tests.expectEqual(eval(session, "totient[9]"), std::string{"6"},
+        "totient uses exact prime factorization");
+    tests.expect(evalError(session, "factorint[0]").type() == error::CalcErrorType::Domain,
+        "factorint rejects zero");
+    tests.expect(evalError(session, "totient[0]").type() == error::CalcErrorType::Domain,
+        "totient requires a positive integer");
+
     tests.expectEqual(eval(session, "dft[{1,2,3,4}]"),
         std::string{"{10, -2+2I, -2, -2-2I}"},
         "DFT remains exact for fourth roots of unity");

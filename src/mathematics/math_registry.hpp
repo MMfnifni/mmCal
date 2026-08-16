@@ -118,6 +118,8 @@ enum class FunctionDefinednessRule {
     RealPairNotBothZero,
     ArgumentsPositiveReal,
     GammaPoles,
+    ZetaPole,
+    IncompleteBetaPrincipal,
     Hypergeometric1F1Poles,
     Hypergeometric2F1Poles,
     EllipticPrincipal,

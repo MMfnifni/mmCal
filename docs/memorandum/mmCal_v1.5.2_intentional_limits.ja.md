@@ -69,6 +69,7 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 | binomial polynomial solve | degree最大256 | `a*x^n+b`系のexact root展開budget |
 | rational-function polynomial exponent | -64..64 | solver内部変換の式爆発防止 |
 | polynomial conversion | degree/terms各4096 | 共通budget |
+| real algebraic `root` defining polynomial | degree最大64 | exact Rational Sturm列の分離・refinementを無制限化しない。Complex root isolationは未実装 |
 
 ## 5. Linear algebra
 
@@ -113,10 +114,26 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 | `Ci` | real certified pathは `0 < x <= 8`，最大200000 terms |
 | positive-order `polylog` | 現series pathは `|z| < 1`，最大1000000 terms |
 | EulerGamma backend | internal `n < 2^20` safety bound |
+| `zeta` certified real | 現在`x>1`，Euler-Maclaurin tail start `N<=4096`，Bernoulli correction `k<=64` |
+| `digamma/trigamma` certified real | 現在`x>0`，recurrence shift `<=1000000`，Bernoulli asymptotic `k<=64` |
+| exact integer `trigamma[n]` | `n<=100000`で有限二次調和和へexact還元 |
+| `ibeta[a,b,x]` exact finite sum | positive integer `a,b<=4096`，`0<=x<=1` |
+| `ibeta` certified real | exact Rational `a,b>0` + certified real `x in [0,1]`。2F1/Beta backendのbudgetを継承 |
 
 これらを超えた入力に対して，mmCalは誤った近似を返すのではなく`PrecisionInsufficient`等で「現在のbackendでは保証できない」とする。
 
-## 8. Algorithm selection threshold — 上限ではない
+## 8. 軽量数論backend
+
+| 項目 | 現在値 | 動作 |
+|---|---:|---|
+| `isprime`証明範囲 | `0..2^64-1` | first 12 prime basesのdeterministic strong Miller-Rabin |
+| `nextprime/prevprime` | `uint64`内 | 候補をdeterministic primalityで検証 |
+| `factorint/totient` | `|n|<=2^64-1` | Pollard-Rho分割 + deterministic primality verification |
+| Pollard-Rho polynomial parameter | `c=1..127` | 1 parameterにつき最大2,000,000 iteration。分割できなければ誤答せず未評価 |
+
+`uint64`を超えるBigInt自体はmmCalで表現できるが，現在の数論proof backendの対象外である。probable-prime判定をexact `True`へ昇格しない。
+
+## 9. Algorithm selection threshold — 上限ではない
 
 以下は性能測定で選んだdispatch境界であり，数学的・意味論的な制限ではない。
 
@@ -131,7 +148,7 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 | certified non-power-of-two FFT | 96点未満direct DFT，それ以上Bluestein |
 | QR column block default | 1（unblocked相当） |
 
-## 9. 「上限がない」もの
+## 10. 「上限がない」もの
 
 - BigUInt / BigIntの桁数に32/64/128-bitの固定数学上限はない。
 - Rationalの分子・分母も任意精度である。
@@ -142,7 +159,7 @@ Unreleasedでは，各workerが独立`KernelSession`を所有し，case間・比
 
 実際の上限はmemory，時間，`size_t`，および各symbolic/certified algorithmが設ける個別budgetで決まる。
 
-## 10. Benchmark multi-thread方針
+## 11. Benchmark multi-thread方針
 
 Benchmark executableだけをmulti-thread化することは可能である。ただし用途を分離する。
 

@@ -609,7 +609,25 @@ fib[100]   -> 354224848179261915075
 `fib` uses fast doubling in O(log n).
 `comb` uses the symmetry `r=min[r,n-r]`.
 
-`isprime/nextprime/prevprime/factorint/totient` are tracked as not yet implemented.
+The lightweight exact number-theory set also includes:
+
+```text
+isprime[n]
+nextprime[n]
+prevprime[n]
+factorint[n]
+totient[n]
+```
+
+```text
+isprime[97]    -> True
+nextprime[14]  -> 17
+prevprime[14]  -> 13
+factorint[360] -> {2, 2, 2, 3, 3, 5}
+totient[9]     -> 6
+```
+
+`isprime` is deterministic on `0 <= n <= 2^64-1` using strong Miller-Rabin bases whose proven range covers all `uint64` values. `factorint` / `totient` use deterministic Pollard-Rho together with exact prime verification in the same `uint64` domain. Values beyond the current proof backend remain unevaluated rather than returning a probable-prime result as `True`. `factorint[-n]` prefixes `-1` to the flat prime-factor list; `factorint[0]` is a DomainError.
 
 ---
 
@@ -661,7 +679,46 @@ betaln[1/2,1/2] -> log[Pi]
 
 The implementation does not unconditionally expand to a general Gamma ratio when doing so could break pole cancellation.
 
-## 14.4 Generalized factorial family
+## 14.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
+
+```text
+zeta[s]
+digamma[x]
+trigamma[x]
+ibeta[a,b,x]
+```
+
+`zeta` denotes the Riemann zeta function. Representative exact values and trivial zeros are simplified exactly. The current certified real `N` backend evaluates the real axis `s>1` with Euler-Maclaurin summation and an explicit remainder bound.
+
+```text
+zeta[0]  -> -1/2
+zeta[-2] -> 0
+zeta[2]  -> Pi^2/6
+N[zeta[3],20] -> 1.2020569031595942854
+```
+
+`digamma[x]` is the derivative of `lgamma[x]`; `trigamma[x]` is the derivative of `digamma[x]`. Non-positive integer poles are DomainErrors. The certified backend currently covers positive real inputs using recurrence plus Bernoulli asymptotics. Positive-integer trigamma values reduce exactly to `Pi^2/6` minus a finite second-order harmonic sum.
+
+```text
+N[digamma[1],20]  -> -0.57721566490153286061
+N[trigamma[1],20] -> 1.6449340668482264365
+trigamma[2]        -> Pi^2/6-1
+D[gamma[x],x]      -> digamma[x]gamma[x]
+D[lgamma[x],x]     -> digamma[x]
+D[digamma[x],x]    -> trigamma[x]
+```
+
+`ibeta[a,b,x]` is the **regularized incomplete beta function** `I_x(a,b)`. The initial real contract is `a>0`, `b>0`, `0<=x<=1`. Positive-integer `a,b` with exact Rational `x` reduce to a finite binomial sum; `N` accepts exact Rational parameters `a,b` and a certified real `x`, reusing the existing 2F1/Beta backend.
+
+```text
+ibeta[1,1,1/4] -> 1/4
+ibeta[2,3,1/2] -> 11/16
+N[ibeta[1/3,2/3,1/4],20] -> 0.53302858123542523627
+```
+
+General complex zeta continuation, higher polygamma, and certified approximate `a,b` parameter propagation for `ibeta` remain intentionally deferred.
+
+## 14.5 Generalized factorial family
 
 ```text
 binom[x,n]
@@ -677,7 +734,7 @@ fallingfact[5,3] -> 60
 risingfact[5,3] -> 210
 ```
 
-## 14.5 Fresnel C / S
+## 14.6 Fresnel C / S
 
 mmCal uses the standard Fresnel integrals corresponding to
 
@@ -700,7 +757,7 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 `Rad` is explicit in the derivatives because the Fresnel definitions themselves must not depend on the session's default angle unit.
 
-## 14.6 Confluent hypergeometric 1F1
+## 14.7 Confluent hypergeometric 1F1
 
 Kummer's confluent hypergeometric function is written as
 
@@ -728,13 +785,22 @@ D[hypergeometric1F1[a,b,z],z]
 is used. For integration, mmCal prefers the 1F1 form when an upper-incomplete-Gamma representation would introduce principal-branch structure or a removable hole at the origin. For example,
 
 ```text
+integrate[exp[-x^2],x]
+-> erf[x]sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,0,Infinity}]
+-> sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,-Infinity,Infinity}]
+-> sqrt[Pi]
+
 integrate[exp[x^6],x]
 -> x hypergeometric1F1[1/6, 7/6, x^6]
 ```
 
 The same family handles `exp[c x^n]` for positive integer `n`.
 
-## 14.7 Gauss hypergeometric 2F1
+## 14.8 Gauss hypergeometric 2F1
 
 The Gauss hypergeometric function is written as
 
@@ -770,7 +836,7 @@ integrate[1/(1+x^5),x]
 
 There is intentionally no general `Solve` inversion rule for 2F1 because global injectivity is not available in general. Only exact degenerations that reduce to existing algebraic expressions are passed on to the ordinary solver.
 
-## 14.8 Incomplete elliptic integrals F / E / Pi
+## 14.9 Incomplete elliptic integrals F / E / Pi
 
 mmCal writes the Legendre incomplete elliptic integrals as
 
@@ -827,7 +893,7 @@ integrate[1/sqrt[1-x^4],x]
 The final quartic reduction is a correct local primitive, but the current `fullSimplify` cannot always prove the corresponding `sin[asin[x]]` and principal-square-root product identity globally. The derivative-back harness therefore monitors it in ResolutionOnly mode instead of reducing integration capability because of a proof-engine limitation. General elliptic equations also remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
 
 
-## 14.9 Ei / Si / Ci / li / Polylogarithm
+## 14.10 Ei / Si / Ci / li / Polylogarithm
 
 The principal special functions commonly required by symbolic integration are exposed as
 
@@ -1336,7 +1402,8 @@ Major exact rules currently implemented:
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
 - `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals; the defining `Pi*x^2/2` kernels are recognized directly
-- `hypergeometric1F1`; `exp[c x^n]` with positive integer `n>=2` reduces to an entire 1F1 primitive at the origin
+- Gaussian family: for exact positive Rational `a`, `exp[-a x^2]` prefers the canonical `erf` primitive over generic 1F1, and improper endpoints close through the the exact `erf` endpoint limits at ±Infinity
+- `hypergeometric1F1`; outside the preferred Gaussian family, `exp[c x^n]` with positive integer `n>=2` reduces to an entire 1F1 primitive at the origin
 - Exact inverse chain rule; `f'(x) f(x)^p` is also recognized structurally instead of depending on the accidental post-`D` expression shape
 - Finite integration by parts for polynomial × `exp/sin/cos/sinh/cosh`
 - Exact integration of `exp[a x+b] sin/cos[c x+d]` forms by solving a linear system
@@ -1785,6 +1852,43 @@ solve[sin[x]==0,x,Real]
 
 The Complex domain likewise does not fabricate complete solution sets from principal inverses alone.
 
+### Exact real algebraic roots: `root`
+
+Unreleased builds add an exact `root` representation for **real roots** of general higher-degree polynomials without forcing a radical expansion.
+
+```text
+root[{a0,a1,...,an},k]
+```
+
+denotes the 1-based `k`th **distinct real root in increasing order** of the exact Rational-coefficient polynomial
+
+```text
+a0 + a1 x + ... + an x^n.
+```
+
+Coefficients are listed in ascending power order. The defining polynomial is normalized exactly to monic square-free form, so for example
+
+```text
+root[{4,0,-4,0,1},2]
+-> root[{-2,0,1},2]
+```
+
+because `(x^2-2)^2` and `x^2-2` have the same distinct real-root set. Full Rational factorization to a minimal polynomial is not yet attempted.
+
+Internally, `RealAlgebraicNumber` uses an exact Rational Sturm sequence to count roots and stores a unique Rational isolating interval for each root. `N[root[...,k],p]` refines that interval under Sturm verification until the requested significant precision can be certified.
+
+```text
+N[root[{-2,0,1},2],30]
+-> 1.41421356237309504880168872421
+
+solve[x^5-x+1==0,x,Real]
+-> {x==root[{1,-1,0,0,0,1},1]}
+```
+
+Existing linear, quadratic, binomial, and Rational-root-deflation solvers remain preferred when they close to a natural exact expression. The `root` fallback is used for Real-domain Rational polynomials that remain unresolved. General complex algebraic roots for `solve[...,x]` / `Complex` remain `UnresolvedSolutionSet` until complex root isolation and a consistent ordering are implemented.
+
+At this stage, `RealAlgebraicNumber` is infrastructure for **identifying, isolating, and certifiedly approximating exact real algebraic numbers**. It does not yet collapse arithmetic between unrelated Root objects into one algebraic-field scalar or compute full minimal polynomials; expressions such as `root[...] + root[...]` therefore remain exact symbolic expressions. The current defining-polynomial degree budget is 64.
+
 ---
 
 # 24. `N` — numerical approximation
@@ -2152,7 +2256,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **240 registered builtin/alias names / 222 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **250 registered builtin/alias names / 232 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2160,21 +2264,21 @@ Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
+det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
-expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
-integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
+expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
+gamma, gcd, geomean, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
+integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
 pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, range, rank,
-qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
+qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
 sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
-transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
+totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore
+vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta
 ```
 
 ---
@@ -2250,12 +2354,10 @@ Future features such as `for/Plot`, which may evaluate expressions thousands or 
 
 # 32. Major currently unimplemented / deferred features
 
-See `docs/roadmap.md` for future candidates and the reasons they are deferred.
+See `docs/roadmap.en.md` for future candidates and the reasons they are deferred.
 
 Representative items:
 
-- `digamma`, `trigamma`, `zeta`, `ibeta`
-- `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
 - Condition number / least squares / general parametric linear systems
 - `hilbert` (legacy naming/specification still to be confirmed)
 - `fma`, `clamp`, `proj`
@@ -2266,7 +2368,7 @@ Representative items:
 
 Further candidates:
 
-AlgebraicNumber / Root infrastructure, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
+complex AlgebraicNumber / Root isolation, exact algebraic-field arithmetic between Root values, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
 
 ---
 

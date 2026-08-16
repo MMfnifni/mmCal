@@ -184,6 +184,22 @@ MathRegistry MathRegistry::defaults(
         FunctionParity::Neither, FunctionDomainRule::RealPairToReal,
         FunctionBranchRule::SingleValued, std::nullopt,
         FunctionDefinednessRule::ArgumentsPositiveReal, 2);
+    registry.addFunction(evaluation::BuiltinId::Zeta, FunctionId::Zeta,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::SingleValued, std::nullopt,
+        FunctionDefinednessRule::ZetaPole);
+    registry.addFunction(evaluation::BuiltinId::Digamma, FunctionId::Digamma,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::SingleValued, std::nullopt,
+        FunctionDefinednessRule::GammaPoles);
+    registry.addFunction(evaluation::BuiltinId::Trigamma, FunctionId::Trigamma,
+        FunctionParity::Neither, FunctionDomainRule::ComplexToComplex,
+        FunctionBranchRule::SingleValued, std::nullopt,
+        FunctionDefinednessRule::GammaPoles);
+    registry.addFunction(evaluation::BuiltinId::IncompleteBeta, FunctionId::IncompleteBeta,
+        FunctionParity::Neither, FunctionDomainRule::Unknown,
+        FunctionBranchRule::SingleValued, std::nullopt,
+        FunctionDefinednessRule::IncompleteBetaPrincipal, 3);
 
     registry.addFunction(
         evaluation::BuiltinId::Sqrt,

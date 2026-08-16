@@ -8,6 +8,7 @@
 #include "numeric/number.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -581,6 +582,154 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return exact::call(BuiltinId::Log, {std::move(beta)}, registry, mathematics, angles);
 }
 
+[[nodiscard]] Expr evaluateZeta(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 1, names::zeta);
+    Rational value;
+    if (!exactRealRational(arguments.front(), value))
+        return hold(BuiltinId::Zeta, arguments, registry);
+
+    if (value == Rational{BigInt{1}})
+        error::throwCalcError(error::CalcErrorType::Domain, "zeta has a pole at 1");
+    if (value.isZero())
+        return rationalExpr(Rational{BigInt{-1}, BigInt{2}});
+    if (value == Rational{BigInt{-1}})
+        return rationalExpr(Rational{BigInt{-1}, BigInt{12}});
+    if (value.isInteger() && value.numerator().isNegative()) {
+        const BigInt magnitude = -value.numerator();
+        if ((magnitude % BigInt{2}).isZero())
+            return integer(0);
+    }
+    if (value == Rational{BigInt{2}}) {
+        Expr piSquared = exact::call(
+            BuiltinId::Power, {piExpr(mathematics), integer(2)}, registry, mathematics, angles);
+        return exact::divide(std::move(piSquared), integer(6), registry, mathematics, angles);
+    }
+    if (value == Rational{BigInt{4}}) {
+        Expr piFourth = exact::call(
+            BuiltinId::Power, {piExpr(mathematics), integer(4)}, registry, mathematics, angles);
+        return exact::divide(std::move(piFourth), integer(90), registry, mathematics, angles);
+    }
+    return hold(BuiltinId::Zeta, arguments, registry);
+}
+
+[[nodiscard]] Expr evaluateDigamma(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    requireArity(arguments, 1, names::digamma);
+    Rational value;
+    if (exactRealRational(arguments.front(), value)
+        && value.isInteger() && !value.numerator().isPositive())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "digamma is undefined at non-positive integers");
+    return hold(BuiltinId::Digamma, arguments, registry);
+}
+
+[[nodiscard]] Expr evaluateTrigamma(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireArity(arguments, 1, names::trigamma);
+    Rational value;
+    if (!exactRealRational(arguments.front(), value))
+        return hold(BuiltinId::Trigamma, arguments, registry);
+    if (value.isInteger() && !value.numerator().isPositive())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "trigamma is undefined at non-positive integers");
+
+    if (value.isInteger() && value.numerator().isPositive()) {
+        const auto n = numeric::tryToUint64(value.numerator());
+        if (!n || *n > 100000)
+            return hold(BuiltinId::Trigamma, arguments, registry);
+        Rational harmonic2{BigInt{0}};
+        for (std::uint64_t k = 1; k < *n; ++k) {
+            const BigInt denominator = BigInt::fromUnsigned(k) * BigInt::fromUnsigned(k);
+            harmonic2 += Rational{BigInt{1}, denominator};
+        }
+        Expr piSquared = exact::call(
+            BuiltinId::Power, {piExpr(mathematics), integer(2)}, registry, mathematics, angles);
+        Expr base = exact::divide(std::move(piSquared), integer(6), registry, mathematics, angles);
+        if (harmonic2.isZero())
+            return base;
+        return exact::subtract(
+            std::move(base), rationalExpr(std::move(harmonic2)), registry, mathematics, angles);
+    }
+    return hold(BuiltinId::Trigamma, arguments, registry);
+}
+
+[[nodiscard]] Rational rationalPower(Rational base, std::uint64_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] BigInt binomialInteger(std::uint64_t n, std::uint64_t k) {
+    if (k > n)
+        return BigInt{};
+    k = std::min(k, n - k);
+    BigInt result{1};
+    for (std::uint64_t i = 1; i <= k; ++i) {
+        result *= BigInt::fromUnsigned(n - k + i);
+        result /= BigInt::fromUnsigned(i);
+    }
+    return result;
+}
+
+[[nodiscard]] Expr evaluateIncompleteBeta(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry) {
+    requireArity(arguments, 3, names::incompleteBeta);
+    Rational a;
+    Rational b;
+    Rational x;
+    const Rational* exactA = exactRealRational(arguments[0], a);
+    const Rational* exactB = exactRealRational(arguments[1], b);
+    const Rational* exactX = exactRealRational(arguments[2], x);
+    if (!exactA || !exactB || !exactX)
+        return hold(BuiltinId::IncompleteBeta, arguments, registry);
+    if (a <= Rational{BigInt{0}} || b <= Rational{BigInt{0}})
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "ibeta requires positive a and b");
+    if (x < Rational{BigInt{0}} || x > Rational{BigInt{1}})
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "ibeta requires x in [0,1]");
+    if (x.isZero())
+        return integer(0);
+    if (x == Rational{BigInt{1}})
+        return integer(1);
+    if (a == Rational{BigInt{1}} && b == Rational{BigInt{1}})
+        return rationalExpr(std::move(x));
+
+    if (!a.isInteger() || !b.isInteger())
+        return hold(BuiltinId::IncompleteBeta, arguments, registry);
+    const auto ai = numeric::tryToUint64(a.numerator());
+    const auto bi = numeric::tryToUint64(b.numerator());
+    if (!ai || !bi || *ai == 0 || *bi == 0 || *ai > 4096 || *bi > 4096
+        || *ai > std::numeric_limits<std::uint64_t>::max() - *bi)
+        return hold(BuiltinId::IncompleteBeta, arguments, registry);
+
+    const std::uint64_t n = *ai + *bi - 1;
+    const Rational oneMinusX = Rational{BigInt{1}} - x;
+    Rational sum{BigInt{0}};
+    for (std::uint64_t j = *ai; j <= n; ++j) {
+        Rational term{binomialInteger(n, j)};
+        term *= rationalPower(x, j);
+        term *= rationalPower(oneMinusX, n - j);
+        sum += term;
+    }
+    return rationalExpr(std::move(sum));
+}
+
 [[nodiscard]] Expr finiteFactorialProduct(
     const Expr& x,
     std::uint64_t n,
@@ -693,6 +842,14 @@ Expr evaluateSpecialFunction(
         return evaluateBeta(arguments, registry, mathematics, angles);
     case BuiltinId::BetaLog:
         return evaluateBetaLog(arguments, registry, mathematics, angles);
+    case BuiltinId::Zeta:
+        return evaluateZeta(arguments, registry, mathematics, angles);
+    case BuiltinId::Digamma:
+        return evaluateDigamma(arguments, registry);
+    case BuiltinId::Trigamma:
+        return evaluateTrigamma(arguments, registry, mathematics, angles);
+    case BuiltinId::IncompleteBeta:
+        return evaluateIncompleteBeta(arguments, registry);
     case BuiltinId::GeneralizedBinomial:
         return evaluateGeneralizedBinomial(arguments, registry, mathematics, angles);
     case BuiltinId::FallingFactorial:

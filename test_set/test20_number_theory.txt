@@ -1,0 +1,23 @@
+# mmCal exact lightweight number theory
+
+isprime[0]==>False
+isprime[1]==>False
+isprime[2]==>True
+isprime[97]==>True
+isprime[561]==>False
+isprime[18446744073709551557]==>True
+isprime[18446744073709551615]==>False
+nextprime[-10]==>2
+nextprime[14]==>17
+prevprime[14]==>13
+prevprime[2]=>DomainError
+factorint[1]==>{1}
+factorint[2]==>{2}
+factorint[360]==>{2, 2, 2, 3, 3, 5}
+factorint[-84]==>{-1, 2, 2, 3, 7}
+factorint[1000036000099]==>{1000003, 1000033}
+factorint[0]=>DomainError
+totient[1]==>1
+totient[9]==>6
+totient[1000036000099]==>1000034000064
+totient[0]=>DomainError

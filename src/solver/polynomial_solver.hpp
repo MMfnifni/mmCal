@@ -7,6 +7,7 @@
 #include "mathematics/math_registry.hpp"
 #include "solution_set.hpp"
 
+#include <optional>
 #include <span>
 
 namespace mmcal::solver {
@@ -22,6 +23,15 @@ namespace mmcal::solver {
     const mathematics::AngleSemantics& angles);
 
 // 互換用の等式solver entry point。ordered relationも渡せるが、新規コードは上を使う。
+// 既存radical/binomial solverで閉じない有理係数等式を、実代数数Rootでexactに補完する。
+// 非多項式・現degree budget外はnulloptとして既存Unresolved semanticsを維持する。
+[[nodiscard]] std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
+    const expression::Expr& equation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
 [[nodiscard]] SolutionSet solvePolynomialEquation(
     const expression::Expr& equation,
     const expression::Symbol& variable,

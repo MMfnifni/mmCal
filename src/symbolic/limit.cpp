@@ -364,6 +364,42 @@ struct LocalPolynomialBehavior final {
             return simplify(call(builtins, combinedId, std::move(values)),
                 builtins, mathematics, angles, assumptions);
         }
+        if (outer && outer->id == BuiltinId::Divide && arguments.size() == 2) {
+            Expr numerator = limitCore(arguments[0], variable, point, direction,
+                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+            Expr denominator = limitCore(arguments[1], variable, point, direction,
+                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+            const bool numeratorFinite = !isHead(numerator, builtins, BuiltinId::Limit)
+                && !isInfinity(numerator, infinity)
+                && !isNegativeInfinity(numerator, builtins, infinity);
+            const bool denominatorFinite = !isHead(denominator, builtins, BuiltinId::Limit)
+                && !isInfinity(denominator, infinity)
+                && !isNegativeInfinity(denominator, builtins, infinity);
+            if (numeratorFinite && denominatorFinite && !isZero(denominator))
+                return divide(std::move(numerator), std::move(denominator),
+                    builtins, mathematics, angles, assumptions);
+        }
+        if (outer && outer->id == BuiltinId::Multiply) {
+            // すべてのfactorが有限極限へ収束する場合だけ積を合成する。
+            // 0*Infinity等の不定形はここで決めず、既存の専用ruleへ残す。
+            std::vector<Expr> values;
+            values.reserve(arguments.size());
+            bool finite = true;
+            for (const Expr& argument : arguments) {
+                Expr value = limitCore(argument, variable, point, direction,
+                    builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                if (isHead(value, builtins, BuiltinId::Limit)
+                    || isInfinity(value, infinity)
+                    || isNegativeInfinity(value, builtins, infinity)) {
+                    finite = false;
+                    break;
+                }
+                values.push_back(std::move(value));
+            }
+            if (finite)
+                return simplify(call(builtins, BuiltinId::Multiply, std::move(values)),
+                    builtins, mathematics, angles, assumptions);
+        }
     }
 
     if (atPositiveInfinity || atNegativeInfinity) {
@@ -404,6 +440,7 @@ struct LocalPolynomialBehavior final {
                 }
             }
         }
+
         return unresolved(expression, variable, point, direction, builtins);
     }
 

@@ -997,6 +997,255 @@ enum class EllipticSeriesKind { F, E, Pi };
     throw PrecisionInsufficient{"polylog series did not converge within the term limit"};
 }
 
+[[nodiscard]] Rational bernoulliEven(std::size_t k) {
+    const auto& values = bernoulliNumbers();
+    const std::size_t index = 2 * k;
+    if (index >= values.size())
+        throw std::overflow_error("special-function Bernoulli order exceeds the current certified budget");
+    return values[index];
+}
+
+[[nodiscard]] Rational rationalPowerInteger(Rational base, std::size_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] Rational risingRational(Rational value, std::size_t count) {
+    Rational result{BigInt{1}};
+    for (std::size_t i = 0; i < count; ++i)
+        result *= value + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(i))};
+    return result;
+}
+
+[[nodiscard]] RealInterval positiveIntegerBasePower(
+    std::uint64_t base,
+    const Rational& exponent,
+    std::size_t precisionBits) {
+    if (base == 1)
+        return exactInterval(1, precisionBits);
+    if (exponent.isInteger()) {
+        const BigInt& e = exponent.numerator();
+        const auto magnitude = numeric::tryToUint64(e.abs());
+        if (magnitude && *magnitude <= 100000) {
+            const BigInt powered = numeric::pow(BigInt::fromUnsigned(base), *magnitude);
+            const Rational exact = e.isNegative()
+                ? Rational{BigInt{1}, powered}
+                : Rational{powered};
+            return exactInterval(exact, precisionBits);
+        }
+    }
+
+    const RealInterval logarithm = encloseLogPositive(
+        exactInterval(Rational{BigInt::fromUnsigned(base)}, precisionBits),
+        precisionBits).interval;
+    const RealInterval scaled = multiply(
+        logarithm, exactInterval(exponent, precisionBits), precisionBits);
+    return encloseExp(scaled, precisionBits).interval;
+}
+
+[[nodiscard]] RealInterval pointZetaGreaterThanOne(
+    const Rational& s,
+    std::size_t precisionBits) {
+    if (s <= rational(1))
+        throw std::domain_error("zeta certified real backend requires s > 1");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "zeta working precision is too large");
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "zeta target precision is too large"));
+
+    std::uint64_t chosenN = 0;
+    std::size_t chosenK = 0;
+    Rational chosenRising;
+    RealInterval chosenPower = exactInterval(0, workBits);
+    for (std::uint64_t n = 8; n <= 4096 && chosenN == 0; n *= 2) {
+        for (std::size_t k = 2; k <= 64; ++k) {
+            const Rational rising = risingRational(s, 2 * k - 1);
+            const BigInt factorial = numeric::factorial(static_cast<std::uint64_t>(2 * k));
+            const Rational coefficient = absRational(bernoulliEven(k))
+                * rising / Rational{factorial};
+            const Rational exponent = -(s + Rational{BigInt::fromUnsigned(
+                static_cast<std::uint64_t>(2 * k - 1))});
+            const RealInterval power = positiveIntegerBasePower(n, exponent, workBits);
+            const Rational bound = coefficient * power.upper().toRational();
+            if (bound <= target) {
+                chosenN = n;
+                chosenK = k;
+                chosenRising = rising;
+                chosenPower = power;
+                break;
+            }
+        }
+    }
+    if (chosenN == 0)
+        throw PrecisionInsufficient{"zeta Euler-Maclaurin budget is insufficient for the requested precision"};
+
+    RealInterval result = exactInterval(0, workBits);
+    for (std::uint64_t n = 1; n < chosenN; ++n) {
+        const RealInterval term = positiveIntegerBasePower(n, -s, workBits);
+        result = add(result, term, workBits);
+    }
+
+    const RealInterval integralTail = divide(
+        positiveIntegerBasePower(chosenN, rational(1) - s, workBits),
+        exactInterval(s - rational(1), workBits), workBits);
+    result = add(result, integralTail, workBits);
+    result = add(result, multiply(
+        exactInterval(rational(1, 2), workBits),
+        positiveIntegerBasePower(chosenN, -s, workBits), workBits), workBits);
+
+    for (std::size_t k = 1; k < chosenK; ++k) {
+        const Rational rising = risingRational(s, 2 * k - 1);
+        const BigInt factorial = numeric::factorial(static_cast<std::uint64_t>(2 * k));
+        const Rational coefficient = bernoulliEven(k) * rising / Rational{factorial};
+        const Rational exponent = -(s + Rational{BigInt::fromUnsigned(
+            static_cast<std::uint64_t>(2 * k - 1))});
+        result = add(result, multiply(
+            exactInterval(coefficient, workBits),
+            positiveIntegerBasePower(chosenN, exponent, workBits), workBits), workBits);
+    }
+
+    const BigInt omittedFactorial = numeric::factorial(
+        static_cast<std::uint64_t>(2 * chosenK));
+    const Rational omittedCoefficient = absRational(bernoulliEven(chosenK))
+        * chosenRising / Rational{omittedFactorial};
+    const Rational remainderBound = omittedCoefficient * chosenPower.upper().toRational();
+    result = add(result, symmetricError(remainderBound, workBits), workBits);
+    return result.roundedOutward(precisionBits);
+}
+
+struct PsiPlan final {
+    std::size_t shift = 0;
+    std::size_t omittedK = 0;
+    Rational remainderBound;
+};
+
+[[nodiscard]] PsiPlan choosePsiPlan(
+    const Rational& input,
+    std::size_t precisionBits,
+    bool trigamma) {
+    if (input <= rational(0))
+        throw std::domain_error("psi certified backend requires a positive argument");
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 18, "psi target precision is too large"));
+    for (std::size_t shift = 0; shift <= 1'000'000; shift += 4) {
+        const Rational x = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(shift))};
+        if (x < rational(4))
+            continue;
+        const Rational xSquared = x * x;
+        Rational power = trigamma ? xSquared * x : xSquared;
+        for (std::size_t k = 1; k <= 64; ++k) {
+            Rational bound = absRational(bernoulliEven(k));
+            if (!trigamma)
+                bound /= Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
+            bound /= power;
+            if (bound <= target)
+                return PsiPlan{shift, k, bound};
+            power *= xSquared;
+        }
+    }
+    throw PrecisionInsufficient{"psi asymptotic budget is insufficient for the requested precision"};
+}
+
+[[nodiscard]] RealInterval pointDigammaPositive(
+    const Rational& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "digamma working precision is too large");
+    const PsiPlan plan = choosePsiPlan(input, workBits, false);
+    const Rational x = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(plan.shift))};
+    RealInterval result = encloseLogPositive(exactInterval(x, workBits), workBits).interval;
+    result = subtract(result, exactInterval(rational(1, 2) / x, workBits), workBits);
+    const Rational xSquared = x * x;
+    Rational power = xSquared;
+    for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        Rational term = bernoulliEven(k)
+            / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
+        term /= power;
+        result = subtract(result, exactInterval(term, workBits), workBits);
+        power *= xSquared;
+    }
+
+    const Rational omitted = -bernoulliEven(plan.omittedK)
+        / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * plan.omittedK))}
+        / power;
+    const RealInterval remainder = omitted.numerator().isNegative()
+        ? RealInterval::fromRationalBounds(-plan.remainderBound, rational(0), workBits)
+        : RealInterval::fromRationalBounds(rational(0), plan.remainderBound, workBits);
+    result = add(result, remainder, workBits);
+
+    for (std::size_t j = 0; j < plan.shift; ++j) {
+        const Rational divisor = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))};
+        result = subtract(result, exactInterval(rational(1) / divisor, workBits), workBits);
+    }
+    return result.roundedOutward(precisionBits);
+}
+
+[[nodiscard]] RealInterval pointTrigammaPositive(
+    const Rational& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "trigamma working precision is too large");
+    const PsiPlan plan = choosePsiPlan(input, workBits, true);
+    const Rational x = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(plan.shift))};
+    RealInterval result = exactInterval(rational(1) / x, workBits);
+    const Rational xSquared = x * x;
+    result = add(result, exactInterval(rational(1, 2) / xSquared, workBits), workBits);
+    Rational power = xSquared * x;
+    for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        const Rational term = bernoulliEven(k) / power;
+        result = add(result, exactInterval(term, workBits), workBits);
+        power *= xSquared;
+    }
+    result = add(result, symmetricError(plan.remainderBound, workBits), workBits);
+    for (std::size_t j = 0; j < plan.shift; ++j) {
+        const Rational divisor = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))};
+        result = add(result, exactInterval(rational(1) / (divisor * divisor), workBits), workBits);
+    }
+    return result.roundedOutward(precisionBits);
+}
+
+[[nodiscard]] RealInterval pointIncompleteBetaRegularized(
+    const Rational& a,
+    const Rational& b,
+    const Rational& x,
+    std::size_t precisionBits) {
+    if (a <= rational(0) || b <= rational(0))
+        throw std::domain_error("ibeta certified backend requires a > 0 and b > 0");
+    if (x < rational(0) || x > rational(1))
+        throw std::domain_error("ibeta certified backend requires x in [0,1]");
+    if (x.isZero())
+        return exactInterval(0, precisionBits);
+    if (x == rational(1))
+        return exactInterval(1, precisionBits);
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 40, "ibeta working precision is too large");
+    if (x > rational(1, 2)) {
+        const RealInterval complement = pointIncompleteBetaRegularized(
+            b, a, rational(1) - x, workBits);
+        return subtract(exactInterval(1, workBits), complement, workBits)
+            .roundedOutward(precisionBits);
+    }
+
+    const RealInterval logX = encloseLogPositive(exactInterval(x, workBits), workBits).interval;
+    const RealInterval xPower = encloseExp(
+        multiply(logX, exactInterval(a, workBits), workBits), workBits).interval;
+    const RealInterval hyper = encloseHypergeometric2F1Real(
+        a, rational(1) - b, a + rational(1), x, workBits);
+    const RealInterval numerator = divide(
+        multiply(xPower, hyper, workBits), exactInterval(a, workBits), workBits);
+    const RealInterval beta = encloseBetaPositive(
+        exactInterval(a, workBits), exactInterval(b, workBits), workBits);
+    return divide(numerator, beta, workBits).roundedOutward(precisionBits);
+}
+
 RealInterval encloseGammaReal(
     const RealInterval& input,
     std::size_t precisionBits) {
@@ -1199,6 +1448,54 @@ RealInterval encloseBetaPositive(
     const RealInterval& b,
     std::size_t precisionBits) {
     return encloseExp(encloseBetaLogPositive(a, b, precisionBits), precisionBits).interval;
+}
+
+RealInterval encloseZetaReal(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (input.lower().toRational() <= rational(1))
+        throw std::domain_error("zeta certified real backend currently requires s > 1");
+    const Rational lower = input.lower().toRational();
+    const Rational upper = input.upper().toRational();
+    const RealInterval lowValue = pointZetaGreaterThanOne(upper, precisionBits);
+    const RealInterval highValue = pointZetaGreaterThanOne(lower, precisionBits);
+    return RealInterval{lowValue.lower(), highValue.upper()};
+}
+
+RealInterval encloseDigammaPositive(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (input.lower().toRational() <= rational(0))
+        throw std::domain_error("digamma certified real backend currently requires x > 0");
+    const RealInterval lower = pointDigammaPositive(input.lower().toRational(), precisionBits);
+    const RealInterval upper = pointDigammaPositive(input.upper().toRational(), precisionBits);
+    return RealInterval{lower.lower(), upper.upper()};
+}
+
+RealInterval encloseTrigammaPositive(
+    const RealInterval& input,
+    std::size_t precisionBits) {
+    if (input.lower().toRational() <= rational(0))
+        throw std::domain_error("trigamma certified real backend currently requires x > 0");
+    const RealInterval lowerValue = pointTrigammaPositive(input.upper().toRational(), precisionBits);
+    const RealInterval upperValue = pointTrigammaPositive(input.lower().toRational(), precisionBits);
+    return RealInterval{lowerValue.lower(), upperValue.upper()};
+}
+
+RealInterval encloseIncompleteBetaRegularized(
+    const Rational& a,
+    const Rational& b,
+    const RealInterval& x,
+    std::size_t precisionBits) {
+    if (a <= rational(0) || b <= rational(0))
+        throw std::domain_error("ibeta certified backend requires positive a and b");
+    const Rational lower = x.lower().toRational();
+    const Rational upper = x.upper().toRational();
+    if (lower < rational(0) || upper > rational(1))
+        throw std::domain_error("ibeta certified backend requires x in [0,1]");
+    const RealInterval lowValue = pointIncompleteBetaRegularized(a, b, lower, precisionBits);
+    const RealInterval highValue = pointIncompleteBetaRegularized(a, b, upper, precisionBits);
+    return RealInterval{lowValue.lower(), highValue.upper()};
 }
 
 } // namespace mmcal::approximation

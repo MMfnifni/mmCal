@@ -210,6 +210,50 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expect(evalError(session, "beta[-1/2,2]").type() == error::CalcErrorType::Domain,
         "current Beta contract rejects non-positive real arguments");
 
+    tests.expectEqual(eval(session, "zeta[0]"), std::string{"-1/2"},
+        "zeta zero is exact");
+    tests.expectEqual(eval(session, "zeta[-2]"), std::string{"0"},
+        "zeta negative even integers are exact trivial zeros");
+    tests.expectEqual(eval(session, "zeta[2]"), std::string{"Pi^2/6"},
+        "zeta two uses the exact Basel value");
+    tests.expectEqual(eval(session, "N[zeta[3],20]"),
+        std::string{"1.2020569031595942854"},
+        "zeta has a certified real backend for s greater than one");
+    tests.expect(evalError(session, "zeta[1]").type() == error::CalcErrorType::Domain,
+        "zeta rejects its pole at one");
+
+    tests.expectEqual(eval(session, "N[digamma[1],20]"),
+        std::string{"-0.57721566490153286061"},
+        "digamma has a certified positive-real backend");
+    tests.expectEqual(eval(session, "N[trigamma[1],20]"),
+        std::string{"1.6449340668482264365"},
+        "trigamma has a certified positive-real backend");
+    tests.expectEqual(eval(session, "trigamma[2]"), std::string{"Pi^2/6-1"},
+        "trigamma at positive integers reduces exactly to a harmonic correction");
+    tests.expect(evalError(session, "digamma[0]").type() == error::CalcErrorType::Domain,
+        "digamma rejects non-positive integer poles");
+    tests.expect(evalError(session, "trigamma[-1]").type() == error::CalcErrorType::Domain,
+        "trigamma rejects non-positive integer poles");
+    tests.expectEqual(eval(session, "D[gamma[x],x]"), std::string{"digamma[x]gamma[x]"},
+        "Gamma derivative uses digamma");
+    tests.expectEqual(eval(session, "D[lgamma[x],x]"), std::string{"digamma[x]"},
+        "LogGamma derivative uses digamma");
+    tests.expectEqual(eval(session, "D[digamma[x],x]"), std::string{"trigamma[x]"},
+        "digamma derivative uses trigamma");
+
+    tests.expectEqual(eval(session, "ibeta[1,1,1/4]"), std::string{"1/4"},
+        "regularized incomplete Beta reduces exactly for unit parameters");
+    tests.expectEqual(eval(session, "ibeta[2,3,1/2]"), std::string{"11/16"},
+        "regularized incomplete Beta is exact for positive integer parameters");
+    tests.expectEqual(eval(session, "N[ibeta[1/3,2/3,1/4],20]"),
+        std::string{"0.53302858123542523627"},
+        "regularized incomplete Beta has a certified real backend");
+    tests.expect(evalError(session, "ibeta[1,1,2]").type() == error::CalcErrorType::Domain,
+        "ibeta rejects x outside the real unit interval");
+    tests.expectEqual(eval(session, "D[ibeta[2,3,x],x]"),
+        std::string{"x*(1-x)^2/beta[2, 3]"},
+        "ibeta differentiates with respect to x when its parameters are constant");
+
     tests.expectEqual(eval(session, "binom[1/2,2]"), std::string{"-1/8"},
         "generalized binomial with nonnegative integer order is exact");
     tests.expectEqual(eval(session, "fallingfact[5,3]"), std::string{"60"},

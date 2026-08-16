@@ -606,7 +606,25 @@ fib[100]   -> 354224848179261915075
 `fib`はfast doubling O(log n)。
 `comb`は対称性`r=min[r,n-r]`を利用。
 
-`isprime/nextprime/prevprime/factorint/totient`は未実装一覧で追跡中。
+軽量数論として次も実装している。
+
+```text
+isprime[n]
+nextprime[n]
+prevprime[n]
+factorint[n]
+totient[n]
+```
+
+```text
+isprime[97]    -> True
+nextprime[14]  -> 17
+prevprime[14]  -> 13
+factorint[360] -> {2, 2, 2, 3, 3, 5}
+totient[9]     -> 6
+```
+
+`isprime`は`0 <= n <= 2^64-1`でdeterministicなstrong Miller-Rabin判定を行う。`factorint` / `totient`は同じ`uint64`範囲でdeterministic Pollard-Rho + exact prime verificationを使う。現在の証明backendを超えるBigIntではprobable-primeを`True`として返さず，未評価を保持する。`factorint[-n]`は先頭に`-1`を付けたflat prime factor listを返し，`factorint[0]`はDomainErrorである。
 
 ---
 
@@ -658,7 +676,46 @@ betaln[1/2,1/2] -> log[Pi]
 
 一般Gamma比へ無条件展開してpole cancellationを壊さない。
 
-## 14.4 generalized factorial系
+## 14.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
+
+```text
+zeta[s]
+digamma[x]
+trigamma[x]
+ibeta[a,b,x]
+```
+
+`zeta`はRiemann zeta函数である。exactには代表値と自明零点を扱い，現在のcertified real `N` backendは`Re[s]=s>1`の実軸をEuler-Maclaurin展開と明示的剰余上界で評価する。
+
+```text
+zeta[0]  -> -1/2
+zeta[-2] -> 0
+zeta[2]  -> Pi^2/6
+N[zeta[3],20] -> 1.2020569031595942854
+```
+
+`digamma[x]`は`d/dx lgamma[x]`，`trigamma[x]`は`d/dx digamma[x]`である。非正整数poleはDomainError。現certified backendは正実数を漸近Bernoulli展開＋recurrenceで評価する。`trigamma[n]`の正整数値は`Pi^2/6`と有限二次調和和へexact還元する。
+
+```text
+N[digamma[1],20]  -> -0.57721566490153286061
+N[trigamma[1],20] -> 1.6449340668482264365
+trigamma[2]        -> Pi^2/6-1
+D[gamma[x],x]      -> digamma[x]gamma[x]
+D[lgamma[x],x]     -> digamma[x]
+D[digamma[x],x]    -> trigamma[x]
+```
+
+`ibeta[a,b,x]`は**正則化不完全Beta函数**`I_x(a,b)`である。第一版のreal contractは`a>0`, `b>0`, `0<=x<=1`。正整数`a,b`とexact Rational `x`は有限binomial sumへexact還元し，`N`ではexact Rational parameter `a,b`とcertified real `x`を既存2F1/Beta backendへ接続する。
+
+```text
+ibeta[1,1,1/4] -> 1/4
+ibeta[2,3,1/2] -> 11/16
+N[ibeta[1/3,2/3,1/4],20] -> 0.53302858123542523627
+```
+
+一般複素zetaの解析接続，polygamma高階，近似`a,b`を持つ`ibeta`のcertified parameter伝播は意図的に未実装である。
+
+## 14.5 generalized factorial系
 
 ```text
 binom[x,n]
@@ -674,7 +731,7 @@ fallingfact[5,3] -> 60
 risingfact[5,3] -> 210
 ```
 
-## 14.5 Fresnel C / S
+## 14.6 Fresnel C / S
 
 mmCalでは標準Fresnel積分を
 
@@ -697,7 +754,7 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 微分の位相には`Rad`を明示する。Fresnel函数の定義自体はsessionの既定角度単位に依存しないためである。
 
-## 14.6 合流型超幾何函数 1F1
+## 14.7 合流型超幾何函数 1F1
 
 Kummerの合流型超幾何函数を
 
@@ -725,13 +782,22 @@ D[hypergeometric1F1[a,b,z],z]
 を使う。積分器では、上側不完全Gammaによる局所式がprincipal branchや原点のremovable holeを持つ場合に、原点を含めてentireな1F1表現を優先する。例えば、
 
 ```text
+integrate[exp[-x^2],x]
+-> erf[x]sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,0,Infinity}]
+-> sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,-Infinity,Infinity}]
+-> sqrt[Pi]
+
 integrate[exp[x^6],x]
 -> x hypergeometric1F1[1/6, 7/6, x^6]
 ```
 
 より一般に正整数`n`について`exp[c x^n]`を同じ系列へ還元できる。
 
-## 14.7 Gauss超幾何函数 2F1
+## 14.8 Gauss超幾何函数 2F1
 
 Gaussの超幾何函数を
 
@@ -767,7 +833,7 @@ integrate[1/(1+x^5),x]
 
 のようなbinomial-power familyへ利用する。一般の2F1を`Solve`で逆函数化する規則は持たない。大域単射性を証明できないためであり、停止級数やexact退化で既存代数式へ落ちた場合だけ通常のSolverへ渡す。
 
-## 14.8 不完全楕円積分 F / E / Pi
+## 14.9 不完全楕円積分 F / E / Pi
 
 mmCalではLegendre形の不完全楕円積分を
 
@@ -824,7 +890,7 @@ integrate[1/sqrt[1-x^4],x]
 最後のquartic reductionは正しい局所primitiveだが、現在の`fullSimplify`は`sin[asin[x]]`とprincipal square rootの積を一般に安全な恒等式へ潰し切れない。そのためderivative-back harnessではResolutionOnlyとして監視し、証明器不足を理由に積分能力を削らない。一般の楕円函数方程式も、逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
 
 
-## 14.9 Ei / Si / Ci / li / Polylogarithm
+## 14.10 Ei / Si / Ci / li / Polylogarithm
 
 積分で頻出するprincipal special functionsを次の名前で表す。
 
@@ -1335,7 +1401,8 @@ integrate[1/(2x+3),x]
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
 - `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元。`Pi*x^2/2`の定義核も直接認識
-- `hypergeometric1F1`。正整数`n>=2`の`exp[c x^n]`を原点でentireな1F1 primitiveへ還元
+- Gaussian family。`a`がexact positive Rationalの`exp[-a x^2]`は一般1F1より`erf`をpreferred canonical primitiveとして選び，improper endpointでも`erf`の±Infinity endpoint極限からexact Gaussian積分へ閉じる
+- `hypergeometric1F1`。上記Gaussian以外の正整数`n>=2`の`exp[c x^n]`を原点でentireな1F1 primitiveへ還元
 - exactな逆chain rule。`f'(x) f(x)^p`はD後の偶然の式形に依存せず構造的にも認識
 - 多項式×`exp/sin/cos/sinh/cosh`に対する有限回のintegration by parts
 - `exp[a x+b] sin/cos[c x+d]`型を連立一次式としてexact積分
@@ -1800,6 +1867,42 @@ solve[sin[x]==0,x,Real]
 
 Complex領域でもprincipal inverseだけから全解を捏造しない。
 
+### exact実代数根 `root`
+
+Unreleasedでは，一般高次多項式の**実根**をradicalへ無理に展開せずexactに保持する`root`表現を追加した。
+
+```text
+root[{a0,a1,...,an},k]
+```
+
+はexact Rational係数多項式
+
+```text
+a0 + a1 x + ... + an x^n
+```
+
+の**異なる実根を小さい順に並べた1-based第`k`根**を表す。係数列は昇冪順である。定義多項式はmonicかつsquare-freeへexactに正規化するため，例えば
+
+```text
+root[{4,0,-4,0,1},2]
+-> root[{-2,0,1},2]
+```
+
+となる。これは`(x^2-2)^2`と`x^2-2`が同じdistinct real-root集合を持つためである。完全な有理既約因子化によるminimal polynomial化まではまだ行わない。
+
+内部の`RealAlgebraicNumber`はRational Sturm列で根数をexactに数え，各根へ一意なRational isolating intervalを保持する。`N[root[...,k],p]`ではその区間を要求有効桁まで二分・Sturm監査し，certified approximationへ変換する。
+
+```text
+N[root[{-2,0,1},2],30]
+-> 1.41421356237309504880168872421
+
+solve[x^5-x+1==0,x,Real]
+-> {x==root[{1,-1,0,0,0,1},1]}
+```
+
+既存の線形・二次・binomial・Rational-root deflation等で自然なexact式に閉じる場合は従来のSolverを優先し，それでも閉じないRational係数多項式をReal領域で解く場合だけ`root` fallbackを使う。`solve[...,x]` / `Complex`に対する一般複素代数根は，複素root isolationと一貫した順序付けが未実装なので現在も`UnresolvedSolutionSet`を保持する。
+
+現段階の`RealAlgebraicNumber`は**exact実代数数を識別・分離・certified近似する基盤**であり，異なるRoot同士の代数体演算やminimal polynomial計算までを一つのscalar `Number`型へ畳み込むものではない。したがって`root[...] + root[...]`等はexact symbolic expressionとして保持する。現在のRoot定義多項式次数budgetは64である。
 
 ---
 
@@ -2186,7 +2289,7 @@ mmCal 1.5.0では、Mathematica互換だけを目的とした大文字始まりa
 
 # 29. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名240個 / sourceから呼出可能な名前222個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名250個 / sourceから呼出可能な名前232個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
@@ -2194,21 +2297,21 @@ Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
 ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
+det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
-expm1, fact, factor, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, harmmean, hypot, identity, if, ifft, im, imag,
-integrate, inverse, iqr, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
+expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
+gamma, gcd, geomean, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
+integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
 pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, range, rank,
-qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, round, rows, rref,
+qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
 sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
-transpose, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
+totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore
+vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta
 ```
 
 ---
@@ -2288,8 +2391,6 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 代表:
 
-- `digamma`, `trigamma`, `zeta`, `ibeta`
-- `isprime`, `nextprime`, `prevprime`, `factorint`, `totient`
 - condition number / least squares / 一般parametric linear system
 - `hilbert`（旧仕様の名称再確認）
 - `fma`, `clamp`, `proj`
@@ -2300,7 +2401,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 
 今後追加検討:
 
-今後はAlgebraicNumber / Root基盤，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
+今後は複素AlgebraicNumber / Root isolation，Root間のexact algebraic-field演算，`rootApproximant`，より一般のparameterized solution family，Machine evaluator / `for` / `plot`等を候補とする。
 
 ---
 

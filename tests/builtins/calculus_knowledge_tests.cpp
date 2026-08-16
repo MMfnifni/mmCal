@@ -61,6 +61,12 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "integrable endpoint square-root singularity is accepted");
     tests.expectEqual(eval(session, "integrate[log[x],{x,0,1}]"), std::string{"-1"},
         "logarithmic endpoint singularity is handled by a one-sided limit");
+    tests.expectEqual(eval(session, "integrate[exp[-x^2],{x,0,Infinity}]"),
+        std::string{"sqrt[Pi]/2"},
+        "Gaussian semi-infinite integral closes through the canonical erf endpoint limit");
+    tests.expectEqual(eval(session, "integrate[exp[-x^2],{x,-Infinity,Infinity}]"),
+        std::string{"sqrt[Pi]"},
+        "two-sided Gaussian integral closes exactly through erf infinity limits");
 
     const std::string internalPole = eval(session, "integrate[1/(x-2),{x,1,Infinity}]");
     tests.expect(internalPole.find("integrate[") == 0,
@@ -105,6 +111,37 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expect(hypergeometricUnresolved == "UnresolvedSolutionSet[x]"
             && findDiagnostic(session, "solve::unresolved") != nullptr,
         "Solve does not invent a global inverse for a general Gauss hypergeometric function");
+
+    tests.expectEqual(eval(session, "root[{-4,0,2},2]"),
+        std::string{"root[{-2, 0, 1}, 2]"},
+        "root canonicalizes its defining polynomial to monic form");
+    tests.expectEqual(eval(session, "root[{4,0,-4,0,1},2]"),
+        std::string{"root[{-2, 0, 1}, 2]"},
+        "root removes repeated polynomial factors because indices count distinct real roots");
+    tests.expectEqual(eval(session, "N[root[{-2,0,1},2],30]"),
+        std::string{"1.41421356237309504880168872421"},
+        "root has certified arbitrary-precision numerical refinement");
+    tests.expectEqual(eval(session, "N[root[{0,-2,0,1},2],30]"),
+        std::string{"0"},
+        "root refinement recognizes an exact zero root without relative-precision stalling");
+    tests.expectEqual(eval(session, "solve[x^5-x+1==0,x,Real]"),
+        std::string{"{x==root[{1, -1, 0, 0, 0, 1}, 1]}"},
+        "Real Solve falls back to an exact Root representation for unresolved rational polynomials");
+    tests.expectEqual(eval(session, "solve[(x^2-2)^2==0,x,Real]"),
+        std::string{"{x==root[{-2, 0, 1}, 1], x==root[{-2, 0, 1}, 2]}"},
+        "algebraic Root fallback preserves distinct repeated-polynomial roots canonically");
+    tests.expectEqual(eval(session, "solve[x^4+1==0,x,Real]"),
+        std::string{"{}"},
+        "Real Root isolation proves that a rational polynomial has no real roots");
+    const std::string complexAlgebraicUnresolved = eval(session, "solve[x^5-x+1==0,x]");
+    tests.expect(complexAlgebraicUnresolved == "UnresolvedSolutionSet[x]"
+            && findDiagnostic(session, "solve::unresolved") != nullptr,
+        "general complex algebraic Root isolation remains intentionally unresolved");
+    const std::string rootExplanation = eval(session, "explain[root[{-2,0,1},2]]");
+    tests.expect(rootExplanation.find("{\"Kind\", \"AlgebraicNumber\"}") != std::string::npos
+            && rootExplanation.find("{\"PolynomialDegree\", 2}") != std::string::npos
+            && rootExplanation.find("{\"RootIndex\", 2}") != std::string::npos,
+        "explain exposes Root as an exact real algebraic number without evaluating it numerically");
 
     tests.expectEqual(eval(session, "solve[sin[x]==0,x,Real]"),
         std::string{"{x==Pi k where k in Integer}"},

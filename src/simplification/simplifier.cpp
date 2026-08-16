@@ -1402,6 +1402,8 @@ struct PositiveIntegerPower final {
         return expression;
 
     case BuiltinId::Erf:
+        if (arguments.size() == 1 && isExactReal(arguments[0], 0))
+            return integerExpr(0);
         if (arguments.size() == 1
             && isHead(arguments[0], context.builtins, BuiltinId::Negate)
             && arguments[0].asCall().arguments.size() == 1)
@@ -1411,6 +1413,8 @@ struct PositiveIntegerPower final {
         return expression;
 
     case BuiltinId::Erfc:
+        if (arguments.size() == 1 && isExactReal(arguments[0], 0))
+            return integerExpr(1);
         if (arguments.size() == 1
             && isHead(arguments[0], context.builtins, BuiltinId::Negate)
             && arguments[0].asCall().arguments.size() == 1)
@@ -1577,6 +1581,15 @@ struct PositiveIntegerPower final {
     case BuiltinId::Mod:
     case BuiltinId::Rem:
     case BuiltinId::Quotient:
+    case BuiltinId::IsPrime:
+    case BuiltinId::NextPrime:
+    case BuiltinId::PreviousPrime:
+    case BuiltinId::FactorInteger:
+    case BuiltinId::Totient:
+    case BuiltinId::Zeta:
+    case BuiltinId::Digamma:
+    case BuiltinId::Trigamma:
+    case BuiltinId::IncompleteBeta:
     case BuiltinId::Permutation:
     case BuiltinId::Combination:
     case BuiltinId::Fibonacci:
@@ -1611,6 +1624,7 @@ struct PositiveIntegerPower final {
     case BuiltinId::Range:
     case BuiltinId::Table:
     case BuiltinId::Rationalize:
+    case BuiltinId::Root:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:
     case BuiltinId::Expand:

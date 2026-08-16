@@ -100,4 +100,24 @@ namespace mmcal::approximation {
     const RealInterval& b,
     std::size_t precisionBits);
 
+// Riemann zeta。第一版certified backendは実軸s>1。
+[[nodiscard]] RealInterval encloseZetaReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
+// digamma/trigamma。第一版certified backendは正実数域。
+[[nodiscard]] RealInterval encloseDigammaPositive(
+    const RealInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseTrigammaPositive(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
+// 正則化不完全Beta I_x(a,b)。a,bはexact positive Rational、xは[0,1]のcertified interval。
+[[nodiscard]] RealInterval encloseIncompleteBetaRegularized(
+    const numeric::Rational& a,
+    const numeric::Rational& b,
+    const RealInterval& x,
+    std::size_t precisionBits);
+
 } // namespace mmcal::approximation

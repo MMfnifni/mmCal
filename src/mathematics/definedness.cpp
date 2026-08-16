@@ -191,6 +191,17 @@ private:
             // 正確に表せない。Solverへ弱い条件を返すより未解決を選ぶ。
             return false;
 
+        case FunctionDefinednessRule::ZetaPole:
+            // zeta(s)はs=1に単純poleを持つ。一般symbolic条件は現Predicateでも
+            // s!=1と書けるが、将来の複素branch/continuation知識と混同しないよう
+            // 現段階では保守的に未解決とする。
+            return false;
+
+        case FunctionDefinednessRule::IncompleteBetaPrincipal:
+            // 第一版ibetaはa,b>0かつ0<=x<=1のregularized real branchだけを実装する。
+            // この三条件をgeneric definedness collectorへ半端に複製せず専用builtin側で検証する。
+            return false;
+
         case FunctionDefinednessRule::Hypergeometric1F1Poles:
             // 1F1(a;b;z) の b=0,-1,-2,... pole集合も有限Predicateでは正確に表せない。
             // terminating seriesによる可除ケースもあるため、弱い条件を捏造せず未解決とする。

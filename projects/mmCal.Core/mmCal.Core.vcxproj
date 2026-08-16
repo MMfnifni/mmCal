@@ -193,6 +193,7 @@
     <ClInclude Include="..\..\src\simplification\expression_ordering.hpp" />
     <ClInclude Include="..\..\src\simplification\simplifier.hpp" />
     <ClInclude Include="..\..\src\symbolic\symbolic_operation.hpp" />
+    <ClInclude Include="..\..\src\symbolic\algebraic_number.hpp" />
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp" />
     <ClInclude Include="..\..\src\symbolic\algebra_transforms.hpp" />
     <ClInclude Include="..\..\src\solver\polynomial_solver.hpp" />
@@ -304,6 +305,7 @@
     <ClCompile Include="..\..\src\simplification\expression_cost.cpp" />
     <ClCompile Include="..\..\src\simplification\expression_ordering.cpp" />
     <ClCompile Include="..\..\src\simplification\simplifier.cpp" />
+    <ClCompile Include="..\..\src\symbolic\algebraic_number.cpp" />
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp" />
     <ClCompile Include="..\..\src\symbolic\algebra_transforms.cpp" />
     <ClCompile Include="..\..\src\solver\polynomial_solver.cpp" />

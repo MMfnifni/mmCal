@@ -19,9 +19,11 @@
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
+#include "symbolic/algebraic_number.hpp"
 
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -73,6 +75,36 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
         }
     }
     return false;
+}
+
+[[nodiscard]] std::optional<symbolic::RealAlgebraicNumber> algebraicRoot(
+    const expression::CallExpr& call) {
+    if (call.arguments.size() != 2 || !call.arguments[0].isArray()
+        || call.arguments[0].asArray().rank() != 1)
+        return std::nullopt;
+
+    const auto& coefficientsArray = call.arguments[0].asArray();
+    std::vector<Rational> coefficients;
+    coefficients.reserve(coefficientsArray.size());
+    for (std::size_t i = 0; i < coefficientsArray.size(); ++i) {
+        const Expr value = coefficientsArray.element(i);
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        coefficients.push_back(value.asNumber().asReal().toRational());
+    }
+
+    const Expr& indexExpression = call.arguments[1];
+    if (!indexExpression.isNumber() || !indexExpression.asNumber().isReal()
+        || !indexExpression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& indexInteger = indexExpression.asNumber().asReal().asInteger();
+    if (indexInteger.isNegative() || indexInteger.isZero())
+        return std::nullopt;
+    const auto index = numeric::tryToUint64(indexInteger);
+    if (!index || *index > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    return symbolic::RealAlgebraicNumber::create(
+        coefficients, static_cast<std::size_t>(*index));
 }
 
 [[nodiscard]] Rational rational(std::int64_t numerator, std::int64_t denominator = 1) {
@@ -469,6 +501,15 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     };
 
     switch (definition->id) {
+    case BuiltinId::Root: {
+        const auto algebraic = algebraicRoot(call);
+        if (!algebraic)
+            return std::nullopt;
+        const symbolic::RationalRootInterval interval = algebraic->refined(precisionBits);
+        return CertifiedValue{RealInterval::fromRationalBounds(
+            interval.lower, interval.upper, precisionBits)};
+    }
+
     case BuiltinId::Add: {
         CertifiedValue result{RealInterval::fromRational(rational(0), precisionBits)};
         for (const Expr& argument : call.arguments) {
@@ -738,6 +779,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
+    case BuiltinId::Zeta:
+    case BuiltinId::Digamma:
+    case BuiltinId::Trigamma:
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
     case BuiltinId::FresnelC:
@@ -754,6 +798,12 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return CertifiedValue{encloseGammaReal(value->asReal(), precisionBits)};
         case BuiltinId::LogGamma:
             return CertifiedValue{encloseLogGammaReal(value->asReal(), precisionBits)};
+        case BuiltinId::Zeta:
+            return CertifiedValue{encloseZetaReal(value->asReal(), precisionBits)};
+        case BuiltinId::Digamma:
+            return CertifiedValue{encloseDigammaPositive(value->asReal(), precisionBits)};
+        case BuiltinId::Trigamma:
+            return CertifiedValue{encloseTrigammaPositive(value->asReal(), precisionBits)};
         case BuiltinId::Erf:
             return CertifiedValue{encloseErfReal(value->asReal(), precisionBits)};
         case BuiltinId::Erfc:
@@ -852,6 +902,18 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         return CertifiedValue{enclosePolylogReal(*count, *z, precisionBits)};
     }
 
+    case BuiltinId::IncompleteBeta: {
+        if (call.arguments.size() != 3)
+            return std::nullopt;
+        const auto a = exactRealRational(call.arguments[0]);
+        const auto b = exactRealRational(call.arguments[1]);
+        const auto x = encloseArgument(2);
+        if (!a || !b || !x || !x->isReal())
+            return std::nullopt;
+        return CertifiedValue{encloseIncompleteBetaRegularized(
+            *a, *b, x->asReal(), precisionBits)};
+    }
+
     case BuiltinId::Beta:
     case BuiltinId::BetaLog: {
         if (call.arguments.size() != 2)
@@ -870,6 +932,11 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::GeneralizedBinomial:
     case BuiltinId::FallingFactorial:
     case BuiltinId::RisingFactorial:
+    case BuiltinId::IsPrime:
+    case BuiltinId::NextPrime:
+    case BuiltinId::PreviousPrime:
+    case BuiltinId::FactorInteger:
+    case BuiltinId::Totient:
     case BuiltinId::RandSeed:
     case BuiltinId::Rand:
     case BuiltinId::RandInt:

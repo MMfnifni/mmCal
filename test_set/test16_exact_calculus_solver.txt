@@ -75,3 +75,15 @@ solve[sin[2x+1]==0,x,Real]==>{x==-(1-Pi k)/2 where k in Integer}
 solve[sin[x]==1,x,Real]==>{x==Pi/2+2Pi k where k in Integer}
 solve[sin[x]==2,x,Real]==>{}
 solve[sin[x^2]==0,x,Real]==>UnresolvedSolutionSet[x]
+
+# Unreleased canonical Gaussian / real algebraic Root.
+integrate[exp[-x^2],x]==>erf[x]sqrt[Pi]/2
+integrate[exp[-2*x^2],x]==>erf[x sqrt[2]]sqrt[Pi]/(2sqrt[2])
+integrate[exp[-x^2],{x,0,Infinity}]==>sqrt[Pi]/2
+integrate[exp[-x^2],{x,-Infinity,Infinity}]==>sqrt[Pi]
+root[{-4,0,2},2]==>root[{-2, 0, 1}, 2]
+root[{4,0,-4,0,1},2]==>root[{-2, 0, 1}, 2]
+N[root[{-2,0,1},2],30]==>1.41421356237309504880168872421
+solve[x^5-x+1==0,x,Real]==>{x==root[{1, -1, 0, 0, 0, 1}, 1]}
+solve[(x^2-2)^2==0,x,Real]==>{x==root[{-2, 0, 1}, 1], x==root[{-2, 0, 1}, 2]}
+solve[x^4+1==0,x,Real]==>{}

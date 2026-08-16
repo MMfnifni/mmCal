@@ -81,6 +81,12 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
     const evaluation::BuiltinRegistry& builtins,
     const symbols::SymbolRegistry& symbols,
     const mathematics::MathRegistry& mathematics) noexcept {
+    if (value.isCall()) {
+        const auto* definition = builtins.find(value.asCall().head);
+        if (definition && definition->id == evaluation::BuiltinId::Root)
+            return "AlgebraicNumber";
+        return kindName(value.kind());
+    }
     if (!value.isSymbol())
         return kindName(value.kind());
 
@@ -588,7 +594,21 @@ expression::Expr evaluateExplain(
         if (internal)
             add(properties, "Representation", text("ListExpr"));
         break;
-    case ExprKind::Call:
+    case ExprKind::Call: {
+        const auto* definition = builtins.find(value.asCall().head);
+        if (definition && definition->id == evaluation::BuiltinId::Root
+            && value.asCall().arguments.size() == 2
+            && value.asCall().arguments[0].isArray()) {
+            add(properties, "Domain", text("Real"));
+            add(properties, "Exactness", text("Exact"));
+            const auto& coefficients = value.asCall().arguments[0].asArray();
+            if (coefficients.rank() == 1 && coefficients.size() >= 2)
+                add(properties, "PolynomialDegree", integer(coefficients.size() - 1));
+            add(properties, "RootIndex", value.asCall().arguments[1]);
+            if (internal)
+                add(properties, "Representation", text("RealAlgebraicNumber<RootCall>"));
+            break;
+        }
         add(properties, "Domain", text("Unknown"));
         add(properties, "Exactness", text("Unknown"));
         add(properties, "Head", text(value.asCall().head.view()));
@@ -596,6 +616,7 @@ expression::Expr evaluateExplain(
         if (internal)
             add(properties, "Representation", text("CallExpr"));
         break;
+    }
     case ExprKind::SolutionSet:
         add(properties, "Domain", text("SolutionSet"));
         add(properties, "Exactness", text("Unknown"));

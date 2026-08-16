@@ -33,12 +33,14 @@
 #include "solver/solve_constraints.hpp"
 #include "solver/transcendental_solver.hpp"
 #include "symbolic/algebra_transforms.hpp"
+#include "symbolic/algebraic_number.hpp"
 #include "symbolic/differentiation.hpp"
 #include "symbolic/integration.hpp"
 #include "symbolic/limit.hpp"
 #include "numeric/integer_algorithms.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -112,6 +114,49 @@ namespace {
         }
     }
     return false;
+}
+
+[[nodiscard]] std::optional<std::vector<numeric::Rational>> rootCoefficients(
+    const expression::Expr& expression) {
+    if (!expression.isArray() || expression.asArray().rank() != 1)
+        return std::nullopt;
+    const auto& array = expression.asArray();
+    std::vector<numeric::Rational> coefficients;
+    coefficients.reserve(array.size());
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const expression::Expr value = array.element(i);
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        coefficients.push_back(value.asNumber().asReal().toRational());
+    }
+    while (!coefficients.empty() && coefficients.back().isZero())
+        coefficients.pop_back();
+    return coefficients;
+}
+
+[[nodiscard]] std::optional<std::size_t> rootIndex(const expression::Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const numeric::BigInt& integer = expression.asNumber().asReal().asInteger();
+    if (integer.isNegative() || integer.isZero())
+        return std::nullopt;
+    const auto value = numeric::tryToUint64(integer);
+    if (!value || *value > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    return static_cast<std::size_t>(*value);
+}
+
+[[nodiscard]] expression::Expr canonicalRootCall(
+    const symbolic::RealAlgebraicNumber& algebraic,
+    const BuiltinRegistry& registry) {
+    std::vector<numeric::Rational> coefficients(
+        algebraic.polynomial().begin(), algebraic.polynomial().end());
+    const std::size_t coefficientCount = coefficients.size();
+    return expression::Expr::call(registry.symbol(BuiltinId::Root), {
+        expression::Expr::rationalArray({coefficientCount}, std::move(coefficients)),
+        expression::Expr{numeric::Number{numeric::BigInt::fromUnsigned(algebraic.rootIndex())}}
+    });
 }
 
 [[nodiscard]] bool containsUnresolvedSolution(const solver::SolutionSet& solutions) {
@@ -322,6 +367,16 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateRem(arguments, registry_);
     case BuiltinId::Quotient:
         return builtins::evaluateQuotient(arguments, registry_);
+    case BuiltinId::IsPrime:
+        return builtins::evaluateIsPrime(arguments, registry_);
+    case BuiltinId::NextPrime:
+        return builtins::evaluateNextPrime(arguments, registry_);
+    case BuiltinId::PreviousPrime:
+        return builtins::evaluatePreviousPrime(arguments, registry_);
+    case BuiltinId::FactorInteger:
+        return builtins::evaluateFactorInteger(arguments, registry_);
+    case BuiltinId::Totient:
+        return builtins::evaluateTotient(arguments, registry_);
     case BuiltinId::Permutation:
         return builtins::evaluatePermutation(arguments, registry_);
     case BuiltinId::Combination:
@@ -648,6 +703,10 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Log10:
     case BuiltinId::Gamma:
     case BuiltinId::LogGamma:
+    case BuiltinId::Zeta:
+    case BuiltinId::Digamma:
+    case BuiltinId::Trigamma:
+    case BuiltinId::IncompleteBeta:
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
     case BuiltinId::FresnelC:
@@ -767,6 +826,27 @@ expression::Expr Evaluator::dispatchBuiltin(
         emitWarning("rationalize::unevaluated",
             "rationalize could not convert part of the expression; it remains unevaluated");
         return expression::Expr::call(call.head, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+    case BuiltinId::Root: {
+        if (arguments.size() != 2)
+            error::throwCalcError(error::CalcErrorType::Type,
+                "root expects a coefficient array and a positive root index");
+        const auto coefficients = rootCoefficients(arguments[0]);
+        const auto index = rootIndex(arguments[1]);
+        if (!coefficients || coefficients->size() < 2 || !index)
+            error::throwCalcError(error::CalcErrorType::Type,
+                "root expects exact real Rational coefficients and a positive integer index");
+        if (coefficients->size() == 2) {
+            if (*index != 1)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "root index exceeds the number of real roots");
+            return expression::Expr{numeric::Number{-(*coefficients)[0] / (*coefficients)[1]}};
+        }
+        const auto algebraic = symbolic::RealAlgebraicNumber::create(*coefficients, *index);
+        if (!algebraic)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "root index is invalid or the polynomial exceeds the current algebraic degree limit");
+        return canonicalRootCall(*algebraic, registry_);
+    }
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify: {
         if (arguments.empty() || arguments.size() > 2)
@@ -863,8 +943,14 @@ expression::Expr Evaluator::dispatchBuiltin(
                             angleSemantics_, constraints.assumptions))
                         return *transcendental;
                 }
-                return solver::solveUnivariatePolynomialRelation(
+                solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
                     arguments[0], variables.front(), registry_, mathematics_, angleSemantics_);
+                if (realDomain && polynomial.kind() == solver::SolutionSetKind::Unresolved) {
+                    if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
+                            arguments[0], variables.front(), registry_, mathematics_, angleSemantics_))
+                        return *algebraic;
+                }
+                return polynomial;
             }
 
             std::vector<expression::Expr> equations;

@@ -723,6 +723,39 @@ using numeric::Rational;
         }
         break;
 
+    case BuiltinId::Gamma:
+        if (a.size() == 1) {
+            Expr kernel = multiply(builtins, {
+                call(builtins, BuiltinId::Gamma, {a[0]}),
+                call(builtins, BuiltinId::Digamma, {a[0]})});
+            return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
+        }
+        break;
+    case BuiltinId::LogGamma:
+        if (a.size() == 1)
+            return chain(call(builtins, BuiltinId::Digamma, {a[0]}),
+                a[0], variable, builtins, mathematics, angles);
+        break;
+    case BuiltinId::Digamma:
+        if (a.size() == 1)
+            return chain(call(builtins, BuiltinId::Trigamma, {a[0]}),
+                a[0], variable, builtins, mathematics, angles);
+        break;
+    case BuiltinId::IncompleteBeta:
+        if (a.size() == 3
+            && !containsVariable(a[0], variable)
+            && !containsVariable(a[1], variable)) {
+            Expr xPower = power(builtins, a[2], subtract(builtins, a[0], integer(1)));
+            Expr oneMinusXPower = power(builtins,
+                subtract(builtins, integer(1), a[2]),
+                subtract(builtins, a[1], integer(1)));
+            Expr kernel = divide(builtins,
+                multiply(builtins, {std::move(xPower), std::move(oneMinusXPower)}),
+                call(builtins, BuiltinId::Beta, {a[0], a[1]}));
+            return chain(std::move(kernel), a[2], variable, builtins, mathematics, angles);
+        }
+        break;
+
     case BuiltinId::Exp:
         if (a.size() == 1)
             return chain(expression, a[0], variable, builtins, mathematics, angles);
@@ -780,8 +813,8 @@ using numeric::Rational;
     case BuiltinId::Im:
     case BuiltinId::Conj:
     case BuiltinId::Arg:
-    case BuiltinId::Gamma:
-    case BuiltinId::LogGamma:
+    case BuiltinId::Zeta:
+    case BuiltinId::Trigamma:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:
@@ -804,6 +837,11 @@ using numeric::Rational;
     case BuiltinId::Mod:
     case BuiltinId::Rem:
     case BuiltinId::Quotient:
+    case BuiltinId::IsPrime:
+    case BuiltinId::NextPrime:
+    case BuiltinId::PreviousPrime:
+    case BuiltinId::FactorInteger:
+    case BuiltinId::Totient:
     case BuiltinId::Permutation:
     case BuiltinId::Combination:
     case BuiltinId::Fibonacci:
@@ -903,6 +941,7 @@ using numeric::Rational;
     case BuiltinId::Accuracy:
     case BuiltinId::Explain:
     case BuiltinId::Rationalize:
+    case BuiltinId::Root:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:
     case BuiltinId::Expand:

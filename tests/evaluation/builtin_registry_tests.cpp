@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{240},
+    tests.expectEqual(registry.size(), std::size_t{250},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -220,7 +220,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: table holds the body and binds its iterator specification");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{222},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{232},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
@@ -272,6 +272,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("integrate") && sourceFunctions.contains("limit")
         && sourceFunctions.contains("map") && sourceFunctions.contains("range")
         && sourceFunctions.contains("table")
+        && sourceFunctions.contains("root")
         && sourceFunctions.contains("cbrt") && sourceFunctions.contains("hypot")
         && sourceFunctions.contains("cis") && sourceFunctions.contains("polar")
         && sourceFunctions.contains("nextpow2")

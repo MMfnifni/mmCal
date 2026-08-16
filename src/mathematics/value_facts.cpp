@@ -416,6 +416,12 @@ using numeric::Number;
             return ValueFacts{domain, sign, base.exact && argument(1).exact, false};
         }
 
+    case BuiltinId::Root:
+        if (call.arguments.size() != 2)
+            return {};
+        // root[...]はEvaluatorがexact Rational係数と有効な実根indexを検証してから残す。
+        return ValueFacts{NumericDomain::Real, RealSign::Unknown, true, false};
+
     case BuiltinId::Cbrt:
         if (call.arguments.size() != 1 || !argument(0).isProvablyReal())
             return {};
@@ -471,6 +477,22 @@ using numeric::Number;
         if (call.arguments.size() != 1 || !argument(0).isNumeric())
             return {};
         return ValueFacts{NumericDomain::Integer, RealSign::Unknown, true, false};
+
+    case BuiltinId::IsPrime:
+        return {}; // Boolean result.
+    case BuiltinId::NextPrime:
+    case BuiltinId::PreviousPrime:
+    case BuiltinId::Totient:
+        return ValueFacts{NumericDomain::Integer, RealSign::Positive, true, false};
+    case BuiltinId::FactorInteger:
+        return {}; // List result.
+
+    case BuiltinId::Zeta:
+    case BuiltinId::Digamma:
+    case BuiltinId::Trigamma:
+    case BuiltinId::IncompleteBeta:
+        // 詳細なdomain/signは各函数の定義域・parameterに依存するため、現段階では推論しない。
+        return {};
 
     case BuiltinId::Sqrt:
         if (call.arguments.size() != 1)

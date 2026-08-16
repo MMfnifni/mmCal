@@ -439,9 +439,17 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
+Unreleasedではさらに，`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`を追加し，代表exact値・微分関係・対応領域のcertified `N`へ接続した。また軽量数論として`isprime` / `nextprime` / `prevprime` / `factorint` / `totient`を`uint64`範囲で決定的に評価する。証明backendを超えるBigIntをprobable-primeとして確定しない。
+
 代表例:
 
 ```text
+integrate[exp[-x^2],x]
+-> erf[x]sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,-Infinity,Infinity}]
+-> sqrt[Pi]
+
 integrate[exp[x^6],x]
 -> x hypergeometric1F1[1/6,7/6,x^6]
 
@@ -482,6 +490,18 @@ solve[sin[x]==0,x,Real]
 ```
 
 `sin/cos/tan`の実軸周期解は，exact非零一次係数を持つaffine argumentから段階的にinteger-parameter familyへ対応している。非線形argumentやComplex全解をprincipal inverseだけから捏造しない。
+
+一般高次Rational係数多項式のReal解は，既存radical solverで自然に閉じない場合にexact `root`へfallbackできる。`root[{a0,...,an},k]`は昇冪係数多項式の異なる実根を小さい順に数えた第`k`根で，`N`ではSturm分離区間をcertifiedに細分化する。
+
+```text
+solve[x^5-x+1==0,x,Real]
+-> {x==root[{1,-1,0,0,0,1},1]}
+
+N[root[{-2,0,1},2],30]
+-> 1.41421356237309504880168872421
+```
+
+一般Complex Root isolationとRoot間のalgebraic-field演算はまだ未実装である。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。

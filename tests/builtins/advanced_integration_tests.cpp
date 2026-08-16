@@ -94,6 +94,17 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, nested), nested,
         "compact nested-radical formatting round-trips through the parser");
 
+    tests.expectEqual(eval(session, "integrate[exp[-x^2],x]"),
+        std::string{"erf[x]sqrt[Pi]/2"},
+        "Gaussian antiderivative prefers the canonical erf representation over generic 1F1");
+    tests.expectEqual(eval(session, "integrate[exp[-2*x^2],x]"),
+        std::string{"erf[x sqrt[2]]sqrt[Pi]/(2sqrt[2])"},
+        "scaled Gaussian antiderivative remains in the canonical erf family");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[integrate[exp[-x^2],x],x]-exp[-x^2]]"),
+        std::string{"0"},
+        "canonical Gaussian erf primitive differentiates back exactly");
+
     tests.expectEqual(eval(session, "integrate[exp[x^6],x]"),
         std::string{"x hypergeometric1F1[1/6, 7/6, x^6]"},
         "exp of an integer monomial closes through the entire 1F1 representation");

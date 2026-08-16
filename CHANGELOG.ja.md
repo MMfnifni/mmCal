@@ -4,6 +4,9 @@
 
 ### 開発・検証基盤
 
+- 特殊函数へ`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`を追加。`zeta`は代表exact値・自明零点と実軸`s>1`のEuler-Maclaurin certified backend，`digamma/trigamma`は正実数のBernoulli漸近＋recurrence，`ibeta`は`a,b>0, 0<=x<=1`のreal contractとexact integer-parameter有限和・exact Rational parameterのcertified 2F1/Beta経路を実装。`D[gamma]` / `D[lgamma]` / `D[digamma]`も新しい函数語彙へ接続
+- 軽量数論として`isprime` / `nextprime` / `prevprime` / `factorint` / `totient`を追加。`uint64`全域では証明範囲が既知のdeterministic strong Miller-Rabinを使い，因数分解はprime verification付きPollard-Rhoでexactに返す。現在の証明backendを超えるBigIntはprobable-primeを`True`として返さず未評価を保持
+- `docs/roadmap.md`を正式化し，意図的未実装，backend未対応，探索budgetを区別して整理。Complex Root/algebraic-field，特殊函数の複素解析接続，一般parametric Solve，arbitrary-BigInt数論，Machine evaluator，BigUInt SBO，Core全体multi-thread化等の保留理由を明文化
 - Lexer / Parser / Lowererで式として成立しなかった入力は履歴へcommitせず，`In[n]`番号を消費しないよう変更。SyntaxError表示はpending番号を示し，修正後の次入力は同じ`In[n]`を再利用する。parse/lower成功後の評価エラーは従来どおり入力履歴へ残す
 - `mmCal.Benchmarks --random-expressions`へgrammar-awareなsemantic expression fuzzerを追加
 - `--loop`ではcase数を制限せず連続実行し，最初のFAILを検出した時点でshrinking・seed/case再現情報を表示して即停止する
@@ -30,6 +33,8 @@
 - InformationEnclosureを近似値の順序比較だけでなく`==` / `!=`にも接続。実部または虚部のInformationEnclosureが互いに素なら不等を確定し，双方が同一pointと証明できる場合だけ等値を確定する。重なる区間はhidden guard桁を使わず未評価へ残す。`floor` / `ceil` / `trunc` / `round`および`min` / `max`も既存どおりInformationEnclosureのみで離散結果を証明する
 - exact finite sequence / iteration APIとして`range` / `table` / `map`を追加。`range`はexact Integer / Rational stepを用い，`table`はheld bodyとlocal iterator scopeでnested反復・外側定義の復元を保証する。`map`はArray / ragged braceのscalar leafへ函数を明示適用し，通常函数を暗黙element-wise化しない。`explain[builtin]`はBuiltinRegistry / MathRegistryからarity・held属性・domain・parity・period・principal inverse・real range等をO(1)で照会可能にした
 - Real上の`sin/cos/tan`周期方程式へinteger formal parameter付きSolutionSetを追加。引数がsolve変数に対するexact非零一次係数のaffine式である範囲を安全に扱い，`solve[sin[x]==0,x,Real] -> {x==Pi k where k in Integer}`等を返す。target range，session角度mode，endpoint branch重複除去，parameter name衝突を監査し，非線形argumentやComplex全解は未解決のまま保持する
+- Gaussian積分のpreferred canonical formを改善。exact positive Rational `a`に対する`integrate[exp[-a x^2],x]`を一般1F1より`erf`へ優先し，有限積/商の安全なInfinity極限を追加して`integrate[exp[-x^2],{x,0,Infinity}] -> sqrt[Pi]/2`および全実軸Gaussian `-> sqrt[Pi]`までexactに閉じる。`erf[0]` / `erfc[0]`もSimplifierでcanonical化
+- exact実代数根`root[{a0,...,an},k]`と`RealAlgebraicNumber` specialized IRを追加。係数は昇冪exact Rational，`k`は異なる実根を昇順に数える1-based index。定義多項式をmonic square-freeへ正規化し，Rational Sturm列で根数をexactに数え，Rational isolating intervalを保持して`N[root[...,k],p]`をcertified refinementする。既存Solverで閉じないRational係数高次多項式はReal領域に限りRoot fallbackを使い，一般Complex root isolation・algebraic-field演算・minimal polynomial化は未実装のまま明示的に保留
 - nested positive exact integer Powerを通常Simplifierで`(a^m)^n -> a^(mn)`へ安全に正規化し，random fuzzerが検出した`expand`/`factor`不変量違反を修正
 - Formatterは`^`の右結合性を明示し，左nested Powerを`(a^b)^c`と括弧付きで出力してASTの意味を保持
 - exact Rational定数を連続減算する`(a-b)-c`を`a-(b+c)`へ畳み，`((((x-1)-3)^3)^4...) -> (x-4)^144`のcanonicalizationを改善

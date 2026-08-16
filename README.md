@@ -443,9 +443,17 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
+Unreleased also adds `zeta`, `digamma`, `trigamma`, and the regularized incomplete beta `ibeta`, connected to representative exact reductions, derivative relations, and certified `N` on their supported real domains. Lightweight exact number theory now includes `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient`, deterministic over the `uint64` range; larger BigInts are not promoted from probable-prime evidence to certified truth.
+
 Representative reductions include:
 
 ```text
+integrate[exp[-x^2],x]
+-> erf[x]sqrt[Pi]/2
+
+integrate[exp[-x^2],{x,-Infinity,Infinity}]
+-> sqrt[Pi]
+
 integrate[exp[x^6],x]
 -> x hypergeometric1F1[1/6,7/6,x^6]
 
@@ -486,6 +494,18 @@ solve[sin[x]==0,x,Real]
 ```
 
 Real periodic `sin/cos/tan` equations can now return integer-parameter families when the argument is affine in the solve variable with an exact nonzero linear coefficient. Nonlinear arguments and complete Complex-domain families are not fabricated from a principal inverse.
+
+For higher-degree Rational-coefficient polynomials over Real, the solver can fall back to exact `root` values when the existing radical-oriented solver does not close naturally. `root[{a0,...,an},k]` denotes the `k`th distinct increasing real root of the ascending-power coefficient polynomial, and `N` certifiedly refines its Sturm isolating interval.
+
+```text
+solve[x^5-x+1==0,x,Real]
+-> {x==root[{1,-1,0,0,0,1},1]}
+
+N[root[{-2,0,1},2],30]
+-> 1.41421356237309504880168872421
+```
+
+General Complex Root isolation and algebraic-field arithmetic between Root values remain future work.
 
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.
@@ -686,7 +706,7 @@ D N In Out Exit Clear Defs UnDef
 - `docs/reference.md` — Detailed function, syntax, and current-behavior reference
 - `docs/mathematics.md` — Mathematical policy for domains, principal values, and numerical evaluation
 - `docs/architecture.md` — Internal architecture for developers
-- `docs/roadmap.md` — Major currently unsupported features and future candidates
+- `docs/roadmap.en.md` — Major currently unsupported features and future candidates
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
 - `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.2, with benchmark rationale
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
