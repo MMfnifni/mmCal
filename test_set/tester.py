@@ -21,7 +21,7 @@ REL_EPS_STRICT = 1e-10
 REL_EPS_LOOSE = 1e-6
 
 ERROR_TYPES = (
-    "SyntaxError", "DomainError", "TypeError", "NameError",
+    "SyntaxError", "ResourceLimitError", "DomainError", "TypeError", "NameError",
     "OverflowError", "EvaluationError", "InternalError"
 )
 PUBLIC_ERROR_TYPES = tuple(name for name in ERROR_TYPES if name != "InternalError")

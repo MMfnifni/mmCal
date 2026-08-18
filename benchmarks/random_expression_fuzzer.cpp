@@ -366,19 +366,42 @@ struct Failure final {
             const Expr transformed = evaluate(session, transformedSource);
             const std::string transformedText = mmcal::formatting::formatExpr(transformed);
 
-            const std::string originalAtPoint = replaceSymbolX(source, testCase.substitution);
-            const std::string transformedAtPoint = replaceSymbolX(transformedText, testCase.substitution);
+            // v1.5.3までは一点代入だけだったため，異なる多項式が偶然同じ値になる
+            // blind spotがあった。まず形式差を展開し，さらに独立な三点で照合する。
             session.resetForIndependentEvaluation();
-            const Expr lhs = evaluate(session, originalAtPoint);
+            const Expr residual = evaluate(
+                session,
+                "expand[(" + source + ")-(" + transformedText + ")]");
             session.resetForIndependentEvaluation();
-            const Expr rhs = evaluate(session, transformedAtPoint);
-            if (!(lhs == rhs))
+            const Expr zero = evaluate(session, "0");
+            if (!(residual == zero))
                 return Failure{
                     testCase.invariant == Invariant::ExpandPreservesPolynomial
-                        ? "expand changed polynomial value"
-                        : "factor[expand[...]] changed polynomial value",
-                    mmcal::formatting::formatExpr(lhs),
-                    mmcal::formatting::formatExpr(rhs)};
+                        ? "expand left a nonzero symbolic polynomial residual"
+                        : "factor[expand[...]] left a nonzero symbolic polynomial residual",
+                    "0",
+                    mmcal::formatting::formatExpr(residual)};
+
+            const std::array<std::int64_t, 3> substitutions{
+                testCase.substitution,
+                testCase.substitution + 11,
+                testCase.substitution - 13};
+            for (const std::int64_t substitution : substitutions) {
+                const std::string originalAtPoint = replaceSymbolX(source, substitution);
+                const std::string transformedAtPoint = replaceSymbolX(transformedText, substitution);
+                session.resetForIndependentEvaluation();
+                const Expr lhs = evaluate(session, originalAtPoint);
+                session.resetForIndependentEvaluation();
+                const Expr rhs = evaluate(session, transformedAtPoint);
+                if (!(lhs == rhs))
+                    return Failure{
+                        (testCase.invariant == Invariant::ExpandPreservesPolynomial
+                            ? "expand changed polynomial value at x="
+                            : "factor[expand[...]] changed polynomial value at x=")
+                            + std::to_string(substitution),
+                        mmcal::formatting::formatExpr(lhs),
+                        mmcal::formatting::formatExpr(rhs)};
+            }
             return std::nullopt;
         }
 

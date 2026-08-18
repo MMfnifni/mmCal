@@ -2599,11 +2599,19 @@ The CLI separates mathematical Kernel state from frontend presentation state. Th
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --eval "expand[(x+1)^3]"
+mmCal --batch < expressions.txt
 ```
 
 - `--fix n`: Set the startup limit on decimal display digits. Internal values are unchanged and unnecessary trailing zeros are omitted
 - `--angle deg|rad|grad`: Set the default angle unit at startup
+- `--eval expr`: Evaluate one expression non-interactively
+- `--batch`: Evaluate standard input one expression per line in one session.
 - `--help`, `-h`: Show usage
+
+Automation modes emit no banner, prompt, `Out[...]` label, or farewell. Successful values go to stdout and warnings/errors to stderr. Exit codes are `0` for success, `2` for argument errors, `3` for `SyntaxError` / `ResourceLimitError`, `4` for evaluation errors, and `5` for `InternalError`. Batch processing continues after line errors and returns the greatest code observed. `--eval` and `--batch` are mutually exclusive.
+
+The Lexer/Parser has independent budgets for tokens, AST nodes, nesting, operator chains, numeric-literal digits, function arguments, and Array elements. Exceeding a budget stops before AST lowering with a source-spanned `ResourceLimitError`.
 
 ```text
 In [1]> 1/3

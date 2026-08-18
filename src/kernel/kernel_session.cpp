@@ -68,11 +68,14 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
     auto document = std::make_shared<const source::SourceDocument>(pendingInputNumber, source);
 
     try {
-        syntax::Lexer lexer{*source};
+        // LexerとParserで同じbudgetを共有し，危険な入力をAST/Lowererの手前で止める。
+        syntax::ParseBudget parseBudget;
+        syntax::Lexer lexer{*source, &parseBudget};
         syntax::Parser parser{
             source,
             lexer.tokenize(),
-            makeParserOptions(symbolRegistry_, registry_, userFunctions_)};
+            makeParserOptions(symbolRegistry_, registry_, userFunctions_),
+            &parseBudget};
         syntax::SyntaxTree tree = parser.parse();
         syntax::LoweringResult lowered = lowerer_.lowerTracked(tree, document);
 

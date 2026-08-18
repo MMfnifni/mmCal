@@ -2663,11 +2663,19 @@ CLIはKernelの数学状態とfrontendの表示状態を分離する。起動時
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --eval "expand[(x+1)^3]"
+mmCal --batch < expressions.txt
 ```
 
 - `--fix n`: 起動時の小数表示桁数上限。内部値は変更せず，末尾の不要な0は省略する
 - `--angle deg|rad|grad`: 起動時の既定角度
+- `--eval expr`: 1式だけを非対話評価する
+- `--batch`: 標準入力を1行1式として同じsessionで非対話評価する。
 - `--help`, `-h`: 使用法を表示
+
+非対話modeはbanner，prompt，`Out[...]` label，終了挨拶を出さない。成功値だけをstdout，Warning / Errorをstderrへ出す。終了codeは成功`0`，引数error`2`，`SyntaxError` / `ResourceLimitError`は`3`，評価errorは`4`，`InternalError`は`5`である。batchは行単位error後も続行し，最大codeをprocessの終了codeとする。`--eval`と`--batch`は同時指定できない。
+
+Lexer / Parserはtoken，AST node，入れ子，演算子鎖，数値literal桁，函数引数，Array要素に独立budgetを持つ。上限超過は位置情報付き`ResourceLimitError`としてAST lowering前に停止する。
 
 ```text
 In [1]> 1/3

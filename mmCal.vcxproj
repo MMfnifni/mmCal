@@ -117,6 +117,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="version.h" />
+    <ClInclude Include="src\cli\startup_options.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="projects\mmCal.Core\mmCal.Core.vcxproj">

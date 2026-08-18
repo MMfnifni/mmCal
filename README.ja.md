@@ -126,13 +126,19 @@ Windowsでは`mmCal.exe`を起動するだけ。
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --eval "factor[x^2-1]"
+mmCal --batch < expressions.txt
 ```
 
 - `--fix 16`: 結果を小数点以下**最大16桁(0..1000)**で表示する。末尾の不要な0は省略
 - `--angle deg`: 角度指定のない三角函数を度として扱う
 - `--angle rad`: ラジアン。既定値
 - `--angle grad`: グラード
+- `--eval expr`: 1式だけ評価し，値だけを標準出力へ出す
+- `--batch`: 標準入力を1行1式として同一sessionで順に評価する。
 - `--help`, `-h`: 起動オプションを表示する
+
+`--eval` / `--batch`は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。`--batch`はerror後も次行を処理し，発生した最大の終了codeを返す。
 
 Linux等ではCMake 3.20以上とGCCまたはClangを用いてソースからビルドできる。
 
@@ -694,6 +700,8 @@ WARN: integrate could not fully prove the symbolic antiderivative or definite in
 `:fix n`は小数点以下最大`n`桁へ丸めて**表示するだけ**で，保存されている値や`precision` / `accuracy`の意味は変更しない。
 `:status`では現在の角度，表示形式，定義数，履歴数などを確認できる。
 コンソールタイトルにも角度と表示形式を補助表示する。
+
+Parserはtoken数，AST node数，入れ子深さ，演算子鎖，数値literal桁数，函数引数数，Array要素数を独立に制限する。上限超過は`ResourceLimitError`であり，OSのstack overflowや曖昧な`InternalError`にはしない。
 
 ## 12. 名前について
 

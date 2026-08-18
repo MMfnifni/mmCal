@@ -19,7 +19,8 @@ enum class CalcErrorType {
     Overflow,
     Name,
     Evaluation,
-    Internal
+    Internal,
+    ResourceLimit
 };
 
 struct ErrorTraceFrame final {

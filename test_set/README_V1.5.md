@@ -12,6 +12,14 @@ py tester.py --exe "..\..\build\x64\Release\mmCal.exe"
 
 各テストファイル先頭の `# @args ...` で、そのファイルだけに適用する起動引数を指定できます。旧テストの多くは当時の挙動を再現するため `--fix 15 --angle deg` を指定しています。
 
+CLI自動処理contractは，通常の対話protocolとは別に検証する。
+
+```powershell
+py cli_automation_tests.py --exe "..\..\build\x64\Release\mmCal.exe"
+```
+
+このtestは`--eval`，`--batch`，`--bach`互換alias，stdout / stderr分離，終了code，batchのsession保持とerror後継続，および巨大Parser入力が`ResourceLimitError`で安全に停止することを確認する。
+
 
 ## 性能監査
 

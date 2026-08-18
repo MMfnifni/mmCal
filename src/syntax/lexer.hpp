@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parse_budget.hpp"
 #include "token.hpp"
 
 #include <string_view>
@@ -10,12 +11,14 @@ namespace mmcal::syntax {
 // 文字列を意味解釈せず、位置情報付きトークン列へ分解する。
 class Lexer final {
 public:
-    explicit Lexer(std::string_view sourceText);
+    explicit Lexer(std::string_view sourceText, ParseBudget* budget = nullptr);
 
     [[nodiscard]] std::vector<Token> tokenize();
 
 private:
     std::string_view sourceText_;
+    ParseBudget ownedBudget_;
+    ParseBudget* budget_ = nullptr;
     std::size_t index_ = 0;
     std::size_t line_ = 1;
     std::size_t column_ = 1;

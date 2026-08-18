@@ -2,6 +2,7 @@
 #include "approximation/approximation_context.hpp"
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
+#include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
@@ -32,12 +33,6 @@ namespace {
 
 struct DisplaySettings final {
     std::optional<std::size_t> fixedDigits;
-};
-
-struct StartupOptions final {
-    std::optional<std::size_t> fixedDigits;
-    std::optional<mmcal::mathematics::AngleUnit> angleUnit;
-    bool showHelp = false;
 };
 
 [[nodiscard]] std::string displayModeName(const DisplaySettings& settings) {
@@ -219,52 +214,6 @@ void updateConsoleTitle(
             fixedApproximation(expression, *settings.fixedDigits, session)));
 }
 
-[[nodiscard]] std::size_t parseFixedDigits(std::string_view text) {
-    std::size_t digits = 0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), digits);
-    if (text.empty() || result.ec != std::errc{}
-        || result.ptr != text.data() + text.size() || digits > 1000)
-        throw std::invalid_argument("--fix expects an integer from 0 to 1000");
-    return digits;
-}
-
-[[nodiscard]] StartupOptions parseStartupOptions(int argc, char* argv[]) {
-    StartupOptions options;
-
-    for (int index = 1; index < argc; ++index) {
-        const std::string_view argument{argv[index]};
-        if (argument == "--help" || argument == "-h") {
-            options.showHelp = true;
-            continue;
-        }
-
-        if (argument == "--fix") {
-            if (++index >= argc)
-                throw std::invalid_argument("--fix requires a value");
-            options.fixedDigits = parseFixedDigits(argv[index]);
-            continue;
-        }
-
-        if (argument == "--angle") {
-            if (++index >= argc)
-                throw std::invalid_argument("--angle requires deg, rad, or grad");
-            const auto unit = mmcal::mathematics::AngleSemantics::parseUnit(argv[index]);
-            if (!unit)
-                throw std::invalid_argument("--angle expects deg, rad, or grad");
-            options.angleUnit = *unit;
-            continue;
-        }
-
-        throw std::invalid_argument("Unknown command-line option: " + std::string{argument});
-    }
-
-    return options;
-}
-
-void printUsage(std::ostream& output) {
-    output << "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>]\n";
-}
-
 [[nodiscard]] std::string_view trim(std::string_view text) noexcept {
     while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
         text.remove_prefix(1);
@@ -276,7 +225,9 @@ void printUsage(std::ostream& output) {
 [[nodiscard]] bool handleFixCommand(
     std::string_view line,
     DisplaySettings& settings,
-    const mmcal::kernel::KernelSession& session) {
+    const mmcal::kernel::KernelSession& session,
+    std::ostream& output,
+    bool updateTitle) {
     line = trim(line);
     if (!line.starts_with(":fix"))
         return false;
@@ -285,14 +236,15 @@ void printUsage(std::ostream& output) {
 
     std::string_view argument = trim(line.substr(4));
     if (argument.empty()) {
-        std::cout << "Display: " << displayModeName(settings) << '\n';
+        output << "Display: " << displayModeName(settings) << '\n';
         return true;
     }
 
     if (argument == "off") {
         settings.fixedDigits.reset();
-        std::cout << "Display: Exact\n";
-        updateConsoleTitle(session, settings);
+        output << "Display: Exact\n";
+        if (updateTitle)
+            updateConsoleTitle(session, settings);
         return true;
     }
 
@@ -301,30 +253,142 @@ void printUsage(std::ostream& output) {
         argument.data(), argument.data() + argument.size(), digits);
     if (result.ec != std::errc{} || result.ptr != argument.data() + argument.size()
         || digits > 1000) {
-        std::cout << "Usage: :fix <0..1000>|off\n";
+        output << "Usage: :fix <0..1000>|off\n";
         return true;
     }
 
     settings.fixedDigits = digits;
-    std::cout << "Display: " << displayModeName(settings) << '\n';
-    updateConsoleTitle(session, settings);
+    output << "Display: " << displayModeName(settings) << '\n';
+    if (updateTitle)
+        updateConsoleTitle(session, settings);
     return true;
 }
 
 [[nodiscard]] bool handleStatusCommand(
     std::string_view line,
     const mmcal::kernel::KernelSession& session,
-    const DisplaySettings& settings) {
+    const DisplaySettings& settings,
+    std::ostream& output) {
     if (trim(line) != ":status")
         return false;
 
-    std::cout << "Angle: " << angleModeName(session) << '\n'
-              << "Display: " << displayModeName(settings) << '\n'
-              << "Evaluation: Exact-first\n"
-              << "Definitions: "
-              << session.environment().size() + session.userFunctions().size() << '\n'
-              << "History: " << session.historySize() << '\n';
+    output << "Angle: " << angleModeName(session) << '\n'
+           << "Display: " << displayModeName(settings) << '\n'
+           << "Evaluation: Exact-first\n"
+           << "Definitions: "
+           << session.environment().size() + session.userFunctions().size() << '\n'
+           << "History: " << session.historySize() << '\n';
     return true;
+}
+
+[[nodiscard]] mmcal::cli::ExitCode exitCodeFor(mmcal::error::CalcErrorType type) noexcept {
+    using mmcal::cli::ExitCode;
+    using mmcal::error::CalcErrorType;
+
+    switch (type) {
+    case CalcErrorType::Syntax:
+    case CalcErrorType::ResourceLimit:
+        return ExitCode::Syntax;
+    case CalcErrorType::Internal:
+        return ExitCode::Internal;
+    case CalcErrorType::Domain:
+    case CalcErrorType::Type:
+    case CalcErrorType::Overflow:
+    case CalcErrorType::Name:
+    case CalcErrorType::Evaluation:
+        return ExitCode::Evaluation;
+    }
+    return ExitCode::Internal;
+}
+
+void printDiagnostics(
+    const mmcal::kernel::KernelSession& session,
+    std::ostream& output) {
+    for (const mmcal::evaluation::EvaluationDiagnostic& diagnostic : session.diagnostics()) {
+        output << (diagnostic.severity == mmcal::evaluation::DiagnosticSeverity::Warning
+            ? "WARN: " : "INFO: ") << diagnostic.message;
+        if (diagnostic.previousExpression)
+            output << " (was "
+                   << mmcal::formatting::formatExpr(*diagnostic.previousExpression) << ')';
+        output << '\n';
+    }
+}
+
+struct AutomatedLineResult final {
+    mmcal::cli::ExitCode exitCode = mmcal::cli::ExitCode::Success;
+    bool stop = false;
+};
+
+[[nodiscard]] AutomatedLineResult runAutomatedLine(
+    std::string_view line,
+    mmcal::kernel::KernelSession& session,
+    DisplaySettings& settings,
+    std::ostream& output,
+    std::ostream& diagnostics) {
+    using namespace mmcal;
+
+    if (handleFixCommand(line, settings, session, output, false)
+        || handleStatusCommand(line, session, settings, output))
+        return {};
+
+    const std::string_view commandLine = trim(line);
+    if (!commandLine.empty() && commandLine.front() == ':') {
+        diagnostics << "Unknown command\n";
+        return {cli::ExitCode::Evaluation, false};
+    }
+
+    try {
+        const expression::Expr result = session.evaluate(line);
+        if (session.exitRequested())
+            return {cli::ExitCode::Success, true};
+        if (session.clearRequested()) {
+            output << "Cleared\n";
+            return {};
+        }
+
+        printDiagnostics(session, diagnostics);
+        output << formatForDisplay(result, session, settings) << '\n';
+        return {};
+    }
+    catch (const error::CalcError& exception) {
+        diagnostics << error::errorMessage(exception) << '\n';
+        return {exitCodeFor(exception.type()), false};
+    }
+    catch (const std::exception& exception) {
+        diagnostics << error::errorMessage(
+            error::CalcError{error::CalcErrorType::Internal, exception.what()}) << '\n';
+        return {cli::ExitCode::Internal, false};
+    }
+}
+
+[[nodiscard]] int runAutomated(
+    const mmcal::cli::StartupOptions& startup,
+    mmcal::kernel::KernelSession& session,
+    DisplaySettings& settings) {
+    using mmcal::cli::ExitCode;
+
+    ExitCode overall = ExitCode::Success;
+    const auto runLine = [&](std::string_view line) {
+        const AutomatedLineResult result = runAutomatedLine(
+            line, session, settings, std::cout, std::cerr);
+        if (static_cast<int>(result.exitCode) > static_cast<int>(overall))
+            overall = result.exitCode;
+        return result.stop;
+    };
+
+    if (startup.inputMode == mmcal::cli::InputMode::Evaluate) {
+        static_cast<void>(runLine(*startup.expression));
+        return static_cast<int>(overall);
+    }
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (trim(line).empty())
+            continue;
+        if (runLine(line))
+            break;
+    }
+    return static_cast<int>(overall);
 }
 
 } // namespace
@@ -332,18 +396,18 @@ void printUsage(std::ostream& output) {
 int main(int argc, char* argv[]) {
     using namespace mmcal;
 
-    StartupOptions startup;
+    cli::StartupOptions startup;
     try {
-        startup = parseStartupOptions(argc, argv);
+        startup = cli::parseStartupOptions(argc, argv);
     }
     catch (const std::exception& error) {
         std::cerr << "Argument error: " << error.what() << '\n';
-        printUsage(std::cerr);
-        return 2;
+        cli::printUsage(std::cerr);
+        return static_cast<int>(cli::ExitCode::Argument);
     }
 
     if (startup.showHelp) {
-        printUsage(std::cout);
+        cli::printUsage(std::cout);
         return 0;
     }
 
@@ -353,6 +417,10 @@ int main(int argc, char* argv[]) {
 
     DisplaySettings displaySettings;
     displaySettings.fixedDigits = startup.fixedDigits;
+
+    if (startup.inputMode != cli::InputMode::Interactive)
+        return runAutomated(startup, session, displaySettings);
+
     updateConsoleTitle(session, displaySettings);
 
     std::cout << "================================\n"
@@ -369,8 +437,8 @@ int main(int argc, char* argv[]) {
         if (trim(line).empty())
             continue;
 
-        if (handleFixCommand(line, displaySettings, session)
-            || handleStatusCommand(line, session, displaySettings))
+        if (handleFixCommand(line, displaySettings, session, std::cout, true)
+            || handleStatusCommand(line, session, displaySettings, std::cout))
             continue;
         const std::string_view commandLine = trim(line);
         if (!commandLine.empty() && commandLine.front() == ':') {

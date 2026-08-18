@@ -1,11 +1,14 @@
 // 定義・履歴・角度・診断を持つセッションの回帰テスト
 #include "kernel_session_tests.hpp"
 
+#include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
 #include "test_framework.hpp"
 
+#include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -35,6 +38,39 @@ namespace {
 } // namespace
 
 void runKernelSessionTests(TestRunner& tests) {
+    {
+        const std::array<std::string_view, 2> arguments{"--eval", "1+2"};
+        const cli::StartupOptions options = cli::parseStartupOptions(arguments);
+        tests.expect(
+            options.inputMode == cli::InputMode::Evaluate
+                && options.expression == std::optional<std::string>{"1+2"},
+            "CLI: --eval selects single-expression automation mode");
+    }
+    {
+        const std::array<std::string_view, 1> canonical{"--batch"};
+        const std::array<std::string_view, 1> compatibility{"--bach"};
+        tests.expect(
+            cli::parseStartupOptions(canonical).inputMode == cli::InputMode::Batch,
+            "CLI: --batch selects line-oriented automation mode");
+        tests.expect(
+            cli::parseStartupOptions(compatibility).inputMode == cli::InputMode::Batch,
+            "CLI: --bach remains a compatibility alias for --batch");
+    }
+    tests.expectThrows<std::invalid_argument>([] {
+        const std::array<std::string_view, 3> arguments{"--batch", "--eval", "1"};
+        static_cast<void>(cli::parseStartupOptions(arguments));
+    }, "CLI: input modes are mutually exclusive");
+    tests.expectThrows<std::invalid_argument>([] {
+        const std::array<std::string_view, 1> arguments{"--eval"};
+        static_cast<void>(cli::parseStartupOptions(arguments));
+    }, "CLI: --eval requires an expression");
+    tests.expect(
+        static_cast<int>(cli::ExitCode::Argument) == 2
+            && static_cast<int>(cli::ExitCode::Syntax) == 3
+            && static_cast<int>(cli::ExitCode::Evaluation) == 4
+            && static_cast<int>(cli::ExitCode::Internal) == 5,
+        "CLI: automation exit-code contract is stable");
+
     kernel::KernelSession session;
 
     tests.expectEqual(evaluateAndFormat(session, "1 + 2 * 3"), std::string{"7"},
@@ -1107,6 +1143,14 @@ void runKernelSessionTests(TestRunner& tests) {
     session.setEvaluationDepthLimit(2048);
     tests.expectEqual(session.evaluationDepthLimit(), std::size_t{2048},
         "KernelSession: forwards evaluation depth limit");
+
+    kernel::KernelSession parserBudgetSession;
+    std::string hostileUnary(50'000, '-');
+    hostileUnary += '1';
+    tests.expect(
+        evaluateError(parserBudgetSession, hostileUnary).type()
+            == error::CalcErrorType::ResourceLimit,
+        "KernelSession: parser resource limits stop hostile input before lowering");
 
     kernel::KernelSession independentReset;
     kernel::KernelSession randomControl;

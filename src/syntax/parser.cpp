@@ -49,17 +49,22 @@ bool ParserOptions::isUnit(std::string_view name) const {
 Parser::Parser(
     std::shared_ptr<const std::string> sourceText,
     std::vector<Token> tokens,
-    ParserOptions options)
+    ParserOptions options,
+    ParseBudget* budget)
     : sourceText_(std::move(sourceText)),
       tokens_(std::move(tokens)),
-      options_(std::move(options)) {
+      options_(std::move(options)),
+      budget_(budget ? budget : &ownedBudget_) {
     if (tokens_.empty() || tokens_.back().kind != TokenKind::End)
         error::throwCalcError(
             error::CalcErrorType::Internal,
             "Parser requires an end-of-input token");
+
+    budget_->checkTokenCount(tokens_.size(), tokens_.back().span);
 }
 
 SyntaxTree Parser::parse() {
+    const auto depthGuard = budget_->enter(current().span);
     SyntaxNodePtr root = parseAssignment();
     consume(TokenKind::End, "Unexpected token after the expression");
     return SyntaxTree{sourceText_, std::move(tokens_), std::move(root)};
@@ -102,21 +107,35 @@ std::string_view Parser::tokenText(const Token& token) const noexcept {
 }
 
 SyntaxNodePtr Parser::parseAssignment() {
-    SyntaxNodePtr left = parseComparison();
-    if (!match(TokenKind::Assign))
-        return left;
+    const auto depthGuard = budget_->enter(current().span);
+    std::vector<SyntaxNodePtr> targets;
+    SyntaxNodePtr value = parseComparison();
+    std::size_t operationCount = 0;
 
-    SyntaxNodePtr target = makeAssignmentTarget(left);
-    SyntaxNodePtr value = parseAssignment();
-    const source::SourceSpan span{target->span.begin, value->span.end};
-    return makeSyntaxNode(
-        span,
-        AssignmentSyntax{std::move(target), std::move(value)});
+    while (match(TokenKind::Assign)) {
+        budget_->checkOperatorChain(++operationCount, previous().span);
+        targets.push_back(makeAssignmentTarget(value));
+        value = parseComparison();
+    }
+
+    // v1.5.3では右辺をparseAssignment()で再帰していた。ここでは同じ右結合を
+    // 末尾から組み立て，長い a:=b:=... がC++スタックを消費しないようにする。
+    for (auto iterator = targets.rbegin(); iterator != targets.rend(); ++iterator) {
+        SyntaxNodePtr target = *iterator;
+        const source::SourceSpan span{target->span.begin, value->span.end};
+        value = makeNode(
+            span,
+            AssignmentSyntax{std::move(target), std::move(value)});
+    }
+
+    return value;
 }
 
 SyntaxNodePtr Parser::parseComparison() {
+    const auto depthGuard = budget_->enter(current().span);
     std::vector<SyntaxNodePtr> operands;
     std::vector<ComparisonOperator> operations;
+    std::size_t operationCount = 0;
     operands.push_back(parseExpression());
 
     while (check(TokenKind::Less)
@@ -126,7 +145,9 @@ SyntaxNodePtr Parser::parseComparison() {
         || check(TokenKind::EqualEqual)
         || check(TokenKind::BangEqual)) {
         const TokenKind operation = current().kind;
+        const source::SourceSpan operationSpan = current().span;
         ++index_;
+        budget_->checkOperatorChain(++operationCount, operationSpan);
         operations.push_back(comparisonOperator(operation));
         operands.push_back(parseExpression());
     }
@@ -135,20 +156,24 @@ SyntaxNodePtr Parser::parseComparison() {
         return operands.front();
 
     const source::SourceSpan span{operands.front()->span.begin, operands.back()->span.end};
-    return makeSyntaxNode(
+    return makeNode(
         span,
         ComparisonSyntax{std::move(operands), std::move(operations)});
 }
 
 SyntaxNodePtr Parser::parseExpression() {
+    const auto depthGuard = budget_->enter(current().span);
     SyntaxNodePtr left = parseTerm();
+    std::size_t operationCount = 0;
 
     while (check(TokenKind::Plus) || check(TokenKind::Minus)) {
         const TokenKind operation = current().kind;
+        const source::SourceSpan operationSpan = current().span;
         ++index_;
+        budget_->checkOperatorChain(++operationCount, operationSpan);
         SyntaxNodePtr right = parseTerm();
         const source::SourceSpan span = combinedSpan(left, right);
-        left = makeSyntaxNode(
+        left = makeNode(
             span,
             BinarySyntax{
                 operation == TokenKind::Plus
@@ -162,22 +187,26 @@ SyntaxNodePtr Parser::parseExpression() {
 }
 
 SyntaxNodePtr Parser::parseTerm() {
+    const auto depthGuard = budget_->enter(current().span);
     SyntaxNodePtr left = parseUnary();
+    std::size_t operationCount = 0;
 
     while (true) {
         if (match(TokenKind::Star)) {
+            budget_->checkOperatorChain(++operationCount, previous().span);
             SyntaxNodePtr right = parseUnary();
             const source::SourceSpan span = combinedSpan(left, right);
-            left = makeSyntaxNode(
+            left = makeNode(
                 span,
                 BinarySyntax{BinaryOperator::Multiply, std::move(left), std::move(right)});
             continue;
         }
 
         if (match(TokenKind::Slash)) {
+            budget_->checkOperatorChain(++operationCount, previous().span);
             SyntaxNodePtr right = parseUnary();
             const source::SourceSpan span = combinedSpan(left, right);
-            left = makeSyntaxNode(
+            left = makeNode(
                 span,
                 BinarySyntax{BinaryOperator::Divide, std::move(left), std::move(right)});
             continue;
@@ -189,8 +218,9 @@ SyntaxNodePtr Parser::parseTerm() {
         if (check(TokenKind::Identifier) && options_.isUnit(tokenText(current()))) {
             const Token unit = current();
             ++index_;
+            budget_->checkOperatorChain(++operationCount, unit.span);
             const source::SourceSpan span{left->span.begin, unit.span.end};
-            left = makeSyntaxNode(
+            left = makeNode(
                 span,
                 UnitAppliedSyntax{std::move(left), std::string{tokenText(unit)}});
             continue;
@@ -204,9 +234,11 @@ SyntaxNodePtr Parser::parseTerm() {
                 "An identifier followed by a number is not implicit multiplication",
                 current().span);
 
+        const source::SourceSpan operationSpan = current().span;
+        budget_->checkOperatorChain(++operationCount, operationSpan);
         SyntaxNodePtr right = parseUnary();
         const source::SourceSpan span = combinedSpan(left, right);
-        left = makeSyntaxNode(
+        left = makeNode(
             span,
             BinarySyntax{
                 BinaryOperator::ImplicitMultiply,
@@ -218,46 +250,73 @@ SyntaxNodePtr Parser::parseTerm() {
 }
 
 SyntaxNodePtr Parser::parseUnary() {
-    if (match(TokenKind::Plus)) {
-        const Token operation = previous();
-        SyntaxNodePtr operand = parseUnary();
-        const source::SourceSpan span{operation.span.begin, operand->span.end};
-        return makeSyntaxNode(
-            span,
-            UnarySyntax{UnaryOperator::Plus, std::move(operand)});
+    const auto depthGuard = budget_->enter(current().span);
+
+    struct PowerOperand final {
+        std::vector<Token> prefixes;
+        SyntaxNodePtr base;
+    };
+
+    std::vector<PowerOperand> operands;
+    std::size_t operationCount = 0;
+
+    while (true) {
+        PowerOperand operand;
+        while (check(TokenKind::Plus) || check(TokenKind::Minus)) {
+            operand.prefixes.push_back(current());
+            budget_->checkOperatorChain(++operationCount, current().span);
+            ++index_;
+        }
+
+        operand.base = parsePostfix();
+        operands.push_back(std::move(operand));
+
+        if (!match(TokenKind::Caret))
+            break;
+        budget_->checkOperatorChain(++operationCount, previous().span);
     }
 
-    if (match(TokenKind::Minus)) {
-        const Token operation = previous();
-        SyntaxNodePtr operand = parseUnary();
-        const source::SourceSpan span{operation.span.begin, operand->span.end};
-        return makeSyntaxNode(
+    const auto applyPrefixes = [this](PowerOperand& operand, SyntaxNodePtr value) {
+        for (auto iterator = operand.prefixes.rbegin();
+             iterator != operand.prefixes.rend();
+             ++iterator) {
+            const source::SourceSpan span{iterator->span.begin, value->span.end};
+            value = makeNode(
+                span,
+                UnarySyntax{
+                    iterator->kind == TokenKind::Plus
+                        ? UnaryOperator::Plus
+                        : UnaryOperator::Minus,
+                    std::move(value)});
+        }
+        return value;
+    };
+
+    SyntaxNodePtr value = applyPrefixes(operands.back(), operands.back().base);
+    for (std::size_t index = operands.size() - 1; index != 0; --index) {
+        PowerOperand& operand = operands[index - 1];
+        const source::SourceSpan span = combinedSpan(operand.base, value);
+        value = makeNode(
             span,
-            UnarySyntax{UnaryOperator::Minus, std::move(operand)});
+            BinarySyntax{BinaryOperator::Power, operand.base, std::move(value)});
+        value = applyPrefixes(operand, std::move(value));
     }
 
-    return parsePower();
-}
-
-SyntaxNodePtr Parser::parsePower() {
-    SyntaxNodePtr left = parsePostfix();
-    if (!match(TokenKind::Caret))
-        return left;
-
-    SyntaxNodePtr right = parseUnary();
-    const source::SourceSpan span = combinedSpan(left, right);
-    return makeSyntaxNode(
-        span,
-        BinarySyntax{BinaryOperator::Power, std::move(left), std::move(right)});
+    // v1.5.3のparseUnary()/parsePower()相互再帰と同じ優先順位・右結合を保つ。
+    // 配列へ平坦化したのは，++++1 や 2^2^... でC++スタックを使わないためである。
+    return value;
 }
 
 SyntaxNodePtr Parser::parsePostfix() {
+    const auto depthGuard = budget_->enter(current().span);
     SyntaxNodePtr value = parsePrimary();
+    std::size_t operationCount = 0;
 
     while (match(TokenKind::Bang)) {
         const Token operation = previous();
+        budget_->checkOperatorChain(++operationCount, operation.span);
         const source::SourceSpan span{value->span.begin, operation.span.end};
-        value = makeSyntaxNode(
+        value = makeNode(
             span,
             PostfixSyntax{PostfixOperator::Factorial, std::move(value)});
     }
@@ -266,16 +325,17 @@ SyntaxNodePtr Parser::parsePostfix() {
 }
 
 SyntaxNodePtr Parser::parsePrimary() {
+    const auto depthGuard = budget_->enter(current().span);
     if (match(TokenKind::Number)) {
         const Token token = previous();
-        return makeSyntaxNode(
+        return makeNode(
             token.span,
             NumberLiteralSyntax{std::string{tokenText(token)}});
     }
 
     if (match(TokenKind::String)) {
         const Token token = previous();
-        return makeSyntaxNode(
+        return makeNode(
             token.span,
             StringLiteralSyntax{std::string{tokenText(token)}});
     }
@@ -303,44 +363,49 @@ SyntaxNodePtr Parser::parsePrimary() {
 }
 
 SyntaxNodePtr Parser::parseArray() {
+    const auto depthGuard = budget_->enter(current().span);
     const Token opening = consume(TokenKind::LBrace, "Expected '{'");
     std::vector<SyntaxNodePtr> elements;
 
     if (!check(TokenKind::RBrace)) {
         do {
             elements.push_back(parseAssignment());
+            budget_->checkArrayElements(elements.size(), elements.back()->span);
         } while (match(TokenKind::Comma));
     }
 
     const Token closing = consume(TokenKind::RBrace, "Expected '}' after array elements");
-    return makeSyntaxNode(
+    return makeNode(
         source::SourceSpan{opening.span.begin, closing.span.end},
         ArrayLiteralSyntax{std::move(elements)});
 }
 
 SyntaxNodePtr Parser::parseHistoryReference() {
+    const auto depthGuard = budget_->enter(current().span);
     const Token first = consume(TokenKind::Percent, "Expected '%'");
     std::size_t depth = 1;
     while (match(TokenKind::Percent))
         ++depth;
 
-    return makeSyntaxNode(
+    return makeNode(
         source::SourceSpan{first.span.begin, previous().span.end},
         HistoryReferenceSyntax{HistoryReferenceKind::Output, depth});
 }
 
 SyntaxNodePtr Parser::parseInputHistoryReference() {
+    const auto depthGuard = budget_->enter(current().span);
     const Token first = consume(TokenKind::At, "Expected '@'");
     std::size_t depth = 1;
     while (match(TokenKind::At))
         ++depth;
 
-    return makeSyntaxNode(
+    return makeNode(
         source::SourceSpan{first.span.begin, previous().span.end},
         HistoryReferenceSyntax{HistoryReferenceKind::Input, depth});
 }
 
 SyntaxNodePtr Parser::parseIdentifierOrCall() {
+    const auto depthGuard = budget_->enter(current().span);
     const Token identifier = consume(TokenKind::Identifier, "Expected identifier");
     const std::string name{tokenText(identifier)};
 
@@ -354,7 +419,7 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
             current().span);
 
     if (!check(TokenKind::LBracket))
-        return makeSyntaxNode(identifier.span, IdentifierSyntax{name});
+        return makeNode(identifier.span, IdentifierSyntax{name});
 
     consume(TokenKind::LBracket, "Expected '['");
     std::vector<SyntaxNodePtr> arguments;
@@ -362,6 +427,7 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
     if (!check(TokenKind::RBracket)) {
         do {
             arguments.push_back(parseAssignment());
+            budget_->checkCallArguments(arguments.size(), arguments.back()->span);
         } while (match(TokenKind::Comma));
     }
 
@@ -369,17 +435,18 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
         TokenKind::RBracket,
         "Expected ']' after function arguments");
 
-    return makeSyntaxNode(
+    return makeNode(
         source::SourceSpan{identifier.span.begin, closing.span.end},
         CallSyntax{name, std::move(arguments)});
 }
 
 SyntaxNodePtr Parser::parseGroup() {
+    const auto depthGuard = budget_->enter(current().span);
     const Token opening = consume(TokenKind::LParen, "Expected '('");
     SyntaxNodePtr expression = parseAssignment();
     const Token closing = consume(TokenKind::RParen, "Expected ')' after grouped expression");
 
-    return makeSyntaxNode(
+    return makeNode(
         source::SourceSpan{opening.span.begin, closing.span.end},
         GroupSyntax{std::move(expression)});
 }
@@ -402,7 +469,7 @@ bool Parser::isConstantIdentifier(const SyntaxNodePtr& node) const {
     return identifier && options_.isConstant(identifier->name);
 }
 
-SyntaxNodePtr Parser::makeAssignmentTarget(const SyntaxNodePtr& node) const {
+SyntaxNodePtr Parser::makeAssignmentTarget(const SyntaxNodePtr& node) {
     if (const auto* identifier = std::get_if<IdentifierSyntax>(&node->data)) {
         if (options_.isProtected(identifier->name))
             error::throwCalcError(
@@ -467,7 +534,7 @@ SyntaxNodePtr Parser::makeAssignmentTarget(const SyntaxNodePtr& node) const {
         parameters.push_back(parameter->name);
     }
 
-    return makeSyntaxNode(
+    return makeNode(
         node->span,
         FunctionSignatureSyntax{call->name, std::move(parameters)});
 }

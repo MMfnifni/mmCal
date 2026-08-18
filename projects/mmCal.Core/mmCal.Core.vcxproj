@@ -138,6 +138,7 @@
     <ClInclude Include="..\..\src\source\source_document.hpp" />
     <ClInclude Include="..\..\src\error\error_message.hpp" />
     <ClInclude Include="..\..\src\syntax\token.hpp" />
+    <ClInclude Include="..\..\src\syntax\parse_budget.hpp" />
     <ClInclude Include="..\..\src\syntax\lexer.hpp" />
     <ClInclude Include="..\..\src\syntax\syntax_node.hpp" />
     <ClInclude Include="..\..\src\syntax\syntax_tree.hpp" />

@@ -134,6 +134,8 @@ std::string_view calcErrorTypeName(CalcErrorType type) noexcept {
     switch (type) {
     case CalcErrorType::Syntax:
         return "SyntaxError";
+    case CalcErrorType::ResourceLimit:
+        return "ResourceLimitError";
     case CalcErrorType::Domain:
         return "DomainError";
     case CalcErrorType::Type:

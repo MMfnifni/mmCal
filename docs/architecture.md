@@ -34,6 +34,10 @@ CoreからCLIへ依存しない。数学層からKernelSessionへ依存しない
 
 評価対象となるExpr，Call，Array，Symbolなどの構造を所有する。表示方法やユーザー入力位置は本体の数学値から分離する。
 
+### `syntax`
+
+Lexer / Parser / Lowererを分離する。`ParseBudget`はtoken数，AST node数，入れ子深さ，演算子鎖長，数値literal桁数，函数引数数，Array要素数を独立に監査し，超過時は位置情報付き`ResourceLimitError`をLowerer前に返す。単項演算，累乗，代入の長い右結合鎖は再帰parseせず，一度平坦化して末尾からASTを構築する。Parserの深さだけを守ってLowererへ極端な深さを移送しないよう，演算子鎖にも別上限を持つ。
+
 ### `mathematics`
 
 函数の定義域，逆函数，単調性，値域，周期，definednessなど，評価文脈に依存しない数学知識を`MathRegistry`へ集約する。`KnowledgeContext`はユーザー仮定や片側極限など局所的な事実を保持し，関係式の左右反転や安全な非零知識も共通推論として利用する。`ValueFacts`は正のdomain所属だけでなく，非整数exact Rational，既知irrational/transcendental定数，証明済み高次algebraic Root等から`NonInteger` / `NonRational`相当の排他的事実も導出し，`element`とSolver constraintの双方へ共有する。
@@ -90,7 +94,7 @@ Builtin属性，Hold規則，iterator，代入，ユーザー函数，履歴参�
 
 ### `cli`
 
-標準入出力，`:fix`, `:status`, 起動時引数，console titleを担当する。`:fix`は表示だけを変え，KernelのExprや履歴を書き換えない。
+標準入出力，`:fix`, `:status`, 起動時引数，console titleを担当する。`:fix`は表示だけを変え，KernelのExprや履歴を書き換えない。対話loopと`--eval` / `--batch`自動処理経路を分離し，自動処理ではstdoutを値，stderrをdiagnosticに限定する。終了codeの分類は`cli::ExitCode`へ固定する。`--bach`は`--batch`の互換aliasであり，別modeを実装しない。
 
 ## 数学知識の共有
 
@@ -114,6 +118,7 @@ Builtin属性，Hold規則，iterator，代入，ユーザー函数，履歴参�
 
 特に監査対象とする処理:
 
+- Lexer / Parser / Lowerer境界
 - CertifiedEvaluatorのAST深さ
 - Simplifierの再入
 - 高階微分

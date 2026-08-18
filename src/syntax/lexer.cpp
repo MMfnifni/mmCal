@@ -5,6 +5,7 @@
 
 #include <cctype>
 #include <string>
+#include <utility>
 
 namespace mmcal::syntax {
 namespace {
@@ -27,83 +28,112 @@ namespace {
         || (value >= 'a' && value <= 'z');
 }
 
+[[nodiscard]] std::size_t numericLiteralDigitCount(std::string_view text) noexcept {
+    const bool hashRadix = text.find('#') != std::string_view::npos;
+    const bool prefixedRadix = text.size() > 2 && text.front() == '0'
+        && (text[1] == 'b' || text[1] == 'B'
+            || text[1] == 'o' || text[1] == 'O'
+            || text[1] == 'x' || text[1] == 'X');
+
+    std::size_t count = 0;
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        const char value = text[index];
+        if (value >= '0' && value <= '9') {
+            ++count;
+            continue;
+        }
+        if ((hashRadix || (prefixedRadix && index >= 2)) && isAsciiLetter(value))
+            ++count;
+    }
+    return count;
+}
+
 } // namespace
 
-Lexer::Lexer(std::string_view sourceText)
-    : sourceText_(sourceText) {}
+Lexer::Lexer(std::string_view sourceText, ParseBudget* budget)
+    : sourceText_(sourceText),
+      budget_(budget ? budget : &ownedBudget_) {}
 
 std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens;
+
+    const auto append = [&](Token token) {
+        budget_->checkTokenCount(tokens.size() + 1, token.span);
+        if (token.kind == TokenKind::Number)
+            budget_->checkLiteralDigits(
+                numericLiteralDigitCount(token.text(sourceText_)), token.span);
+        tokens.push_back(std::move(token));
+    };
 
     while (true) {
         skipWhitespace();
         const source::SourcePosition begin = position();
 
         if (atEnd()) {
-            tokens.push_back(makeToken(TokenKind::End, begin));
+            append(makeToken(TokenKind::End, begin));
             return tokens;
         }
 
         const char value = current();
         if ((value >= '0' && value <= '9')
             || (value == '.' && peek() >= '0' && peek() <= '9')) {
-            tokens.push_back(lexNumber());
+            append(lexNumber());
             continue;
         }
 
         if (isIdentifierStart(value)) {
-            tokens.push_back(lexIdentifier());
+            append(lexIdentifier());
             continue;
         }
 
         if (value == '"') {
-            tokens.push_back(lexString());
+            append(lexString());
             continue;
         }
 
         advance();
         switch (value) {
         case '+':
-            tokens.push_back(makeToken(TokenKind::Plus, begin));
+            append(makeToken(TokenKind::Plus, begin));
             break;
         case '-':
-            tokens.push_back(makeToken(TokenKind::Minus, begin));
+            append(makeToken(TokenKind::Minus, begin));
             break;
         case '*':
-            tokens.push_back(makeToken(TokenKind::Star, begin));
+            append(makeToken(TokenKind::Star, begin));
             break;
         case '/':
-            tokens.push_back(makeToken(TokenKind::Slash, begin));
+            append(makeToken(TokenKind::Slash, begin));
             break;
         case '^':
-            tokens.push_back(makeToken(TokenKind::Caret, begin));
+            append(makeToken(TokenKind::Caret, begin));
             break;
         case '(':
-            tokens.push_back(makeToken(TokenKind::LParen, begin));
+            append(makeToken(TokenKind::LParen, begin));
             break;
         case ')':
-            tokens.push_back(makeToken(TokenKind::RParen, begin));
+            append(makeToken(TokenKind::RParen, begin));
             break;
         case '[':
-            tokens.push_back(makeToken(TokenKind::LBracket, begin));
+            append(makeToken(TokenKind::LBracket, begin));
             break;
         case ']':
-            tokens.push_back(makeToken(TokenKind::RBracket, begin));
+            append(makeToken(TokenKind::RBracket, begin));
             break;
         case '{':
-            tokens.push_back(makeToken(TokenKind::LBrace, begin));
+            append(makeToken(TokenKind::LBrace, begin));
             break;
         case '}':
-            tokens.push_back(makeToken(TokenKind::RBrace, begin));
+            append(makeToken(TokenKind::RBrace, begin));
             break;
         case ',':
-            tokens.push_back(makeToken(TokenKind::Comma, begin));
+            append(makeToken(TokenKind::Comma, begin));
             break;
         case '%':
-            tokens.push_back(makeToken(TokenKind::Percent, begin));
+            append(makeToken(TokenKind::Percent, begin));
             break;
         case '@':
-            tokens.push_back(makeToken(TokenKind::At, begin));
+            append(makeToken(TokenKind::At, begin));
             break;
         case ':':
             if (current() != '=')
@@ -112,23 +142,23 @@ std::vector<Token> Lexer::tokenize() {
                     "Expected '=' after ':'",
                     makeToken(TokenKind::End, begin).span);
             advance();
-            tokens.push_back(makeToken(TokenKind::Assign, begin));
+            append(makeToken(TokenKind::Assign, begin));
             break;
         case '<':
             if (current() == '=') {
                 advance();
-                tokens.push_back(makeToken(TokenKind::LessEqual, begin));
+                append(makeToken(TokenKind::LessEqual, begin));
             }
             else
-                tokens.push_back(makeToken(TokenKind::Less, begin));
+                append(makeToken(TokenKind::Less, begin));
             break;
         case '>':
             if (current() == '=') {
                 advance();
-                tokens.push_back(makeToken(TokenKind::GreaterEqual, begin));
+                append(makeToken(TokenKind::GreaterEqual, begin));
             }
             else
-                tokens.push_back(makeToken(TokenKind::Greater, begin));
+                append(makeToken(TokenKind::Greater, begin));
             break;
         case '=':
             if (current() != '=')
@@ -137,15 +167,15 @@ std::vector<Token> Lexer::tokenize() {
                     "Assignment uses ':='; equality uses '=='",
                     makeToken(TokenKind::End, begin).span);
             advance();
-            tokens.push_back(makeToken(TokenKind::EqualEqual, begin));
+            append(makeToken(TokenKind::EqualEqual, begin));
             break;
         case '!':
             if (current() == '=') {
                 advance();
-                tokens.push_back(makeToken(TokenKind::BangEqual, begin));
+                append(makeToken(TokenKind::BangEqual, begin));
             }
             else
-                tokens.push_back(makeToken(TokenKind::Bang, begin));
+                append(makeToken(TokenKind::Bang, begin));
             break;
         default:
             error::throwCalcError(

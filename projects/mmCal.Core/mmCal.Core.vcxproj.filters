@@ -147,6 +147,9 @@
     <ClInclude Include="..\..\src\syntax\token.hpp">
       <Filter>src\syntax</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\syntax\parse_budget.hpp">
+      <Filter>src\syntax</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\syntax\lexer.hpp">
       <Filter>src\syntax</Filter>
     </ClInclude>

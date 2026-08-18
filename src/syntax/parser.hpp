@@ -1,11 +1,13 @@
 #pragma once
 
+#include "parse_budget.hpp"
 #include "syntax_tree.hpp"
 
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace mmcal::syntax {
@@ -29,7 +31,8 @@ public:
     Parser(
         std::shared_ptr<const std::string> sourceText,
         std::vector<Token> tokens,
-        ParserOptions options = ParserOptions::defaults());
+        ParserOptions options = ParserOptions::defaults(),
+        ParseBudget* budget = nullptr);
 
     [[nodiscard]] SyntaxTree parse();
 
@@ -37,6 +40,8 @@ private:
     std::shared_ptr<const std::string> sourceText_;
     std::vector<Token> tokens_;
     ParserOptions options_;
+    ParseBudget ownedBudget_;
+    ParseBudget* budget_ = nullptr;
     std::size_t index_ = 0;
 
     [[nodiscard]] const Token& current() const noexcept;
@@ -51,7 +56,6 @@ private:
     [[nodiscard]] SyntaxNodePtr parseExpression();
     [[nodiscard]] SyntaxNodePtr parseTerm();
     [[nodiscard]] SyntaxNodePtr parseUnary();
-    [[nodiscard]] SyntaxNodePtr parsePower();
     [[nodiscard]] SyntaxNodePtr parsePostfix();
     [[nodiscard]] SyntaxNodePtr parsePrimary();
     [[nodiscard]] SyntaxNodePtr parseArray();
@@ -62,8 +66,14 @@ private:
 
     [[nodiscard]] bool canStartImplicitFactor() const noexcept;
     [[nodiscard]] bool isConstantIdentifier(const SyntaxNodePtr& node) const;
-    [[nodiscard]] SyntaxNodePtr makeAssignmentTarget(const SyntaxNodePtr& node) const;
+    [[nodiscard]] SyntaxNodePtr makeAssignmentTarget(const SyntaxNodePtr& node);
     [[nodiscard]] static ComparisonOperator comparisonOperator(TokenKind kind);
+
+    template <class NodeData>
+    [[nodiscard]] SyntaxNodePtr makeNode(source::SourceSpan span, NodeData data) {
+        budget_->consumeNode(span);
+        return makeSyntaxNode(span, std::move(data));
+    }
 };
 
 } // namespace mmcal::syntax

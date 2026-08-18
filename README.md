@@ -128,13 +128,19 @@ The display precision and default angle unit can also be specified at startup.
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --eval "factor[x^2-1]"
+mmCal --batch < expressions.txt
 ```
 
 - `--fix 16`: Display results with **up to 16(0..1000) digits after the decimal point**. Unnecessary trailing zeros are omitted
 - `--angle deg`: Treat trigonometric inputs without an explicit angle unit as degrees
 - `--angle rad`: Radians. This is the default
 - `--angle grad`: Gradians
+- `--eval expr`: Evaluate one expression and write only its value to standard output
+- `--batch`: Evaluate standard input one line at a time in one session.
 - `--help`, `-h`: Show startup options
+
+`--eval` and `--batch` are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
 
 On Linux and similar systems, mmCal can be built from source using CMake 3.20 or later with GCC or Clang.
 
@@ -667,6 +673,8 @@ Unsupported regions will continue to be expanded. I'm working on it.
 `:fix n` only rounds the **display** to at most `n` digits after the decimal point; it does not change the stored value or the semantics of `precision` / `accuracy`.
 `:status` shows the current angle mode, display mode, number of definitions, history count, and similar state.
 The console title also shows the angle and display mode as auxiliary information.
+
+The parser applies separate limits to token count, AST node count, nesting depth, operator-chain length, numeric-literal digits, function arguments, and Array elements. Exceeding one produces `ResourceLimitError` rather than an OS stack overflow or an ambiguous `InternalError`.
 
 ## 12. Naming
 

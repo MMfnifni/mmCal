@@ -6,8 +6,11 @@
 #include "syntax/parser.hpp"
 #include "test_framework.hpp"
 
+#include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace mmcal::tests {
 namespace {
@@ -17,6 +20,46 @@ namespace {
     syntax::Lexer lexer{*sourceText};
     syntax::Parser parser{sourceText, lexer.tokenize()};
     return parser.parse();
+}
+
+[[nodiscard]] syntax::SyntaxTree parseWithLimits(
+    std::string text,
+    syntax::ParseLimits limits) {
+    auto sourceText = std::make_shared<const std::string>(std::move(text));
+    syntax::ParseBudget budget{limits};
+    syntax::Lexer lexer{*sourceText, &budget};
+    syntax::Parser parser{
+        sourceText,
+        lexer.tokenize(),
+        syntax::ParserOptions::defaults(),
+        &budget};
+    return parser.parse();
+}
+
+[[nodiscard]] error::CalcError parseError(
+    std::string text,
+    syntax::ParseLimits limits = {}) {
+    try {
+        static_cast<void>(parseWithLimits(std::move(text), limits));
+    }
+    catch (const error::CalcError& exception) {
+        return exception;
+    }
+    throw std::logic_error("Expected CalcError was not thrown");
+}
+
+[[nodiscard]] std::string nestedInput(
+    std::string_view opening,
+    std::string_view closing,
+    std::size_t depth) {
+    std::string result;
+    result.reserve((opening.size() + closing.size()) * depth + 1);
+    for (std::size_t index = 0; index < depth; ++index)
+        result += opening;
+    result += '1';
+    for (std::size_t index = 0; index < depth; ++index)
+        result += closing;
+    return result;
 }
 
 } // namespace
@@ -129,6 +172,115 @@ void runParserTests(TestRunner& tests) {
     tests.expect(
         std::holds_alternative<syntax::UnitAppliedSyntax>(parse("Pi/6 Rad").root().data),
         "parser applies a unit suffix to the complete preceding term");
+
+    {
+        syntax::ParseLimits limits;
+        limits.maxOperatorChain = 2;
+        static_cast<void>(parseWithLimits("1+2+3", limits));
+        const error::CalcError boundaryError = parseError("1+2+3+4", limits);
+        tests.expect(
+            boundaryError.type() == error::CalcErrorType::ResourceLimit
+                && boundaryError.span()
+                && boundaryError.span()->begin.column == 6,
+            "parser gives an explicit resource error at the operator-chain boundary");
+    }
+
+    {
+        syntax::ParseLimits limits;
+        limits.maxTokens = 3;
+        tests.expect(
+            parseError("1+2", limits).type() == error::CalcErrorType::ResourceLimit,
+            "lexer token budget includes the end-of-input token");
+
+        limits = {};
+        limits.maxLiteralDigits = 3;
+        tests.expect(
+            parseError("1234", limits).type() == error::CalcErrorType::ResourceLimit,
+            "lexer rejects an oversized numeric literal before numeric conversion");
+
+        limits = {};
+        limits.maxNodes = 2;
+        tests.expect(
+            parseError("1+2", limits).type() == error::CalcErrorType::ResourceLimit,
+            "parser enforces the AST node budget");
+    }
+
+    {
+        syntax::ParseLimits limits;
+        limits.maxCallArguments = 2;
+        tests.expect(
+            parseError("f[1,2,3]", limits).type() == error::CalcErrorType::ResourceLimit,
+            "parser enforces the function argument budget");
+
+        limits = {};
+        limits.maxArrayElements = 2;
+        tests.expect(
+            parseError("{1,2,3}", limits).type() == error::CalcErrorType::ResourceLimit,
+            "parser enforces the array element budget");
+
+        limits = {};
+        limits.maxRecursionDepth = 32;
+        tests.expect(
+            parseError(nestedInput("(", ")", 100), limits).type()
+                == error::CalcErrorType::ResourceLimit,
+            "parser enforces its nesting budget with a source-spanned error");
+    }
+
+    // 旧実装がC++再帰で落ち得た形を，十分大きい動的corpusとして固定する。
+    const auto expectHostileResourceLimit = [&](std::string input, std::string_view name) {
+        tests.expect(
+            parseError(std::move(input)).type() == error::CalcErrorType::ResourceLimit,
+            name);
+    };
+
+    expectHostileResourceLimit(
+        nestedInput("(", ")", 4000),
+        "parser survives deeply nested groups without stack overflow");
+    expectHostileResourceLimit(
+        nestedInput("f[", "]", 4000),
+        "parser survives deeply nested calls without stack overflow");
+    expectHostileResourceLimit(
+        nestedInput("{", "}", 4000),
+        "parser survives deeply nested arrays without stack overflow");
+
+    std::string unaryChain(50'000, '-');
+    unaryChain += '1';
+    expectHostileResourceLimit(
+        std::move(unaryChain),
+        "parser rejects a huge unary chain without recursive descent");
+
+    std::string powerChain;
+    powerChain.reserve(100'001);
+    for (std::size_t index = 0; index < 50'000; ++index)
+        powerChain += "1^";
+    powerChain += '1';
+    expectHostileResourceLimit(
+        std::move(powerChain),
+        "parser rejects a huge power chain without recursive descent");
+
+    std::string additiveChain;
+    additiveChain.reserve(100'001);
+    for (std::size_t index = 0; index < 50'000; ++index)
+        additiveChain += "1+";
+    additiveChain += '1';
+    expectHostileResourceLimit(
+        std::move(additiveChain),
+        "parser bounds a huge left-associative chain before lowering");
+
+    std::string assignmentChain;
+    assignmentChain.reserve(60'001);
+    for (std::size_t index = 0; index < 20'000; ++index)
+        assignmentChain += "x:=";
+    assignmentChain += '1';
+    expectHostileResourceLimit(
+        std::move(assignmentChain),
+        "parser rejects a huge assignment chain without recursive descent");
+
+    std::string postfixChain{"1"};
+    postfixChain.append(50'000, '!');
+    expectHostileResourceLimit(
+        std::move(postfixChain),
+        "parser bounds huge postfix chains before lowering");
 }
 
 } // namespace mmcal::tests
