@@ -4,6 +4,7 @@
 #include "builtins/array_helpers.hpp"
 #include "builtins/exact_operations.hpp"
 #include "error/error_message.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
@@ -159,6 +160,8 @@ Expr evaluateIdentity(std::span<const Expr> arguments) {
     const std::size_t n = detail::requireSize(arguments[0], "identity");
     const std::size_t shape[] = {n, n};
     const std::size_t count = expression::arrayElementCount(shape);
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, count);
     std::vector<BigInt> elements;
     elements.reserve(count);
     for (std::size_t r = 0; r < n; ++r)
@@ -172,6 +175,8 @@ Expr evaluateZeros(std::span<const Expr> arguments) {
     const std::size_t cols = detail::requireSize(arguments[1], "zeros");
     const std::size_t shape[] = {rows, cols};
     const std::size_t count = expression::arrayElementCount(shape);
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, count);
     return Expr::integerArray({rows, cols}, std::vector<BigInt>(count, BigInt{0}));
 }
 

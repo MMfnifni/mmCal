@@ -1,28 +1,10 @@
 // 双曲線函数
 #include "hyperbolic.hpp"
+#include "builtin_helpers.hpp"
 
-#include "error/error_message.hpp"
 
-#include <string>
-#include <string_view>
-#include <vector>
 
 namespace mmcal::builtins {
-namespace {
-
-[[nodiscard]] expression::Expr holdUnary(
-    evaluation::BuiltinId id,
-    std::string_view name,
-    std::span<const expression::Expr> arguments,
-    const evaluation::BuiltinRegistry& registry) {
-    if (arguments.size() != 1)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects 1 argument(s)");
-    return expression::Expr::call(registry.symbol(id), {arguments.front()});
-}
-
-} // namespace
 
 #define MMCAL_HOLD_HYPERBOLIC(NAME, ID, TEXT) \
 expression::Expr NAME( \
@@ -30,7 +12,7 @@ expression::Expr NAME( \
     const evaluation::BuiltinRegistry& registry, \
     const mathematics::MathRegistry& mathematics) { \
     static_cast<void>(mathematics); \
-    return holdUnary(evaluation::BuiltinId::ID, TEXT, arguments, registry); \
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::ID, TEXT); \
 }
 
 MMCAL_HOLD_HYPERBOLIC(evaluateSinh, Sinh, "sinh")

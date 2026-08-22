@@ -20,8 +20,23 @@ public:
     [[nodiscard]] std::string_view text() const noexcept;
     [[nodiscard]] const DecimalApproximation& real() const noexcept;
     [[nodiscard]] const DecimalApproximation& imaginary() const noexcept;
+    // legacy accessor。意味は「後続計算でexact zeroとして再利用してよいcomponent」。
     [[nodiscard]] bool realExactlyZero() const noexcept;
     [[nodiscard]] bool imaginaryExactlyZero() const noexcept;
+    [[nodiscard]] bool realCertifiedExactlyZero() const noexcept;
+    [[nodiscard]] bool imaginaryCertifiedExactlyZero() const noexcept;
+    [[nodiscard]] bool realInformationExactlyZero() const noexcept;
+    [[nodiscard]] bool imaginaryInformationExactlyZero() const noexcept;
+    // Complex値として再利用可能なinformation bounds。information-exact-zero証明済み成分は
+    // 表示用DecimalApproximationのzero-centered量子幅ではなくpoint zeroを返す。
+    [[nodiscard]] const Rational& realInformationLower() const noexcept;
+    [[nodiscard]] const Rational& realInformationUpper() const noexcept;
+    [[nodiscard]] const Rational& imaginaryInformationLower() const noexcept;
+    [[nodiscard]] const Rational& imaginaryInformationUpper() const noexcept;
+
+    // exact-zero component flagを含むprovenanceを保ったまま符号反転する。
+    [[nodiscard]] ComplexDecimalApproximation negated() const;
+
     [[nodiscard]] bool operator==(const ComplexDecimalApproximation&) const = default;
 
 private:

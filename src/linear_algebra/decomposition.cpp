@@ -8,8 +8,11 @@
 #include "approximation/interval_math.hpp"
 #include "builtins/exact_operations.hpp"
 #include "expression/array_utils.hpp"
+#include "evaluation/evaluation_budget.hpp"
+#include "mathematics/exact_roots.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 #include "numeric/rational.hpp"
 
@@ -35,7 +38,6 @@ using numeric::Rational;
 
 constexpr std::size_t maximumPrecisionRetries = 12;
 constexpr std::size_t defaultQrBlockColumns = 1;
-constexpr std::size_t maximumExactQrOrder = 3;
 
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
@@ -156,10 +158,6 @@ private:
         || facts.sign == mathematics::RealSign::NonZero;
 }
 
-[[nodiscard]] Expr add(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::add({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
 [[nodiscard]] Expr subtract(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
     return builtins::exact::subtract(std::move(lhs), std::move(rhs),
         context.builtins, context.mathematics, context.angles);
@@ -170,10 +168,6 @@ private:
 }
 [[nodiscard]] Expr divide(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
     return builtins::exact::divide(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr negate(Expr value, const ExactMatrixContext& context) {
-    return builtins::exact::negate(std::move(value),
         context.builtins, context.mathematics, context.angles);
 }
 
@@ -259,44 +253,6 @@ private:
     return packedExprMatrices(factors, n, n);
 }
 
-struct ExactReflector final {
-    std::size_t firstRow = 0;
-    std::vector<Expr> vector;
-    Expr beta;
-};
-
-void applyExactHouseholderLeft(
-    MatrixBuffer& matrix,
-    const ExactReflector& reflector,
-    std::size_t firstColumn,
-    const ExactMatrixContext& context,
-    std::size_t blockColumns) {
-    const std::size_t width = std::max<std::size_t>(1, blockColumns);
-    for (std::size_t block = firstColumn; block < matrix.columns(); block += width) {
-        const std::size_t end = std::min(matrix.columns(), block + width);
-        std::vector<Expr> dots(end - block, integer(0));
-        for (std::size_t i = 0; i < reflector.vector.size(); ++i) {
-            const Expr& v = reflector.vector[i];
-            if (exactZero(v))
-                continue;
-            const std::size_t row = reflector.firstRow + i;
-            for (std::size_t column = block; column < end; ++column)
-                dots[column - block] = add(std::move(dots[column - block]),
-                    multiply(v, matrix(row, column), context), context);
-        }
-        for (std::size_t i = 0; i < reflector.vector.size(); ++i) {
-            const Expr& v = reflector.vector[i];
-            if (exactZero(v))
-                continue;
-            const std::size_t row = reflector.firstRow + i;
-            for (std::size_t column = block; column < end; ++column)
-                matrix(row, column) = subtract(matrix(row, column),
-                    multiply(reflector.beta,
-                        multiply(v, dots[column - block], context), context), context);
-        }
-    }
-}
-
 [[nodiscard]] bool upperTriangular(const MatrixView& matrix) {
     for (std::size_t row = 1; row < matrix.rows(); ++row)
         for (std::size_t column = 0; column < std::min(row, matrix.columns()); ++column)
@@ -305,65 +261,291 @@ void applyExactHouseholderLeft(
     return true;
 }
 
-[[nodiscard]] std::optional<Expr> exactHouseholderQrReal(
+using IntegerVector = std::vector<BigInt>;
+using RationalVector = std::vector<Rational>;
+
+[[nodiscard]] Rational exactRational(const MatrixView& matrix,
+    std::size_t row,
+    std::size_t column) {
+    return matrix(row, column).asNumber().asReal().toRational();
+}
+
+[[nodiscard]] BigInt lcmPositive(const BigInt& lhs, const BigInt& rhs) {
+    if (lhs.isZero() || rhs.isZero())
+        return BigInt{};
+    return (lhs / numeric::gcd(lhs, rhs)) * rhs;
+}
+
+void primitiveReduce(IntegerVector& vector) {
+    BigInt content{};
+    for (const BigInt& value : vector) {
+        if (value.isZero())
+            continue;
+        content = content.isZero()
+            ? value.abs()
+            : numeric::gcd(std::move(content), value.abs());
+        if (content == BigInt{1})
+            return;
+    }
+    if (content.isZero() || content == BigInt{1})
+        return;
+    for (BigInt& value : vector)
+        value /= content;
+}
+
+[[nodiscard]] bool zeroVector(const IntegerVector& vector) noexcept {
+    return std::all_of(vector.begin(), vector.end(),
+        [](const BigInt& value) { return value.isZero(); });
+}
+
+[[nodiscard]] BigInt integerDot(const IntegerVector& lhs, const IntegerVector& rhs) {
+    BigInt result{};
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        result += lhs[i] * rhs[i];
+    return result;
+}
+
+[[nodiscard]] Rational mixedDot(const IntegerVector& lhs, const RationalVector& rhs) {
+    Rational result{};
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        result += Rational{lhs[i]} * rhs[i];
+    return result;
+}
+
+[[nodiscard]] IntegerVector primitiveIntegerDirection(const RationalVector& source) {
+    BigInt commonDenominator{1};
+    for (const Rational& value : source)
+        commonDenominator = lcmPositive(commonDenominator, value.denominator());
+
+    IntegerVector result;
+    result.reserve(source.size());
+    for (const Rational& value : source)
+        result.push_back(value.numerator() * (commonDenominator / value.denominator()));
+    primitiveReduce(result);
+    return result;
+}
+
+// p への射影を除く際に除算を作らず，整数vectorの方向だけを更新する。
+void fractionFreeProjectAway(IntegerVector& vector,
+    const IntegerVector& p,
+    const BigInt& normSquared) {
+    BigInt projection = integerDot(p, vector);
+    if (projection.isZero())
+        return;
+
+    const BigInt common = numeric::gcd(normSquared, projection.abs());
+    const BigInt normFactor = normSquared / common;
+    projection /= common;
+    for (std::size_t row = 0; row < vector.size(); ++row)
+        vector[row] = normFactor * vector[row] - projection * p[row];
+    primitiveReduce(vector);
+}
+
+[[nodiscard]] IntegerVector orthogonalizeFractionFree(
+    IntegerVector vector,
+    std::span<const IntegerVector> basis,
+    std::span<const BigInt> normSquared) {
+    for (std::size_t i = 0; i < basis.size(); ++i) {
+        fractionFreeProjectAway(vector, basis[i], normSquared[i]);
+        if (zeroVector(vector))
+            break;
+    }
+    return vector;
+}
+
+[[nodiscard]] IntegerVector completionDirection(
+    std::size_t rows,
+    std::span<const IntegerVector> basis,
+    std::span<const BigInt> normSquared) {
+    for (std::size_t candidate = 0; candidate < rows; ++candidate) {
+        IntegerVector vector(rows, BigInt{});
+        vector[candidate] = BigInt{1};
+        vector = orthogonalizeFractionFree(
+            std::move(vector), basis, normSquared);
+        if (!zeroVector(vector))
+            return vector;
+    }
+    return {};
+}
+
+[[nodiscard]] std::optional<std::pair<std::vector<IntegerVector>, std::vector<BigInt>>>
+bareissGramOrthogonalBasis(std::span<const IntegerVector> columns) {
+    const std::size_t size = columns.size();
+    if (size == 0)
+        return std::pair{std::vector<IntegerVector>{}, std::vector<BigInt>{}};
+
+    std::vector<IntegerVector> work(size, IntegerVector(size));
+    std::vector<IntegerVector> lower(size, IntegerVector(size));
+    for (std::size_t row = 0; row < size; ++row)
+        for (std::size_t column = 0; column <= row; ++column)
+            work[row][column] = work[column][row] = integerDot(columns[row], columns[column]);
+
+    std::vector<BigInt> determinants(size + 1);
+    determinants[0] = BigInt{1};
+    BigInt previousPivot{1};
+    for (std::size_t k = 0; k < size; ++k) {
+        const BigInt pivot = work[k][k];
+        if (pivot.isZero())
+            return std::nullopt;
+        determinants[k + 1] = pivot;
+        lower[k][k] = pivot;
+        for (std::size_t row = k + 1; row < size; ++row)
+            lower[row][k] = work[row][k];
+
+        for (std::size_t row = k + 1; row < size; ++row) {
+            for (std::size_t column = row; column < size; ++column) {
+                BigInt numerator = pivot * work[row][column]
+                    - work[row][k] * work[k][column];
+                const auto division = numeric::divmod(numerator, previousPivot);
+                if (!division.remainder.isZero())
+                    return std::nullopt;
+                work[row][column] = work[column][row] = division.quotient;
+            }
+        }
+        previousPivot = pivot;
+    }
+
+    std::vector<IntegerVector> basis;
+    std::vector<BigInt> normSquared;
+    basis.reserve(size);
+    normSquared.reserve(size);
+    for (std::size_t column = 0; column < size; ++column) {
+        const BigInt diagonalScale = determinants[column] * determinants[column + 1];
+        IntegerVector coefficients(size);
+        for (std::size_t i = column + 1; i-- > 0;) {
+            BigInt rhs = i == column ? diagonalScale : BigInt{};
+            for (std::size_t j = i + 1; j <= column; ++j)
+                rhs -= lower[j][i] * coefficients[j];
+            const auto division = numeric::divmod(rhs, lower[i][i]);
+            if (!division.remainder.isZero())
+                return std::nullopt;
+            coefficients[i] = division.quotient;
+        }
+
+        IntegerVector vector(columns.front().size());
+        for (std::size_t i = 0; i <= column; ++i) {
+            if (coefficients[i].isZero())
+                continue;
+            for (std::size_t row = 0; row < vector.size(); ++row)
+                vector[row] += columns[i][row] * coefficients[i];
+        }
+        primitiveReduce(vector);
+        if (zeroVector(vector))
+            return std::nullopt;
+        basis.push_back(std::move(vector));
+        normSquared.push_back(integerDot(basis.back(), basis.back()));
+    }
+    return std::pair{std::move(basis), std::move(normSquared)};
+}
+
+[[nodiscard]] Expr rationalExpr(Rational value) {
+    return Expr{Number{std::move(value)}};
+}
+
+[[nodiscard]] Expr scaledExactFactor(
+    Rational coefficient,
+    const Expr& factor,
+    const ExactMatrixContext& context) {
+    if (coefficient.isZero())
+        return integer(0);
+    if (coefficient == Rational{BigInt{1}})
+        return factor;
+    return Expr::call(context.builtins.symbol(evaluation::BuiltinId::Multiply),
+        {rationalExpr(std::move(coefficient)), factor});
+}
+
+struct ExactInverseNorm final {
+    Rational scale;
+    std::optional<Expr> radical;
+};
+
+[[nodiscard]] ExactInverseNorm makeInverseIntegerNorm(
+    const BigInt& normSquared,
+    const ExactMatrixContext& context) {
+    const auto decomposition = mathematics::decomposePositiveRationalSquareRoot(
+        Rational{normSquared});
+    if (decomposition.radicand == BigInt{1})
+        return ExactInverseNorm{
+            Rational{BigInt{1}} / decomposition.coefficient, std::nullopt};
+
+    Rational scale = Rational{BigInt{1}}
+        / (decomposition.coefficient * Rational{decomposition.radicand});
+    Expr radical = Expr::call(context.builtins.symbol(evaluation::BuiltinId::Sqrt),
+        {rationalExpr(Rational{decomposition.radicand})});
+    return ExactInverseNorm{std::move(scale), std::move(radical)};
+}
+
+[[nodiscard]] Expr applyInverseNorm(
+    Rational coefficient,
+    const ExactInverseNorm& inverseNorm,
+    const ExactMatrixContext& context) {
+    coefficient *= inverseNorm.scale;
+    if (!inverseNorm.radical)
+        return rationalExpr(std::move(coefficient));
+    return scaledExactFactor(std::move(coefficient), *inverseNorm.radical, context);
+}
+
+[[nodiscard]] std::optional<Expr> exactFractionFreeQrReal(
     const MatrixView& source,
     const ExactMatrixContext& context) {
     const std::size_t rows = source.rows();
     const std::size_t columns = source.columns();
     const std::size_t qColumns = std::min(rows, columns);
-    const std::size_t reflectorSteps = rows == 0 ? 0 : std::min(columns, rows - 1);
 
-    if (!upperTriangular(source) && qColumns > maximumExactQrOrder)
-        return std::nullopt;
+    std::vector<RationalVector> sourceColumns(columns, RationalVector(rows));
+    for (std::size_t column = 0; column < columns; ++column)
+        for (std::size_t row = 0; row < rows; ++row)
+            sourceColumns[column][row] = exactRational(source, row, column);
 
-    MatrixBuffer r{source};
-    std::vector<ExactReflector> householder;
-    householder.reserve(reflectorSteps);
+    std::vector<IntegerVector> sourceDirections;
+    sourceDirections.reserve(qColumns);
+    for (std::size_t column = 0; column < qColumns; ++column)
+        sourceDirections.push_back(primitiveIntegerDirection(sourceColumns[column]));
 
-    for (std::size_t k = 0; k < reflectorSteps; ++k) {
-        Expr normSquared = integer(0);
-        for (std::size_t row = k; row < rows; ++row)
-            normSquared = add(std::move(normSquared),
-                multiply(r(row, k), r(row, k), context), context);
-        if (exactZero(normSquared))
-            continue;
+    std::vector<IntegerVector> basis;
+    std::vector<BigInt> normSquared;
+    if (auto gram = bareissGramOrthogonalBasis(sourceDirections)) {
+        basis = std::move(gram->first);
+        normSquared = std::move(gram->second);
+    } else {
+        // rank落ちや先頭principal minorが消えるcaseは，直接fraction-free直交化で基底を補完する。
+        basis.reserve(qColumns);
+        normSquared.reserve(qColumns);
+        for (std::size_t column = 0; column < qColumns; ++column) {
+            IntegerVector vector = orthogonalizeFractionFree(
+                std::move(sourceDirections[column]), basis, normSquared);
+            if (zeroVector(vector))
+                vector = completionDirection(rows, basis, normSquared);
+            if (zeroVector(vector))
+                return std::nullopt;
 
-        const Expr norm = builtins::exact::sqrt(normSquared,
-            context.builtins, context.mathematics, context.angles);
-        const Expr alpha = negate(norm, context); // exact経路はcancelを気にせず固定符号を使う。
-
-        std::vector<Expr> v;
-        v.reserve(rows - k);
-        v.push_back(subtract(r(k, k), alpha, context));
-        for (std::size_t row = k + 1; row < rows; ++row)
-            v.push_back(r(row, k));
-
-        Expr vNormSquared = integer(0);
-        for (const Expr& item : v)
-            vNormSquared = add(std::move(vNormSquared), multiply(item, item, context), context);
-        if (exactZero(vNormSquared))
-            continue;
-
-        ExactReflector reflector{k, std::move(v),
-            divide(integer(2), vNormSquared, context)};
-        applyExactHouseholderLeft(r, reflector, k, context, defaultQrBlockColumns);
-        for (std::size_t row = k + 1; row < rows; ++row)
-            r(row, k) = integer(0);
-        householder.push_back(std::move(reflector));
+            BigInt squared = integerDot(vector, vector);
+            if (squared.isZero())
+                return std::nullopt;
+            basis.push_back(std::move(vector));
+            normSquared.push_back(std::move(squared));
+        }
     }
 
-    // reduced Q = H0 H1 ... Hk E。reflectorを逆順に左から適用する。
     MatrixBuffer q{rows, qColumns, integer(0)};
-    for (std::size_t i = 0; i < qColumns; ++i)
-        q(i, i) = integer(1);
-    for (std::size_t i = householder.size(); i-- > 0;)
-        applyExactHouseholderLeft(q, householder[i], 0, context, defaultQrBlockColumns);
+    MatrixBuffer r{qColumns, columns, integer(0)};
+    for (std::size_t i = 0; i < qColumns; ++i) {
+        const ExactInverseNorm inverseNorm = makeInverseIntegerNorm(normSquared[i], context);
+        for (std::size_t row = 0; row < rows; ++row) {
+            if (basis[i][row].isZero())
+                continue;
+            q(row, i) = applyInverseNorm(
+                Rational{basis[i][row]}, inverseNorm, context);
+        }
+        for (std::size_t column = 0; column < columns; ++column) {
+            const Rational projection = mixedDot(basis[i], sourceColumns[column]);
+            if (projection.isZero())
+                continue;
+            r(i, column) = applyInverseNorm(projection, inverseNorm, context);
+        }
+    }
 
-    MatrixBuffer reducedR{qColumns, columns, integer(0)};
-    for (std::size_t row = 0; row < qColumns; ++row)
-        for (std::size_t column = 0; column < columns; ++column)
-            reducedR(row, column) = r(row, column);
-    const MatrixBuffer* factors[] = {&q, &reducedR};
+    const MatrixBuffer* factors[] = {&q, &r};
     return braceExprMatrices(factors);
 }
 
@@ -506,11 +688,16 @@ template <class Operation>
     approximation::ApproximationContext context,
     Operation&& operation) {
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         try {
             if (const auto result = operation(context))
                 return result;
         }
         catch (const approximation::PrecisionInsufficient&) {
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
         context.setGuardDigits(approximation::nextGuardDigits(context.guardDigits()));
     }
@@ -719,7 +906,7 @@ std::optional<Expr> qrDecomposition(
     }
     if (!allExactRealNumbers(matrix))
         return std::nullopt;
-    return exactHouseholderQrReal(matrix, context);
+    return exactFractionFreeQrReal(matrix, context);
 }
 
 std::optional<Expr> approximateLuDecomposition(

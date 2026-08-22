@@ -1,5 +1,6 @@
 #pragma once
 
+#include "complex_interval.hpp"
 #include "real_interval.hpp"
 #include "numeric/rational.hpp"
 
@@ -43,6 +44,18 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+// 複素特殊函数のcertified backend。principal branchを持つ函数は
+// ComplexInterval上でbranch cutを跨がないことを証明できる場合だけ評価する。
+[[nodiscard]] ComplexInterval encloseErfComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseErfcComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseGammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+
 // Fresnel C(x)=integral_0^x cos(Pi t^2/2)dt, S(x)=integral_0^x sin(Pi t^2/2)dt。
 // 実軸ではTaylor/部分積分漸近展開を切り替え、剰余を明示的に包含する。
 [[nodiscard]] RealInterval encloseFresnelCReal(
@@ -53,12 +66,26 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+[[nodiscard]] ComplexInterval encloseFresnelCComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+
+[[nodiscard]] ComplexInterval encloseFresnelSComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+
 // Kummerの合流型超幾何函数 M(a,b,z)=1F1(a;b;z)。
 // 現backendはexact Rationalのpoint引数を級数＋厳密tail boundで保証評価する。
 [[nodiscard]] RealInterval encloseHypergeometric1F1Real(
     const numeric::Rational& a,
     const numeric::Rational& b,
     const numeric::Rational& z,
+    std::size_t precisionBits);
+
+[[nodiscard]] ComplexInterval encloseHypergeometric1F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& z,
     std::size_t precisionBits);
 
 // Gauss 2F1。現backendはprincipal branchのうち |z|<1 のexact Rational pointを
@@ -68,6 +95,13 @@ namespace mmcal::approximation {
     const numeric::Rational& b,
     const numeric::Rational& c,
     const numeric::Rational& z,
+    std::size_t precisionBits);
+
+[[nodiscard]] ComplexInterval encloseHypergeometric2F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& c,
+    const ComplexInterval& z,
     std::size_t precisionBits);
 
 // Legendre不完全楕円積分。amplitudeは常にRadian。
@@ -87,6 +121,22 @@ namespace mmcal::approximation {
     const numeric::Rational& m,
     std::size_t precisionBits);
 
+// 有限precisionの実数入力用。m/nのbounded-work範囲を区間全体で証明し，
+// 同じ級数をRealInterval上で評価する。
+[[nodiscard]] RealInterval encloseEllipticFReal(
+    const RealInterval& phi,
+    const RealInterval& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticEReal(
+    const RealInterval& phi,
+    const RealInterval& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticPiReal(
+    const RealInterval& n,
+    const RealInterval& phi,
+    const RealInterval& m,
+    std::size_t precisionBits);
+
 // 古典的積分函数。実数backendではprincipal real valueを保証区間で返す。
 [[nodiscard]] RealInterval encloseExponentialIntegralEiReal(
     const RealInterval& input,
@@ -101,10 +151,28 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+[[nodiscard]] ComplexInterval encloseExponentialIntegralEiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseSineIntegralSiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseCosineIntegralCiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseLogarithmicIntegralLiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+
 // 現backendは正整数sと|z|<1のexact Rational pointを級数で保証評価する。
 [[nodiscard]] RealInterval enclosePolylogReal(
     std::uint64_t order,
     const numeric::Rational& z,
+    std::size_t precisionBits);
+
+[[nodiscard]] ComplexInterval enclosePolylogComplex(
+    std::uint64_t order,
+    const ComplexInterval& z,
     std::size_t precisionBits);
 
 // a,b>0 に対するBetaとlog Beta。Gammaの比ではなくlog-domainで評価する。
@@ -133,12 +201,25 @@ namespace mmcal::approximation {
     const RealInterval& input,
     std::size_t precisionBits);
 
+[[nodiscard]] ComplexInterval encloseZetaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+
 // digamma/trigamma。第一版certified backendは正実数域。
 [[nodiscard]] RealInterval encloseDigammaPositive(
     const RealInterval& input,
     std::size_t precisionBits);
 [[nodiscard]] RealInterval encloseTrigammaPositive(
     const RealInterval& input,
+    std::size_t precisionBits);
+
+// principal branchの複素digamma/trigamma。poleを含まず，右半平面への
+// recurrence shiftと漸近剰余を保証できる区間だけ評価する。
+[[nodiscard]] ComplexInterval encloseDigammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits);
+[[nodiscard]] ComplexInterval encloseTrigammaComplex(
+    const ComplexInterval& input,
     std::size_t precisionBits);
 
 // 正則化不完全Beta I_x(a,b)。a,bはexact positive Rational、xは[0,1]のcertified interval。

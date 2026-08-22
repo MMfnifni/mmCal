@@ -43,6 +43,7 @@ private:
     ParseBudget ownedBudget_;
     ParseBudget* budget_ = nullptr;
     std::size_t index_ = 0;
+    bool casesIfDelimiter_ = false;
 
     [[nodiscard]] const Token& current() const noexcept;
     [[nodiscard]] const Token& previous() const noexcept;
@@ -62,6 +63,7 @@ private:
     [[nodiscard]] SyntaxNodePtr parseHistoryReference();
     [[nodiscard]] SyntaxNodePtr parseInputHistoryReference();
     [[nodiscard]] SyntaxNodePtr parseIdentifierOrCall();
+    [[nodiscard]] SyntaxNodePtr parseCasesCall(const Token& identifier);
     [[nodiscard]] SyntaxNodePtr parseGroup();
 
     [[nodiscard]] bool canStartImplicitFactor() const noexcept;

@@ -1,0 +1,228 @@
+# mmCal V1.5 consolidated black-box regression
+# Each # @session block runs in a fresh mmCal process.
+
+# ============================================================================
+# Former file: test0_v1_5_core.txt
+# ============================================================================
+# @session
+# mmCal V1.5 core / exact-first black-box regression
+
+1/3=>1/3
+0.1=>1/10
+sin[Pi/6]=>1/2
+cos[Pi/3]=>1/2
+E^x=>exp[x]
+
+# integration / implicit multiplication / scientific notation lexer regression
+integrate[E^x cos[x],x]=>(cos[x]+sin[x])exp[x]/2
+integrate[E^x cos[x],x]==(cos[x]+sin[x])/2exp[x]=>True
+(cos[x]+sin[x])/2exp[x]=>(cos[x]+sin[x])exp[x]/2
+2e3=>2000
+2e-3=>1/500
+2exp[x]=>2*exp[x]
+2E^x=>2*exp[x]
+
+fullSimplify[sin[x]^2+cos[x]^2]=>1
+D[exp[x^2],x]=>2x exp[x^2]
+solve[x^2-1==0,x]=>{x==1,x==-1}
+N[Pi,20]=>3.14159265358979323846
+
+# --fix is presentation only; the exceptional result remains symbolic.
+0^I=>Indeterminate
+
+# ============================================================================
+# Former file: test10_angleMode.txt
+# ============================================================================
+# @session
+# mmCal V1.5 angle semantics
+
+angleMode[]=>Rad
+sin[Pi/6]=>1/2
+atan[1]=>Pi/4
+arg[I]=>Pi/2 Rad
+vangle[{1,0},{0,1}]=>Pi/2
+
+angleMode[Deg]=>Deg
+angleMode[]=>Deg
+sin[30]=>1/2
+atan[1]=>45
+arg[I]=>Pi/2 Rad
+vangle[{1,0},{0,1}]=>90
+
+angleMode[Grad]=>Grad
+angleMode[]=>Grad
+sin[100]=>1
+atan[1]=>50
+arg[I]=>Pi/2 Rad
+vangle[{1,0},{0,1}]=>100
+
+angleMode[Rad]=>Rad
+angleMode[]=>Rad
+
+# Explicit units override the session default.
+sin[30 Deg]=>1/2
+sin[100 Grad]=>1
+
+# ============================================================================
+# Former file: test14_numeric_lexer_boundaries.txt
+# ============================================================================
+# @session
+# Numeric lexer boundary regression.
+# Particularly guards the 2exp[x] / scientific-notation ambiguity.
+
+0b0==>0
+0b1==>1
+0b101010==>42
+0o0==>0
+0o17==>15
+0x0==>0
+0xFF==>255
+0xff==>255
+2#1010==>10
+16#FF==>255
+16#ff==>255
+36#Z==>35
+36#10==>36
+
+# e/E is an exponent marker only if a valid exponent really follows.
+2e3==>2000
+2e-3==>1/500
+2exp[x]==>2*exp[x]
+2E^x==>2*exp[x]
+1e==>e
+1E==>E
+1e+==>SyntaxError: Exponent requires at least one digit
+1e-==>SyntaxError: Exponent requires at least one digit
+
+# Malformed literals must fail deterministically.
+1..2==>SyntaxError: Malformed number literal
+0x==>SyntaxError: Prefixed integer requires at least one digit
+0b==>SyntaxError: Prefixed integer requires at least one digit
+0o==>SyntaxError: Prefixed integer requires at least one digit
+0xG==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+0b2==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+0o8==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+2#102==>SyntaxError: BigUInt contains a digit invalid for the selected radix
+1#0==>SyntaxError: Radix must be an integer from 2 through 36
+37#10==>SyntaxError: Radix must be an integer from 2 through 36
+
+# ============================================================================
+# Former file: test17_history_relative.txt
+# ============================================================================
+# @session
+# mmCal V1.5.2 relative input/output history regression
+
+2+3=>5
+10*10=>100
+7*8=>56
+In[-2]=>100
+11=>11
+12=>12
+13=>13
+@=>13
+21=>21
+22=>22
+23=>23
+@@=>22
+31=>31
+32=>32
+33=>33
+34=>34
+@@@=>32
+41=>41
+42=>42
+43=>43
+%=>43
+51=>51
+52=>52
+53=>53
+%%=>52
+61=>61
+62=>62
+63=>63
+64=>64
+%%%=>62
+71=>71
+72=>72
+73=>73
+74=>74
+75=>75
+@@@@=>72
+81=>81
+82=>82
+83=>83
+84=>84
+85=>85
+%%%%=>82
+log[0]=>DomainError
+In[-1]=>DomainError
+Out[-1]=>82
+In[0]=>TypeError
+Out[0]=>TypeError
+Pi=>Pi
+N[@,10]=>3.1415926536
+
+# ============================================================================
+# Former file: test19_iteration.txt
+# ============================================================================
+# @session
+# Exact finite sequences, local iteration and explicit element-wise mapping.
+range[5]==>{1,2,3,4,5}
+range[0,1,1/3]==>{0,1/3,2/3,1}
+range[5,1,-2]==>{5,3,1}
+map[sin,{0,Pi/2,Pi}]==>{0,1,0}
+mapSquare[x]:=x^2+1==>mapSquare[x]:=x^2+1
+map[mapSquare,{{1,2},{3,4}}]==>{{2,5},{10,17}}
+map[mapSquare,{{1,2},{3}}]==>{{2,5},{10}}
+table[i^2,{i,5}]==>{1,4,9,16,25}
+table[i/2,{i,0,2,1/2}]==>{0,1/4,1/2,3/4,1}
+table[table[i+j,{j,2}],{i,2}]==>{{2,3},{3,4}}
+i:=99==>99
+table[i,{i,3}]==>{1,2,3}
+i==>99
+table[1/(i+j+1),{{i,4},{j,4}}]==>{{1/3,1/4,1/5,1/6},{1/4,1/5,1/6,1/7},{1/5,1/6,1/7,1/8},{1/6,1/7,1/8,1/9}}
+
+# ============================================================================
+# Former file: test7_vars.txt
+# ============================================================================
+# @session
+# mmCal V1.5 variables / user functions
+
+Clear[]=>"Cleared"
+x:=2=>2
+x=>2
+x:=3=>3
+x=>3
+
+f[x]:=2*x=>f[x]:=2x
+f(3)=>SyntaxError: Function calls require square brackets; use f[...]
+f[3]=>6
+f[x]=>6
+
+g[y]:=x+y=>g[y]:=x+y
+g[4]=>7
+
+UnDef[x]=>1
+x=>x
+g[4]=>x+4
+
+UnDef[f]=>1
+f[3]=>NameError
+Defs[]=>{g[y]:=x+y}
+
+Clear[]=>"Cleared"
+Defs[]=>{}
+
+# Own value and function definition may coexist on the same symbol.
+x:=1=>1
+x[y]:=y+1=>x[y]:=y+1
+x=>1
+x[4]=>5
+
+f[x]:=x+1=>f[x]:=x+1
+f:=2=>2
+f=>2
+f[3]=>4
+
+UnDef[x,f]=>2
+Defs[]=>{}

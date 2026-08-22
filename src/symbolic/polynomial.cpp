@@ -895,6 +895,134 @@ Monomial Monomial::without(const expression::Symbol& variable) const {
     return Monomial{std::move(factors)};
 }
 
+std::optional<MonomialOrder> parseMonomialOrder(std::string_view name) noexcept {
+    if (name == "Lex" || name == "lex")
+        return MonomialOrder::Lex;
+    if (name == "GrLex" || name == "grlex")
+        return MonomialOrder::GrLex;
+    if (name == "GrevLex" || name == "grevlex")
+        return MonomialOrder::GrevLex;
+    return std::nullopt;
+}
+
+std::string_view monomialOrderName(MonomialOrder order) noexcept {
+    switch (order) {
+    case MonomialOrder::Lex: return "Lex";
+    case MonomialOrder::GrLex: return "GrLex";
+    case MonomialOrder::GrevLex: return "GrevLex";
+    }
+    return "GrevLex";
+}
+
+PolynomialRing::PolynomialRing(
+    std::vector<expression::Symbol> variables,
+    MonomialOrder order)
+    : variables_(std::move(variables)), order_(order) {
+    for (std::size_t i = 0; i < variables_.size(); ++i) {
+        if (!variables_[i].valid())
+            throw std::invalid_argument("Polynomial ring contains an invalid variable");
+        for (std::size_t j = 0; j < i; ++j)
+            if (variables_[i] == variables_[j])
+                throw std::invalid_argument("Polynomial ring variables must be unique");
+    }
+}
+
+std::span<const expression::Symbol> PolynomialRing::variables() const noexcept {
+    return variables_;
+}
+
+MonomialOrder PolynomialRing::order() const noexcept { return order_; }
+
+bool PolynomialRing::contains(const expression::Symbol& variable) const noexcept {
+    return std::find(variables_.begin(), variables_.end(), variable) != variables_.end();
+}
+
+bool PolynomialRing::contains(const Monomial& monomial) const noexcept {
+    for (const MonomialFactor& factor : monomial.factors())
+        if (!contains(factor.variable))
+            return false;
+    return true;
+}
+
+int PolynomialRing::compare(const Monomial& lhs, const Monomial& rhs) const {
+    if (!contains(lhs) || !contains(rhs))
+        throw std::invalid_argument("Monomial does not belong to the polynomial ring");
+
+    const auto lexCompare = [&]() -> int {
+        for (const expression::Symbol& variable : variables_) {
+            const std::size_t left = lhs.exponentOf(variable);
+            const std::size_t right = rhs.exponentOf(variable);
+            if (left != right)
+                return left < right ? -1 : 1;
+        }
+        return 0;
+    };
+
+    if (order_ == MonomialOrder::Lex)
+        return lexCompare();
+
+    const std::size_t leftDegree = lhs.totalDegree();
+    const std::size_t rightDegree = rhs.totalDegree();
+    if (leftDegree != rightDegree)
+        return leftDegree < rightDegree ? -1 : 1;
+    if (order_ == MonomialOrder::GrLex)
+        return lexCompare();
+
+    // graded reverse lexicographic: total degree equalなら、後ろから最初に
+    // 異なる指数が小さい側を大きいmonomialとする。
+    for (auto iterator = variables_.rbegin(); iterator != variables_.rend(); ++iterator) {
+        const std::size_t left = lhs.exponentOf(*iterator);
+        const std::size_t right = rhs.exponentOf(*iterator);
+        if (left != right)
+            return left < right ? 1 : -1;
+    }
+    return 0;
+}
+
+bool monomialDivides(const Monomial& divisor, const Monomial& dividend) noexcept {
+    for (const MonomialFactor& factor : divisor.factors())
+        if (factor.exponent > dividend.exponentOf(factor.variable))
+            return false;
+    return true;
+}
+
+Monomial multiplyMonomials(const Monomial& lhs, const Monomial& rhs) {
+    return multiplyMonomial(lhs, rhs);
+}
+
+Monomial leastCommonMultiple(const Monomial& lhs, const Monomial& rhs) {
+    std::vector<MonomialFactor> factors;
+    factors.reserve(lhs.factors().size() + rhs.factors().size());
+    for (const MonomialFactor& factor : lhs.factors())
+        factors.push_back(factor);
+    for (const MonomialFactor& factor : rhs.factors()) {
+        const auto existing = std::find_if(factors.begin(), factors.end(), [&](const MonomialFactor& current) {
+            return current.variable == factor.variable;
+        });
+        if (existing == factors.end())
+            factors.push_back(factor);
+        else
+            existing->exponent = std::max(existing->exponent, factor.exponent);
+    }
+    return Monomial{std::move(factors)};
+}
+
+std::optional<Monomial> divideMonomials(
+    const Monomial& dividend,
+    const Monomial& divisor) {
+    if (!monomialDivides(divisor, dividend))
+        return std::nullopt;
+    std::vector<MonomialFactor> factors;
+    factors.reserve(dividend.factors().size());
+    for (const MonomialFactor& factor : dividend.factors()) {
+        const std::size_t divisorExponent = divisor.exponentOf(factor.variable);
+        if (factor.exponent > divisorExponent)
+            factors.push_back(MonomialFactor{
+                factor.variable, factor.exponent - divisorExponent});
+    }
+    return Monomial{std::move(factors)};
+}
+
 MultivariateRationalPolynomial::MultivariateRationalPolynomial() = default;
 
 MultivariateRationalPolynomial::MultivariateRationalPolynomial(std::vector<PolynomialTerm> terms)
@@ -957,11 +1085,92 @@ std::vector<expression::Symbol> MultivariateRationalPolynomial::variables() cons
     return result;
 }
 
+bool MultivariateRationalPolynomial::belongsTo(const PolynomialRing& ring) const noexcept {
+    for (const PolynomialTerm& term : terms_)
+        if (!ring.contains(term.monomial))
+            return false;
+    return true;
+}
+
+std::optional<PolynomialTerm> MultivariateRationalPolynomial::leadingTerm(
+    const PolynomialRing& ring) const {
+    if (isZero())
+        return std::nullopt;
+    if (!belongsTo(ring))
+        throw std::invalid_argument("Polynomial does not belong to the polynomial ring");
+    const PolynomialTerm* leading = &terms_.front();
+    for (const PolynomialTerm& term : terms_)
+        if (ring.compare(term.monomial, leading->monomial) > 0)
+            leading = &term;
+    return *leading;
+}
+
+MultivariateRationalPolynomial negatePolynomial(
+    const MultivariateRationalPolynomial& value) {
+    return negate(value);
+}
+
+MultivariateRationalPolynomial addPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs) {
+    return add(lhs, rhs);
+}
+
+MultivariateRationalPolynomial subtractPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs) {
+    return add(lhs, negate(rhs));
+}
+
+std::optional<MultivariateRationalPolynomial> multiplyPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs,
+    PolynomialConversionOptions options) {
+    return multiply(lhs, rhs, options);
+}
+
+MultivariateRationalPolynomial multiplyPolynomialByTerm(
+    const MultivariateRationalPolynomial& polynomial,
+    const PolynomialTerm& multiplier) {
+    if (polynomial.isZero() || multiplier.coefficient.isZero())
+        return MultivariateRationalPolynomial{};
+    std::vector<PolynomialTerm> terms;
+    terms.reserve(polynomial.termCount());
+    for (const PolynomialTerm& term : polynomial.terms())
+        terms.push_back(PolynomialTerm{
+            multiplyMonomial(term.monomial, multiplier.monomial),
+            term.coefficient * multiplier.coefficient});
+    return MultivariateRationalPolynomial{std::move(terms)};
+}
+
+MultivariateRationalPolynomial monicPolynomial(
+    const MultivariateRationalPolynomial& polynomial,
+    const PolynomialRing& ring) {
+    const auto leading = polynomial.leadingTerm(ring);
+    if (!leading)
+        return polynomial;
+    std::vector<PolynomialTerm> terms(polynomial.terms().begin(), polynomial.terms().end());
+    for (PolynomialTerm& term : terms)
+        term.coefficient /= leading->coefficient;
+    return MultivariateRationalPolynomial{std::move(terms)};
+}
+
 std::optional<MultivariateRationalPolynomial> toMultivariateRationalPolynomial(
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     PolynomialConversionOptions options) {
     return convert(expression, builtins, options);
+}
+
+std::optional<MultivariateRationalPolynomial> toMultivariateRationalPolynomial(
+    const Expr& expression,
+    const PolynomialRing& ring,
+    const evaluation::BuiltinRegistry& builtins,
+    PolynomialConversionOptions options) {
+    auto polynomial = convert(expression, builtins, options);
+    if (!polynomial || !polynomial->belongsTo(ring))
+        return std::nullopt;
+    return polynomial;
 }
 
 std::optional<RationalPolynomial> toRationalPolynomial(

@@ -1,0 +1,223 @@
+# mmCal V1.5 consolidated black-box regression
+# Each # @session block runs in a fresh mmCal process.
+
+# ============================================================================
+# Former file: test24_semantic_coherence.txt
+# ============================================================================
+# @session
+# Stage 7: solver-safe normalization, negative domain knowledge, structural N, diagnostics, Lambert W backend classification
+solve[E^x==8,x,Real] ==> {x == log[8]}
+solve[exp[x]==8,x,Real] ==> {x == log[8]}
+solve[2^x==8,x,Real] ==> {x == 3}
+solve[2^(2x+1)==8,x,Real] ==> {x == 1}
+solve[2^x==-1,x,Real] ==> {}
+solve[(1/2)^x==4,x,Real] ==> {x == -2}
+solve[1^x==1,x,Real] ==> All
+solve[1^x==2,x,Real] ==> {}
+solve[ln[x]==2,x,Real] ==> {x == exp[2]}
+solve[log[x]==2,x,Real] ==> {x == exp[2]}
+solve[log2[x]==3,x,Real] ==> {x == 8}
+solve[log10[x]==2,x,Real] ==> {x == 100}
+element[1/2,Integer] ==> False
+element[Pi,Rational] ==> False
+element[Phi,Rational] ==> False
+element[root[{-2,0,1},2],Rational] ==> False
+solve[x==1/2,x,Integer] ==> {}
+solve[x==Pi,x,Integer] ==> {}
+solve[x==Phi,x,Rational] ==> {}
+N[x+Pi,20] ==> 3.1415926535897932385+x
+N[sin[x]+Pi,20] ==> 3.1415926535897932385+sin[x]
+N[True,20] ==> True
+N[Infinity,20] ==> Infinity
+N[lambertw[-1,-1/2],30] ==> lambertw[-1, -1/2]
+N[lambertw[2,1],30] ==> lambertw[2, 1]
+
+# ============================================================================
+# Former file: test27_audit.txt
+# ============================================================================
+# @session
+# mmCal Phase 6 curated semantic audit
+# Focus: Phase 1-5 features plus cross-family calculus/limit invariants.
+
+Clear[]=>"Cleared"
+
+# first-class scalar cases: evaluation, calculus and limit propagation
+cases[1/0 if False;2 if True]==>2
+cases[1 if False;3]==>3
+cases[1 if x>0;2 if x<=0]==>cases[1 if x > 0; 2 if x <= 0]
+simplify[cases[1/x if x!=0;0 if x==0],x!=0]==>1/x
+N[cases[Pi if x!=0;E if x==0],20]==>cases[3.1415926535897932385 if x != 0; 2.7182818284590452354 if x == 0]
+D[cases[x^2 if a>0;sin[x] if a<=0],x]==>cases[2x if a > 0; cos[x] if a <= 0]
+D[cases[x^2 if x>0;sin[x] if x<=0],x]==>D[cases[x^2 if x > 0; sin[x] if x <= 0], x]
+integrate[cases[x if a>0;x^2 if a<=0],x]==>cases[x^2/2 if a > 0; x^3/3 if a <= 0]
+integrate[cases[x if x>0;x^2 if x<=0],x]==>integrate[cases[x if x > 0; x^2 if x <= 0], x]
+limit[cases[sin[x]/x if a>0;(1-cos[x])/x^2 if a<=0],x,0]==>cases[1 if a > 0; 1/2 if a <= 0]
+limit[cases[sin[x]/x if x>0;(1-cos[x])/x^2 if x<=0],x,0]==>limit[cases[sin[x]/x if x > 0; (1-cos[x])/x^2 if x <= 0], x, 0]
+limit[cases[1/x if a>0;x if a<=0],x,0,1]==>cases[Infinity if a > 0; 0 if a <= 0]
+
+# derivative-back invariants: an implemented primitive must differentiate back exactly
+fullSimplify[D[integrate[x^5+3x^2-7,x],x]-(x^5+3x^2-7)]==>0
+fullSimplify[D[integrate[sin[x]^6,x],x]-sin[x]^6]==>0
+fullSimplify[D[integrate[exp[x],x],x]-exp[x]]==>0
+D[integrate[1/(1+x^5),x],x]==>1/(x^5+1)
+D[integrate[exp[x]/x,x],x]==>exp[x]/x
+D[integrate[sin[x]/x,x],x]==>sin[x]/x
+D[integrate[cos[x]/x,x],x]==>cos[x]/x
+D[integrate[1/log[x],x],x]==>1/log[x]
+D[integrate[log[1-x]/x,x],x]==>log[1-x]/x
+D[integrate[log[log[x]],x],x]==>log[log[x]]
+D[integrate[1/sqrt[1-(1/3)sin[x]^2],x],x]==>1/sqrt[1-sin[x]^2/3]
+fullSimplify[D[integrate[sqrt[1-(1/3)sin[x]^2],x],x]-sqrt[1-(1/3)sin[x]^2]]==>0
+D[integrate[1/((1-(1/5)sin[x]^2)*sqrt[1-(1/3)sin[x]^2]),x],x]==>1/((1-sin[x]^2/5)sqrt[1-sin[x]^2/3])
+D[integrate[lambertw[x],x],x]==>lambertw[x]
+D[integrate[sinc[x Rad],x],x]==>sinc[x Rad]
+D[integrate[digamma[x],x],x]==>digamma[x]
+
+# exact limit matrix, including oscillation and principal-branch special points
+limit[sin[x]/x,x,0]==>1
+limit[(1-cos[x])/x^2,x,0]==>1/2
+limit[1/x,x,0,1]==>Infinity
+limit[1/x,x,0,-1]==>-Infinity
+limit[abs[x]/x,x,0,1]==>1
+limit[abs[x]/x,x,0,-1]==>-1
+limit[atan[x],x,Infinity]==>Pi/2
+limit[exp[-x],x,Infinity]==>0
+limit[sin[1/x],x,0]==>Indeterminate
+limit[sin[1/x],x,0,1]==>Indeterminate
+limit[x sin[1/x],x,0]==>0
+limit[Ei[x],x,0]==>-Infinity
+limit[Ei[x],x,Infinity]==>Infinity
+limit[Ei[x],x,-Infinity]==>0
+limit[Ci[x],x,0]==>-Infinity
+limit[Ci[x],x,Infinity]==>0
+limit[Ci[x],x,-Infinity]==>I Pi
+limit[li[x],x,0]==>0
+limit[li[x],x,1]==>-Infinity
+limit[li[x],{x,1,1}]==>-Infinity
+limit[li[x],x,Infinity]==>Infinity
+limit[li[x],x,-Infinity]==>ComplexInfinity
+
+# general Q[x1,...,xn] polynomial ideals and public term orders
+groebnerBasis[{x y-1,y^2-x},{x,y},Lex]==>{x-y^2,y^3-1}
+groebnerBasis[{x y-1,y^2-x},{x,y},GrLex]==>{-y+x^2,-1+x y,-x+y^2}
+groebnerBasis[{x y-1,y^2-x},{x,y},GrevLex]==>{-y+x^2,-1+x y,-x+y^2}
+groebnerBasis[{x y-1,y^2-x},{x,y}]==>{-y+x^2,-1+x y,-x+y^2}
+polynomialReduce[x^2+y^2,{x-y,y^2-1},{x,y},Lex]==>{{x+y,2},2}
+polynomialReduce[x^2-y^2,{x-y},{x,y},Lex]==>{{x+y},0}
+polynomialReduce[x y-1,groebnerBasis[{x y-1,y^2-x},{x,y},Lex],{x,y},Lex]==>{{y,1},0}
+groebnerBasis[groebnerBasis[{x y-1,y^2-x},{x,y},Lex],{x,y},Lex]==>{x-y^2,y^3-1}
+groebnerBasis[{x-y,y-z,z^2-1},{x,y,z},Lex]==>{x-z,y-z,z^2-1}
+groebnerBasis[{x-y,y-z,z^2-1},{x,y,z},GrevLex]==>{z^2-1,x-z,y-z}
+groebnerBasis[{x+y-1,x+y-2},{x,y},Lex]==>{1}
+groebnerBasis[{2x+2y-2,3x-3y},{x,y},Lex]==>{x-1/2,y-1/2}
+groebnerBasis[{x/2+y/3-1,x-y},{x,y},Lex]==>{x-6/5,y-6/5}
+polynomialReduce[x^3-y^3,{x-y},{x,y},Lex]==>{{x y+x^2+y^2},0}
+
+# Gröbner-backed nonlinear solve and exact algebraic fallback
+solve[{x+y==3,x y==2},{x,y}]==>{{x == 1,y == 2},{x == 2,y == 1}}
+solve[{x-y==0,y-z==0,z^2==1},{x,y,z}]==>{{x == 1,y == 1,z == 1},{x == -1,y == -1,z == -1}}
+solve[{x+y==1,x+y==2},{x,y}]==>{}
+solve[{x^2==2,y-x==0},{x,y}]==>{{x == sqrt[2],y == sqrt[2]},{x == -sqrt[2],y == -sqrt[2]}}
+solve[{x y==0},{x,y}]==>UnresolvedSolutionSet[x,y]
+solve[x^5-x-1==0,x]==>{x == root[{-1,-1,0,0,0,1},1,Complex],x == root[{-1,-1,0,0,0,1},2,Complex],x == root[{-1,-1,0,0,0,1},3,Complex],x == root[{-1,-1,0,0,0,1},4,Complex],x == root[{-1,-1,0,0,0,1},5,Complex]}
+
+# Phase 5 complex digamma/trigamma certification and recurrence identities
+N[digamma[1+I],20]=>0.094650320622476977272+1.0766740474685811741I
+N[trigamma[1+I],20]=>0.4630000966227637863-0.79423354275931886558I
+N[digamma[-1/2],20]=>0.036489973978576520559
+N[trigamma[-1/2],20]=>8.9348022005446793094
+N[digamma[10+20I],20]=>3.0974040398479920216+1.1272820831385623569I
+N[trigamma[10+20I],20]=>0.019385328960904373004-0.040797337395151259789I
+N[digamma[2+I]-digamma[1+I]-1/(1+I),20]=>0
+N[trigamma[2+I]-trigamma[1+I]+1/(1+I)^2,20]=>0
+trigamma[2]==>Pi^2/6-1
+D[gamma[x],x]==>digamma[x]gamma[x]
+D[lgamma[x],x]==>digamma[x]
+D[digamma[x],x]==>trigamma[x]
+digamma[0]=>DomainError
+trigamma[-1]=>DomainError
+
+# bounded-work boundaries must stay classified as backend limits, not invented values
+N[Ei[96],20]=>5.1831746110039680653e39
+N[Ei[97],20]==>Ei[97]
+N[Si[96],20]=>1.5725687465291300355
+N[Si[97],20]==>Si[97]
+N[Ci[96],20]=>0.010263050345143993865
+N[Ci[97],20]==>Ci[97]
+N[polylog[2,49/50],20]=>1.5457997120314656097
+N[polylog[2,99/100],20]==>polylog[2,99/100]
+N[hypergeometric1F1[1/2,5/4,160],20]=>>3.4978276269386186e67
+N[hypergeometric1F1[1/2,5/4,161],20]==>hypergeometric1F1[1/2,5/4,161]
+N[hypergeometric2F1[1/2,1/3,5/4,9/10],20]=>1.2540597304760187485
+N[hypergeometric2F1[1/2,1/3,5/4,19/20],20]==>hypergeometric2F1[1/2,1/3,5/4,19/20]
+N[ellipticF[1/2,9/10],20]=>0.51976394243782869496
+N[ellipticF[1/2,19/20],20]==>ellipticF[1/2,19/20]
+N[zeta[1/2],20]==>zeta[1/2]
+N[zeta[1/2+I],20]==>zeta[1/2+I]
+
+# ============================================================================
+# Former file: test28_semantic_hardening.txt
+# ============================================================================
+# @session
+# Definedness-preserving simplification and assumption-gated cancellation.
+simplify[1/x-1/x]==>1/x-1/x
+simplify[1/x-1/x,x!=0]==>0
+simplify[0*(1/x)]==>0*1/x
+simplify[0*(1/x),x!=0]==>0
+simplify[exp[1/x]/exp[1/x]]==>exp[1/x]/exp[1/x]
+simplify[exp[1/x]/exp[1/x],x!=0]==>1
+simplify[exp[1/x]^0]==>exp[1/x]^0
+simplify[exp[1/x]^0,x!=0]==>1
+simplify[sin[1/x]^2+cos[1/x]^2]==>cos[1/x]^2+sin[1/x]^2
+simplify[sin[1/x]^2+cos[1/x]^2,x!=0]==>1
+fullSimplify[1/x-1/x]==>1/x-1/x
+fullSimplify[1/x-1/x,x!=0]==>0
+
+# ValueFacts may prove realness/sign without proving that the expression is defined.
+simplify[im[1/x],element[x,Real]]==>im[1/x]
+simplify[im[1/x],{element[x,Real],x!=0}]==>0
+simplify[sign[exp[1/x]],element[x,Real]]==>sign[exp[1/x]]
+simplify[sign[exp[1/x]],{element[x,Real],x!=0}]==>1
+
+# Existing safe simplifications remain enabled when no domain hole is present.
+simplify[x-x]==>0
+simplify[0*x]==>0
+simplify[exp[x]/exp[x]]==>1
+simplify[sin[x]^2+cos[x]^2]==>1
+simplify[x^0]==>x^0
+simplify[x^0,x!=0]==>1
+
+# ============================================================================
+# Former file: test29_simplifier_domain_audit.txt
+# ============================================================================
+# @session
+# Domain-preserving degenerate special-function rules.
+hypergeometric1F1[0,3,1/x]==>hypergeometric1F1[0, 3, 1/x]
+simplify[hypergeometric1F1[0,3,1/x],x!=0]==>1
+hypergeometric2F1[0,2,3,1/x]==>hypergeometric2F1[0, 2, 3, 1/x]
+simplify[hypergeometric2F1[0,2,3,1/x],x!=0]==>1
+ellipticF[0,1/x]==>ellipticF[0, 1/x]
+simplify[ellipticF[0,1/x],x!=0]==>0
+ellipticE[0,1/x]==>ellipticE[0, 1/x]
+simplify[ellipticE[0,1/x],x!=0]==>0
+ellipticPi[1/x,0,1/y]==>ellipticPi[1/x, 0, 1/y]
+simplify[ellipticPi[1/x,0,1/y],{x!=0,y!=0}]==>0
+polylog[1/x,0]==>polylog[1/x, 0]
+simplify[polylog[1/x,0],x!=0]==>0
+binom[1/x,0]==>binom[1/x, 0]
+simplify[binom[1/x,0],x!=0]==>1
+fallingfact[1/x,0]==>fallingfact[1/x, 0]
+simplify[fallingfact[1/x,0],x!=0]==>1
+risingfact[1/x,0]==>risingfact[1/x, 0]
+simplify[risingfact[1/x,0],x!=0]==>1
+
+# Exact principal-power and zeta definedness.
+simplify[0*x^(3/2)]==>0
+simplify[0*x^(-3/2)]==>0*x^(-3/2)
+simplify[0*x^(-3/2),x!=0]==>0
+simplify[zeta[x]-zeta[x]]==>zeta[x]-zeta[x]
+simplify[zeta[x]-zeta[x],x!=1]==>0
+
+# FullSimplify must not create an uglier Fourier candidate merely to preserve the same hole.
+fullSimplify[sin[1/x]^2+cos[1/x]^2]==>cos[1/x]^2+sin[1/x]^2
+fullSimplify[sin[1/x]^2+cos[1/x]^2,x!=0]==>1

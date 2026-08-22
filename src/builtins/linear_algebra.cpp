@@ -5,6 +5,7 @@
 #include "builtins/array_helpers.hpp"
 #include "builtins/exact_operations.hpp"
 #include "error/error_message.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "expression/array_utils.hpp"
 #include "linear_algebra/approximate_matrix.hpp"
 #include "linear_algebra/decomposition.hpp"
@@ -14,12 +15,16 @@
 #include "linear_algebra/svd.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/real_number.hpp"
 #include "numeric/number.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -41,6 +46,15 @@ using numeric::Number;
 
 [[nodiscard]] bool allNumbers(const ArrayExpr& array) noexcept {
     return array.hasExactNumberStorage();
+}
+
+[[nodiscard]] bool containsFiniteApproximation(const ArrayExpr& array) {
+    for (std::size_t i = 0; i < array.size(); ++i) {
+        const Expr value = array.element(i);
+        if (value.isDecimalApproximation() || value.isComplexDecimalApproximation())
+            return true;
+    }
+    return false;
 }
 
 [[nodiscard]] Expr transposeArray(const ArrayExpr& array) {
@@ -171,6 +185,256 @@ using numeric::Number;
     return {registry, mathematics, angles};
 }
 
+[[nodiscard]] Expr infinity() {
+    return Expr{expression::Symbol{"Infinity"}};
+}
+
+[[nodiscard]] Expr dotPair(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const std::array<Expr, 2> arguments{lhs, rhs};
+    return evaluateDot(arguments, registry, mathematics, angles);
+}
+
+[[nodiscard]] Expr conjugateTransposeValue(
+    const Expr& value,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const std::array<Expr, 1> arguments{value};
+    return evaluateConjugateTranspose(arguments, registry, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<std::vector<std::size_t>> exactPivotColumns(
+    const linear_algebra::MatrixBuffer& reduced) {
+    std::vector<std::size_t> pivots;
+    pivots.reserve(std::min(reduced.rows(), reduced.columns()));
+    for (std::size_t row = 0; row < reduced.rows(); ++row) {
+        for (std::size_t column = 0; column < reduced.columns(); ++column) {
+            const Expr& value = reduced(row, column);
+            if (!value.isNumber())
+                return std::nullopt;
+            if (!value.asNumber().isZero()) {
+                pivots.push_back(column);
+                break;
+            }
+        }
+    }
+    return pivots;
+}
+
+// exact Number行列ではrank factorization A=F Gを作り，
+// A^+=G^H(GG^H)^-1(F^H F)^-1F^H をそのままexact算術で評価する。
+[[nodiscard]] std::optional<Expr> exactPseudoInverse(
+    const ArrayExpr& array,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const linear_algebra::MatrixView matrix{array};
+    const std::size_t rows = matrix.rows();
+    const std::size_t columns = matrix.columns();
+    if (rows == 0 || columns == 0)
+        return Expr::numberArray({columns, rows}, {});
+    if (!linear_algebra::allExactNumbers(matrix))
+        return std::nullopt;
+
+    const auto context = exactContext(registry, mathematics, angles);
+    const auto rank = linear_algebra::matrixRank(matrix, context);
+    if (!rank)
+        return std::nullopt;
+    if (*rank == 0)
+        return Expr::array({columns, rows},
+            std::vector<Expr>(columns * rows, integer(0)));
+
+    const auto reduced = linear_algebra::rref(matrix, context);
+    if (!reduced)
+        return std::nullopt;
+    const auto pivots = exactPivotColumns(*reduced);
+    if (!pivots || pivots->size() != *rank)
+        return std::nullopt;
+
+    std::vector<Expr> fValues;
+    fValues.reserve(rows * *rank);
+    for (std::size_t row = 0; row < rows; ++row)
+        for (const std::size_t column : *pivots)
+            fValues.push_back(matrix(row, column));
+    Expr f = Expr::array({rows, *rank}, std::move(fValues));
+    const linear_algebra::MatrixView fView{f.asArray()};
+
+    std::vector<Expr> gValues(*rank * columns, integer(0));
+    for (std::size_t column = 0; column < columns; ++column) {
+        std::vector<Expr> rhsValues;
+        rhsValues.reserve(rows);
+        for (std::size_t row = 0; row < rows; ++row)
+            rhsValues.push_back(matrix(row, column));
+        const Expr rhs = Expr::array({rows}, std::move(rhsValues));
+        const auto coefficients = linear_algebra::solveLinear(
+            fView, rhs.asArray(), context);
+        if (!coefficients || !coefficients->isArray()
+            || !coefficients->asArray().isVector())
+            return std::nullopt;
+        for (std::size_t row = 0; row < *rank; ++row)
+            gValues[row * columns + column] = coefficients->asArray().element(row);
+    }
+    Expr g = Expr::array({*rank, columns}, std::move(gValues));
+
+    const Expr fh = conjugateTransposeValue(f, registry, mathematics, angles);
+    const Expr gh = conjugateTransposeValue(g, registry, mathematics, angles);
+    const Expr fGram = dotPair(fh, f, registry, mathematics, angles);
+    const Expr gGram = dotPair(g, gh, registry, mathematics, angles);
+
+    const std::array<Expr, 1> fGramArguments{fGram};
+    const std::array<Expr, 1> gGramArguments{gGram};
+    const Expr fGramInverse = evaluateMatrixInverse(
+        fGramArguments, registry, mathematics, angles);
+    const Expr gGramInverse = evaluateMatrixInverse(
+        gGramArguments, registry, mathematics, angles);
+
+    const Expr left = dotPair(gh, gGramInverse, registry, mathematics, angles);
+    const Expr middle = dotPair(left, fGramInverse, registry, mathematics, angles);
+    return dotPair(middle, fh, registry, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> exactConditionNumber(
+    const ArrayExpr& array,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const linear_algebra::MatrixView matrix{array};
+    const std::size_t k = std::min(matrix.rows(), matrix.columns());
+    if (k == 0 || !linear_algebra::allExactNumbers(matrix))
+        return std::nullopt;
+
+    const auto rank = linear_algebra::matrixRank(
+        matrix, exactContext(registry, mathematics, angles));
+    if (!rank)
+        return std::nullopt;
+    if (*rank < k)
+        return infinity();
+    if (k == 1)
+        return integer(1);
+
+    for (std::size_t row = 0; row < matrix.rows(); ++row)
+        for (std::size_t column = 0; column < matrix.columns(); ++column) {
+            const Expr value = matrix(row, column);
+            if (!value.isNumber() || !value.asNumber().isReal())
+                return std::nullopt;
+            if (row != column && !value.asNumber().isZero())
+                return std::nullopt;
+        }
+
+    numeric::RealNumber minimum = matrix(0, 0).asNumber().asReal().abs();
+    numeric::RealNumber maximum = minimum;
+    for (std::size_t i = 1; i < k; ++i) {
+        const numeric::RealNumber magnitude = matrix(i, i).asNumber().asReal().abs();
+        if (magnitude < minimum)
+            minimum = magnitude;
+        if (magnitude > maximum)
+            maximum = magnitude;
+    }
+    if (minimum.isZero())
+        return infinity();
+    return Expr{Number{maximum} / Number{minimum}};
+}
+
+[[nodiscard]] std::optional<std::array<Expr, 3>> svdFactors(const Expr& value) {
+    if (value.isList()) {
+        const auto& list = value.asList();
+        if (list.size() != 3)
+            return std::nullopt;
+        return std::array<Expr, 3>{
+            list.elements[0], list.elements[1], list.elements[2]};
+    }
+    if (!value.isArray())
+        return std::nullopt;
+
+    const ArrayExpr& array = value.asArray();
+    if (array.rank() < 2 || array.shape.front() != 3)
+        return std::nullopt;
+    std::vector<std::size_t> factorShape(array.shape.begin() + 1, array.shape.end());
+    const std::size_t factorSize = expression::arrayElementCount(factorShape);
+    return std::array<Expr, 3>{
+        Expr::array(array.sliced(factorShape, 0, factorSize)),
+        Expr::array(array.sliced(factorShape, factorSize, factorSize)),
+        Expr::array(array.sliced(std::move(factorShape), factorSize * 2, factorSize))};
+}
+
+[[nodiscard]] std::optional<std::size_t> approximateRank(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    const auto result = linear_algebra::approximateMatrixRank(
+        arguments, registry, mathematics, angles, std::move(context));
+    if (!result || !result->isNumber() || !result->asNumber().isReal()
+        || !result->asNumber().asReal().isInteger())
+        return std::nullopt;
+    const auto converted = numeric::tryToUint64(
+        result->asNumber().asReal().asInteger());
+    if (!converted || *converted > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    return static_cast<std::size_t>(*converted);
+}
+
+[[nodiscard]] std::optional<Expr> approximateSvdPseudoInverse(
+    const ArrayExpr& source,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    const std::size_t k = std::min(source.shape[0], source.shape[1]);
+    if (k == 0)
+        return Expr::numberArray({source.shape[1], source.shape[0]}, {});
+
+    const std::array<Expr, 1> rankArguments{Expr::array(source)};
+    const auto rank = approximateRank(
+        rankArguments, registry, mathematics, angles, context);
+    if (!rank)
+        return std::nullopt;
+    // 有限precisionでrank deficiencyを閾値推測しない。exact入力は後段の
+    // rank-factorization経路でminimum-norm解を正確に作れる。
+    if (*rank != k)
+        return std::nullopt;
+
+    const auto decomposition = linear_algebra::approximateSingularValueDecomposition(
+        source, registry, mathematics, angles, context);
+    if (!decomposition)
+        return std::nullopt;
+    const auto factors = svdFactors(*decomposition);
+    if (!factors || !(*factors)[0].isArray() || !(*factors)[1].isArray()
+        || !(*factors)[2].isArray())
+        return std::nullopt;
+
+    const ArrayExpr& sigma = (*factors)[1].asArray();
+    if (!sigma.isMatrix() || sigma.shape[0] != k || sigma.shape[1] != k)
+        return std::nullopt;
+    std::vector<Expr> inverseSigmaValues(k * k, integer(0));
+    for (std::size_t i = 0; i < k; ++i) {
+        const Expr singular = sigma.element(i * k + i);
+        const auto reciprocal = approximation::divideApproximateScalars(
+            integer(1), singular);
+        if (!reciprocal)
+            return std::nullopt;
+        inverseSigmaValues[i * k + i] = *reciprocal;
+    }
+    const Expr inverseSigma = Expr::array({k, k}, std::move(inverseSigmaValues));
+    const Expr uh = conjugateTransposeValue(
+        (*factors)[0], registry, mathematics, angles);
+
+    const std::array<Expr, 2> firstArguments{(*factors)[2], inverseSigma};
+    const auto first = evaluateApproximateDot(
+        firstArguments, registry, mathematics, angles, context);
+    if (!first)
+        return std::nullopt;
+    const std::array<Expr, 2> secondArguments{*first, uh};
+    return evaluateApproximateDot(
+        secondArguments, registry, mathematics, angles, std::move(context));
+}
+
 } // namespace
 
 Expr evaluateTranspose(
@@ -204,26 +468,8 @@ Expr evaluateConjugateTranspose(
             return value;
         if (value.isComplexDecimalApproximation()) {
             const auto& complex = value.asComplexDecimalApproximation();
-            const auto& imaginary = complex.imaginary();
-            const std::size_t precisionDigits = imaginary.requestedSignificantDigits() != 0
-                ? imaginary.requestedSignificantDigits()
-                : imaginary.requestedFractionalDigits();
-            numeric::DecimalApproximation conjugateImaginary = [&] {
-                if (imaginary.origin() == numeric::ApproximationOrigin::ExactValue)
-                    return numeric::DecimalApproximation::fromRealSignificant(
-                        numeric::RealNumber{-imaginary.displayedValue()},
-                        precisionDigits);
-                const auto result = numeric::DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(
-                    -imaginary.certifiedUpper(), -imaginary.certifiedLower(),
-                    -imaginary.informationUpper(), -imaginary.informationLower(),
-                    precisionDigits);
-                if (!result)
-                    throw std::logic_error(
-                        "Conjugating a certified decimal approximation must preserve rounding");
-                return *result;
-            }();
             return Expr{numeric::ComplexDecimalApproximation::fromComponents(
-                complex.real(), std::move(conjugateImaginary),
+                complex.real(), complex.imaginary().negated(),
                 complex.realExactlyZero(), complex.imaginaryExactlyZero())};
         }
         const mathematics::ValueFacts facts = mathematics::inferValueFacts(
@@ -324,6 +570,8 @@ Expr evaluateDot(
         error::throwCalcError(error::CalcErrorType::Overflow,
             "dot result dimensions overflow the addressable element count");
     }
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, outputSize);
 
     if (numericInputs) {
         std::vector<Number> output;
@@ -390,10 +638,14 @@ Expr evaluateMatrixInverse(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (const auto context = approximation::inferredApproximationContext(arguments))
+    if (const auto context = approximation::inferredApproximationContext(arguments)) {
         if (const auto result = evaluateApproximateInverse(
             arguments, registry, mathematics, angles, *context))
             return *result;
+        // 有限precision入力で特異性を証明できない場合，hidden certified pointを
+        // 用いた記号逆行列へ逃げない。入力情報のまま未評価に保つ。
+        return Expr::call(registry.symbol(BuiltinId::Inverse), {arguments.front()});
+    }
 
     const ArrayExpr& array = detail::requireMatrix(arguments.front(), "inverse");
     if (array.shape[0] != array.shape[1])
@@ -524,6 +776,49 @@ Expr evaluateSingularValueDecomposition(
     if (result)
         return *result;
     return Expr::call(registry.symbol(BuiltinId::SingularValueDecomposition), {arguments.front()});
+}
+
+Expr evaluateConditionNumber(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "conditionNumber");
+    if (array.shape[0] == 0 || array.shape[1] == 0)
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "conditionNumber requires a non-empty matrix");
+    if (const auto result = exactConditionNumber(array, registry, mathematics, angles))
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::ConditionNumber), {arguments.front()});
+}
+
+Expr evaluatePseudoInverse(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments.front(), "pseudoInverse");
+    if (const auto result = exactPseudoInverse(array, registry, mathematics, angles))
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::PseudoInverse), {arguments.front()});
+}
+
+Expr evaluateLeastSquares(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "leastSquares");
+    const ArrayExpr& rhs = detail::requireVector(arguments[1], "leastSquares");
+    if (rhs.shape[0] != matrix.shape[0])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "leastSquares right-hand side size must match the matrix row count");
+
+    const auto inverse = exactPseudoInverse(matrix, registry, mathematics, angles);
+    if (!inverse)
+        return Expr::call(registry.symbol(BuiltinId::LeastSquares),
+            {arguments[0], arguments[1]});
+    return dotPair(*inverse, arguments[1], registry, mathematics, angles);
 }
 
 Expr evaluateEigenvalues(
@@ -714,7 +1009,8 @@ std::optional<Expr> evaluateApproximateLuDecomposition(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateLuDecomposition(
         arguments.front().asArray(), registry, mathematics, angles, context);
@@ -726,7 +1022,8 @@ std::optional<Expr> evaluateApproximateQrDecomposition(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateQrDecomposition(
         arguments.front().asArray(), registry, mathematics, angles, context);
@@ -738,10 +1035,92 @@ std::optional<Expr> evaluateApproximateSingularValueDecomposition(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateSingularValueDecomposition(
         arguments.front().asArray(), registry, mathematics, angles, context);
+}
+
+std::optional<Expr> evaluateApproximateConditionNumber(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || !arguments.front().asArray().isMatrix())
+        return std::nullopt;
+    const ArrayExpr& source = arguments.front().asArray();
+    if (containsFiniteApproximation(source))
+        return std::nullopt;
+    const std::size_t k = std::min(source.shape[0], source.shape[1]);
+    if (k == 0)
+        return std::nullopt;
+
+    const auto rank = approximateRank(arguments, registry, mathematics, angles, context);
+    if (!rank)
+        return std::nullopt;
+    if (*rank != k)
+        return infinity();
+
+    const auto decomposition = linear_algebra::approximateSingularValueDecomposition(
+        source, registry, mathematics, angles, context);
+    if (!decomposition)
+        return std::nullopt;
+    const auto factors = svdFactors(*decomposition);
+    if (!factors || !(*factors)[1].isArray())
+        return std::nullopt;
+    const ArrayExpr& sigma = (*factors)[1].asArray();
+    if (!sigma.isMatrix() || sigma.shape[0] != k || sigma.shape[1] != k)
+        return std::nullopt;
+
+    const Expr largest = sigma.element(0);
+    const Expr smallest = sigma.element((k - 1) * k + (k - 1));
+    return approximation::divideApproximateScalars(largest, smallest);
+}
+
+std::optional<Expr> evaluateApproximatePseudoInverse(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || !arguments.front().asArray().isMatrix()
+        || containsFiniteApproximation(arguments.front().asArray()))
+        return std::nullopt;
+    return approximateSvdPseudoInverse(
+        arguments.front().asArray(), registry, mathematics, angles, std::move(context));
+}
+
+std::optional<Expr> evaluateApproximateLeastSquares(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    if (arguments.size() != 2 || !arguments[0].isArray() || !arguments[1].isArray()
+        || !arguments[0].asArray().isMatrix() || !arguments[1].asArray().isVector())
+        return std::nullopt;
+    if (arguments[1].asArray().shape[0] != arguments[0].asArray().shape[0])
+        return std::nullopt;
+    if (containsFiniteApproximation(arguments[0].asArray()))
+        return std::nullopt;
+
+    // 擬似逆行列を要求表示桁へ先に丸めると，その丸め幅をdotが再伝播して
+    // leastSquaresだけ有効桁を余計に失う。中間値は作業桁まで保持し，
+    // 利用者向けの丸めは最後のdotで一度だけ行う。
+    approximation::ApproximationContext intermediateContext = context;
+    intermediateContext.setDecimalDigits(context.workingDecimalDigits());
+    const std::array<Expr, 1> inverseArguments{arguments[0]};
+    const auto inverse = evaluateApproximatePseudoInverse(
+        inverseArguments, registry, mathematics, angles, intermediateContext);
+    if (!inverse)
+        return std::nullopt;
+    const std::array<Expr, 2> dotArguments{*inverse, arguments[1]};
+    return evaluateApproximateDot(
+        dotArguments, registry, mathematics, angles, std::move(context));
 }
 
 std::optional<Expr> evaluateApproximateEigenvalues(
@@ -750,7 +1129,8 @@ std::optional<Expr> evaluateApproximateEigenvalues(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateEigenvalues(
         arguments.front().asArray(), registry, mathematics, angles, std::move(context));
@@ -762,7 +1142,8 @@ std::optional<Expr> evaluateApproximateEigenvectors(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateEigenvectors(
         arguments.front().asArray(), registry, mathematics, angles, std::move(context));
@@ -774,7 +1155,8 @@ std::optional<Expr> evaluateApproximateEigensystem(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context) {
-    if (arguments.size() != 1 || !arguments.front().isArray())
+    if (arguments.size() != 1 || !arguments.front().isArray()
+        || containsFiniteApproximation(arguments.front().asArray()))
         return std::nullopt;
     return linear_algebra::approximateEigensystem(
         arguments.front().asArray(), registry, mathematics, angles, std::move(context));

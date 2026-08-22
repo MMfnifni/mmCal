@@ -928,6 +928,9 @@ using numeric::Number;
     case BuiltinId::LuDecomposition:
     case BuiltinId::QrDecomposition:
     case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::ConditionNumber:
+    case BuiltinId::LeastSquares:
+    case BuiltinId::PseudoInverse:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -1013,6 +1016,10 @@ using numeric::Number;
     case BuiltinId::Factor:
     case BuiltinId::Collect:
     case BuiltinId::Solve:
+    case BuiltinId::GroebnerBasis:
+    case BuiltinId::PolynomialReduce:
+    case BuiltinId::Cases:
+    case BuiltinId::CaseBranch:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
     case BuiltinId::Less:

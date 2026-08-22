@@ -18,20 +18,22 @@ std::string_view syntaxKindName(const SyntaxNode& node) noexcept {
     case 5:
         return "function call";
     case 6:
-        return "group";
+        return "cases expression";
     case 7:
-        return "unary expression";
+        return "group";
     case 8:
-        return "binary expression";
+        return "unary expression";
     case 9:
-        return "postfix expression";
+        return "binary expression";
     case 10:
-        return "comparison";
+        return "postfix expression";
     case 11:
-        return "assignment";
+        return "comparison";
     case 12:
-        return "function signature";
+        return "assignment";
     case 13:
+        return "function signature";
+    case 14:
         return "unit application";
     default:
         return "syntax node";

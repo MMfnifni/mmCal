@@ -103,6 +103,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <EnableParallelCodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</EnableParallelCodeGeneration>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -110,6 +111,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile>
+      <LargeAddressAware Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</LargeAddressAware>
+      <StackReserveSize Condition="'$(Configuration)|$(Platform)'=='Release|x64'">16777216 </StackReserveSize>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -117,6 +120,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="version.h" />
+    <ClInclude Include="src\cli\repl_help.hpp" />
     <ClInclude Include="src\cli\startup_options.hpp" />
   </ItemGroup>
   <ItemGroup>

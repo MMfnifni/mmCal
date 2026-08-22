@@ -165,6 +165,9 @@ void requireArity(std::span<const Expr> arguments, std::size_t arity, std::strin
                 return lower;
         }
         catch (const approximation::PrecisionInsufficient&) {}
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
+        }
     }
     return std::nullopt;
 }
@@ -248,6 +251,9 @@ enum class IntegralRoundingOperation {
         }
         catch (const approximation::PrecisionInsufficient&) {
             // 分岐や符号をまだ証明できない場合だけ精度を上げて再試行する。
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
     }
     return std::nullopt;
@@ -340,6 +346,9 @@ enum class IntegralRoundingOperation {
         }
         catch (const approximation::PrecisionInsufficient&) {
             // power-of-two境界や符号が未確定なら精度を増やして再試行する。
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
     }
     return std::nullopt;

@@ -25,6 +25,8 @@ enum class PredefinedSymbolId {
     RealDomain,
     ComplexDomain,
     Infinity,
+    ComplexInfinity,
+    Indeterminate,
     DegreeUnit,
     RadianUnit,
     GradianUnit
@@ -37,6 +39,7 @@ enum class PredefinedSymbolKind {
     BooleanTrue,
     BooleanFalse,
     MathematicalDomain,
+    ExceptionalValue,
     EnumeratedValue
 };
 
@@ -61,6 +64,7 @@ public:
         bool protectedName = true);
     [[nodiscard]] const PredefinedSymbolDefinition* find(const expression::Symbol& symbol) const noexcept;
     [[nodiscard]] const PredefinedSymbolDefinition* find(std::string_view name) const noexcept;
+    [[nodiscard]] const PredefinedSymbolDefinition* find(PredefinedSymbolId id) const noexcept;
     [[nodiscard]] bool contains(const expression::Symbol& symbol) const noexcept;
     [[nodiscard]] bool contains(std::string_view name) const noexcept;
     [[nodiscard]] bool isProtected(const expression::Symbol& symbol) const noexcept;

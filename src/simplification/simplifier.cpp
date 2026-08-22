@@ -5,6 +5,7 @@
 #include "expression_ordering.hpp"
 
 #include "error/error_message.hpp"
+#include "mathematics/definedness.hpp"
 #include "mathematics/exact_algebra.hpp"
 #include "mathematics/exact_hyperbolic.hpp"
 #include "mathematics/exact_roots.hpp"
@@ -21,6 +22,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -36,6 +38,49 @@ using numeric::BigInt;
 using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
+
+
+[[nodiscard]] bool provablyDefined(
+    const Expr& expression,
+    const SimplificationContext& context) {
+    if (context.assumeExpressionsDefined)
+        return true;
+
+    const auto conditions = mathematics::expressionDomainConditions(
+        expression, context.builtins, context.mathematics);
+    if (!conditions)
+        return false;
+
+    const mathematics::KnowledgeContext knowledge = context.knowledge();
+    for (const mathematics::Predicate& condition : conditions->predicates())
+        if (knowledge.prove(condition) != TruthValue::True)
+            return false;
+    return true;
+}
+
+[[nodiscard]] std::optional<mathematics::Predicate> conditionPredicate(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    std::optional<RelationKind> kind;
+    switch (definition->id) {
+    case BuiltinId::Equal: kind = RelationKind::Equal; break;
+    case BuiltinId::NotEqual: kind = RelationKind::NotEqual; break;
+    case BuiltinId::Less: kind = RelationKind::Less; break;
+    case BuiltinId::LessEqual: kind = RelationKind::LessEqual; break;
+    case BuiltinId::Greater: kind = RelationKind::Greater; break;
+    case BuiltinId::GreaterEqual: kind = RelationKind::GreaterEqual; break;
+    default: return std::nullopt;
+    }
+    return mathematics::relation(
+        *kind,
+        expression.asCall().arguments[0],
+        expression.asCall().arguments[1]);
+}
 
 [[nodiscard]] Expr integerExpr(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
@@ -94,8 +139,11 @@ void sortCanonical(std::vector<Expr>& expressions) {
 }
 
 [[nodiscard]] bool containsInfinity(const Expr& expression) {
-    if (expression.isSymbol())
-        return expression.asSymbol().view() == "Infinity";
+    if (expression.isSymbol()) {
+        const std::string_view name = expression.asSymbol().view();
+        return name == "Infinity" || name == "ComplexInfinity"
+            || name == "Indeterminate";
+    }
     if (expression.isCall()) {
         for (const Expr& argument : expression.asCall().arguments)
             if (containsInfinity(argument))
@@ -113,6 +161,21 @@ void sortCanonical(std::vector<Expr>& expressions) {
                 return true;
     }
     return false;
+}
+
+[[nodiscard]] std::optional<Expr> predefinedValue(
+    const SimplificationContext& context,
+    symbols::PredefinedSymbolId id) {
+    if (!context.predefinedSymbols)
+        return std::nullopt;
+    const auto* definition = context.predefinedSymbols->find(id);
+    if (!definition)
+        return std::nullopt;
+    return Expr{definition->symbol};
+}
+
+[[nodiscard]] bool isPositiveInfinity(const Expr& expression) noexcept {
+    return expression.isSymbol() && expression.asSymbol().view() == "Infinity";
 }
 
 template <typename Visitor>
@@ -226,7 +289,8 @@ struct TrigSquare final {
 
 [[nodiscard]] Expr canonicalAdd(
     const std::vector<Expr>& arguments,
-    const evaluation::BuiltinRegistry& builtins) {
+    const SimplificationContext& context) {
+    const auto& builtins = context.builtins;
     Number numericSum{BigInt{0}};
     std::vector<Expr> terms;
     terms.reserve(arguments.size());
@@ -291,7 +355,8 @@ struct TrigSquare final {
         if (groups[i].coefficient.isZero())
             continue;
         const auto lhs = trigSquare(groups[i].atom, builtins);
-        if (!lhs || lhs->function != BuiltinId::Sin)
+        if (!lhs || lhs->function != BuiltinId::Sin
+            || !provablyDefined(lhs->argument, context))
             continue;
         for (std::size_t j = 0; j < groups.size(); ++j) {
             if (groups[j].coefficient != groups[i].coefficient)
@@ -317,8 +382,12 @@ struct TrigSquare final {
         result.emplace_back(std::move(numericSum));
 
     for (Group& group : groups) {
-        if (group.coefficient.isZero())
+        if (group.coefficient.isZero()) {
+            if (!provablyDefined(group.atom, context))
+                result.push_back(Expr::call(
+                    builtins.symbol(BuiltinId::Subtract), {group.atom, group.atom}));
             continue;
+        }
         result.push_back(mathematics::scaleExactExpression(
             group.coefficient, group.atom, builtins));
     }
@@ -742,7 +811,7 @@ struct PositiveIntegerPower final {
 
     switch (definition->id) {
     case BuiltinId::Add: {
-        Expr canonical = canonicalAdd(arguments, context.builtins);
+        Expr canonical = canonicalAdd(arguments, context);
         if (auto hypergeometric = simplifyHypergeometricContiguous(canonical, context.builtins))
             return *hypergeometric;
         if (auto hypergeometric = simplifyHypergeometric2F1Contiguous(canonical, context.builtins))
@@ -751,16 +820,25 @@ struct PositiveIntegerPower final {
     }
 
     case BuiltinId::Multiply:
+        if (std::any_of(arguments.begin(), arguments.end(), [](const Expr& argument) {
+                return argument.isNumber() && argument.asNumber().isZero();
+            })) {
+            for (const Expr& argument : arguments)
+                if (!(argument.isNumber() && argument.asNumber().isZero())
+                    && !provablyDefined(argument, context))
+                    return expression;
+        }
         return canonicalMultiply(arguments, context.builtins);
 
-    case BuiltinId::Subtract:
+    case BuiltinId::Subtract: {
         if (arguments.size() != 2)
             return expression;
         if (arguments[0].isNumber() && arguments[1].isNumber())
             return Expr{arguments[0].asNumber() - arguments[1].asNumber()};
         if (isExactReal(arguments[1], 0))
             return arguments[0];
-        if (arguments[0] == arguments[1] && !containsInfinity(arguments[0]))
+        if (arguments[0] == arguments[1] && !containsInfinity(arguments[0])
+            && provablyDefined(arguments[0], context))
             return integerExpr(0);
         if (isExactReal(arguments[0], 0))
             return Expr::call(
@@ -786,7 +864,22 @@ struct PositiveIntegerPower final {
             return Expr::call(
                 context.builtins.symbol(BuiltinId::Add),
                 {arguments[0], arguments[1].asCall().arguments.front()});
+        // builtin評価で(a+b)-aが後から現れる場合だけ，同一のdefined termを安全に相殺する。
+        // 一般のsubtractionを加法normal formへ並べ替えないため，積分結果等の既存表示順は維持する。
+        if (isHead(arguments[0], context.builtins, BuiltinId::Add)
+            && provablyDefined(arguments[1], context)) {
+            std::vector<Expr> remaining = arguments[0].asCall().arguments;
+            const auto match = std::find(remaining.begin(), remaining.end(), arguments[1]);
+            if (match != remaining.end()) {
+                remaining.erase(match);
+                if (remaining.empty())
+                    return integerExpr(0);
+                return canonicalAdd(remaining, context);
+            }
+        }
+
         return expression;
+    }
 
     case BuiltinId::Divide:
         if (arguments.size() != 2)
@@ -798,6 +891,7 @@ struct PositiveIntegerPower final {
         if (isExactReal(arguments[1], 1))
             return arguments[0];
         if ((arguments[0] == arguments[1] || isExactReal(arguments[0], 0))
+            && provablyDefined(arguments[1], context)
             && proveNonZero(arguments[1], knowledge) == TruthValue::True)
             return arguments[0] == arguments[1] ? integerExpr(1) : integerExpr(0);
 
@@ -805,6 +899,7 @@ struct PositiveIntegerPower final {
         // 旧canonicalDivideはdomain hole保持のためsymbolic因子を一切cancelしなかったが、
         // Pi*x/PiのようにKnowledgeが非零を証明できるケースまで残していた。
         if (isHead(arguments[0], context.builtins, BuiltinId::Multiply)
+            && provablyDefined(arguments[1], context)
             && proveNonZero(arguments[1], knowledge) == TruthValue::True) {
             std::vector<Expr> factors = arguments[0].asCall().arguments;
             const auto match = std::find(factors.begin(), factors.end(), arguments[1]);
@@ -854,11 +949,54 @@ struct PositiveIntegerPower final {
         if (isHead(arguments[0], context.builtins, BuiltinId::Negate)
             && arguments[0].asCall().arguments.size() == 1)
             return arguments[0].asCall().arguments.front();
+        if (isHead(arguments[0], context.builtins, BuiltinId::If)
+            && arguments[0].asCall().arguments.size() == 3) {
+            const auto& branch = arguments[0].asCall().arguments;
+            return Expr::call(context.builtins.symbol(BuiltinId::If), {
+                branch[0],
+                Expr::call(context.builtins.symbol(BuiltinId::Negate), {branch[1]}),
+                Expr::call(context.builtins.symbol(BuiltinId::Negate), {branch[2]})});
+        }
+        if (isHead(arguments[0], context.builtins, BuiltinId::Cases)) {
+            std::vector<Expr> branches;
+            branches.reserve(arguments[0].asCall().arguments.size());
+            for (const Expr& branchExpression : arguments[0].asCall().arguments) {
+                if (!isHead(branchExpression, context.builtins, BuiltinId::CaseBranch)
+                    || branchExpression.asCall().arguments.empty()
+                    || branchExpression.asCall().arguments.size() > 2)
+                    return expression;
+                const auto& branch = branchExpression.asCall().arguments;
+                std::vector<Expr> branchArguments{
+                    Expr::call(context.builtins.symbol(BuiltinId::Negate), {branch[0]})};
+                if (branch.size() == 2)
+                    branchArguments.push_back(branch[1]);
+                branches.push_back(Expr::call(
+                    context.builtins.symbol(BuiltinId::CaseBranch),
+                    std::move(branchArguments)));
+            }
+            return Expr::call(context.builtins.symbol(BuiltinId::Cases), std::move(branches));
+        }
         return expression;
 
     case BuiltinId::Power:
         if (arguments.size() != 2)
             return expression;
+        if (arguments[1].isSymbol()
+            && arguments[1].asSymbol().view() == "ComplexInfinity") {
+            if (const auto value = predefinedValue(
+                    context, symbols::PredefinedSymbolId::Indeterminate))
+                return *value;
+        }
+        if (isPositiveInfinity(arguments[1])) {
+            const Expr magnitude = Expr::call(
+                context.builtins.symbol(BuiltinId::Abs), {arguments[0]});
+            if (knowledge.prove(mathematics::relation(
+                    RelationKind::Equal, magnitude, integerExpr(1))) == TruthValue::True) {
+                if (const auto value = predefinedValue(
+                        context, symbols::PredefinedSymbolId::Indeterminate))
+                    return *value;
+            }
+        }
         // E^z = exp[z] はprincipal branchに依存しない全域恒等式。
         // 指数函数の知識をPower/Expで二重化せず、canonicalなExp headへ寄せる。
         if (isMathematicalConstant(
@@ -869,9 +1007,12 @@ struct PositiveIntegerPower final {
             && arguments[1].asNumber().asReal().isInteger()) {
             const BigInt& exponent = arguments[1].asNumber().asReal().asInteger();
             if (arguments[0].asNumber().isZero()) {
-                if (exponent.isZero())
-                    error::throwCalcError(error::CalcErrorType::Domain,
-                        "Zero to the zero power is indeterminate");
+                if (exponent.isZero()) {
+                    if (const auto value = predefinedValue(
+                            context, symbols::PredefinedSymbolId::Indeterminate))
+                        return *value;
+                    return expression;
+                }
                 if (exponent.isNegative())
                     error::throwCalcError(error::CalcErrorType::Domain,
                         "Zero cannot be raised to a negative power");
@@ -895,6 +1036,22 @@ struct PositiveIntegerPower final {
                     innerArguments[0], Expr{Number{combined}}});
             }
         }
+        // (a/b)^n = a^n/b^n は正のexact integer n ならprincipal branchに依存せず安全。
+        // sqrt等を含む有理函数の微分後に (u/sqrt[c])^2 をu^2/cへ落とせるようにする。
+        if (const auto exponent = positiveExactInteger(arguments[1]); exponent
+            && isHead(arguments[0], context.builtins, BuiltinId::Divide)
+            && arguments[0].asCall().arguments.size() == 2) {
+            const auto magnitude = numeric::tryToUint64(*exponent);
+            if (magnitude && *magnitude <= 64) {
+                const auto& quotient = arguments[0].asCall().arguments;
+                return Expr::call(context.builtins.symbol(BuiltinId::Divide), {
+                    Expr::call(context.builtins.symbol(BuiltinId::Power),
+                        {quotient[0], arguments[1]}),
+                    Expr::call(context.builtins.symbol(BuiltinId::Power),
+                        {quotient[1], arguments[1]})});
+            }
+        }
+
         // (c*a)^n でnが正のexact integerなら、exact numeric係数cだけを外へ出す。
         // (ab)^z=a^z b^z を一般複素指数へ拡張せず、式サイズも増やさない限定形。
         // 例: (861(1-x)^64)^3 -> 638277381((1-x)^64)^3 -> 638277381(1-x)^192。
@@ -928,7 +1085,8 @@ struct PositiveIntegerPower final {
         if (isExactReal(arguments[1], 1))
             return arguments[0];
         if (isExactReal(arguments[1], 0)) {
-            if (proveNonZero(arguments[0], knowledge) == TruthValue::True)
+            if (provablyDefined(arguments[0], context)
+                && proveNonZero(arguments[0], knowledge) == TruthValue::True)
                 return integerExpr(1);
             return expression;
         }
@@ -1156,12 +1314,14 @@ struct PositiveIntegerPower final {
         }
 
         const mathematics::ValueFacts facts = knowledge.facts(input);
-        if (facts.sign == mathematics::RealSign::Zero)
-            return integerExpr(0);
-        if (facts.sign == mathematics::RealSign::Positive)
-            return integerExpr(1);
-        if (facts.sign == mathematics::RealSign::Negative)
-            return integerExpr(-1);
+        if (provablyDefined(input, context)) {
+            if (facts.sign == mathematics::RealSign::Zero)
+                return integerExpr(0);
+            if (facts.sign == mathematics::RealSign::Positive)
+                return integerExpr(1);
+            if (facts.sign == mathematics::RealSign::Negative)
+                return integerExpr(-1);
+        }
         if (isHead(input, context.builtins, BuiltinId::Negate)
             && input.asCall().arguments.size() == 1)
             return Expr::call(
@@ -1206,7 +1366,8 @@ struct PositiveIntegerPower final {
         const Expr& input = arguments[0];
         if (input.isNumber())
             return Expr{Number{input.asNumber().imaginaryPart()}};
-        if (knowledge.facts(input).isProvablyReal())
+        if (knowledge.facts(input).isProvablyReal()
+            && provablyDefined(input, context))
             return integerExpr(0);
         if (isHead(input, context.builtins, BuiltinId::Conj)
             && input.asCall().arguments.size() == 1)
@@ -1381,7 +1542,8 @@ struct PositiveIntegerPower final {
             const Expr baseMinusOne = Expr::call(
                 context.builtins.symbol(BuiltinId::Subtract),
                 {arguments[0], integerExpr(1)});
-            const bool validBase = proveNonZero(arguments[0], knowledge) == TruthValue::True
+            const bool validBase = provablyDefined(arguments[0], context)
+                && proveNonZero(arguments[0], knowledge) == TruthValue::True
                 && proveNonZero(baseMinusOne, knowledge) == TruthValue::True;
             if (validBase && isExactReal(arguments[1], 1))
                 return integerExpr(0);
@@ -1435,18 +1597,29 @@ struct PositiveIntegerPower final {
         return expression;
 
     case BuiltinId::Hypergeometric1F1:
+        if (arguments.size() == 3
+            && isExactReal(arguments[0], 0)
+            && provablyDefined(arguments[0], context)
+            && provablyDefined(arguments[1], context)
+            && provablyDefined(arguments[2], context))
+            return integerExpr(1);
         return expression;
 
     case BuiltinId::Hypergeometric2F1:
         if (arguments.size() == 4
-            && (isExactReal(arguments[0], 0) || isExactReal(arguments[1], 0)))
+            && (isExactReal(arguments[0], 0) || isExactReal(arguments[1], 0))
+            && provablyDefined(arguments[0], context)
+            && provablyDefined(arguments[1], context)
+            && provablyDefined(arguments[2], context)
+            && provablyDefined(arguments[3], context))
             return integerExpr(1);
         return expression;
 
     case BuiltinId::EllipticF:
     case BuiltinId::EllipticE:
         if (arguments.size() == 2) {
-            if (isExactReal(arguments[0], 0))
+            if (isExactReal(arguments[0], 0)
+                && provablyDefined(arguments[1], context))
                 return integerExpr(0);
             if (isExactReal(arguments[1], 0))
                 return arguments[0];
@@ -1455,7 +1628,9 @@ struct PositiveIntegerPower final {
 
     case BuiltinId::EllipticPi:
         if (arguments.size() == 3) {
-            if (isExactReal(arguments[1], 0))
+            if (isExactReal(arguments[1], 0)
+                && provablyDefined(arguments[0], context)
+                && provablyDefined(arguments[2], context))
                 return integerExpr(0);
             if (isExactReal(arguments[0], 0))
                 return Expr::call(context.builtins.symbol(BuiltinId::EllipticF),
@@ -1475,6 +1650,20 @@ struct PositiveIntegerPower final {
         if (auto exact = mathematics::simplifyExactExp(
             arguments[0], context.builtins, context.mathematics))
             return std::move(*exact);
+        return expression;
+
+    case BuiltinId::Polylog:
+        if (arguments.size() == 2 && isExactReal(arguments[1], 0)
+            && provablyDefined(arguments[0], context))
+            return integerExpr(0);
+        return expression;
+
+    case BuiltinId::GeneralizedBinomial:
+    case BuiltinId::FallingFactorial:
+    case BuiltinId::RisingFactorial:
+        if (arguments.size() == 2 && isExactReal(arguments[1], 0)
+            && provablyDefined(arguments[0], context))
+            return integerExpr(1);
         return expression;
 
     case BuiltinId::Polar:
@@ -1500,12 +1689,8 @@ struct PositiveIntegerPower final {
     case BuiltinId::SineIntegralSi:
     case BuiltinId::CosineIntegralCi:
     case BuiltinId::LogarithmicIntegralLi:
-    case BuiltinId::Polylog:
     case BuiltinId::Beta:
     case BuiltinId::BetaLog:
-    case BuiltinId::GeneralizedBinomial:
-    case BuiltinId::FallingFactorial:
-    case BuiltinId::RisingFactorial:
     case BuiltinId::RandSeed:
     case BuiltinId::Rand:
     case BuiltinId::RandInt:
@@ -1622,6 +1807,9 @@ struct PositiveIntegerPower final {
     case BuiltinId::LuDecomposition:
     case BuiltinId::QrDecomposition:
     case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::ConditionNumber:
+    case BuiltinId::LeastSquares:
+    case BuiltinId::PseudoInverse:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -1643,7 +1831,52 @@ struct PositiveIntegerPower final {
     case BuiltinId::Expand:
     case BuiltinId::Factor:
     case BuiltinId::Collect:
+    case BuiltinId::Cases: {
+        std::vector<Expr> result;
+        result.reserve(arguments.size());
+        bool unresolvedBefore = false;
+        for (const Expr& branchExpression : arguments) {
+            if (!isHead(branchExpression, context.builtins, BuiltinId::CaseBranch)
+                || branchExpression.asCall().arguments.empty()
+                || branchExpression.asCall().arguments.size() > 2)
+                return expression;
+            const auto& branch = branchExpression.asCall().arguments;
+            if (branch.size() == 1) {
+                if (!unresolvedBefore)
+                    return branch[0];
+                result.push_back(branchExpression);
+                break;
+            }
+            TruthValue branchTruth = TruthValue::Unknown;
+            if (branch[1].isBoolean())
+                branchTruth = branch[1].asBoolean() ? TruthValue::True : TruthValue::False;
+            else if (const auto predicate = conditionPredicate(branch[1], context.builtins))
+                branchTruth = knowledge.prove(*predicate);
+            if (branchTruth != TruthValue::Unknown) {
+                if (branchTruth == TruthValue::False)
+                    continue;
+                if (!unresolvedBefore)
+                    return branch[0];
+                result.push_back(Expr::call(
+                    context.builtins.symbol(BuiltinId::CaseBranch), {branch[0]}));
+                break;
+            }
+            unresolvedBefore = true;
+            result.push_back(branchExpression);
+        }
+        if (result.empty()) {
+            if (const auto value = predefinedValue(
+                    context, symbols::PredefinedSymbolId::Indeterminate))
+                return *value;
+            return expression;
+        }
+        return Expr::call(context.builtins.symbol(BuiltinId::Cases), std::move(result));
+    }
+    case BuiltinId::CaseBranch:
+        return expression;
     case BuiltinId::Solve:
+    case BuiltinId::GroebnerBasis:
+    case BuiltinId::PolynomialReduce:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
     case BuiltinId::Less:
@@ -1769,6 +2002,11 @@ Expr Simplifier::simplify(
 
     Expr current = expression;
     for (std::size_t pass = 0; pass < context.maximumPasses; ++pass) {
+        if (context.budget)
+            context.budget->consume(evaluation::EvaluationResource::SimplificationCandidate);
+        else
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::SimplificationCandidate);
         Expr next = simplifyOnePass(current, context);
         if (next == current)
             return next;

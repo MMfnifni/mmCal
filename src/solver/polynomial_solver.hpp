@@ -41,6 +41,16 @@ namespace mmcal::solver {
 
 // 多変数の一次方程式系。係数はexact Rationalに限定し、
 // 一意解/矛盾を完全に判定できない場合はUnresolvedを返す。
+// exact Rational係数の多変数多項式等式系をgeneral Gröbner basisで処理する。
+// 現solve bridgeはzero-dimensional shape-position basisを完全列挙し、
+// positive-dimensional / 非shape-position系は安全にnulloptへ戻す。
+[[nodiscard]] std::optional<SolutionSet> solvePolynomialSystem(
+    std::span<const expression::Expr> equations,
+    std::span<const expression::Symbol> variables,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
 [[nodiscard]] SolutionSet solveLinearPolynomialSystem(
     std::span<const expression::Expr> equations,
     std::span<const expression::Symbol> variables,

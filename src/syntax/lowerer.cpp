@@ -358,6 +358,19 @@ Expr Lowerer::lowerNode(
             return lowerArray(*array, node.span, origins);
         if (const auto* call = std::get_if<CallSyntax>(&node.data))
             return lowerCall(*call, origins);
+        if (const auto* cases = std::get_if<CasesSyntax>(&node.data)) {
+            std::vector<Expr> branches;
+            branches.reserve(cases->branches.size());
+            for (const CasesBranchSyntax& branch : cases->branches) {
+                std::vector<Expr> branchArguments;
+                branchArguments.push_back(lowerNode(*branch.value, origins));
+                if (branch.condition)
+                    branchArguments.push_back(lowerNode(*branch.condition, origins));
+                branches.push_back(callExpr(
+                    symbolTable_, builtins::names::caseBranch, std::move(branchArguments)));
+            }
+            return callExpr(symbolTable_, builtins::names::cases, std::move(branches));
+        }
         if (const auto* group = std::get_if<GroupSyntax>(&node.data))
             return lowerNode(*group->expression, origins);
         if (const auto* unary = std::get_if<UnarySyntax>(&node.data)) {
@@ -433,6 +446,7 @@ Expr Lowerer::lowerIdentifier(const IdentifierSyntax& identifier) const {
         return Expr{false};
     case symbols::PredefinedSymbolKind::SymbolicConstant:
     case symbols::PredefinedSymbolKind::MathematicalDomain:
+    case symbols::PredefinedSymbolKind::ExceptionalValue:
     case symbols::PredefinedSymbolKind::EnumeratedValue:
         return Expr{symbol};
     }

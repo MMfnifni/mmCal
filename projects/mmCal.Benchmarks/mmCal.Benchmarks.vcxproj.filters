@@ -3,9 +3,11 @@
   <ItemGroup><Filter Include="Source Files"><UniqueIdentifier>{2C534B1A-DE25-4F8C-808C-9C14CD077B57}</UniqueIdentifier><Extensions>cpp;c;cxx;cc</Extensions></Filter></ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\benchmarks\benchmark_main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="..\..\benchmarks\certification_boundary_fuzzer.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="..\..\benchmarks\random_expression_fuzzer.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\benchmarks\certification_boundary_fuzzer.hpp" />
     <ClInclude Include="..\..\benchmarks\random_expression_fuzzer.hpp" />
   </ItemGroup>
 </Project>

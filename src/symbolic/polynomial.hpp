@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace mmcal::symbolic {
@@ -81,6 +82,42 @@ private:
     std::vector<MonomialFactor> factors_;
 };
 
+enum class MonomialOrder {
+    Lex,
+    GrLex,
+    GrevLex
+};
+
+[[nodiscard]] std::optional<MonomialOrder> parseMonomialOrder(std::string_view name) noexcept;
+[[nodiscard]] std::string_view monomialOrderName(MonomialOrder order) noexcept;
+
+// Q[x1,...,xn] の変数順序とterm orderを一体で保持する。
+// Gröbner算法では「変数集合」と「leading termの意味」を暗黙global stateにしない。
+class PolynomialRing final {
+public:
+    PolynomialRing(
+        std::vector<expression::Symbol> variables,
+        MonomialOrder order = MonomialOrder::GrevLex);
+
+    [[nodiscard]] std::span<const expression::Symbol> variables() const noexcept;
+    [[nodiscard]] MonomialOrder order() const noexcept;
+    [[nodiscard]] bool contains(const expression::Symbol& variable) const noexcept;
+    [[nodiscard]] bool contains(const Monomial& monomial) const noexcept;
+    // -1: lhs<rhs, 0: equal, +1: lhs>rhs。
+    [[nodiscard]] int compare(const Monomial& lhs, const Monomial& rhs) const;
+
+private:
+    std::vector<expression::Symbol> variables_;
+    MonomialOrder order_ = MonomialOrder::GrevLex;
+};
+
+[[nodiscard]] bool monomialDivides(const Monomial& divisor, const Monomial& dividend) noexcept;
+[[nodiscard]] Monomial multiplyMonomials(const Monomial& lhs, const Monomial& rhs);
+[[nodiscard]] Monomial leastCommonMultiple(const Monomial& lhs, const Monomial& rhs);
+[[nodiscard]] std::optional<Monomial> divideMonomials(
+    const Monomial& dividend,
+    const Monomial& divisor);
+
 struct PolynomialTerm final {
     Monomial monomial;
     numeric::Rational coefficient;
@@ -101,6 +138,8 @@ public:
     [[nodiscard]] std::size_t degree(const expression::Symbol& variable) const noexcept;
     [[nodiscard]] std::span<const PolynomialTerm> terms() const noexcept;
     [[nodiscard]] std::vector<expression::Symbol> variables() const;
+    [[nodiscard]] bool belongsTo(const PolynomialRing& ring) const noexcept;
+    [[nodiscard]] std::optional<PolynomialTerm> leadingTerm(const PolynomialRing& ring) const;
 
 private:
     std::vector<PolynomialTerm> terms_;
@@ -113,8 +152,33 @@ struct PolynomialConversionOptions final {
     std::size_t maximumTerms = 4096;
 };
 
+[[nodiscard]] MultivariateRationalPolynomial negatePolynomial(
+    const MultivariateRationalPolynomial& value);
+[[nodiscard]] MultivariateRationalPolynomial addPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs);
+[[nodiscard]] MultivariateRationalPolynomial subtractPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs);
+[[nodiscard]] std::optional<MultivariateRationalPolynomial> multiplyPolynomials(
+    const MultivariateRationalPolynomial& lhs,
+    const MultivariateRationalPolynomial& rhs,
+    PolynomialConversionOptions options = {});
+[[nodiscard]] MultivariateRationalPolynomial multiplyPolynomialByTerm(
+    const MultivariateRationalPolynomial& polynomial,
+    const PolynomialTerm& term);
+[[nodiscard]] MultivariateRationalPolynomial monicPolynomial(
+    const MultivariateRationalPolynomial& polynomial,
+    const PolynomialRing& ring);
+
 [[nodiscard]] std::optional<MultivariateRationalPolynomial> toMultivariateRationalPolynomial(
     const expression::Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    PolynomialConversionOptions options = {});
+
+[[nodiscard]] std::optional<MultivariateRationalPolynomial> toMultivariateRationalPolynomial(
+    const expression::Expr& expression,
+    const PolynomialRing& ring,
     const evaluation::BuiltinRegistry& builtins,
     PolynomialConversionOptions options = {});
 

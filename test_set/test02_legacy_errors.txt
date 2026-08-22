@@ -1,11 +1,30 @@
+# mmCal V1.5 consolidated black-box regression
+# Each # @session block runs in a fresh mmCal process.
+
+# ============================================================================
+# Former file: test6_error.txt
+# ============================================================================
+# @session --fix 15 --angle deg
 # mmCal V1.5 black-box regression tests
 # 旧近似テストを維持するため、表示15桁・Degreeで起動する。
-# @args --fix 15 --angle deg
 
-1/0=>DomainError
+1/0=>ComplexInfinity
 1..1=>SyntaxError
-0/0=>DomainError
-0^0=>DomainError
+0/0=>Indeterminate
+Infinity/Infinity=>Indeterminate
+Infinity-Infinity=>Indeterminate
+0*Infinity=>Indeterminate
+0^0=>Indeterminate
+1^Infinity=>Indeterminate
+Infinity^0=>Indeterminate
+(-1)^Infinity=>Indeterminate
+0^I=>Indeterminate
+(3/5+4I/5)^Infinity=>Indeterminate
+x^(1/0)=>Indeterminate
+simplify[z^Infinity,abs[z]==1]=>Indeterminate
+z^Infinity=>z^Infinity
+sin[Indeterminate]=>Indeterminate
+Indeterminate==Indeterminate=>False
 (-1)^(1/2)=>I
 sqrt[-1]=>I
 log[0]=>DomainError
@@ -38,7 +57,7 @@ cnst["GFN)=>SyntaxError
 1+2)=>SyntaxError
 2(3+4)=>14
 (2+3)4=>20
-I/0=>DomainError
+I/0=>ComplexInfinity
 I^I^I=>0.947158998072378+0.320764449979309I
 mean[1,I]=>0.5+0.5I
 var[1,I]=>TypeError

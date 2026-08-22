@@ -26,6 +26,8 @@ enum class LimitDirection {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinitySymbol,
-    const mathematics::AssumptionSet& assumptions = {});
+    const mathematics::AssumptionSet& assumptions = {},
+    const expression::Symbol* complexInfinitySymbol = nullptr,
+    const expression::Symbol* indeterminateSymbol = nullptr);
 
 } // namespace mmcal::symbolic

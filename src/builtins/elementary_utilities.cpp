@@ -1,5 +1,6 @@
 // abs・sign
 #include "elementary_utilities.hpp"
+#include "builtin_helpers.hpp"
 
 #include "builtins/names.hpp"
 #include "approximation/expression_interval.hpp"
@@ -21,16 +22,6 @@ using evaluation::BuiltinId;
 using expression::Expr;
 using numeric::BigInt;
 using numeric::Number;
-
-void requireArity(
-    std::span<const Expr> arguments,
-    std::size_t arity,
-    std::string_view name) {
-    if (arguments.size() != arity)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects " + std::to_string(arity) + " argument(s)");
-}
 
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
@@ -56,15 +47,6 @@ void requireArity(
     return Expr::call(
         registry.symbol(BuiltinId::Divide),
         {std::move(numerator), std::move(denominator)});
-}
-
-[[nodiscard]] Expr holdUnary(
-    std::span<const Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    BuiltinId id,
-    std::string_view name) {
-    requireArity(arguments, 1, name);
-    return Expr::call(registry.symbol(id), {arguments.front()});
 }
 
 } // namespace
@@ -186,7 +168,7 @@ Expr evaluateProj(
 Expr evaluateCis(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
-    return holdUnary(arguments, registry, BuiltinId::Cis, names::cis);
+    return holdUnaryBuiltin(arguments, registry, BuiltinId::Cis, names::cis);
 }
 
 Expr evaluatePolar(

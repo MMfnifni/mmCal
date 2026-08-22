@@ -61,7 +61,7 @@ void runExactTranscendentalTests(TestRunner& tests) {
         "Exact transcendental: principal Log[-1] uses +I Pi");
     tests.expectEqual(evaluateAndFormat(session, "log[I]"), std::string{"I Pi/2"},
         "Exact transcendental: principal Log[I] is I Pi/2");
-    tests.expectEqual(evaluateAndFormat(session, "log[-E]"), std::string{"1+I Pi"},
+    tests.expectEqual(evaluateAndFormat(session, "log[-E]"), std::string{"I Pi+1"},
         "Exact transcendental: principal Log[-E] keeps exact real and branch parts");
 
     const error::CalcError logZero = evaluateError(session, "log[0]");

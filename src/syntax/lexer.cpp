@@ -129,6 +129,9 @@ std::vector<Token> Lexer::tokenize() {
         case ',':
             append(makeToken(TokenKind::Comma, begin));
             break;
+        case ';':
+            append(makeToken(TokenKind::Semicolon, begin));
+            break;
         case '%':
             append(makeToken(TokenKind::Percent, begin));
             break;

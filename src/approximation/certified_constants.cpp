@@ -1,7 +1,9 @@
 // Piなど定数の保証付き評価
 #include "certified_constants.hpp"
+#include "certified_precision.hpp"
 #include "certified_exponential.hpp"
 #include "certified_sqrt.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include "numeric/big_int.hpp"
 #include "numeric/rational.hpp"
@@ -32,20 +34,7 @@ struct AtanEnclosure final {
     return RealInterval::fromRational(Rational{BigInt{value}}, precisionBits);
 }
 
-[[nodiscard]] std::size_t checkedAddSize(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
-[[nodiscard]] Rational binaryThreshold(std::size_t bits) {
-    BigInt denominator{1};
-    denominator <<= bits;
-    return Rational{BigInt{1}, std::move(denominator)};
-}
 
 [[nodiscard]] AtanEnclosure encloseAtanReciprocal(
     std::uint32_t denominatorValue,
@@ -81,11 +70,13 @@ struct AtanEnclosure final {
     // 32bit余分に絞っておけば、Machin線形結合と途中の外向き丸めの余裕を大きく取れる。
     // 最終的な正しさはこの固定32bitに依存しない。decimal丸めが確定しなければ
     // approximateConstant側が作業precision自体を増やして再計算する。
-    const std::size_t thresholdBits = checkedAddSize(
+    const std::size_t thresholdBits = checkedPrecisionAdd(
         precisionBits, 32, "Certified atan precision is too large");
-    const Rational threshold = binaryThreshold(thresholdBits);
+    const Rational threshold = binaryPrecisionThreshold(thresholdBits);
 
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const Rational magnitude{BigInt{1}, odd * qPower};
         const RealInterval term = RealInterval::fromRational(magnitude, precisionBits);
         sum = positive
@@ -126,7 +117,7 @@ struct AtanEnclosure final {
     // 区間を狭め続ければ最終的に要求桁の丸め結果は一意に決まる。
     // guardは少なくとも8桁ずつ、十分大きくなった後は約1.5倍で増やす。
     const std::size_t growth = std::max<std::size_t>(8, guardDigits / 2);
-    return checkedAddSize(guardDigits, growth, "Certified constant precision is too large");
+    return checkedPrecisionAdd(guardDigits, growth, "Certified constant precision is too large");
 }
 
 } // namespace
@@ -192,6 +183,9 @@ struct ChudnovskySplit final {
         throw std::overflow_error("Certified Pi term count is too large");
     const std::uint64_t terms = static_cast<std::uint64_t>(
         std::max<std::size_t>(2, estimatedTerms));
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::CertifiedRefinement,
+        static_cast<std::size_t>(terms));
 
     const ChudnovskySplit split = chudnovskySplit(0, terms);
     const ChudnovskySplit nextLeaf = chudnovskySplit(terms, terms + 1);
@@ -204,7 +198,7 @@ struct ChudnovskySplit final {
     const Rational lowerSum = nextPartial < partial ? nextPartial : partial;
     const Rational upperSum = nextPartial < partial ? partial : nextPartial;
 
-    const std::size_t workBits = checkedAddSize(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 32, "Certified Pi precision is too large");
     const RealInterval sum = RealInterval::fromRationalBounds(
         lowerSum, upperSum, workBits);
@@ -318,6 +312,8 @@ std::optional<DecimalApproximation> approximateConstant(
 
     ApproximationContext context{fractionalDigits};
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const auto enclosure = encloseConstant(id, context.workingBinaryBits());
         if (!enclosure)
             return std::nullopt;

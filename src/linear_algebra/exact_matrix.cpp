@@ -1,5 +1,6 @@
 // exact Matrix elimination。Number行列はExpr/Simplifierを経由せず直接処理する。
 #include "exact_matrix.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include "builtins/exact_operations.hpp"
 #include "mathematics/value_facts.hpp"
@@ -7,6 +8,7 @@
 #include "numeric/number.hpp"
 #include "expression/array_utils.hpp"
 #include "linear_algebra/fraction_free_elimination.hpp"
+#include "linear_algebra/modular_linear_algebra.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/rational.hpp"
 
@@ -170,6 +172,47 @@ template <class RationalAt>
     return result;
 }
 
+[[nodiscard]] std::vector<numeric::Rational> bareissBackSubstituteUnique(
+    const BareissEchelonResult& echelon,
+    std::size_t variables,
+    std::size_t rhsFirstColumn) {
+    if (variables == 0)
+        return {};
+    if (echelon.pivotColumns.size() != variables)
+        throw std::invalid_argument("Bareiss back substitution requires full column rank");
+    for (std::size_t i = 0; i < variables; ++i)
+        if (echelon.pivotColumns[i] != i)
+            throw std::logic_error("Bareiss full-rank pivot columns are not canonical");
+    if (rhsFirstColumn < variables || rhsFirstColumn > echelon.matrix.columns())
+        throw std::invalid_argument("Bareiss back substitution RHS column is invalid");
+
+    const std::size_t rhsColumns = echelon.matrix.columns() - rhsFirstColumn;
+    const BigInt commonDenominator = echelon.matrix(variables - 1, variables - 1);
+    if (commonDenominator.isZero())
+        throw std::logic_error("Bareiss full-rank system has a zero final pivot");
+
+    std::vector<numeric::Rational> result(variables * rhsColumns);
+    std::vector<BigInt> numerators(variables);
+    for (std::size_t rhs = 0; rhs < rhsColumns; ++rhs) {
+        std::fill(numerators.begin(), numerators.end(), BigInt{});
+        for (std::size_t row = variables; row-- > 0;) {
+            BigInt numerator = echelon.matrix(row, rhsFirstColumn + rhs)
+                * commonDenominator;
+            for (std::size_t column = row + 1; column < variables; ++column)
+                numerator -= echelon.matrix(row, column) * numerators[column];
+
+            auto division = numeric::divmod(numerator, echelon.matrix(row, row));
+            if (!division.remainder.isZero())
+                throw std::logic_error("Bareiss back substitution division was not exact");
+            numerators[row] = std::move(division.quotient);
+        }
+        for (std::size_t row = 0; row < variables; ++row)
+            result[row * rhsColumns + rhs] = numeric::Rational{
+                std::move(numerators[row]), commonDenominator};
+    }
+    return result;
+}
+
 [[nodiscard]] NumericMatrix rrefFromBareiss(BareissEchelonResult result) {
     NumericMatrix matrix{result.matrix.rows(), result.matrix.columns()};
     for (std::size_t row = 0; row < result.matrix.rows(); ++row)
@@ -196,17 +239,28 @@ template <class RationalAt>
     return matrix;
 }
 
-[[nodiscard]] Number bareissDeterminantOfRealMatrix(const MatrixView& source) {
+[[nodiscard]] Number exactDeterminantOfRealMatrix(const MatrixView& source) {
     IntegerLift lift = liftRealMatrix(source);
-    BigInt determinant = bareissDeterminant(std::move(lift.matrix));
+    BigInt determinant = preferModularDeterminant(lift.matrix)
+        ? modularDeterminant(lift.matrix)
+        : bareissDeterminant(std::move(lift.matrix));
     return Number{numeric::Rational{
         std::move(determinant), rowScaleProduct(lift.rowScales)}};
 }
 
 [[nodiscard]] MatrixBuffer bareissRrefOfRealMatrix(const MatrixView& source) {
     IntegerLift lift = liftRealMatrix(source);
-    return rrefFromBareiss(bareissEchelon(
-        std::move(lift.matrix), source.columns())).toExprBuffer();
+    auto echelon = bareissEchelon(std::move(lift.matrix), source.columns());
+
+    // full column rankならRREFは上側の単位行列と余剰zero rowで確定する。
+    // 高価なRational後退消去を行う必要はない。
+    if (echelon.pivotColumns.size() == source.columns()) {
+        MatrixBuffer result{source.rows(), source.columns(), integer(0)};
+        for (std::size_t i = 0; i < source.columns(); ++i)
+            result(i, i) = integer(1);
+        return result;
+    }
+    return rrefFromBareiss(std::move(echelon)).toExprBuffer();
 }
 
 [[nodiscard]] std::size_t bareissRankOfRealMatrix(const MatrixView& source) {
@@ -265,12 +319,27 @@ template <class RationalAt>
         rrefFromBareiss(std::move(echelon)), pivots, source.columns());
 }
 
-[[nodiscard]] MatrixBuffer bareissInverseOfRealMatrix(const MatrixView& source) {
+[[nodiscard]] MatrixBuffer exactInverseOfRealMatrix(const MatrixView& source) {
     const std::size_t n = source.rows();
     IntegerLift lift = liftRealMatrix(source);
+
+    if (preferModularInverse(lift.matrix)) {
+        if (const auto modular = modularInverse(lift.matrix)) {
+            std::vector<Expr> elements;
+            const std::size_t shape[] = {n, n};
+            elements.reserve(expression::arrayElementCount(shape));
+            for (std::size_t row = 0; row < n; ++row)
+                for (std::size_t column = 0; column < n; ++column) {
+                    numeric::Rational value = (*modular)[row * n + column]
+                        * numeric::Rational{lift.rowScales[column]};
+                    elements.emplace_back(Number{std::move(value)});
+                }
+            return MatrixBuffer{n, n, std::move(elements)};
+        }
+    }
+
     const std::size_t columns = augmentedColumns(n);
     IntegerMatrixBuffer augmented{n, columns};
-
     for (std::size_t row = 0; row < n; ++row) {
         for (std::size_t column = 0; column < n; ++column)
             augmented(row, column) = lift.matrix(row, column);
@@ -280,14 +349,15 @@ template <class RationalAt>
     auto echelon = bareissEchelon(std::move(augmented), n);
     if (echelon.pivotColumns.size() != n)
         throw std::domain_error("Matrix is singular");
-    NumericMatrix reduced = rrefFromBareiss(std::move(echelon));
 
+    // Bareissの最終pivot（determinant up to row swaps）を全列の共通分母に使い，
+    // 後退代入もBigIntだけで行う。generic Rational RREFをn本分作るより大幅に軽い。
+    const auto inverse = bareissBackSubstituteUnique(echelon, n, n);
     std::vector<Expr> elements;
     const std::size_t shape[] = {n, n};
     elements.reserve(expression::arrayElementCount(shape));
-    for (std::size_t row = 0; row < n; ++row)
-        for (std::size_t column = 0; column < n; ++column)
-            elements.emplace_back(reduced(row, n + column));
+    for (const numeric::Rational& value : inverse)
+        elements.emplace_back(Number{value});
     return MatrixBuffer{n, n, std::move(elements)};
 }
 
@@ -419,7 +489,7 @@ template <class RationalAt>
     return array.hasExactNumberStorage();
 }
 
-[[nodiscard]] Expr bareissSolveLinearOfRealMatrix(
+[[nodiscard]] Expr exactSolveLinearOfRealMatrix(
     const MatrixView& source,
     const expression::ArrayExpr& rhs) {
     const std::size_t rows = source.rows();
@@ -433,6 +503,17 @@ template <class RationalAt>
                 ? rhs.exactNumber(row).asReal().toRational()
                 : source.array().exactNumber(row * variables + column).asReal().toRational();
         });
+
+    if (preferModularSolve(lift.matrix, variables)) {
+        if (const auto modular = modularSolve(lift.matrix, variables)) {
+            std::vector<Expr> solution;
+            solution.reserve(variables);
+            for (const numeric::Rational& value : *modular)
+                solution.emplace_back(Number{value});
+            return Expr::array({variables}, std::move(solution));
+        }
+    }
+
     auto echelon = bareissEchelon(std::move(lift.matrix), variables);
     for (std::size_t row = 0; row < rows; ++row) {
         bool coefficientNonZero = false;
@@ -447,11 +528,11 @@ template <class RationalAt>
     if (echelon.pivotColumns.size() != variables)
         throw std::domain_error("Linear system does not have a unique solution");
 
-    NumericMatrix reduced = rrefFromBareiss(std::move(echelon));
+    const auto solved = bareissBackSubstituteUnique(echelon, variables, variables);
     std::vector<Expr> solution;
     solution.reserve(variables);
-    for (std::size_t variable = 0; variable < variables; ++variable)
-        solution.emplace_back(reduced(variable, variables));
+    for (const numeric::Rational& value : solved)
+        solution.emplace_back(Number{value});
     return Expr::array({variables}, std::move(solution));
 }
 
@@ -631,6 +712,8 @@ template <class RationalAt>
         if (expansionBudget == 0)
             return std::nullopt;
         --expansionBudget;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::TemporaryMatrixElement);
 
         const auto minor = symbolicDeterminant(
             minorMatrix(matrix, expansionRow, column), context, expansionBudget);
@@ -780,7 +863,7 @@ std::optional<Expr> determinant(const MatrixView& matrix, const ExactMatrixConte
     if (matrix.rows() != matrix.columns())
         throw std::invalid_argument("determinant requires a square matrix");
     if (allExactRealNumbers(matrix))
-        return Expr{bareissDeterminantOfRealMatrix(matrix)};
+        return Expr{exactDeterminantOfRealMatrix(matrix)};
     if (allExactNumbers(matrix))
         return Expr{numericDeterminantGaussian(NumericMatrix{matrix})};
 
@@ -795,7 +878,7 @@ std::optional<Expr> inverse(const MatrixView& matrix, const ExactMatrixContext& 
     if (matrix.rows() == 0)
         return MatrixBuffer{matrix}.toExpr();
     if (allExactRealNumbers(matrix))
-        return bareissInverseOfRealMatrix(matrix).toExpr();
+        return exactInverseOfRealMatrix(matrix).toExpr();
     if (allExactNumbers(matrix))
         return numericInverseGaussian(matrix).toExpr();
 
@@ -855,7 +938,7 @@ std::optional<Expr> solveLinear(
     if (!rhs.isVector() || rhs.shape[0] != matrix.rows())
         throw std::invalid_argument("solveLinear right-hand side size does not match matrix rows");
     if (allExactRealNumbers(matrix) && allExactRealNumbers(rhs))
-        return bareissSolveLinearOfRealMatrix(matrix, rhs);
+        return exactSolveLinearOfRealMatrix(matrix, rhs);
     if (allExactNumbers(matrix) && allExactNumbers(rhs))
         return numericSolveLinearGaussian(matrix, rhs);
     return symbolicSolveLinear(matrix, rhs, context);

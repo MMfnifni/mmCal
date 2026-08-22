@@ -43,6 +43,7 @@ void runDefinednessTests(TestRunner& tests) {
     const auto builtins = evaluation::BuiltinRegistry::defaults(symbols);
     const auto mathematics = mathematics::MathRegistry::defaults(symbols, builtins);
     const Expr y{symbols.intern("y")};
+    const Expr x{symbols.intern("x")};
 
     const Expr tanY = call(builtins, BuiltinId::Tan, {y});
     const auto tanConditions = mathematics::expressionDomainConditions(
@@ -83,6 +84,56 @@ void runDefinednessTests(TestRunner& tests) {
         && reciprocalConditions->contains(expectedLog),
         "Definedness: negative integer powers require a nonzero base");
 
+    const Expr productDenominator = call(builtins, BuiltinId::Multiply, {
+        x, call(builtins, BuiltinId::Add, {y, integer(1)})});
+    const Expr reciprocalProduct = call(builtins, BuiltinId::Divide, {integer(1), productDenominator});
+    const auto productConditions = mathematics::expressionDomainConditions(
+        reciprocalProduct, builtins, mathematics);
+    const auto expectedXNonZero = mathematics::relation(RelationKind::NotEqual, x, integer(0));
+    const Expr yPlusOne = call(builtins, BuiltinId::Add, {y, integer(1)});
+    const auto expectedYPlusOneNonZero = mathematics::relation(
+        RelationKind::NotEqual, yPlusOne, integer(0));
+    tests.expect(productConditions && productConditions->size() == 2
+        && productConditions->contains(expectedXNonZero)
+        && productConditions->contains(expectedYPlusOneNonZero),
+        "Definedness: nonzero products decompose into reusable factor conditions");
+
+    const Expr squareDenominator = call(builtins, BuiltinId::Power, {yPlusOne, integer(2)});
+    const Expr reciprocalSquare = call(builtins, BuiltinId::Divide, {integer(1), squareDenominator});
+    const auto squareConditions = mathematics::expressionDomainConditions(
+        reciprocalSquare, builtins, mathematics);
+    tests.expect(squareConditions && squareConditions->size() == 1
+        && squareConditions->contains(expectedYPlusOneNonZero),
+        "Definedness: nonzero integer powers reduce to a nonzero-base condition");
+
+    const Expr zeroPower = call(builtins, BuiltinId::Power, {y, integer(0)});
+    const auto zeroPowerConditions = mathematics::expressionDomainConditions(
+        zeroPower, builtins, mathematics);
+    tests.expect(zeroPowerConditions && zeroPowerConditions->size() == 1
+        && zeroPowerConditions->contains(expectedLog),
+        "Definedness: exponent zero retains the 0^0 exclusion");
+
+    const Expr positivePower = call(builtins, BuiltinId::Power, {y, integer(2)});
+    const auto positivePowerConditions = mathematics::expressionDomainConditions(
+        positivePower, builtins, mathematics);
+    tests.expect(positivePowerConditions && positivePowerConditions->empty(),
+        "Definedness: positive integer powers do not require a nonzero base");
+
+    const Expr positiveRationalPower = call(builtins, BuiltinId::Power, {
+        y, Expr{Number{numeric::Rational{BigInt{3}, BigInt{2}}}}});
+    const auto positiveRationalPowerConditions = mathematics::expressionDomainConditions(
+        positiveRationalPower, builtins, mathematics);
+    tests.expect(positiveRationalPowerConditions && positiveRationalPowerConditions->empty(),
+        "Definedness: positive exact rational powers are defined at a zero base");
+
+    const Expr negativeRationalPower = call(builtins, BuiltinId::Power, {
+        y, Expr{Number{numeric::Rational{BigInt{-3}, BigInt{2}}}}});
+    const auto negativeRationalPowerConditions = mathematics::expressionDomainConditions(
+        negativeRationalPower, builtins, mathematics);
+    tests.expect(negativeRationalPowerConditions && negativeRationalPowerConditions->size() == 1
+        && negativeRationalPowerConditions->contains(expectedLog),
+        "Definedness: negative exact rational powers require a nonzero base");
+
     const Expr cbrtY = call(builtins, BuiltinId::Cbrt, {y});
     const auto cbrtConditions = mathematics::expressionDomainConditions(
         cbrtY, builtins, mathematics);
@@ -91,7 +142,6 @@ void runDefinednessTests(TestRunner& tests) {
         && cbrtConditions->contains(expectedRealY),
         "Definedness: real cbrt requires a real argument");
 
-    const Expr x{symbols.intern("x")};
     const Expr hypotXY = call(builtins, BuiltinId::Hypot, {x, y});
     const auto hypotConditions = mathematics::expressionDomainConditions(
         hypotXY, builtins, mathematics);
@@ -110,6 +160,31 @@ void runDefinednessTests(TestRunner& tests) {
     const Expr gammaY = call(builtins, BuiltinId::Gamma, {y});
     tests.expect(!mathematics::expressionDomainConditions(gammaY, builtins, mathematics),
         "Definedness: Gamma pole complement stays unresolved rather than dropping infinitely many exclusions");
+
+    const Expr digammaThree = call(builtins, BuiltinId::Digamma, {integer(3)});
+    const auto digammaThreeConditions = mathematics::expressionDomainConditions(
+        digammaThree, builtins, mathematics);
+    tests.expect(digammaThreeConditions && digammaThreeConditions->empty(),
+        "Definedness: exact positive Gamma-family arguments are known to avoid poles");
+
+    const Expr digammaHalf = call(builtins, BuiltinId::Digamma, {
+        Expr{Number{numeric::Rational{BigInt{1}, BigInt{2}}}}});
+    const auto digammaHalfConditions = mathematics::expressionDomainConditions(
+        digammaHalf, builtins, mathematics);
+    tests.expect(digammaHalfConditions && digammaHalfConditions->empty(),
+        "Definedness: exact noninteger Gamma-family arguments are known to avoid poles");
+
+    const Expr digammaPole = call(builtins, BuiltinId::Digamma, {integer(0)});
+    tests.expect(!mathematics::expressionDomainConditions(digammaPole, builtins, mathematics),
+        "Definedness: exact Gamma-family poles are not certified as defined");
+
+    const Expr zetaY = call(builtins, BuiltinId::Zeta, {y});
+    const auto zetaConditions = mathematics::expressionDomainConditions(
+        zetaY, builtins, mathematics);
+    const auto expectedZeta = mathematics::relation(RelationKind::NotEqual, y, integer(1));
+    tests.expect(zetaConditions && zetaConditions->size() == 1
+        && zetaConditions->contains(expectedZeta),
+        "Definedness: zeta has the exact finite-plane condition s != 1");
 
     const Expr betaXY = call(builtins, BuiltinId::Beta, {x, y});
     const auto betaConditions = mathematics::expressionDomainConditions(

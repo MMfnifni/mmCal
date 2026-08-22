@@ -53,10 +53,23 @@ ComplexDecimalApproximation ComplexDecimalApproximation::fromComponents(
     DecimalApproximation imaginary,
     bool realExactlyZero,
     bool imaginaryExactlyZero) {
+    if (realExactlyZero
+        && (!real.certifiedEnclosureIsPoint() || !real.certifiedLower().isZero()))
+        throw std::invalid_argument("Real exact-zero flag requires a certified point zero");
+    if (imaginaryExactlyZero
+        && (!imaginary.certifiedEnclosureIsPoint() || !imaginary.certifiedLower().isZero()))
+        throw std::invalid_argument("Imaginary exact-zero flag requires a certified point zero");
+
+    // 表示上のzero省略と，後続計算でInformationEnclosureまでexact zeroとして
+    // 再利用できるかは別概念である。有限precision由来の0はcertified truthが
+    // point zeroでもinformation幅を持ち得るため，表示はcertified truthだけで決める。
+    const bool displayRealAsZero = real.certifiedExactlyZero();
+    const bool displayImaginaryAsZero = imaginary.certifiedExactlyZero();
+
     std::string text;
-    if (imaginaryExactlyZero)
+    if (displayImaginaryAsZero)
         text = std::string{real.text()};
-    else if (realExactlyZero)
+    else if (displayRealAsZero)
         text = imaginaryText(imaginary);
     else {
         const std::string_view imaginaryValue = imaginary.text();
@@ -92,6 +105,43 @@ bool ComplexDecimalApproximation::realExactlyZero() const noexcept {
 
 bool ComplexDecimalApproximation::imaginaryExactlyZero() const noexcept {
     return imaginaryExactlyZero_;
+}
+
+bool ComplexDecimalApproximation::realCertifiedExactlyZero() const noexcept {
+    return real_.certifiedExactlyZero();
+}
+
+bool ComplexDecimalApproximation::imaginaryCertifiedExactlyZero() const noexcept {
+    return imaginary_.certifiedExactlyZero();
+}
+
+bool ComplexDecimalApproximation::realInformationExactlyZero() const noexcept {
+    return realExactlyZero_ || real_.informationExactlyZero();
+}
+
+bool ComplexDecimalApproximation::imaginaryInformationExactlyZero() const noexcept {
+    return imaginaryExactlyZero_ || imaginary_.informationExactlyZero();
+}
+
+const Rational& ComplexDecimalApproximation::realInformationLower() const noexcept {
+    return realInformationExactlyZero() ? real_.certifiedLower() : real_.informationLower();
+}
+
+const Rational& ComplexDecimalApproximation::realInformationUpper() const noexcept {
+    return realInformationExactlyZero() ? real_.certifiedUpper() : real_.informationUpper();
+}
+
+const Rational& ComplexDecimalApproximation::imaginaryInformationLower() const noexcept {
+    return imaginaryInformationExactlyZero() ? imaginary_.certifiedLower() : imaginary_.informationLower();
+}
+
+const Rational& ComplexDecimalApproximation::imaginaryInformationUpper() const noexcept {
+    return imaginaryInformationExactlyZero() ? imaginary_.certifiedUpper() : imaginary_.informationUpper();
+}
+
+ComplexDecimalApproximation ComplexDecimalApproximation::negated() const {
+    return fromComponents(
+        real_.negated(), imaginary_.negated(), realExactlyZero_, imaginaryExactlyZero_);
 }
 
 } // namespace mmcal::numeric

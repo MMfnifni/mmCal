@@ -34,6 +34,10 @@ void testConstructionAndFormatting(TestRunner& tests) {
         std::string{"18446744073709551615"},
         "BigInt constructs the full uint64 range without decimal parsing");
     tests.expectEqual(BigInt::parse("-FF", 16).toString(16), std::string{"-FF"}, "BigInt signed radix conversion");
+    tests.expectEqual(BigInt::parse("123456789012345678901234567890").modulo(2'147'483'647U),
+        std::uint32_t{281'742'486U}, "BigInt computes a word-sized positive modulus without decimal conversion");
+    tests.expectEqual(BigInt::parse("-123456789012345678901234567890").modulo(2'147'483'647U),
+        std::uint32_t{1'865'741'161U}, "BigInt normalizes a negative word-sized modulus");
 
     tests.expectThrows<std::invalid_argument>(
         [] { (void)BigInt::parse("-"); },

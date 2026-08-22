@@ -98,30 +98,34 @@ v1.5.3では，各workerが独立`KernelSession`を所有し，case間・比較�
 | `N[expr,p]`の一般decimal hard max | 明示固定値なし | memory, `size_t`, 個別backendのbudgetで制約される |
 | default N digits                  |             16 | 未指定時                                          |
 | default guard digits              |              8 | certified working precision                       |
+| top-level `N` local refinements   |             16 | branch/pole/work-boundary ambiguityでglobal budgetまで無制限retryしない |
 | `:fix` / `--fix`                  |        0..1000 | 表示のみ。内部precisionではない                   |
 | CertifiedEvaluator AST depth      |             96 | certified numerical pathのnesting safety          |
 
 ## 7. Certified special-function backendの代表的制限
 
-これらは特殊函数そのものの数学的domainではなく，現backendが保証付き級数で安全に処理するための実装範囲である。
+これらは特殊函数そのものの数学的domainではなく，現backendが保証付き評価を有限時間・有限資源で行うための実装範囲である。境界外で数学的に値が存在する場合は`DomainError`にせず，原則として`CertifiedBackendUnsupported`から`N::unsupported`へ戻して未評価式を保持する。`CertifiedBackendUnsupported`は`std::domain_error`とは独立した内部例外である。区間幅だけが境界を跨いでいる場合は，再精密化で解決し得るため`PrecisionInsufficient`を使うが，top-level `N`は局所16回で停止し，既存入力enclosureの幅が原因で解決しない場合は`N::precision`へ戻す。
 
-| backend                           | 現在の代表制限                                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------------ | --- | ----------------------- |
-| `1F1`                             | series最大200000 terms                                                               |
-| `2F1`                             | series最大250000 terms                                                               |
-| elliptic series                   | 最大200000 terms                                                                     |
-| `Ei`                              | 現series pathは `                                                                    | x   | <= 8`，最大200000 terms |
-| `Si`                              | 現series pathは `                                                                    | x   | <= 8`，最大200000 terms |
-| `Ci`                              | real certified pathは `0 < x <= 8`，最大200000 terms                                 |
-| positive-order `polylog`          | 現series pathは `                                                                    | z   | < 1`，最大1000000 terms |
-| EulerGamma backend                | internal `n < 2^20` safety bound                                                     |
-| `zeta` certified real             | 現在`x>1`，Euler-Maclaurin tail start `N<=4096`，Bernoulli correction `k<=64`        |
-| `digamma/trigamma` certified real | 現在`x>0`，recurrence shift `<=1000000`，Bernoulli asymptotic `k<=64`                |
-| exact integer `trigamma[n]`       | `n<=100000`で有限二次調和和へexact還元                                               |
-| `ibeta[a,b,x]` exact finite sum   | positive integer `a,b<=4096`，`0<=x<=1`                                              |
-| `ibeta` certified real            | exact Rational `a,b>0` + certified real `x in [0,1]`。2F1/Beta backendのbudgetを継承 |
+| backend | 現在の代表制限 |
+| --- | --- |
+| `1F1` real / complex series | `|z| <= 160`，series最大200000 terms |
+| `2F1` real Gauss series | `|z| <= 9/10`，series最大250000 terms |
+| `2F1` complex | `|z| <= 9/10`はGauss series，`|z|>1`は退化parameter・branch cutを安全に除外できる場合だけprincipal `1/z` continuation，`9/10<|z|<1`は現backendでは未対応 |
+| elliptic `F/E` series | `|m| <= 9/10`，最大200000 terms |
+| elliptic `Pi` series | `|m| <= 9/10`かつ`|n| <= 9/10`，最大200000 terms |
+| `Ei` real series | `|x| <= 96`，最大200000 terms |
+| `Si` real series | `|x| <= 96`，最大200000 terms |
+| `Ci` real series | `0 < x <= 96`，最大200000 terms |
+| positive-order `polylog` real / complex series | `|z| <= 49/50`，最大1000000 terms |
+| EulerGamma backend | internal `n < 2^20` safety bound |
+| `zeta` certified real | 現在`s>1`，Euler-Maclaurin tail start `N<=4096`，Bernoulli correction `k<=64`。`s=1`だけpoleであり，`s<1`は数学的domain errorではなく現backend未対応として扱う |
+| `zeta` certified complex | 現在`Re(s)>1`，Euler-Maclaurin `N<=128`，`k<=40`。critical stripは未対応でありDomainErrorにはしない |
+| `digamma/trigamma` certified real | 現在`x>0`，recurrence shift `<=1000000`，Bernoulli asymptotic `k<=64` |
+| exact integer `trigamma[n]` | `n<=100000`で有限二次調和和へexact還元 |
+| `ibeta[a,b,x]` exact finite sum | positive integer `a,b<=4096`，`0<=x<=1` |
+| `ibeta` certified real | exact Rational `a,b>0` + certified real `x in [0,1]`。2F1/Beta backendのbudgetを継承 |
 
-これらを超えた入力に対して，mmCalは誤った近似を返すのではなく`PrecisionInsufficient`等で「現在のbackendでは保証できない」とする。
+`49/50`や`9/10`等は数学的な収束半径そのものではない。GCC Releaseの閾値監査で，例えば`polylog[2,0.999]`，`2F1[...,0.98]`，`ellipticF[...,0.98]`は理論上収束してもexact Rational majorantを用いる現series backendでは実用時間を大きく超えたため，性能・保証計算量のpolicyとして安全側へ制限している。これらは将来のanalytic continuationや別算法追加時に再測定してよい。
 
 ## 8. 軽量数論backend
 
@@ -146,7 +150,7 @@ v1.5.3では，各workerが独立`KernelSession`を所有し，case間・比較�
 | square Karatsuba               |                            約48 limbs |
 | Burnikel–Ziegler division      |            約32 limbs + offset policy |
 | decimal divide-and-conquer     |                           約128 limbs |
-| certified non-power-of-two FFT | 96点未満direct DFT，それ以上Bluestein |
+| certified non-power-of-two FFT | 384点未満direct DFT，それ以上Bluestein（`--fft-threshold`で環境別再測定） |
 | exact Cyclotomic FFT           |                        `phi(n) <= 64` | 対応exact入力を`Q[t]/Phi_n(t)`へ写せる場合の現在backend budget。超過時はgeneric exact DFTへfallback |
 | QR column block default        |                    1（unblocked相当） |
 

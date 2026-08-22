@@ -117,14 +117,25 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
         std::string{"{a c, a d+b c, b d}"},
         "convolution supports symbolic coefficients");
     tests.expectEqual(eval(session, "N[dft[{1,2,3}],12]"),
-        std::string{"{6, -1.5+0.866025403784I, -1.5-0.866025403784I}"},
+        std::string{"{6.0, -1.50+0.866025403784I, -1.50-0.866025403784I}"},
         "N recursively approximates exact transform arrays");
     tests.expectEqual(eval(session, "N[fft[{1,2,3}],12]"),
-        std::string{"{6, -1.5+0.866025403784I, -1.5-0.866025403784I}"},
+        std::string{"{6.0, -1.50+0.866025403784I, -1.50-0.866025403784I}"},
         "N pushes requested precision into the FFT backend before exact expansion");
     tests.expectEqual(eval(session, "fft[N[{1,2,3,4},12]]"),
-        std::string{"{10, -2+2I, -2, -2-2I}"},
+        std::string{"{10.0, -2.0+2.0I, -2.0, -2.0-2.0I}"},
         "FFT dispatches approximate inputs directly to the certified backend");
+    tests.expectEqual(eval(session, "fft[{N[1,5],N[-1+1/10^10,5]}]"),
+        std::string{"{0.0, 2.0}"},
+        "FFT cancellation propagates finite input information instead of hidden certified points");
+    tests.expectEqual(eval(session,
+        "precision[at[fft[{N[1,5],N[-1+1/10^10,5]}],0]]"),
+        std::string{"0"},
+        "FFT cancellation does not invent relative precision");
+    tests.expectEqual(eval(session,
+        "accuracy[at[fft[{N[1,5],N[-1+1/10^10,5]}],0]]"),
+        std::string{"3"},
+        "FFT cancellation retains input-supported absolute accuracy");
 
     // Fourier位相は数学上rad固定であり、ユーザーの三角函数既定単位から独立する。
     session.setDefaultAngleUnit(mathematics::AngleUnit::Degree);

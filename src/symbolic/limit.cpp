@@ -57,6 +57,22 @@ constexpr std::size_t maximumLHopitalSteps = 12;
     return Expr::call(builtins.symbol(id), std::move(arguments));
 }
 
+[[nodiscard]] Expr caseBranch(
+    const evaluation::BuiltinRegistry& builtins,
+    Expr value,
+    std::optional<Expr> condition = std::nullopt) {
+    std::vector<Expr> arguments{std::move(value)};
+    if (condition)
+        arguments.push_back(std::move(*condition));
+    return call(builtins, BuiltinId::CaseBranch, std::move(arguments));
+}
+
+[[nodiscard]] Expr cases(
+    const evaluation::BuiltinRegistry& builtins,
+    std::vector<Expr> branches) {
+    return call(builtins, BuiltinId::Cases, std::move(branches));
+}
+
 [[nodiscard]] Expr simplify(
     Expr expression,
     const evaluation::BuiltinRegistry& builtins,
@@ -117,6 +133,17 @@ constexpr std::size_t maximumLHopitalSteps = 12;
 
 [[nodiscard]] bool isInfinity(const Expr& expression, const expression::Symbol& infinity) {
     return expression.isSymbol() && expression.asSymbol().sameIdentity(infinity);
+}
+
+[[nodiscard]] bool isUnaryFunctionOfVariable(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    BuiltinId id) {
+    return isHead(expression, builtins, id)
+        && expression.asCall().arguments.size() == 1
+        && expression.asCall().arguments[0].isSymbol()
+        && expression.asCall().arguments[0].asSymbol().sameIdentity(variable);
 }
 
 [[nodiscard]] bool isNegativeInfinity(
@@ -272,6 +299,19 @@ struct LocalPolynomialBehavior final {
     return signedInfinity(sign, builtins, mathematics, angles, infinity, assumptions);
 }
 
+[[nodiscard]] Expr imaginaryPi(
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    const auto* pi = mathematics.findConstant(mathematics::ConstantId::Pi);
+    Expr imaginaryUnit{Number::complex(
+        numeric::RealNumber{BigInt{0}}, numeric::RealNumber{BigInt{1}})};
+    return simplify(call(builtins, BuiltinId::Multiply, {
+        std::move(imaginaryUnit), Expr{pi->symbol}}),
+        builtins, mathematics, angles, assumptions);
+}
+
 [[nodiscard]] Expr inverseHalfTurn(
     bool negative,
     const evaluation::BuiltinRegistry& builtins,
@@ -307,6 +347,46 @@ struct LocalPolynomialBehavior final {
     return polynomial->coefficient(1);
 }
 
+
+[[nodiscard]] bool isSignedInfinity(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const expression::Symbol& infinity) {
+    return isInfinity(expression, infinity)
+        || isNegativeInfinity(expression, builtins, infinity);
+}
+
+[[nodiscard]] bool isOscillatoryPeriodicBuiltin(BuiltinId id) {
+    return id == BuiltinId::Sin || id == BuiltinId::Cos || id == BuiltinId::Tan;
+}
+
+[[nodiscard]] bool isExactRealRationalFunction(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2) {
+        const auto numerator = toRationalPolynomial(
+            expression.asCall().arguments[0], variable, builtins, {256, 2048});
+        const auto denominator = toRationalPolynomial(
+            expression.asCall().arguments[1], variable, builtins, {256, 2048});
+        return numerator && denominator && !denominator->isZero();
+    }
+    return toRationalPolynomial(expression, variable, builtins, {256, 2048}).has_value();
+}
+
+[[nodiscard]] bool isBoundedRealTrigFactor(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!expression.isCall() || expression.asCall().arguments.size() != 1)
+        return false;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || (definition->id != BuiltinId::Sin && definition->id != BuiltinId::Cos))
+        return false;
+    return isExactRealRationalFunction(expression.asCall().arguments[0], variable, builtins);
+}
+
 [[nodiscard]] Expr limitCore(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -317,11 +397,71 @@ struct LocalPolynomialBehavior final {
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinity,
     const mathematics::AssumptionSet& assumptions,
+    const expression::Symbol* complexInfinity,
+    const expression::Symbol* indeterminate,
     std::size_t depth) {
     if (depth > maximumLimitDepth)
         return unresolved(expression, variable, point, direction, builtins);
     if (!containsSymbol(expression, variable))
         return expression;
+
+    // casesの条件が極限変数に依存しない場合だけ，各branchの極限へ分配できる。
+    // 変数依存条件ではapproach directionとbranch境界の解析が必要であり，
+    // 点代入でbranch値を先に評価すると0/0等を誤ってDomainErrorへ落とすため未解決で保持する。
+    if (isHead(expression, builtins, BuiltinId::Cases)) {
+        const auto& sourceBranches = expression.asCall().arguments;
+        std::vector<Expr> branches;
+        branches.reserve(sourceBranches.size());
+        for (const Expr& branchExpression : sourceBranches) {
+            if (!isHead(branchExpression, builtins, BuiltinId::CaseBranch)
+                || branchExpression.asCall().arguments.empty()
+                || branchExpression.asCall().arguments.size() > 2)
+                return unresolved(expression, variable, point, direction, builtins);
+            const auto& branch = branchExpression.asCall().arguments;
+            if (branch.size() == 2 && containsSymbol(branch[1], variable))
+                return unresolved(expression, variable, point, direction, builtins);
+            Expr value = limitCore(
+                branch[0], variable, point, direction, builtins, mathematics, angles,
+                infinity, assumptions, complexInfinity, indeterminate, depth + 1);
+            if (branch.size() == 2)
+                branches.push_back(caseBranch(builtins, std::move(value), branch[1]));
+            else
+                branches.push_back(caseBranch(builtins, std::move(value)));
+        }
+        return cases(builtins, std::move(branches));
+    }
+
+    // 実引数が無限大へ走る周期三角函数は単一の極限値を持たない。
+    // これは「未実装」ではなく不存在を証明できる場合なので，Evaluatorから
+    // Indeterminate atomが渡されていればそれを返す。有限点の二側極限では，
+    // どちらか一方で無限振動を証明できれば二側極限の不存在も確定する。
+    if (expression.isCall() && expression.asCall().arguments.size() == 1) {
+        const auto* definition = builtins.find(expression.asCall().head);
+        if (definition && isOscillatoryPeriodicBuiltin(definition->id) && indeterminate) {
+            const Expr& argument = expression.asCall().arguments[0];
+            if (direction == LimitDirection::TwoSided
+                && !isInfinity(point, infinity)
+                && !isNegativeInfinity(point, builtins, infinity)) {
+                Expr left = limitCore(argument, variable, point, LimitDirection::Left,
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity,
+                    indeterminate, depth + 1);
+                if (isSignedInfinity(left, builtins, infinity))
+                    return Expr{*indeterminate};
+                Expr right = limitCore(argument, variable, point, LimitDirection::Right,
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity,
+                    indeterminate, depth + 1);
+                if (isSignedInfinity(right, builtins, infinity))
+                    return Expr{*indeterminate};
+            }
+            else {
+                Expr inner = limitCore(argument, variable, point, direction,
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity,
+                    indeterminate, depth + 1);
+                if (isSignedInfinity(inner, builtins, infinity))
+                    return Expr{*indeterminate};
+            }
+        }
+    }
 
     const bool atPositiveInfinity = isInfinity(point, infinity);
     const bool atNegativeInfinity = isNegativeInfinity(point, builtins, infinity);
@@ -333,7 +473,7 @@ struct LocalPolynomialBehavior final {
         const auto& arguments = expression.asCall().arguments;
         if (outer && outer->id == BuiltinId::Negate && arguments.size() == 1) {
             Expr inner = limitCore(arguments[0], variable, point, direction,
-                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
             if (!isHead(inner, builtins, BuiltinId::Limit))
                 return negate(std::move(inner), builtins, mathematics, angles, assumptions);
         }
@@ -344,7 +484,7 @@ struct LocalPolynomialBehavior final {
             bool negativeInfinitySeen = false;
             for (const Expr& argument : arguments) {
                 Expr value = limitCore(argument, variable, point, direction,
-                    builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
                 if (isHead(value, builtins, BuiltinId::Limit))
                     return unresolved(expression, variable, point, direction, builtins);
                 if (outer->id == BuiltinId::Subtract && values.size() == 1)
@@ -366,9 +506,9 @@ struct LocalPolynomialBehavior final {
         }
         if (outer && outer->id == BuiltinId::Divide && arguments.size() == 2) {
             Expr numerator = limitCore(arguments[0], variable, point, direction,
-                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
             Expr denominator = limitCore(arguments[1], variable, point, direction,
-                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
             const bool numeratorFinite = !isHead(numerator, builtins, BuiltinId::Limit)
                 && !isInfinity(numerator, infinity)
                 && !isNegativeInfinity(numerator, builtins, infinity);
@@ -380,6 +520,20 @@ struct LocalPolynomialBehavior final {
                     builtins, mathematics, angles, assumptions);
         }
         if (outer && outer->id == BuiltinId::Multiply) {
+            // 実有理函数を引数に取るsin/cosは実軸上で絶対値1以下なので，
+            // もう一方のfactorが0へ収束する2因子積はsqueeze theoremで0となる。
+            if (arguments.size() == 2) {
+                for (std::size_t boundedIndex = 0; boundedIndex < 2; ++boundedIndex) {
+                    if (!isBoundedRealTrigFactor(arguments[boundedIndex], variable, builtins))
+                        continue;
+                    Expr vanishing = limitCore(arguments[1 - boundedIndex], variable, point, direction,
+                        builtins, mathematics, angles, infinity, assumptions, complexInfinity,
+                        indeterminate, depth + 1);
+                    if (isZero(vanishing))
+                        return integer(0);
+                }
+            }
+
             // すべてのfactorが有限極限へ収束する場合だけ積を合成する。
             // 0*Infinity等の不定形はここで決めず、既存の専用ruleへ残す。
             std::vector<Expr> values;
@@ -387,7 +541,7 @@ struct LocalPolynomialBehavior final {
             bool finite = true;
             for (const Expr& argument : arguments) {
                 Expr value = limitCore(argument, variable, point, direction,
-                    builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
                 if (isHead(value, builtins, BuiltinId::Limit)
                     || isInfinity(value, infinity)
                     || isNegativeInfinity(value, builtins, infinity)) {
@@ -407,6 +561,33 @@ struct LocalPolynomialBehavior final {
                 expression, variable, atNegativeInfinity,
                 builtins, mathematics, angles, infinity, assumptions))
             return *rationalLimit;
+
+        // Classical integral functions have branch-sensitive but exact real-axis asymptotics.
+        // Ei(x) ~ exp(x)/x for x->+Infinity and tends to zero for x->-Infinity.
+        if (isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::ExponentialIntegralEi))
+            return atNegativeInfinity ? integer(0) : Expr{infinity};
+
+        // Principal Ci(x) tends to zero on the positive real axis. On the negative real
+        // branch cut Ci(-r)=Ci(r)+I Pi (r>0), hence x->-Infinity tends exactly to I Pi.
+        if (isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::CosineIntegralCi))
+            return atNegativeInfinity
+                ? imaginaryPi(builtins, mathematics, angles, assumptions)
+                : integer(0);
+
+        // li(x)=Ei(Log(x)). On the positive real axis li(x)->+Infinity.
+        // Along x->-Infinity on the principal branch, Log(x)=log|x|+I Pi and
+        // |Ei(Log(x))| ~ |x|/|Log(x)| -> Infinity while the value is complex.
+        // mmCal has no DirectedInfinity yet, so ComplexInfinity is the exact conservative
+        // extended-complex result: it records unbounded magnitude without inventing a real value.
+        if (isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::LogarithmicIntegralLi)) {
+            if (!atNegativeInfinity)
+                return Expr{infinity};
+            if (complexInfinity)
+                return Expr{*complexInfinity};
+        }
 
         if (expression.isCall() && expression.asCall().arguments.size() == 1) {
             const auto* definition = builtins.find(expression.asCall().head);
@@ -446,6 +627,35 @@ struct LocalPolynomialBehavior final {
 
     const auto rationalPoint = exactRealRational(point);
     if (rationalPoint) {
+        if (rationalPoint->isZero()) {
+            // Ei(x)=gamma+log|x|+O(x) on the real axis, so both real one-sided
+            // limits at its logarithmic singularity are -Infinity.
+            if (isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::ExponentialIntegralEi))
+                return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+
+            // Ci(z)=gamma+Log(z)+O(z^2). From the right this is real -Infinity;
+            // from the left the principal branch adds the bounded term I Pi. In either
+            // case the directed limit is -Infinity, so the two-sided real limit agrees.
+            if (isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::CosineIntegralCi))
+                return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+
+            // li(x)=Ei(Log(x)) tends to zero at the origin from either real side,
+            // despite x=0 being a branch point of the complex principal function.
+            if (isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::LogarithmicIntegralLi))
+                return integer(0);
+        }
+
+        // li(x)=Ei(Log(x)) and Ei(t)->-Infinity as t->0 from either real side.
+        // Hence both one-sided limits, and therefore the two-sided real limit, at x=1
+        // are -Infinity even though li(1) itself is undefined.
+        if (*rationalPoint == Rational{BigInt{1}}
+            && isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::LogarithmicIntegralLi))
+            return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+
         if (auto rationalLimit = rationalFunctionFiniteLimit(
                 expression, variable, *rationalPoint, direction,
                 builtins, mathematics, angles, infinity, assumptions))
@@ -525,7 +735,7 @@ struct LocalPolynomialBehavior final {
             Expr quotient = divide(numerator, denominator,
                 builtins, mathematics, angles, assumptions);
             Expr result = limitCore(quotient, variable, point, direction,
-                builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
             if (!isHead(result, builtins, BuiltinId::Limit))
                 return result;
         }
@@ -546,7 +756,7 @@ struct LocalPolynomialBehavior final {
                     divide(integer(1), factor, builtins, mathematics, angles, assumptions),
                     builtins, mathematics, angles, assumptions);
                 Expr result = limitCore(rewritten, variable, point, direction,
-                    builtins, mathematics, angles, infinity, assumptions, depth + 1);
+                    builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
                 if (!isHead(result, builtins, BuiltinId::Limit))
                     return result;
             }
@@ -567,7 +777,9 @@ Expr limitExpression(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinitySymbol,
-    const mathematics::AssumptionSet& assumptions) {
+    const mathematics::AssumptionSet& assumptions,
+    const expression::Symbol* complexInfinitySymbol,
+    const expression::Symbol* indeterminateSymbol) {
     mathematics::AssumptionSet local = assumptions;
     if (!isInfinity(point, infinitySymbol)
         && !isNegativeInfinity(point, builtins, infinitySymbol)
@@ -583,7 +795,8 @@ Expr limitExpression(
         expression,
         simplification::SimplificationContext{builtins, mathematics, angles, local});
     return limitCore(prepared, variable, point, direction,
-        builtins, mathematics, angles, infinitySymbol, local, 0);
+        builtins, mathematics, angles, infinitySymbol, local, complexInfinitySymbol,
+        indeterminateSymbol, 0);
 }
 
 } // namespace mmcal::symbolic

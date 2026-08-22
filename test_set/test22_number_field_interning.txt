@@ -1,2 +1,0 @@
-# AlgebraicNumber Stage 4: weak-interned embedded number fields
-(root[{-2,0,1},2]+root[{-3,0,0,1},1])*(root[{-2,0,1},2]-root[{-3,0,0,1},1]) ==> root[{1, 12, -6, 1}, 1]

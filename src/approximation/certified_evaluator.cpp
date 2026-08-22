@@ -1,7 +1,9 @@
 // 式全体の保証付き区間評価
 #include "certified_evaluator.hpp"
+#include "expression_interval.hpp"
 
 #include "certified_constants.hpp"
+#include "certified_domain.hpp"
 #include "certification_error.hpp"
 #include "certified_atan.hpp"
 #include "certified_complex_transcendental.hpp"
@@ -12,6 +14,7 @@
 #include "certified_sqrt.hpp"
 #include "certified_special_functions.hpp"
 #include "certified_trigonometry.hpp"
+#include "certified_value_math.hpp"
 #include "interval_math.hpp"
 #include "mathematics/exact_trigonometry.hpp"
 #include "numeric/big_int.hpp"
@@ -19,6 +22,8 @@
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
+#include "numeric/rational_rounding.hpp"
+#include "numeric/detail/binary_scale.hpp"
 #include "symbolic/algebraic_number.hpp"
 
 #include <charconv>
@@ -27,6 +32,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -43,7 +49,68 @@ using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
 
+// CertifiedEvaluatorは式木を再帰評価する。Windowsの既定stackでもOS例外へ到達しないよう、
+// 構文上の深さとは別に実評価の再帰budgetを持つ。
 constexpr std::size_t maximumCertifiedExpressionDepth = 96;
+constexpr std::size_t maximumCertifiedRecursionDepth = 48;
+
+[[nodiscard]] Rational absRational(const Rational& value) {
+    return value.numerator().isNegative() ? -value : value;
+}
+
+[[nodiscard]] Rational intervalMagnitudeUpper(const RealInterval& value) {
+    const Rational lower = absRational(value.lower().toRational());
+    const Rational upper = absRational(value.upper().toRational());
+    return lower < upper ? upper : lower;
+}
+
+[[nodiscard]] Rational valueComponentMagnitudeUpper(const CertifiedValue& value) {
+    if (value.isReal())
+        return intervalMagnitudeUpper(value.asReal());
+    const Rational real = intervalMagnitudeUpper(value.asComplex().real());
+    const Rational imaginary = intervalMagnitudeUpper(value.asComplex().imaginary());
+    return real < imaginary ? imaginary : real;
+}
+
+[[nodiscard]] std::size_t cancellationGuardBits(const CertifiedValue& value) {
+    const Rational magnitude = valueComponentMagnitudeUpper(value);
+    if (magnitude.isZero() || magnitude >= Rational{BigInt{1}})
+        return 0;
+
+    const std::int64_t exponent = numeric::detail::floorLog2PositiveRatio(
+        magnitude.numerator().abs(), magnitude.denominator());
+    if (exponent >= 0)
+        return 0;
+
+    const std::uint64_t loss = static_cast<std::uint64_t>(-(exponent + 1)) + 1;
+    constexpr std::size_t margin = 24;
+    if (loss > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max() - margin))
+        throw std::overflow_error("Stable elementary cancellation guard is too large");
+    return static_cast<std::size_t>(loss) + margin;
+}
+
+[[nodiscard]] std::size_t checkedPrecisionWithGuard(
+    std::size_t precisionBits,
+    std::size_t guardBits) {
+    if (guardBits > std::numeric_limits<std::size_t>::max() - precisionBits)
+        throw std::overflow_error("Stable elementary working precision is too large");
+    return precisionBits + guardBits;
+}
+
+[[nodiscard]] std::optional<std::size_t> positivePrecisionDigits(const Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& value = expression.asNumber().asReal().asInteger();
+    if (value.isNegative() || value.isZero())
+        return std::nullopt;
+    const std::string text = value.toString();
+    std::size_t result = 0;
+    const auto converted = std::from_chars(text.data(), text.data() + text.size(), result);
+    if (converted.ec != std::errc{} || converted.ptr != text.data() + text.size())
+        return std::nullopt;
+    return result;
+}
 
 [[nodiscard]] bool exceedsCertifiedExpressionDepth(const Expr& root) {
     struct Pending final {
@@ -143,66 +210,99 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
+[[nodiscard]] Rational rationalPower(Rational base, std::size_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] RealInterval scaleInterval(
+    const RealInterval& value,
+    const Rational& scale,
+    std::size_t precisionBits) {
+    return approximation::multiply(
+        value, RealInterval::fromRational(scale, precisionBits), precisionBits);
+}
+
+[[nodiscard]] RealInterval addSymmetricRemainder(
+    const RealInterval& value,
+    const Rational& radius,
+    std::size_t precisionBits) {
+    return approximation::add(value,
+        RealInterval::fromRationalBounds(-radius, radius, precisionBits), precisionBits);
+}
+
+// 可除特異点を含む小区間では商を直接作らず，Taylor多項式と剰余上界で包む。
+// |x|<=1だけを対象とし，それ以外は従来backendへ委ねる。
+[[nodiscard]] std::optional<RealInterval> stableCardinalRealNearZero(
+    BuiltinId id,
+    const RealInterval& x,
+    std::size_t precisionBits) {
+    const Rational radius = intervalMagnitudeUpper(x);
+    if (radius > rational(1))
+        return std::nullopt;
+
+    const RealInterval one = RealInterval::fromRational(rational(1), precisionBits);
+    const RealInterval x2 = approximation::squareInterval(x, precisionBits);
+    const RealInterval x3 = approximation::multiply(x2, x, precisionBits);
+    const RealInterval x4 = approximation::squareInterval(x2, precisionBits);
+    const RealInterval x5 = approximation::multiply(x4, x, precisionBits);
+
+    switch (id) {
+    case BuiltinId::Sinc: {
+        RealInterval result = approximation::subtract(
+            one, scaleInterval(x2, rational(1, 6), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
+        return addSymmetricRemainder(
+            result, rationalPower(radius, 6) * rational(1, 5040), precisionBits);
+    }
+    case BuiltinId::Cosc: {
+        RealInterval result = scaleInterval(x, rational(1, 2), precisionBits);
+        result = approximation::subtract(
+            result, scaleInterval(x3, rational(1, 24), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x5, rational(1, 720), precisionBits), precisionBits);
+        return addSymmetricRemainder(
+            result, rationalPower(radius, 7) * rational(1, 40320), precisionBits);
+    }
+    case BuiltinId::Sinhc: {
+        RealInterval result = approximation::add(
+            one, scaleInterval(x2, rational(1, 6), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
+        // k>=3の正項tailは|x|<=1で初項r^6/7!と比率<=1/72の幾何級数で抑える。
+        return addSymmetricRemainder(
+            result, rationalPower(radius, 6) * rational(1, 4970), precisionBits);
+    }
+    case BuiltinId::Expc: {
+        RealInterval result = approximation::add(
+            one, scaleInterval(x, rational(1, 2), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x2, rational(1, 6), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x3, rational(1, 24), precisionBits), precisionBits);
+        result = approximation::add(
+            result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
+        // expのLagrange剰余でe^|x|<3を使う。
+        return addSymmetricRemainder(
+            result, rationalPower(radius, 5) * rational(1, 240), precisionBits);
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] RealInterval exactRealInterval(
     const RealNumber& value,
     std::size_t precisionBits) {
     return RealInterval::fromRational(value.toRational(), precisionBits);
-}
-
-[[nodiscard]] CertifiedValue normalizeComplex(ComplexInterval value) {
-    if (value.isProvablyReal())
-        return CertifiedValue{value.real()};
-    return CertifiedValue{std::move(value)};
-}
-
-[[nodiscard]] CertifiedValue addValues(
-    const CertifiedValue& lhs,
-    const CertifiedValue& rhs,
-    std::size_t precisionBits) {
-    if (lhs.isReal() && rhs.isReal())
-        return CertifiedValue{approximation::add(lhs.asReal(), rhs.asReal(), precisionBits)};
-
-    return normalizeComplex(approximation::add(
-        lhs.toComplex(), rhs.toComplex(), precisionBits));
-}
-
-[[nodiscard]] CertifiedValue subtractValues(
-    const CertifiedValue& lhs,
-    const CertifiedValue& rhs,
-    std::size_t precisionBits) {
-    if (lhs.isReal() && rhs.isReal())
-        return CertifiedValue{approximation::subtract(lhs.asReal(), rhs.asReal(), precisionBits)};
-
-    return normalizeComplex(approximation::subtract(
-        lhs.toComplex(), rhs.toComplex(), precisionBits));
-}
-
-[[nodiscard]] CertifiedValue multiplyValues(
-    const CertifiedValue& lhs,
-    const CertifiedValue& rhs,
-    std::size_t precisionBits) {
-    if (lhs.isReal() && rhs.isReal())
-        return CertifiedValue{approximation::multiply(lhs.asReal(), rhs.asReal(), precisionBits)};
-
-    return normalizeComplex(approximation::multiply(
-        lhs.toComplex(), rhs.toComplex(), precisionBits));
-}
-
-[[nodiscard]] CertifiedValue divideValues(
-    const CertifiedValue& lhs,
-    const CertifiedValue& rhs,
-    std::size_t precisionBits) {
-    if (lhs.isReal() && rhs.isReal())
-        return CertifiedValue{approximation::divide(lhs.asReal(), rhs.asReal(), precisionBits)};
-
-    return normalizeComplex(approximation::divide(
-        lhs.toComplex(), rhs.toComplex(), precisionBits));
-}
-
-[[nodiscard]] CertifiedValue negateValue(const CertifiedValue& value) {
-    if (value.isReal())
-        return CertifiedValue{approximation::negate(value.asReal())};
-    return normalizeComplex(approximation::negate(value.asComplex()));
 }
 
 [[nodiscard]] std::optional<std::uint64_t> toUint64(const BigInt& value) {
@@ -247,14 +347,76 @@ constexpr std::size_t maximumCertifiedExpressionDepth = 96;
 
     while (exponent != 0) {
         if ((exponent & 1U) != 0)
-            result = multiplyValues(result, base, precisionBits);
+            result = multiplyCertifiedValues(result, base, precisionBits);
 
         exponent >>= 1U;
         if (exponent != 0)
-            base = multiplyValues(base, base, precisionBits);
+            base = multiplyCertifiedValues(base, base, precisionBits);
     }
 
     return result;
+}
+
+[[nodiscard]] std::optional<RealInterval> provablyReal(const CertifiedValue& value) {
+    if (value.isReal())
+        return value.asReal();
+    if (approximation::intervalIsExactZero(value.asComplex().imaginary()))
+        return value.asComplex().real();
+    return std::nullopt;
+}
+
+[[nodiscard]] bool informationStraddlesRealOnlyBackend(const CertifiedValue& value) {
+    return value.isComplex()
+        && value.asComplex().imaginary().containsZero()
+        && !approximation::intervalIsExactZero(value.asComplex().imaginary());
+}
+
+void requireNoNonPositiveIntegerPole(
+    const CertifiedValue& value,
+    std::string_view functionName,
+    bool informationEnclosure = false) {
+    const SingularityRelation relation = value.isReal()
+        ? classifyNonPositiveIntegerPole(value.asReal())
+        : classifyNonPositiveIntegerPole(value.asComplex());
+    switch (relation) {
+    case SingularityRelation::Clear:
+        return;
+    case SingularityRelation::ExactSingularity:
+        throw std::domain_error(
+            std::string{functionName} + " is undefined at a non-positive integer");
+    case SingularityRelation::MayContainSingularity:
+        throw PrecisionInsufficient(
+            std::string{functionName}
+                + " InformationEnclosure may contain a non-positive-integer pole",
+            informationEnclosure
+                ? PrecisionInsufficientKind::InputInformation
+                : PrecisionInsufficientKind::Refinable);
+    }
+}
+
+void requireNoPointSingularity(
+    const CertifiedValue& value,
+    const Rational& point,
+    std::string_view domainMessage,
+    std::string_view precisionMessage,
+    bool informationEnclosure = false) {
+    const ComplexInterval complex = value.toComplex();
+    const Rational realLower = complex.real().lower().toRational();
+    const Rational realUpper = complex.real().upper().toRational();
+    if (point < realLower || point > realUpper || !complex.imaginary().containsZero())
+        return;
+
+    const bool exactPoint = complex.real().isPoint()
+        && realLower == point
+        && intervalIsExactZero(complex.imaginary());
+    if (exactPoint)
+        throw std::domain_error(std::string{domainMessage});
+
+    throw PrecisionInsufficient(
+        std::string{precisionMessage},
+        informationEnclosure
+            ? PrecisionInsufficientKind::InputInformation
+            : PrecisionInsufficientKind::Refinable);
 }
 
 [[nodiscard]] CertifiedValue principalSqrtReal(
@@ -324,7 +486,7 @@ struct AngleOperand final {
     std::size_t precisionBits) {
     if (value.isReal())
         return CertifiedValue{approximation::multiply(value.asReal(), factor, precisionBits)};
-    return normalizeComplex(approximation::multiply(
+    return normalizeCertifiedComplex(approximation::multiply(
         value.asComplex(), ComplexInterval::fromReal(factor), precisionBits));
 }
 
@@ -388,44 +550,12 @@ struct AngleOperand final {
 
     if (value.asComplex().containsZero())
         throw PrecisionInsufficient{message};
-    return normalizeComplex(approximation::divide(
+    return normalizeCertifiedComplex(approximation::divide(
         ComplexInterval::fromReal(RealInterval::fromRational(rational(1), precisionBits)),
         value.asComplex(), precisionBits));
 }
 
 } // namespace
-
-CertifiedValue::CertifiedValue(RealInterval real)
-    : value_(std::move(real)) {}
-
-CertifiedValue::CertifiedValue(ComplexInterval complex)
-    : value_(std::move(complex)) {}
-
-bool CertifiedValue::isReal() const noexcept {
-    return std::holds_alternative<RealInterval>(value_);
-}
-
-bool CertifiedValue::isComplex() const noexcept {
-    return std::holds_alternative<ComplexInterval>(value_);
-}
-
-const RealInterval& CertifiedValue::asReal() const {
-    if (!isReal())
-        throw std::logic_error("CertifiedValue does not contain a real interval");
-    return std::get<RealInterval>(value_);
-}
-
-const ComplexInterval& CertifiedValue::asComplex() const {
-    if (!isComplex())
-        throw std::logic_error("CertifiedValue does not contain a complex interval");
-    return std::get<ComplexInterval>(value_);
-}
-
-ComplexInterval CertifiedValue::toComplex() const {
-    if (isComplex())
-        return asComplex();
-    return ComplexInterval::fromReal(asReal());
-}
 
 CertifiedEvaluator::CertifiedEvaluator(
     const evaluation::BuiltinRegistry& builtins,
@@ -441,7 +571,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::enclose(
     EnclosureKind enclosureKind) const {
     if (exceedsCertifiedExpressionDepth(expression))
         return std::nullopt;
-    return encloseBound(expression, precisionBits, {}, enclosureKind);
+    return encloseBound(expression, precisionBits, {}, enclosureKind, 0);
 }
 
 std::optional<CertifiedValue> CertifiedEvaluator::enclose(
@@ -451,14 +581,17 @@ std::optional<CertifiedValue> CertifiedEvaluator::enclose(
     EnclosureKind enclosureKind) const {
     if (exceedsCertifiedExpressionDepth(expression))
         return std::nullopt;
-    return encloseBound(expression, precisionBits, bindings, enclosureKind);
+    return encloseBound(expression, precisionBits, bindings, enclosureKind, 0);
 }
 
 std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
     const Expr& expression,
     std::size_t precisionBits,
     std::span<const CertifiedBinding> bindings,
-    EnclosureKind enclosureKind) const {
+    EnclosureKind enclosureKind,
+    std::size_t recursionDepth) const {
+    if (recursionDepth > maximumCertifiedRecursionDepth)
+        return std::nullopt;
     if (precisionBits == 0)
         throw std::invalid_argument("Certified evaluation precision must be at least one bit");
 
@@ -485,14 +618,23 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
 
     if (expression.isComplexDecimalApproximation()) {
         const auto& value = expression.asComplexDecimalApproximation();
-        const auto component = [&](const numeric::DecimalApproximation& part) {
+        const auto component = [&](const numeric::DecimalApproximation& part,
+                                   bool exactlyZero,
+                                   const Rational& informationLower,
+                                   const Rational& informationUpper) {
+            if (enclosureKind == EnclosureKind::Information && exactlyZero)
+                return RealInterval::fromRational(Rational{}, precisionBits);
             const Rational& lower = enclosureKind == EnclosureKind::Information
-                ? part.informationLower() : part.certifiedLower();
+                ? informationLower : part.certifiedLower();
             const Rational& upper = enclosureKind == EnclosureKind::Information
-                ? part.informationUpper() : part.certifiedUpper();
+                ? informationUpper : part.certifiedUpper();
             return RealInterval::fromRationalBounds(lower, upper, precisionBits);
         };
-        return CertifiedValue{ComplexInterval{component(value.real()), component(value.imaginary())}};
+        return CertifiedValue{ComplexInterval{
+            component(value.real(), value.realExactlyZero(),
+                value.realInformationLower(), value.realInformationUpper()),
+            component(value.imaginary(), value.imaginaryExactlyZero(),
+                value.imaginaryInformationLower(), value.imaginaryInformationUpper())}};
     }
 
     if (expression.isSymbol()) {
@@ -512,7 +654,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
     }
 
     if (expression.isCall())
-        return encloseCall(expression.asCall(), precisionBits, bindings, enclosureKind);
+        return encloseCall(expression.asCall(), precisionBits, bindings, enclosureKind, recursionDepth);
 
     return std::nullopt;
 }
@@ -521,7 +663,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     const expression::CallExpr& call,
     std::size_t precisionBits,
     std::span<const CertifiedBinding> bindings,
-    EnclosureKind enclosureKind) const {
+    EnclosureKind enclosureKind,
+    std::size_t recursionDepth) const {
+    if (recursionDepth > maximumCertifiedRecursionDepth)
+        return std::nullopt;
     const auto* definition = builtins_.find(call.head);
     if (!definition)
         return std::nullopt;
@@ -529,10 +674,43 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     const auto encloseArgument = [&](std::size_t index) -> std::optional<CertifiedValue> {
         if (index >= call.arguments.size())
             return std::nullopt;
-        return encloseBound(call.arguments[index], precisionBits, bindings, enclosureKind);
+        return encloseBound(call.arguments[index], precisionBits, bindings, enclosureKind, recursionDepth + 1);
     };
 
     switch (definition->id) {
+    case BuiltinId::NumericalApproximation: {
+        if (call.arguments.empty() || call.arguments.size() > 2)
+            return std::nullopt;
+        constexpr std::size_t defaultPrecisionDigits = 16;
+        const std::size_t digits = call.arguments.size() == 2
+            ? positivePrecisionDigits(call.arguments[1]).value_or(0)
+            : defaultPrecisionDigits;
+        if (digits == 0)
+            return std::nullopt;
+
+        ApproximationContext context{digits};
+        for (;;) {
+            const std::size_t nestedBits = context.workingBinaryBits();
+            const auto information = encloseBound(
+                call.arguments[0], nestedBits, bindings, EnclosureKind::Information, recursionDepth + 1);
+            const auto certified = encloseBound(
+                call.arguments[0], nestedBits, bindings, EnclosureKind::Certified, recursionDepth + 1);
+            if (!information || !certified)
+                return std::nullopt;
+            if (const auto materialized = finalizeCertifiedApproximation(
+                    *certified, *information, digits))
+                return encloseBound(
+                    *materialized, precisionBits, bindings, enclosureKind, recursionDepth + 1);
+
+            const std::size_t growth = std::max<std::size_t>(8, context.guardDigits() / 2);
+            if (growth > std::numeric_limits<std::size_t>::max() - context.guardDigits())
+                return std::nullopt;
+            context.setGuardDigits(context.guardDigits() + growth);
+            if (context.guardDigits() > digits + 256)
+                return std::nullopt;
+        }
+    }
+
     case BuiltinId::Root: {
         if (call.arguments.size() == 3) {
             const auto algebraic = complexAlgebraicRoot(call);
@@ -564,10 +742,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Add: {
         CertifiedValue result{RealInterval::fromRational(rational(0), precisionBits)};
         for (const Expr& argument : call.arguments) {
-            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind);
+            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind, recursionDepth + 1);
             if (!enclosed)
                 return std::nullopt;
-            result = addValues(result, *enclosed, precisionBits);
+            result = addCertifiedValues(result, *enclosed, precisionBits);
         }
         return result;
     }
@@ -579,16 +757,16 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto rhs = encloseArgument(1);
         if (!lhs || !rhs)
             return std::nullopt;
-        return subtractValues(*lhs, *rhs, precisionBits);
+        return subtractCertifiedValues(*lhs, *rhs, precisionBits);
     }
 
     case BuiltinId::Multiply: {
         CertifiedValue result{RealInterval::fromRational(rational(1), precisionBits)};
         for (const Expr& argument : call.arguments) {
-            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind);
+            const auto enclosed = encloseBound(argument, precisionBits, bindings, enclosureKind, recursionDepth + 1);
             if (!enclosed)
                 return std::nullopt;
-            result = multiplyValues(result, *enclosed, precisionBits);
+            result = multiplyCertifiedValues(result, *enclosed, precisionBits);
         }
         return result;
     }
@@ -600,12 +778,32 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto rhs = encloseArgument(1);
         if (!lhs || !rhs)
             return std::nullopt;
-        return divideValues(*lhs, *rhs, precisionBits);
+        return divideCertifiedValues(*lhs, *rhs, precisionBits);
     }
 
     case BuiltinId::Negate: {
         const auto value = encloseArgument(0);
-        return value ? std::optional<CertifiedValue>{negateValue(*value)} : std::nullopt;
+        return value ? std::optional<CertifiedValue>{negateCertifiedValue(*value)} : std::nullopt;
+    }
+
+    case BuiltinId::Frac: {
+        if (call.arguments.size() != 1)
+            return std::nullopt;
+        const auto value = encloseArgument(0);
+        if (!value || !value->isReal())
+            return std::nullopt;
+        const Rational lower = value->asReal().lower().toRational();
+        const Rational upper = value->asReal().upper().toRational();
+        const BigInt lowerFloor = numeric::floorToInteger(lower);
+        const BigInt upperFloor = numeric::floorToInteger(upper);
+        if (lowerFloor != upperFloor)
+            throw PrecisionInsufficient(
+                "fract InformationEnclosure crosses an integer boundary",
+                enclosureKind == EnclosureKind::Information
+                    ? PrecisionInsufficientKind::InputInformation
+                    : PrecisionInsufficientKind::Refinable);
+        return CertifiedValue{RealInterval::fromRationalBounds(
+            lower - Rational{lowerFloor}, upper - Rational{lowerFloor}, precisionBits)};
     }
 
     case BuiltinId::Cbrt: {
@@ -642,7 +840,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             call.arguments[0], builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind, recursionDepth + 1);
         if (!scalar)
             return std::nullopt;
         const CertifiedValue radians = angleValueToRadians(
@@ -653,7 +851,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const ComplexInterval iSine{
             approximation::negate(sine.imaginary()),
             sine.real()};
-        return normalizeComplex(approximation::add(cosine, iSine, precisionBits));
+        return normalizeCertifiedComplex(approximation::add(cosine, iSine, precisionBits));
     }
 
     case BuiltinId::DegreeToRadian:
@@ -692,35 +890,64 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Expm1: {
         if (call.arguments.size() != 1)
             return std::nullopt;
-        const auto value = encloseArgument(0);
+        const auto initial = encloseArgument(0);
+        if (!initial)
+            return std::nullopt;
+
+        // exp(x)-1 は x≈0 で桁落ちする。入力の2進桁位置だけ余分に作業精度を
+        // 与え，同じ式を再包含してから減算する。有限precision入力では
+        // InformationEnclosure自体は狭まらないため，隠れた精度を発明しない。
+        const std::size_t workBits = checkedPrecisionWithGuard(
+            precisionBits, cancellationGuardBits(*initial));
+        const auto value = workBits == precisionBits
+            ? initial
+            : encloseBound(call.arguments[0], workBits, bindings, enclosureKind, recursionDepth + 1);
         if (!value)
             return std::nullopt;
-        const CertifiedValue one{RealInterval::fromRational(rational(1), precisionBits)};
-        if (value->isReal())
-            return subtractValues(
-                CertifiedValue{encloseExp(value->asReal(), precisionBits).interval},
-                one, precisionBits);
-        return subtractValues(
-            normalizeComplex(encloseComplexExp(value->asComplex(), precisionBits).interval),
-            one, precisionBits);
+        const CertifiedValue one{RealInterval::fromRational(rational(1), workBits)};
+        CertifiedValue result = value->isReal()
+            ? subtractCertifiedValues(
+                CertifiedValue{encloseExp(value->asReal(), workBits).interval}, one, workBits)
+            : subtractCertifiedValues(
+                normalizeCertifiedComplex(encloseComplexExp(value->asComplex(), workBits).interval),
+                one, workBits);
+        return result.isReal()
+            ? CertifiedValue{result.asReal().roundedOutward(precisionBits)}
+            : CertifiedValue{result.asComplex().roundedOutward(precisionBits)};
     }
 
     case BuiltinId::Log1p: {
         if (call.arguments.size() != 1)
             return std::nullopt;
-        const auto value = encloseArgument(0);
+        const auto initial = encloseArgument(0);
+        if (!initial)
+            return std::nullopt;
+
+        // log(1+x) は x≈0 の加算とlog評価，x≈-1 の 1+x の双方で
+        // cancellationを起こし得る。初回区間から必要guardを見積もり，
+        // shifted側がさらに小さい場合はその桁落ち分も加える。
+        const CertifiedValue initialOne{
+            RealInterval::fromRational(rational(1), precisionBits)};
+        const CertifiedValue initialShifted = addCertifiedValues(
+            *initial, initialOne, precisionBits);
+        const std::size_t guardBits = std::max(
+            cancellationGuardBits(*initial), cancellationGuardBits(initialShifted));
+        const std::size_t workBits = checkedPrecisionWithGuard(precisionBits, guardBits);
+        const auto value = workBits == precisionBits
+            ? initial
+            : encloseBound(call.arguments[0], workBits, bindings, enclosureKind, recursionDepth + 1);
         if (!value)
             return std::nullopt;
-        const CertifiedValue shifted = addValues(
-            *value, CertifiedValue{RealInterval::fromRational(rational(1), precisionBits)},
-            precisionBits);
+        const CertifiedValue shifted = addCertifiedValues(
+            *value, CertifiedValue{RealInterval::fromRational(rational(1), workBits)}, workBits);
         if (shifted.isReal()) {
             const numeric::BigFloat zero;
             if (shifted.asReal().lower() > zero)
-                return CertifiedValue{encloseLogPositive(shifted.asReal(), precisionBits).interval};
+                return CertifiedValue{
+                    encloseLogPositive(shifted.asReal(), workBits).interval.roundedOutward(precisionBits)};
         }
-        return normalizeComplex(enclosePrincipalComplexLog(
-            shifted.toComplex(), precisionBits).interval);
+        return normalizeCertifiedComplex(enclosePrincipalComplexLog(
+            shifted.toComplex(), workBits).interval.roundedOutward(precisionBits));
     }
 
     case BuiltinId::Sinc:
@@ -731,7 +958,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto angleOperand = splitAngleOperand(call.arguments[0], builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind, recursionDepth + 1);
         if (!scalar)
             return std::nullopt;
         const CertifiedValue radians = angleValueToRadians(
@@ -744,8 +971,28 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                 return CertifiedValue{RealInterval::fromRational(
                     definition->id == BuiltinId::Cosc ? rational(0) : rational(1), precisionBits)};
             }
-            if (x.containsZero())
-                throw PrecisionInsufficient{"Cardinal trigonometric denominator cannot yet be proven nonzero"};
+            if (x.containsZero()) {
+                if (definition->id == BuiltinId::Sinc || definition->id == BuiltinId::Cosc) {
+                    if (const auto stable = stableCardinalRealNearZero(
+                            definition->id, x, precisionBits))
+                        return CertifiedValue{*stable};
+                }
+                else if (definition->id == BuiltinId::Tanc) {
+                    if (const auto stableSinc = stableCardinalRealNearZero(
+                            BuiltinId::Sinc, x, precisionBits)) {
+                        const RealInterval cosine = encloseCosRadianInterval(
+                            x, precisionBits).interval;
+                        if (!cosine.containsZero())
+                            return CertifiedValue{approximation::divide(
+                                *stableSinc, cosine, precisionBits)};
+                    }
+                }
+                throw PrecisionInsufficient{
+                    "Cardinal trigonometric input information crosses the removable singularity",
+                    enclosureKind == EnclosureKind::Information
+                        ? PrecisionInsufficientKind::InputInformation
+                        : PrecisionInsufficientKind::Refinable};
+            }
             const auto sine = encloseSinRadianInterval(x, precisionBits).interval;
             const auto cosine = encloseCosRadianInterval(x, precisionBits).interval;
             if (definition->id == BuiltinId::Sinc)
@@ -770,15 +1017,15 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const ComplexInterval sine = encloseComplexSinRadian(x, precisionBits);
         const ComplexInterval cosine = encloseComplexCosRadian(x, precisionBits);
         if (definition->id == BuiltinId::Sinc)
-            return normalizeComplex(approximation::divide(sine, x, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(sine, x, precisionBits));
         if (definition->id == BuiltinId::Cosc) {
             const ComplexInterval one = ComplexInterval::fromReal(oneReal);
-            return normalizeComplex(approximation::divide(
+            return normalizeCertifiedComplex(approximation::divide(
                 approximation::subtract(one, cosine, precisionBits), x, precisionBits));
         }
         if (cosine.containsZero())
             throw PrecisionInsufficient{"Complex tanc pole cannot yet be excluded"};
-        return normalizeComplex(approximation::divide(
+        return normalizeCertifiedComplex(approximation::divide(
             sine, approximation::multiply(x, cosine, precisionBits), precisionBits));
     }
 
@@ -796,16 +1043,41 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                 && value->asComplex().imaginary().isPoint() && value->asComplex().imaginary().lower().isZero();
         if (pointZero)
             return CertifiedValue{RealInterval::fromRational(rational(1), precisionBits)};
-        if ((value->isReal() && value->asReal().containsZero())
-            || (value->isComplex() && value->asComplex().containsZero()))
-            throw PrecisionInsufficient{"Cardinal function denominator cannot yet be proven nonzero"};
+        if (value->isReal() && value->asReal().containsZero()) {
+            if (definition->id == BuiltinId::Sinhc || definition->id == BuiltinId::Expc) {
+                if (const auto stable = stableCardinalRealNearZero(
+                        definition->id, value->asReal(), precisionBits))
+                    return CertifiedValue{*stable};
+            }
+            else if (definition->id == BuiltinId::Tanhc) {
+                if (const auto stableSinhc = stableCardinalRealNearZero(
+                        BuiltinId::Sinhc, value->asReal(), precisionBits)) {
+                    const RealInterval coshValue = encloseCoshReal(
+                        value->asReal(), precisionBits);
+                    if (!coshValue.containsZero())
+                        return CertifiedValue{approximation::divide(
+                            *stableSinhc, coshValue, precisionBits)};
+                }
+            }
+            throw PrecisionInsufficient{
+                "Cardinal function input information crosses the removable singularity",
+                enclosureKind == EnclosureKind::Information
+                    ? PrecisionInsufficientKind::InputInformation
+                    : PrecisionInsufficientKind::Refinable};
+        }
+        if (value->isComplex() && value->asComplex().containsZero())
+            throw PrecisionInsufficient{
+                "Complex cardinal function denominator cannot yet be proven nonzero",
+                enclosureKind == EnclosureKind::Information
+                    ? PrecisionInsufficientKind::InputInformation
+                    : PrecisionInsufficientKind::Refinable};
 
         if (definition->id == BuiltinId::Expc) {
             const CertifiedValue one{RealInterval::fromRational(rational(1), precisionBits)};
             const CertifiedValue exponential = value->isReal()
                 ? CertifiedValue{encloseExp(value->asReal(), precisionBits).interval}
-                : normalizeComplex(encloseComplexExp(value->asComplex(), precisionBits).interval);
-            return divideValues(subtractValues(exponential, one, precisionBits), *value, precisionBits);
+                : normalizeCertifiedComplex(encloseComplexExp(value->asComplex(), precisionBits).interval);
+            return divideCertifiedValues(subtractCertifiedValues(exponential, one, precisionBits), *value, precisionBits);
         }
 
         if (value->isReal()) {
@@ -820,11 +1092,11 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const ComplexInterval z = value->asComplex();
         const ComplexInterval sinhValue = encloseComplexSinh(z, precisionBits);
         if (definition->id == BuiltinId::Sinhc)
-            return normalizeComplex(approximation::divide(sinhValue, z, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(sinhValue, z, precisionBits));
         const ComplexInterval coshValue = encloseComplexCosh(z, precisionBits);
         if (coshValue.containsZero())
             throw PrecisionInsufficient{"Complex tanhc pole cannot yet be excluded"};
-        return normalizeComplex(approximation::divide(
+        return normalizeCertifiedComplex(approximation::divide(
             sinhValue, approximation::multiply(z, coshValue, precisionBits), precisionBits));
     }
 
@@ -848,8 +1120,42 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto value = encloseArgument(0);
         if (!value)
             return std::nullopt;
-        if (!value->isReal())
-            return std::nullopt; // complex special-function backend is intentionally not implemented yet.
+
+        if (definition->id == BuiltinId::Gamma
+            || definition->id == BuiltinId::LogGamma
+            || definition->id == BuiltinId::Digamma
+            || definition->id == BuiltinId::Trigamma)
+            requireNoNonPositiveIntegerPole(
+                *value, definition->name(), enclosureKind == EnclosureKind::Information);
+        if (definition->id == BuiltinId::Zeta)
+            requireNoPointSingularity(
+                *value, rational(1),
+                "zeta has a pole at s = 1",
+                "zeta InformationEnclosure may contain the pole at s = 1",
+                enclosureKind == EnclosureKind::Information);
+
+        if (!value->isReal()) {
+            switch (definition->id) {
+            case BuiltinId::Gamma:
+                return normalizeCertifiedComplex(encloseGammaComplex(value->asComplex(), precisionBits));
+            case BuiltinId::Zeta:
+                return normalizeCertifiedComplex(encloseZetaComplex(value->asComplex(), precisionBits));
+            case BuiltinId::Digamma:
+                return normalizeCertifiedComplex(encloseDigammaComplex(value->asComplex(), precisionBits));
+            case BuiltinId::Trigamma:
+                return normalizeCertifiedComplex(encloseTrigammaComplex(value->asComplex(), precisionBits));
+            case BuiltinId::Erf:
+                return normalizeCertifiedComplex(encloseErfComplex(value->asComplex(), precisionBits));
+            case BuiltinId::Erfc:
+                return normalizeCertifiedComplex(encloseErfcComplex(value->asComplex(), precisionBits));
+            case BuiltinId::FresnelC:
+                return normalizeCertifiedComplex(encloseFresnelCComplex(value->asComplex(), precisionBits));
+            case BuiltinId::FresnelS:
+                return normalizeCertifiedComplex(encloseFresnelSComplex(value->asComplex(), precisionBits));
+            default:
+                return std::nullopt;
+            }
+        }
         switch (definition->id) {
         case BuiltinId::Gamma:
             return CertifiedValue{encloseGammaReal(value->asReal(), precisionBits)};
@@ -858,9 +1164,17 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         case BuiltinId::Zeta:
             return CertifiedValue{encloseZetaReal(value->asReal(), precisionBits)};
         case BuiltinId::Digamma:
-            return CertifiedValue{encloseDigammaPositive(value->asReal(), precisionBits)};
+            if (value->asReal().lower().toRational() > Rational{})
+                return CertifiedValue{encloseDigammaPositive(value->asReal(), precisionBits)};
+            // digammaは非正整数のpoleを除けば負の実軸上でも実数値を持つ。
+            // positive-only real backendへ誤送せず，複素recurrenceでpoleを分類して実部へ射影する。
+            return CertifiedValue{encloseDigammaComplex(
+                ComplexInterval::fromReal(value->asReal()), precisionBits).real()};
         case BuiltinId::Trigamma:
-            return CertifiedValue{encloseTrigammaPositive(value->asReal(), precisionBits)};
+            if (value->asReal().lower().toRational() > Rational{})
+                return CertifiedValue{encloseTrigammaPositive(value->asReal(), precisionBits)};
+            return CertifiedValue{encloseTrigammaComplex(
+                ComplexInterval::fromReal(value->asReal()), precisionBits).real()};
         case BuiltinId::Erf:
             return CertifiedValue{encloseErfReal(value->asReal(), precisionBits)};
         case BuiltinId::Erfc:
@@ -909,10 +1223,27 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto a = exactRealRational(call.arguments[0]);
         const auto b = exactRealRational(call.arguments[1]);
         const auto z = exactRealRational(call.arguments[2]);
-        if (!a || !b || !z)
-            return std::nullopt; // 現backendはexact Rationalのparameter/pointだけを保証評価する。
-        return CertifiedValue{encloseHypergeometric1F1Real(
-            *a, *b, *z, precisionBits)};
+        if (a && b && z)
+            return CertifiedValue{encloseHypergeometric1F1Real(
+                *a, *b, *z, precisionBits)};
+
+        const auto complexA = encloseArgument(0);
+        const auto complexB = encloseArgument(1);
+        const auto complexZ = encloseArgument(2);
+        if (!complexA || !complexB || !complexZ)
+            return std::nullopt;
+        requireNoNonPositiveIntegerPole(
+            *complexB, "hypergeometric1F1 denominator parameter",
+            enclosureKind == EnclosureKind::Information);
+        const ComplexInterval result = encloseHypergeometric1F1Complex(
+            complexA->toComplex(), complexB->toComplex(),
+            complexZ->toComplex(), precisionBits);
+        // 実parameter/実argumentでは1F1は実数値。complex interval backendの
+        // 虚部に丸め由来のzero-centered幅が残っても，実数値であること自体は
+        // 数学的に保証されるためreal projectionしてbackend経路差を露出させない。
+        if (complexA->isReal() && complexB->isReal() && complexZ->isReal())
+            return CertifiedValue{result.real()};
+        return normalizeCertifiedComplex(result);
     }
 
     case BuiltinId::Hypergeometric2F1: {
@@ -922,34 +1253,102 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto b = exactRealRational(call.arguments[1]);
         const auto c = exactRealRational(call.arguments[2]);
         const auto z = exactRealRational(call.arguments[3]);
-        if (!a || !b || !c || !z)
+        if (a && b && c && z) {
+            const Rational absZ = z->numerator().isNegative() ? -*z : *z;
+            if (absZ <= rational(9, 10))
+                return CertifiedValue{encloseHypergeometric2F1Real(
+                    *a, *b, *c, *z, precisionBits)};
+        }
+
+        const auto complexA = encloseArgument(0);
+        const auto complexB = encloseArgument(1);
+        const auto complexC = encloseArgument(2);
+        const auto complexZ = encloseArgument(3);
+        if (!complexA || !complexB || !complexC || !complexZ)
             return std::nullopt;
-        return CertifiedValue{encloseHypergeometric2F1Real(
-            *a, *b, *c, *z, precisionBits)};
+        requireNoNonPositiveIntegerPole(
+            *complexC, "hypergeometric2F1 denominator parameter",
+            enclosureKind == EnclosureKind::Information);
+        if (enclosureKind == EnclosureKind::Information
+            && informationIsAmbiguousAtPositiveRealCut(complexZ->toComplex()))
+            throw PrecisionInsufficient{
+                "hypergeometric2F1 InformationEnclosure cannot determine the principal branch-cut side",
+                PrecisionInsufficientKind::InputInformation};
+        const ComplexInterval result = encloseHypergeometric2F1Complex(
+            complexA->toComplex(), complexB->toComplex(),
+            complexC->toComplex(), complexZ->toComplex(), precisionBits);
+        // principal branch cutはz>=1。入力区間全体が実軸上かつ1未満なら
+        // Gauss continuationも実数値なので，complex backendの虚部roundoffを捨てられる。
+        if (complexA->isReal() && complexB->isReal() && complexC->isReal()
+            && complexZ->isReal()
+            && complexZ->asReal().upper().toRational() < rational(1))
+            return CertifiedValue{result.real()};
+        return normalizeCertifiedComplex(result);
     }
 
     case BuiltinId::EllipticF:
     case BuiltinId::EllipticE: {
         if (call.arguments.size() != 2)
             return std::nullopt;
-        const auto phi = exactRealRational(call.arguments[0]);
-        const auto m = exactRealRational(call.arguments[1]);
+        const auto exactPhi = exactRealRational(call.arguments[0]);
+        const auto exactM = exactRealRational(call.arguments[1]);
+        if (exactPhi && exactM)
+            return CertifiedValue{definition->id == BuiltinId::EllipticF
+                ? encloseEllipticFReal(*exactPhi, *exactM, precisionBits)
+                : encloseEllipticEReal(*exactPhi, *exactM, precisionBits)};
+
+        const auto phi = encloseArgument(0);
+        const auto m = encloseArgument(1);
         if (!phi || !m)
             return std::nullopt;
+        const auto realPhi = provablyReal(*phi);
+        const auto realM = provablyReal(*m);
+        if (!realPhi || !realM) {
+            if (enclosureKind == EnclosureKind::Information
+                && (informationStraddlesRealOnlyBackend(*phi)
+                    || informationStraddlesRealOnlyBackend(*m)))
+                throw PrecisionInsufficient{
+                    "Elliptic integral InformationEnclosure straddles the real-only certified backend boundary",
+                    PrecisionInsufficientKind::InputInformation};
+            throw CertifiedBackendUnsupported{
+                "Certified complex elliptic F/E backend is not implemented"};
+        }
         return CertifiedValue{definition->id == BuiltinId::EllipticF
-            ? encloseEllipticFReal(*phi, *m, precisionBits)
-            : encloseEllipticEReal(*phi, *m, precisionBits)};
+            ? encloseEllipticFReal(*realPhi, *realM, precisionBits)
+            : encloseEllipticEReal(*realPhi, *realM, precisionBits)};
     }
 
     case BuiltinId::EllipticPi: {
         if (call.arguments.size() != 3)
             return std::nullopt;
-        const auto n = exactRealRational(call.arguments[0]);
-        const auto phi = exactRealRational(call.arguments[1]);
-        const auto m = exactRealRational(call.arguments[2]);
+        const auto exactN = exactRealRational(call.arguments[0]);
+        const auto exactPhi = exactRealRational(call.arguments[1]);
+        const auto exactM = exactRealRational(call.arguments[2]);
+        if (exactN && exactPhi && exactM)
+            return CertifiedValue{encloseEllipticPiReal(
+                *exactN, *exactPhi, *exactM, precisionBits)};
+
+        const auto n = encloseArgument(0);
+        const auto phi = encloseArgument(1);
+        const auto m = encloseArgument(2);
         if (!n || !phi || !m)
             return std::nullopt;
-        return CertifiedValue{encloseEllipticPiReal(*n, *phi, *m, precisionBits)};
+        const auto realN = provablyReal(*n);
+        const auto realPhi = provablyReal(*phi);
+        const auto realM = provablyReal(*m);
+        if (!realN || !realPhi || !realM) {
+            if (enclosureKind == EnclosureKind::Information
+                && (informationStraddlesRealOnlyBackend(*n)
+                    || informationStraddlesRealOnlyBackend(*phi)
+                    || informationStraddlesRealOnlyBackend(*m)))
+                throw PrecisionInsufficient{
+                    "Elliptic Pi InformationEnclosure straddles the real-only certified backend boundary",
+                    PrecisionInsufficientKind::InputInformation};
+            throw CertifiedBackendUnsupported{
+                "Certified complex elliptic Pi backend is not implemented"};
+        }
+        return CertifiedValue{encloseEllipticPiReal(
+            *realN, *realPhi, *realM, precisionBits)};
     }
 
     case BuiltinId::ExponentialIntegralEi:
@@ -959,17 +1358,89 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (call.arguments.size() != 1)
             return std::nullopt;
         const auto value = encloseArgument(0);
-        if (!value || !value->isReal())
+        if (!value)
             return std::nullopt;
+
+        const bool informationInput = enclosureKind == EnclosureKind::Information;
+        if (definition->id == BuiltinId::ExponentialIntegralEi)
+            requireNoPointSingularity(
+                *value, rational(0),
+                "Ei is singular at zero",
+                "Ei InformationEnclosure may contain the singular point zero",
+                informationInput);
+        else if (definition->id == BuiltinId::CosineIntegralCi)
+            requireNoPointSingularity(
+                *value, rational(0),
+                "Ci is singular at zero",
+                "Ci InformationEnclosure may contain the singular point zero",
+                informationInput);
+        else if (definition->id == BuiltinId::LogarithmicIntegralLi) {
+            requireNoPointSingularity(
+                *value, rational(1),
+                "li is singular at x=1",
+                "li InformationEnclosure may contain the singular point x=1",
+                informationInput);
+            if (informationInput
+                && informationCrossesPrincipalNegativeRealCut(value->toComplex()))
+                throw PrecisionInsufficient{
+                    "li InformationEnclosure cannot determine the principal branch-cut side",
+                    PrecisionInsufficientKind::InputInformation};
+        }
+
+        if (!value->isReal()) {
+            switch (definition->id) {
+            case BuiltinId::ExponentialIntegralEi:
+                return normalizeCertifiedComplex(encloseExponentialIntegralEiComplex(
+                    value->asComplex(), precisionBits));
+            case BuiltinId::SineIntegralSi:
+                return normalizeCertifiedComplex(encloseSineIntegralSiComplex(
+                    value->asComplex(), precisionBits));
+            case BuiltinId::CosineIntegralCi:
+                return normalizeCertifiedComplex(encloseCosineIntegralCiComplex(
+                    value->asComplex(), precisionBits));
+            case BuiltinId::LogarithmicIntegralLi:
+                return normalizeCertifiedComplex(encloseLogarithmicIntegralLiComplex(
+                    value->asComplex(), precisionBits));
+            default:
+                return std::nullopt;
+            }
+        }
         switch (definition->id) {
         case BuiltinId::ExponentialIntegralEi:
             return CertifiedValue{encloseExponentialIntegralEiReal(value->asReal(), precisionBits)};
         case BuiltinId::SineIntegralSi:
             return CertifiedValue{encloseSineIntegralSiReal(value->asReal(), precisionBits)};
-        case BuiltinId::CosineIntegralCi:
-            return CertifiedValue{encloseCosineIntegralCiPositive(value->asReal(), precisionBits)};
+        case BuiltinId::CosineIntegralCi: {
+            const RealInterval& real = value->asReal();
+            const Rational lower = real.lower().toRational();
+            const Rational upper = real.upper().toRational();
+            if (informationInput && lower > Rational{}
+                && lower <= rational(96) && upper > rational(96))
+                throw PrecisionInsufficient{
+                    "Ci InformationEnclosure crosses the certified series boundary x=96",
+                    PrecisionInsufficientKind::InputInformation};
+            if (lower > Rational{})
+                return CertifiedValue{encloseCosineIntegralCiPositive(real, precisionBits)};
+            if (upper < Rational{}) {
+                // principal branchでは x<0 に対して Ci(x)=Ci(-x)+i Pi。
+                // 負の実軸をgeneric complex-logへ送るとbranch cut crossingと区別できないため，
+                // 実軸上であることが保証された経路だけこの恒等式でprincipal sideを固定する。
+                const RealInterval realPart = encloseCosineIntegralCiPositive(
+                    approximation::negate(real), precisionBits);
+                return CertifiedValue{ComplexInterval{
+                    realPart, enclosePi(precisionBits).interval}};
+            }
+            if (real.isPoint())
+                throw std::domain_error("Ci is singular at zero");
+            throw PrecisionInsufficient{
+                "Ci real input interval crosses the singular point zero"};
+        }
         case BuiltinId::LogarithmicIntegralLi:
-            return CertifiedValue{encloseLogarithmicIntegralLiPositive(value->asReal(), precisionBits)};
+            if (value->asReal().upper().toRational() < Rational{})
+                return normalizeCertifiedComplex(encloseLogarithmicIntegralLiComplex(
+                    ComplexInterval::fromReal(value->asReal()), precisionBits));
+            return CertifiedValue{encloseLogarithmicIntegralLiPositive(
+                value->asReal(), precisionBits)};
         default:
             return std::nullopt;
         }
@@ -979,25 +1450,84 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (call.arguments.size() != 2)
             return std::nullopt;
         const auto order = exactRealRational(call.arguments[0]);
-        const auto z = exactRealRational(call.arguments[1]);
-        if (!order || !z || !order->isInteger() || !order->numerator().isPositive())
+        if (!order || !order->isInteger() || !order->numerator().isPositive()) {
+            // PolyLogは一般の数値orderにも数学的には定義されるが，現certified backendは
+            // exact positive integer order専用。数値orderをgeneric unevaluatedへ落とさない。
+            if (encloseArgument(0))
+                throw CertifiedBackendUnsupported{
+                    "Certified polylog currently requires an exact positive integer order"};
             return std::nullopt;
+        }
         const auto count = numeric::tryToUint64(order->numerator());
         if (!count)
+            throw CertifiedBackendUnsupported{
+                "Certified polylog order exceeds the bounded-work backend range"};
+        if (const auto z = exactRealRational(call.arguments[1]))
+            return CertifiedValue{enclosePolylogReal(*count, *z, precisionBits)};
+        const auto z = encloseArgument(1);
+        if (!z)
             return std::nullopt;
-        return CertifiedValue{enclosePolylogReal(*count, *z, precisionBits)};
+        if (enclosureKind == EnclosureKind::Information && z->isComplex()
+            && informationIsAmbiguousAtPositiveRealCut(z->asComplex()))
+            throw PrecisionInsufficient{
+                "Polylog InformationEnclosure cannot determine the principal branch-cut side",
+                PrecisionInsufficientKind::InputInformation};
+        if (z->isReal()) {
+            const ComplexInterval result = enclosePolylogComplex(
+                *count, z->toComplex(), precisionBits);
+            // 現bounded-work領域は|z|<=49/50でprincipal cutの手前にある。
+            // 実入力ならpolylogは実数値なのでreal componentだけを返す。
+            return CertifiedValue{result.real()};
+        }
+        return normalizeCertifiedComplex(enclosePolylogComplex(
+            *count, z->asComplex(), precisionBits));
     }
 
     case BuiltinId::IncompleteBeta: {
         if (call.arguments.size() != 3)
             return std::nullopt;
-        const auto a = exactRealRational(call.arguments[0]);
-        const auto b = exactRealRational(call.arguments[1]);
+
+        const auto exactA = exactRealRational(call.arguments[0]);
+        const auto exactB = exactRealRational(call.arguments[1]);
+        const auto a = encloseArgument(0);
+        const auto b = encloseArgument(1);
         const auto x = encloseArgument(2);
-        if (!a || !b || !x || !x->isReal())
+        if (!a || !b || !x)
             return std::nullopt;
+        if (!a->isReal() || !b->isReal() || !x->isReal())
+            throw CertifiedBackendUnsupported{
+                "Certified complex ibeta parameters are not implemented"};
+
+        const numeric::BigFloat zero;
+        const auto classifyPositiveParameter = [&](
+            const RealInterval& value, std::string_view name) {
+            if (value.upper() <= zero)
+                throw std::domain_error(
+                    std::string{"ibeta requires positive "} + std::string{name});
+            if (value.lower() <= zero)
+                throw PrecisionInsufficient{
+                    std::string{"ibeta "} + std::string{name}
+                        + " InformationEnclosure crosses the positive-real domain boundary",
+                    PrecisionInsufficientKind::InputInformation};
+        };
+        classifyPositiveParameter(a->asReal(), "a");
+        classifyPositiveParameter(b->asReal(), "b");
+
+        const RealInterval& xInterval = x->asReal();
+        const Rational xLower = xInterval.lower().toRational();
+        const Rational xUpper = xInterval.upper().toRational();
+        if (xUpper < rational(0) || xLower > rational(1))
+            throw std::domain_error("ibeta requires x in [0,1]");
+        if (xLower < rational(0) || xUpper > rational(1))
+            throw PrecisionInsufficient{
+                "ibeta x InformationEnclosure crosses the x in [0,1] domain boundary",
+                PrecisionInsufficientKind::InputInformation};
+
+        if (!exactA || !exactB)
+            throw CertifiedBackendUnsupported{
+                "Certified ibeta currently requires exact a and b parameters"};
         return CertifiedValue{encloseIncompleteBetaRegularized(
-            *a, *b, x->asReal(), precisionBits)};
+            *exactA, *exactB, xInterval, precisionBits)};
     }
 
     case BuiltinId::Beta:
@@ -1048,8 +1578,14 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return principalSqrtReal(value->asReal(), precisionBits);
 
         // 一般複素数でもprincipal branchをcertifiedに評価する。
-        // branch cut（負実軸）を入力区間が跨ぐ場合はcertified_complex_sqrt側が虚部を両符号へ広げ、真値を落とさない。
-        return normalizeComplex(enclosePrincipalComplexSqrt(
+        // finite-precision入力のInformationEnclosureが負実軸のbranch sideを
+        // 決められない場合，両側を含む粗い像を数値として返してはいけない。
+        if (enclosureKind == EnclosureKind::Information
+            && informationCrossesPrincipalNegativeRealCut(value->asComplex()))
+            throw PrecisionInsufficient{
+                "sqrt input InformationEnclosure crosses the principal branch cut",
+                PrecisionInsufficientKind::InputInformation};
+        return normalizeCertifiedComplex(enclosePrincipalComplexSqrt(
             value->asComplex(), precisionBits));
     }
 
@@ -1101,7 +1637,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const RealInterval magnitude = encloseSqrt(magnitudeSquared, precisionBits).interval;
         if (magnitude.containsZero())
             throw PrecisionInsufficient{"Complex sign magnitude cannot yet be proven nonzero"};
-        return normalizeComplex(approximation::divide(
+        return normalizeCertifiedComplex(approximation::divide(
             complex, ComplexInterval::fromReal(magnitude), precisionBits));
     }
 
@@ -1135,7 +1671,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return std::nullopt;
         if (value->isReal())
             return *value;
-        return normalizeComplex(ComplexInterval{
+        return normalizeCertifiedComplex(ComplexInterval{
             value->asComplex().real(),
             approximation::negate(value->asComplex().imaginary())});
     }
@@ -1152,14 +1688,27 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (isOneHalf(call.arguments[1])) {
             if (base->isReal())
                 return principalSqrtReal(base->asReal(), precisionBits);
-            return normalizeComplex(enclosePrincipalComplexSqrt(
+            if (enclosureKind == EnclosureKind::Information
+                && informationCrossesPrincipalNegativeRealCut(base->asComplex()))
+                throw PrecisionInsufficient{
+                    "Power input InformationEnclosure crosses the principal branch cut",
+                    PrecisionInsufficientKind::InputInformation};
+            return normalizeCertifiedComplex(enclosePrincipalComplexSqrt(
                 base->asComplex(), precisionBits));
         }
 
         const auto exponent = exactIntegerExponent(call.arguments[1]);
         if (exponent) {
-            if (exponent->isZero())
+            if (exponent->isZero()) {
+                const bool containsZero = base->isReal()
+                    ? base->asReal().containsZero()
+                    : base->asComplex().containsZero();
+                if (enclosureKind == EnclosureKind::Information && containsZero)
+                    throw PrecisionInsufficient{
+                        "Power base InformationEnclosure may contain zero for exponent zero",
+                        PrecisionInsufficientKind::InputInformation};
                 return CertifiedValue{RealInterval::fromRational(rational(1), precisionBits)};
+            }
 
             const bool negative = exponent->isNegative();
             const auto magnitude = toUint64(exponent->abs());
@@ -1171,7 +1720,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                 return result;
 
             const CertifiedValue one{RealInterval::fromRational(rational(1), precisionBits)};
-            return divideValues(one, result, precisionBits);
+            return divideCertifiedValues(one, result, precisionBits);
         }
 
         // 一般の非整数・複素指数は principal Power の定義へ一本化する。
@@ -1180,7 +1729,12 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto exponentValue = encloseArgument(1);
         if (!exponentValue)
             return std::nullopt;
-        return normalizeComplex(enclosePrincipalPower(
+        if (enclosureKind == EnclosureKind::Information
+            && informationCrossesPrincipalNegativeRealCut(base->toComplex()))
+            throw PrecisionInsufficient{
+                "Power base InformationEnclosure crosses the principal Log branch cut",
+                PrecisionInsufficientKind::InputInformation};
+        return normalizeCertifiedComplex(enclosePrincipalPower(
             base->toComplex(), exponentValue->toComplex(), precisionBits).interval);
     }
 
@@ -1194,7 +1748,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (value->isReal())
             return CertifiedValue{encloseExp(value->asReal(), precisionBits).interval};
 
-        return normalizeComplex(encloseComplexExp(
+        return normalizeCertifiedComplex(encloseComplexExp(
             value->asComplex(), precisionBits).interval);
     }
 
@@ -1210,7 +1764,12 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                     return CertifiedValue{
                         encloseLogPositive(value.asReal(), precisionBits).interval};
             }
-            return normalizeComplex(enclosePrincipalComplexLog(
+            if (enclosureKind == EnclosureKind::Information
+                && informationCrossesPrincipalNegativeRealCut(value.toComplex()))
+                throw PrecisionInsufficient{
+                    "Log input InformationEnclosure crosses the principal branch cut",
+                    PrecisionInsufficientKind::InputInformation};
+            return normalizeCertifiedComplex(enclosePrincipalComplexLog(
                 value.toComplex(), precisionBits).interval);
         };
 
@@ -1228,10 +1787,19 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
         const CertifiedValue baseLog = principalLog(*base);
         const CertifiedValue valueLog = principalLog(*value);
-        // base=1ならLog[base]=0で数学的に未定義。exactな1はSimplifierがDomainErrorにし、区間が0を含むだけならworking precisionを上げて再試行する。
+        // base=1ならLog[base]=0で数学的に未定義。finite-precision入力の
+        // InformationEnclosureが1を含み得る場合はguardを増やしても入力情報自体は
+        // 狭まらないため，persistentなprecision不足として即座に返す。
+        const bool baseLogMayContainZero = baseLog.isReal()
+            ? baseLog.asReal().containsZero()
+            : baseLog.asComplex().containsZero();
+        if (enclosureKind == EnclosureKind::Information && baseLogMayContainZero)
+            throw PrecisionInsufficient{
+                "Logarithm base InformationEnclosure may contain one",
+                PrecisionInsufficientKind::InputInformation};
         const CertifiedValue reciprocalBaseLog = reciprocalValue(
             baseLog, precisionBits, "Logarithm base could not be certified away from one");
-        return multiplyValues(valueLog, reciprocalBaseLog, precisionBits);
+        return multiplyCertifiedValues(valueLog, reciprocalBaseLog, precisionBits);
     }
 
     case BuiltinId::Arg: {
@@ -1240,6 +1808,17 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto value = encloseArgument(0);
         if (!value)
             return std::nullopt;
+        if (enclosureKind == EnclosureKind::Information) {
+            const ComplexInterval complex = value->toComplex();
+            if (informationMayContainComplexZero(complex))
+                throw PrecisionInsufficient{
+                    "Arg input InformationEnclosure may contain the undefined origin",
+                    PrecisionInsufficientKind::InputInformation};
+            if (informationCrossesPrincipalNegativeRealCut(complex))
+                throw PrecisionInsufficient{
+                    "Arg input InformationEnclosure crosses the principal branch cut",
+                    PrecisionInsufficientKind::InputInformation};
+        }
         return CertifiedValue{enclosePrincipalArgument(
             value->toComplex(), precisionBits).interval};
     }
@@ -1333,7 +1912,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto angleOperand = splitAngleOperand(argument, builtins_, angleSemantics_);
         if (!angleOperand)
             return std::nullopt;
-        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind);
+        const auto scalar = encloseBound(angleOperand->value, precisionBits, bindings, enclosureKind, recursionDepth + 1);
         if (!scalar)
             return std::nullopt;
 
@@ -1348,22 +1927,22 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             radians.asComplex(), precisionBits);
         switch (definition->id) {
         case BuiltinId::Sin:
-            return normalizeComplex(sine);
+            return normalizeCertifiedComplex(sine);
         case BuiltinId::Cos:
-            return normalizeComplex(cosine);
+            return normalizeCertifiedComplex(cosine);
         case BuiltinId::Tan:
             if (cosine.containsZero())
                 throw PrecisionInsufficient{"Complex tangent denominator cannot yet be proven nonzero"};
-            return normalizeComplex(approximation::divide(sine, cosine, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(sine, cosine, precisionBits));
         case BuiltinId::Cot:
             if (sine.containsZero())
                 throw PrecisionInsufficient{"Complex cotangent denominator cannot yet be proven nonzero"};
-            return normalizeComplex(approximation::divide(cosine, sine, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(cosine, sine, precisionBits));
         case BuiltinId::Sec:
-            return reciprocalValue(normalizeComplex(cosine), precisionBits,
+            return reciprocalValue(normalizeCertifiedComplex(cosine), precisionBits,
                 "Complex secant denominator cannot yet be proven nonzero");
         case BuiltinId::Csc:
-            return reciprocalValue(normalizeComplex(sine), precisionBits,
+            return reciprocalValue(normalizeCertifiedComplex(sine), precisionBits,
                 "Complex cosecant denominator cannot yet be proven nonzero");
         default:
             return std::nullopt;
@@ -1378,6 +1957,17 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto input = encloseArgument(0);
         if (!input)
             return std::nullopt;
+
+        if (enclosureKind == EnclosureKind::Information && input->isComplex()) {
+            const ComplexInterval complex = input->asComplex();
+            const bool crossesCut = definition->id == BuiltinId::Atan
+                ? informationIsAmbiguousAtOuterImaginaryCuts(complex)
+                : informationIsAmbiguousAtOuterRealCuts(complex);
+            if (crossesCut)
+                throw PrecisionInsufficient{
+                    "Inverse trigonometric InformationEnclosure cannot determine the principal branch-cut side",
+                    PrecisionInsufficientKind::InputInformation};
+        }
 
         CertifiedValue radians = [&]() -> CertifiedValue {
             if (input->isReal()) {
@@ -1401,10 +1991,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
             const ComplexInterval complex = input->toComplex();
             if (definition->id == BuiltinId::Asin)
-                return normalizeComplex(enclosePrincipalComplexAsinRadian(complex, precisionBits));
+                return normalizeCertifiedComplex(enclosePrincipalComplexAsinRadian(complex, precisionBits));
             if (definition->id == BuiltinId::Acos)
-                return normalizeComplex(enclosePrincipalComplexAcosRadian(complex, precisionBits));
-            return normalizeComplex(enclosePrincipalComplexAtanRadian(complex, precisionBits));
+                return normalizeCertifiedComplex(enclosePrincipalComplexAcosRadian(complex, precisionBits));
+            return normalizeCertifiedComplex(enclosePrincipalComplexAtanRadian(complex, precisionBits));
         }();
 
         return radiansToAngleValue(
@@ -1421,8 +2011,20 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (!y->isReal() || !x->isReal())
             throw std::domain_error("atan2 expects real arguments");
 
+        const ComplexInterval cartesian{x->asReal(), y->asReal()};
+        if (enclosureKind == EnclosureKind::Information) {
+            if (informationMayContainComplexZero(cartesian))
+                throw PrecisionInsufficient{
+                    "atan2 InformationEnclosure may contain the undefined origin",
+                    PrecisionInsufficientKind::InputInformation};
+            if (informationCrossesPrincipalNegativeRealCut(cartesian))
+                throw PrecisionInsufficient{
+                    "atan2 InformationEnclosure cannot determine the principal branch-cut side",
+                    PrecisionInsufficientKind::InputInformation};
+        }
+
         const RealInterval radians = enclosePrincipalArgument(
-            ComplexInterval{x->asReal(), y->asReal()}, precisionBits).interval;
+            cartesian, precisionBits).interval;
         return radiansToAngleValue(
             CertifiedValue{radians}, angleSemantics_.defaultUnit(), mathematics_, precisionBits);
     }
@@ -1472,23 +2074,23 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const ComplexInterval coshValue = encloseComplexCosh(complex, precisionBits);
         switch (definition->id) {
         case BuiltinId::Sinh:
-            return normalizeComplex(sinhValue);
+            return normalizeCertifiedComplex(sinhValue);
         case BuiltinId::Cosh:
-            return normalizeComplex(coshValue);
+            return normalizeCertifiedComplex(coshValue);
         case BuiltinId::Tanh:
             if (coshValue.containsZero())
                 throw PrecisionInsufficient{"Complex tanh denominator cannot yet be proven nonzero"};
-            return normalizeComplex(approximation::divide(sinhValue, coshValue, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(sinhValue, coshValue, precisionBits));
         case BuiltinId::Csch:
-            return reciprocalValue(normalizeComplex(sinhValue), precisionBits,
+            return reciprocalValue(normalizeCertifiedComplex(sinhValue), precisionBits,
                 "Complex csch denominator cannot yet be proven nonzero");
         case BuiltinId::Sech:
-            return reciprocalValue(normalizeComplex(coshValue), precisionBits,
+            return reciprocalValue(normalizeCertifiedComplex(coshValue), precisionBits,
                 "Complex sech denominator cannot yet be proven nonzero");
         case BuiltinId::Coth:
             if (sinhValue.containsZero())
                 throw PrecisionInsufficient{"Complex coth denominator cannot yet be proven nonzero"};
-            return normalizeComplex(approximation::divide(coshValue, sinhValue, precisionBits));
+            return normalizeCertifiedComplex(approximation::divide(coshValue, sinhValue, precisionBits));
         default:
             return std::nullopt;
         }
@@ -1502,6 +2104,21 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto input = encloseArgument(0);
         if (!input)
             return std::nullopt;
+
+        if (enclosureKind == EnclosureKind::Information && input->isComplex()) {
+            const ComplexInterval complex = input->asComplex();
+            bool crossesCut = false;
+            if (definition->id == BuiltinId::Asinh)
+                crossesCut = informationIsAmbiguousAtOuterImaginaryCuts(complex);
+            else if (definition->id == BuiltinId::Acosh)
+                crossesCut = informationIsAmbiguousAtAcoshCut(complex);
+            else
+                crossesCut = informationIsAmbiguousAtOuterRealCuts(complex);
+            if (crossesCut)
+                throw PrecisionInsufficient{
+                    "Inverse hyperbolic InformationEnclosure cannot determine the principal branch-cut side",
+                    PrecisionInsufficientKind::InputInformation};
+        }
 
         if (input->isReal()) {
             const RealInterval& real = input->asReal();
@@ -1528,10 +2145,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
 
         const ComplexInterval complex = input->toComplex();
         if (definition->id == BuiltinId::Asinh)
-            return normalizeComplex(enclosePrincipalComplexAsinh(complex, precisionBits));
+            return normalizeCertifiedComplex(enclosePrincipalComplexAsinh(complex, precisionBits));
         if (definition->id == BuiltinId::Acosh)
-            return normalizeComplex(enclosePrincipalComplexAcosh(complex, precisionBits));
-        return normalizeComplex(enclosePrincipalComplexAtanh(complex, precisionBits));
+            return normalizeCertifiedComplex(enclosePrincipalComplexAcosh(complex, precisionBits));
+        return normalizeCertifiedComplex(enclosePrincipalComplexAtanh(complex, precisionBits));
     }
 
     case BuiltinId::Fma: {
@@ -1542,7 +2159,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto c = encloseArgument(2);
         if (!a || !b || !c)
             return std::nullopt;
-        return addValues(multiplyValues(*a, *b, precisionBits), *c, precisionBits);
+        return addCertifiedValues(multiplyCertifiedValues(*a, *b, precisionBits), *c, precisionBits);
     }
 
     case BuiltinId::Clamp: {
@@ -1653,7 +2270,6 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Ceil:
     case BuiltinId::Trunc:
     case BuiltinId::Round:
-    case BuiltinId::Frac:
     case BuiltinId::Gcd:
     case BuiltinId::Lcm:
     case BuiltinId::Mod:
@@ -1678,6 +2294,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::LuDecomposition:
     case BuiltinId::QrDecomposition:
     case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::ConditionNumber:
+    case BuiltinId::LeastSquares:
+    case BuiltinId::PseudoInverse:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -1685,7 +2304,6 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Length:
     case BuiltinId::NumericDerivative:
     case BuiltinId::NumericIntegral:
-    case BuiltinId::NumericalApproximation:
     case BuiltinId::Precision:
     case BuiltinId::Accuracy:
     case BuiltinId::Explain:
@@ -1699,6 +2317,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Factor:
     case BuiltinId::Collect:
     case BuiltinId::Solve:
+    case BuiltinId::GroebnerBasis:
+    case BuiltinId::PolynomialReduce:
+    case BuiltinId::Cases:
+    case BuiltinId::CaseBranch:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
     case BuiltinId::Less:

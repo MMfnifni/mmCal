@@ -2,6 +2,7 @@
 #include "expression_interval.hpp"
 
 #include "certification_error.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
@@ -60,11 +61,22 @@ namespace {
 
     if (value.isComplexDecimalApproximation()) {
         const auto& complex = value.asComplexDecimalApproximation();
+        const auto component = [&](const numeric::DecimalApproximation& part,
+                                   bool exactlyZero,
+                                   const numeric::Rational& informationLower,
+                                   const numeric::Rational& informationUpper) {
+            if (!information)
+                return intervalFromDecimal(part, precisionBits);
+            if (exactlyZero)
+                return RealInterval::fromRational(numeric::Rational{}, precisionBits);
+            return RealInterval::fromRationalBounds(
+                informationLower, informationUpper, precisionBits);
+        };
         return CertifiedValue{ComplexInterval{
-            information ? informationIntervalFromDecimal(complex.real(), precisionBits)
-                        : intervalFromDecimal(complex.real(), precisionBits),
-            information ? informationIntervalFromDecimal(complex.imaginary(), precisionBits)
-                        : intervalFromDecimal(complex.imaginary(), precisionBits)}};
+            component(complex.real(), complex.realExactlyZero(),
+                complex.realInformationLower(), complex.realInformationUpper()),
+            component(complex.imaginary(), complex.imaginaryExactlyZero(),
+                complex.imaginaryInformationLower(), complex.imaginaryInformationUpper())}};
     }
 
     return std::nullopt;
@@ -110,12 +122,6 @@ namespace {
     if (lhs.isReal() && rhs.isReal())
         return CertifiedValue{divide(lhs.asReal(), rhs.asReal(), precisionBits)};
     return normalizeComplex(divide(lhs.toComplex(), rhs.toComplex(), precisionBits));
-}
-
-[[nodiscard]] CertifiedValue negateValue(const CertifiedValue& value) {
-    if (value.isReal())
-        return CertifiedValue{negate(value.asReal())};
-    return normalizeComplex(negate(value.asComplex()));
 }
 
 [[nodiscard]] std::size_t guaranteedDigits(
@@ -238,18 +244,91 @@ namespace {
     const CertifiedValue& information,
     std::size_t cap) {
     if (displayed.isDecimalApproximation()) {
-        const RealInterval& interval = information.isReal()
-            ? information.asReal() : information.asComplex().real();
-        return componentPrecisionCap(displayed.asDecimalApproximation(), interval, cap);
+        if (information.isReal())
+            return componentPrecisionCap(
+                displayed.asDecimalApproximation(), information.asReal(), cap);
+
+        // certified truthが実数へ縮退していても，有限precision入力の
+        // InformationEnclosureが虚方向へ幅を持つ場合がある。実部だけで
+        // 桁上限を決めると，Pi+I*N[0,p]のような値で隠れた桁を表示してしまう。
+        const ComplexInterval interval = information.asComplex();
+        const auto& real = displayed.asDecimalApproximation();
+        const numeric::Rational realError = maximum(
+            absRational(real.displayedValue() - interval.real().lower().toRational()),
+            absRational(real.displayedValue() - interval.real().upper().toRational()));
+        const numeric::Rational imaginaryError = maximum(
+            absRational(interval.imaginary().lower().toRational()),
+            absRational(interval.imaginary().upper().toRational()));
+        const auto square = [](const numeric::Rational& value) { return value * value; };
+        const numeric::Rational errorSquared = square(realError) + square(imaginaryError);
+        if (errorSquared.isZero())
+            return cap;
+
+        const auto minimumMagnitude = [](const RealInterval& bounds) {
+            const numeric::Rational lower = bounds.lower().toRational();
+            const numeric::Rational upper = bounds.upper().toRational();
+            if (lower <= numeric::Rational{} && upper >= numeric::Rational{})
+                return numeric::Rational{};
+            return lower > numeric::Rational{} ? lower : -upper;
+        };
+        const numeric::Rational realMagnitude = minimumMagnitude(interval.real());
+        const numeric::Rational imaginaryMagnitude = minimumMagnitude(interval.imaginary());
+        const numeric::Rational magnitudeSquared =
+            square(realMagnitude) + square(imaginaryMagnitude);
+        if (magnitudeSquared.isZero())
+            return 0;
+
+        const numeric::Rational relativeErrorSquared = errorSquared / magnitudeSquared;
+        const std::size_t doubledCap = cap > std::numeric_limits<std::size_t>::max() / 2
+            ? std::numeric_limits<std::size_t>::max()
+            : cap * 2;
+        return std::min(cap, guaranteedDigits(relativeErrorSquared, doubledCap) / 2);
     }
 
     if (!displayed.isComplexDecimalApproximation())
         return cap;
+
+    // 複素Precisionはcomponent precisionのminではない。例えば1+epsilon Iで
+    // epsilon区間が0を跨いでも，whole-valueの大きさは実部1によって下から
+    // 抑えられる。component minを使うとこの場合にprecision=0と誤判定し，
+    // 1桁へ再量子化して実部の情報まで破壊する。
     const auto& complex = displayed.asComplexDecimalApproximation();
     const ComplexInterval interval = information.toComplex();
-    return std::min(
-        componentPrecisionCap(complex.real(), interval.real(), cap),
-        componentPrecisionCap(complex.imaginary(), interval.imaginary(), cap));
+    const auto componentError = [](
+        const numeric::DecimalApproximation& part, const RealInterval& bounds) {
+        const numeric::Rational lowerError = absRational(
+            part.displayedValue() - bounds.lower().toRational());
+        const numeric::Rational upperError = absRational(
+            part.displayedValue() - bounds.upper().toRational());
+        return maximum(lowerError, upperError);
+    };
+    const auto minimumMagnitude = [](const RealInterval& bounds) {
+        const numeric::Rational lower = bounds.lower().toRational();
+        const numeric::Rational upper = bounds.upper().toRational();
+        if (lower <= numeric::Rational{} && upper >= numeric::Rational{})
+            return numeric::Rational{};
+        return lower > numeric::Rational{} ? lower : -upper;
+    };
+    const auto square = [](const numeric::Rational& value) { return value * value; };
+
+    const numeric::Rational realError = componentError(complex.real(), interval.real());
+    const numeric::Rational imaginaryError = componentError(complex.imaginary(), interval.imaginary());
+    const numeric::Rational errorSquared = square(realError) + square(imaginaryError);
+    if (errorSquared.isZero())
+        return cap;
+
+    const numeric::Rational realMagnitude = minimumMagnitude(interval.real());
+    const numeric::Rational imaginaryMagnitude = minimumMagnitude(interval.imaginary());
+    const numeric::Rational magnitudeSquared =
+        square(realMagnitude) + square(imaginaryMagnitude);
+    if (magnitudeSquared.isZero())
+        return 0;
+
+    const numeric::Rational relativeErrorSquared = errorSquared / magnitudeSquared;
+    const std::size_t doubledCap = cap > std::numeric_limits<std::size_t>::max() / 2
+        ? std::numeric_limits<std::size_t>::max()
+        : cap * 2;
+    return std::min(cap, guaranteedDigits(relativeErrorSquared, doubledCap) / 2);
 }
 
 [[nodiscard]] std::optional<expression::Expr> decimalExpressionWithInformation(
@@ -284,23 +363,34 @@ namespace {
         significantDigits);
     if (!real || !imaginary)
         return std::nullopt;
-    if (exactZero(certified.imaginary()))
+
+    const bool realInformationExactlyZero =
+        exactZero(certified.real()) && exactZero(information.real());
+    const bool imaginaryInformationExactlyZero =
+        exactZero(certified.imaginary()) && exactZero(information.imaginary());
+
+    // certified truthが実数でも，有限precision演算のInformationEnclosureが虚方向へ
+    // 幅を持つ場合はComplexDecimalApproximationとして保持する。表示は
+    // ComplexDecimalApproximation側がcertified zero componentを省略するため，
+    // 0.0等の従来表記を保ったままbranch判定用の情報だけ失わずに済む。
+    if (imaginaryInformationExactlyZero)
         return expression::Expr{*real};
     return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
-        *real, *imaginary, exactZero(certified.real()), false)};
+        *real, *imaginary, realInformationExactlyZero, false)};
 }
 
 [[nodiscard]] std::optional<expression::Expr> decimalExpressionWithInformation(
     const CertifiedValue& certified,
     const CertifiedValue& information,
     std::size_t significantDigits) {
-    if (certified.isReal()) {
-        const RealInterval& info = information.isReal()
-            ? information.asReal() : information.asComplex().real();
-        return decimalExpressionWithInformation(certified.asReal(), info, significantDigits);
-    }
+    if (certified.isReal() && information.isReal())
+        return decimalExpressionWithInformation(
+            certified.asReal(), information.asReal(), significantDigits);
+
+    // InformationEnclosureが複素方向の幅を持つなら，certified truthが実数pointへ
+    // 縮退していてもその幅を捨てない。
     return decimalExpressionWithInformation(
-        certified.asComplex(), information.toComplex(), significantDigits);
+        certified.toComplex(), information.toComplex(), significantDigits);
 }
 
 [[nodiscard]] std::optional<expression::Expr> finalizeApproximateOperation(
@@ -318,7 +408,15 @@ namespace {
         if (crossesZero)
             return decimalExpressionWithInformation(certified, information, sourceDigits);
     }
-    return decimalExpressionWithInformation(certified, information, std::max<std::size_t>(cap, 1));
+    // precisionDigitsは「保証される桁数」であり，N[...,p]の表示桁pとは
+    // 1桁ずれる。保証precision=capを保つには通常cap+1桁で丸める必要がある。
+    // capそのものへ再量子化すると，exactなscale演算だけでも毎回1桁ずつ
+    // information precisionを失う。元入力が要求したsourceDigitsを上限にする。
+    const std::size_t displayDigits = cap >= sourceDigits
+        ? sourceDigits
+        : std::min(sourceDigits, cap + 1);
+    return decimalExpressionWithInformation(
+        certified, information, std::max<std::size_t>(displayDigits, 1));
 }
 
 void collectApproximationDigits(
@@ -383,19 +481,29 @@ void collectApproximationDigits(
 std::optional<ComplexInterval> encloseComplexExpression(
     const expression::Expr& expression,
     std::size_t precisionBits,
-    const CertifiedEvaluator& certified) {
+    const CertifiedEvaluator& certified,
+    CertifiedEvaluator::EnclosureKind enclosureKind) {
+    const bool information = enclosureKind == CertifiedEvaluator::EnclosureKind::Information;
     if (expression.isDecimalApproximation())
-        return ComplexInterval::fromReal(
-            intervalFromDecimal(expression.asDecimalApproximation(), precisionBits));
+        return ComplexInterval::fromReal(information
+            ? informationIntervalFromDecimal(expression.asDecimalApproximation(), precisionBits)
+            : intervalFromDecimal(expression.asDecimalApproximation(), precisionBits));
 
     if (expression.isComplexDecimalApproximation()) {
         const auto& value = expression.asComplexDecimalApproximation();
+        if (information) {
+            return ComplexInterval{
+                RealInterval::fromRationalBounds(
+                    value.realInformationLower(), value.realInformationUpper(), precisionBits),
+                RealInterval::fromRationalBounds(
+                    value.imaginaryInformationLower(), value.imaginaryInformationUpper(), precisionBits)};
+        }
         return ComplexInterval{
             intervalFromDecimal(value.real(), precisionBits),
             intervalFromDecimal(value.imaginary(), precisionBits)};
     }
 
-    const auto enclosed = certified.enclose(expression, precisionBits);
+    const auto enclosed = certified.enclose(expression, precisionBits, enclosureKind);
     if (!enclosed)
         return std::nullopt;
     return enclosed->toComplex();
@@ -447,6 +555,55 @@ std::optional<expression::Expr> decimalExpression(
         *real, *imaginary, exactZero(value.real()), false)};
 }
 
+std::optional<expression::Expr> finalizeCertifiedApproximation(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t significantDigits) {
+    return finalizeApproximateOperation(certified, information, significantDigits);
+}
+
+std::optional<expression::Expr> finalizeCertifiedApproximationFixed(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t fractionalDigits) {
+    const auto fixedDecimal = [&](const RealInterval& truth, const RealInterval& info)
+        -> std::optional<numeric::DecimalApproximation> {
+        // exact point入力では旧diff/nintegrateと同じfixed丸めを使い，整数でも
+        // 6.0 / 1.0 のように近似値であることを表示する。有限precision情報幅が
+        // ある場合だけ明示InformationEnclosure版を使う。
+        if (truth.isPoint() && info.isPoint()
+            && truth.lower().toRational() == info.lower().toRational())
+            return numeric::DecimalApproximation::fromCertifiedInterval(
+                truth.lower().toRational(), truth.upper().toRational(), fractionalDigits);
+        return numeric::DecimalApproximation::fromCertifiedIntervalWithInformation(
+            truth.lower().toRational(), truth.upper().toRational(),
+            info.lower().toRational(), info.upper().toRational(), fractionalDigits);
+    };
+    const auto realDecimal = [&](const RealInterval& truth, const RealInterval& info)
+        -> std::optional<expression::Expr> {
+        const auto value = fixedDecimal(truth, info);
+        return value ? std::optional<expression::Expr>{expression::Expr{*value}} : std::nullopt;
+    };
+
+    if (certified.isReal() && information.isReal())
+        return realDecimal(certified.asReal(), information.asReal());
+
+    const ComplexInterval truth = certified.toComplex();
+    const ComplexInterval info = information.toComplex();
+    const auto real = fixedDecimal(truth.real(), info.real());
+    const auto imaginary = fixedDecimal(truth.imaginary(), info.imaginary());
+    if (!real || !imaginary)
+        return std::nullopt;
+
+    const bool realInformationExactlyZero = exactZero(truth.real()) && exactZero(info.real());
+    const bool imaginaryInformationExactlyZero =
+        exactZero(truth.imaginary()) && exactZero(info.imaginary());
+    if (imaginaryInformationExactlyZero)
+        return expression::Expr{*real};
+    return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
+        *real, *imaginary, realInformationExactlyZero, false)};
+}
+
 std::optional<ApproximationContext> inferredApproximationContext(
     std::span<const expression::Expr> expressions) {
     std::optional<std::size_t> digits;
@@ -469,21 +626,28 @@ std::optional<expression::Expr> evaluateApproximateExpression(
 
     CertifiedEvaluator evaluator{builtins, mathematics, angles};
     for (std::size_t attempt = 0; attempt < 12; ++attempt) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         try {
             const std::size_t bits = context->workingBinaryBits();
-            const auto certified = evaluator.enclose(
-                expression, bits, CertifiedEvaluator::EnclosureKind::Certified);
             const auto information = evaluator.enclose(
                 expression, bits, CertifiedEvaluator::EnclosureKind::Information);
+            const auto certified = evaluator.enclose(
+                expression, bits, CertifiedEvaluator::EnclosureKind::Certified);
             if (!certified || !information)
                 return std::nullopt;
             if (const auto result = finalizeApproximateOperation(
                     *certified, *information, context->decimalDigits()))
                 return result;
         }
-        catch (const PrecisionInsufficient&) {
-            // backendのguard不足なら再試行する。InformationEnclosureそのものが
-            // branch/domain境界を跨ぐ場合は上限回数で保守的に未評価へ戻る。
+        catch (const PrecisionInsufficient& exception) {
+            // finite-precision入力自身のInformationEnclosureがbranch/domain境界を
+            // 跨ぐ場合，guardを増やしても入力情報は狭まらない。即座に未評価へ戻す。
+            if (!exception.refinable())
+                return std::nullopt;
+        }
+        catch (const CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
         catch (const std::domain_error&) {
             return std::nullopt;
@@ -585,18 +749,14 @@ std::optional<expression::Expr> divideApproximateScalars(
 
 std::optional<expression::Expr> negateApproximateScalar(
     const expression::Expr& value) {
-    const std::array<expression::Expr, 1> expressions{value};
-    const auto context = inferredApproximationContext(expressions);
-    if (!context)
-        return std::nullopt;
-
-    const std::size_t precisionBits = context->workingBinaryBits();
-    const auto enclosed = storedNumericInterval(value, precisionBits, false);
-    const auto informationValue = storedNumericInterval(value, precisionBits, true);
-    if (!enclosed || !informationValue)
-        return std::nullopt;
-    return finalizeApproximateOperation(
-        negateValue(*enclosed), negateValue(*informationValue), context->decimalDigits());
+    // 符号反転はenclosureの向きを反すだけで情報量を失わない。intervalへ
+    // 戻して再丸めするとrequested precisionを1桁ずつ削るため，値型の
+    // metadataと両enclosureをそのまま鏡映する。
+    if (value.isDecimalApproximation())
+        return expression::Expr{value.asDecimalApproximation().negated()};
+    if (value.isComplexDecimalApproximation())
+        return expression::Expr{value.asComplexDecimalApproximation().negated()};
+    return std::nullopt;
 }
 
 std::size_t nextGuardDigits(std::size_t current) {

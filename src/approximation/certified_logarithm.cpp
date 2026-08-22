@@ -1,6 +1,8 @@
 // 対数函数の保証付き評価
 #include "certified_logarithm.hpp"
+#include "certified_precision.hpp"
 #include "certified_sqrt.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include "numeric/detail/binary_scale.hpp"
 #include "numeric/big_int.hpp"
@@ -21,14 +23,6 @@ using numeric::Rational;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] std::size_t checkedAdd(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
 [[nodiscard]] std::size_t checkedShiftCount(std::uint64_t bits) {
     if (bits > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
@@ -140,12 +134,15 @@ struct IntervalSeriesSplit final {
     const Rational& m,
     std::size_t precisionBits) {
     constexpr std::size_t sqrtReductions = 16;
-    const std::size_t workBits = checkedAdd(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 32, "Certified log precision is too large");
 
     RealInterval reduced = RealInterval::fromRational(m, workBits);
-    for (std::size_t i = 0; i < sqrtReductions; ++i)
+    for (std::size_t i = 0; i < sqrtReductions; ++i) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         reduced = encloseSqrt(reduced, workBits).interval;
+    }
 
     const RealInterval one = RealInterval::fromRational(rational(1), workBits);
     const RealInterval t = divide(
@@ -158,7 +155,7 @@ struct IntervalSeriesSplit final {
     //   t=(root-1)/(root+1) < 2^-(s+1)
     // と保守的に押さえられる。元のlogへ戻す2^(s+1)倍も含め、
     // tailが要求bitを下回る項数を固定回数ではなく精度から決める。
-    const std::size_t targetBits = checkedAdd(
+    const std::size_t targetBits = checkedPrecisionAdd(
         precisionBits, 28, "Certified log precision is too large");
     constexpr std::size_t reductionDenominator = 2 * (sqrtReductions + 1);
     if (targetBits > std::numeric_limits<std::size_t>::max() - reductionDenominator)
@@ -216,77 +213,13 @@ struct IntervalSeriesSplit final {
     //   2*R_M <= 2*u_M/(1-t^2) < 2^(-3M)
     // と保守的に抑えられる。したがってprecision+guardを3で割るだけで
     // correctnessに依存しない十分な項数を決められる。
-    const std::size_t targetBits = checkedAdd(
+    const std::size_t targetBits = checkedPrecisionAdd(
         precisionBits, 28, "Certified log precision is too large");
     if (targetBits > std::numeric_limits<std::size_t>::max() - 2)
         throw std::overflow_error("Certified log precision is too large");
     return (targetBits + 2) / 3;
 }
 
-/*
-旧実装（逐次RealInterval atanh級数）。
-高精度では各項の巨大除算・外向き丸めが支配的になったため、
-binary splitting + 必要時のsqrt range reductionへ置き換えた。
-比較・検証用に旧コードをそのまま残す。
-
-[[nodiscard]] SeriesResult encloseLogMantissa(
-    const Rational& m,
-    std::size_t precisionBits) {
-    if (m < rational(1) || m > rational(2))
-        throw std::invalid_argument("Log mantissa must be in [1, 2]");
-    if (m == rational(1))
-        return SeriesResult{RealInterval::fromRational(rational(0), precisionBits), 0};
-
-    const Rational tExact = (m - rational(1)) / (m + rational(1));
-    const Rational tSquaredExact = tExact * tExact;
-    const RealInterval t = RealInterval::fromRational(tExact, precisionBits);
-    const RealInterval tSquared = RealInterval::fromRational(tSquaredExact, precisionBits);
-
-    RealInterval power = t; // t^(2n+1)
-    RealInterval sum = RealInterval::fromRational(rational(0), precisionBits);
-    std::uint64_t odd = 1;
-    std::size_t termsUsed = 0;
-
-    const Rational threshold = binaryThreshold(checkedAdd(
-        precisionBits, 24, "Certified log precision is too large"));
-    const Rational geometricFactor = rational(1) / (rational(1) - tSquaredExact);
-
-    for (;;) {
-        // BigIntの小整数constructorはint64_tなので、理論上そこを越えるほどの項数を要求された場合はwrapさせず、資源上限として明示的に止める。
-        if (odd > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
-            throw std::overflow_error("Certified log series index exceeds BigInt small-integer range");
-        const RealInterval divisor = RealInterval::fromRational(
-            Rational{BigInt{static_cast<std::int64_t>(odd)}}, precisionBits);
-        const RealInterval term = divide(power, divisor, precisionBits);
-        sum = add(sum, term, precisionBits);
-        ++termsUsed;
-
-        if (odd > std::numeric_limits<std::uint64_t>::max() - 2)
-            throw std::overflow_error("Certified log series iteration overflow");
-        const std::uint64_t nextOdd = odd + 2;
-        if (nextOdd > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
-            throw std::overflow_error("Certified log series index exceeds BigInt small-integer range");
-        const RealInterval nextPower = multiply(power, tSquared, precisionBits);
-        const RealInterval nextDivisor = RealInterval::fromRational(
-            Rational{BigInt{static_cast<std::int64_t>(nextOdd)}}, precisionBits);
-        const RealInterval nextTerm = divide(nextPower, nextDivisor, precisionBits);
-        const Rational tailBound = nextTerm.upper().toRational() * geometricFactor;
-
-        if (tailBound <= threshold) {
-            const RealInterval tail = RealInterval::fromRationalBounds(
-                rational(0), tailBound, precisionBits);
-            const RealInterval two = RealInterval::fromRational(rational(2), precisionBits);
-            return SeriesResult{
-                multiply(add(sum, tail, precisionBits), two, precisionBits),
-                termsUsed
-            };
-        }
-
-        power = nextPower;
-        odd = nextOdd;
-    }
-}
-*/
 
 // 1 <= m <= 2 に対して log(m)=2*atanh((m-1)/(m+1)) を保証付き評価する。
 [[nodiscard]] SeriesResult encloseLogMantissa(

@@ -109,6 +109,8 @@ Highlights:
 - added domain-short Solve forms such as `solve[equation,Real]`, solve-safe normalization, proof-gated Lambert-W exponential solving, and `N[solve[...]]`
 - promoted certified approximations to first-class numeric values with separate CertifiedEnclosure / InformationEnclosure propagation and structural partial numericalization such as `N[x+Pi,p]`
 - added `zeta`, `digamma`, `trigamma`, and `ibeta`, together with substantial high-precision Gamma/Beta backend optimization
+- Added first-class `cases[...]`, general `Q[x1,...,xn]` Gröbner bases (Lex / GrLex / GrevLex), `polynomialReduce`, and zero-dimensional polynomial Solve integration
+- Extended certified `N` for `digamma` / `trigamma` to complex arguments
 - added an exact Cyclotomic quotient backend for non-power-of-two FFTs, closing exact 5/7/10/12-point round trips without large root-of-unity expressions
 - replaced the large `Expr::Node` variant with typed nodes and moved dense Arrays to immutable paged packed backing plus stride views
 - added lightweight exact number theory, BigInt bit utilities, `range` / `table` / `map`, and `explain`
@@ -137,17 +139,19 @@ mmCal --batch < expressions.txt
 - `--angle rad`: Radians. This is the default
 - `--angle grad`: Gradians
 - `--eval expr`: Evaluate one expression and write only its value to standard output
-- `--batch`: Evaluate standard input one line at a time in one session.
-- `--help`, `-h`: Show startup options
+- `--batch` (compatibility alias: `--bach`): Evaluate standard input one line at a time in one session.
+- `--help`, `-h`: Show concise startup usage. Use commands such as `:help sin` after startup for function details
 
-`--eval` and `--batch` are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
+`--eval` and `--batch` (`--bach`) are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
 
 On Linux and similar systems, mmCal can be built from source using CMake 3.20 or later with GCC or Clang.
 
 ```text
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build --parallel
 ```
+
+For CMake-generated MSVC builds, `MMCAL_PARALLEL_COMPILE=ON` is the default and adds `/MP`. Disable it at configure time with `-DMMCAL_PARALLEL_COMPILE=OFF` when necessary. GCC and Clang do not receive a compiler-specific parallel-build flag; parallelism is delegated to Ninja, Make, or the selected build tool through `cmake --build ... --parallel`. Unity builds are intentionally not enabled by default because the existing large translation units would increase memory pressure and make incremental rebuilds coarser.
 
 ## 2. Exact values and decimal display are different things
 
@@ -174,7 +178,7 @@ In [4]> N[Pi,30]
 Out[4]> 3.14159265358979323846264338328
 ```
 
-`N[expression,p]` evaluates the expression to a certified approximation at `p` significant digits, so requested relative precision follows the scale of the value.
+`N[expression,p]` evaluates the expression to a certified approximation at `p` significant digits, so requested relative precision follows the scale of the value. Guard precision may be increased when interval width straddles a branch cut or backend boundary, but top-level `N` is bounded to 16 local refinement attempts. If an existing finite-precision input enclosure prevents certification of the requested digits, `N::precision` preserves the expression; if the mathematical value exists but the current certified backend is unavailable, `N::unsupported` is used instead. Genuine domain violations remain DomainError.
 By contrast, `:fix` changes **only the number of displayed fractional digits** and does not change the exact value stored internally or the Precision semantics of `N`.
 
 ```text
@@ -216,7 +220,7 @@ In [10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
-`precision` and `accuracy` do not simply return the `n` supplied to `N[...,n]`.
+`precision` and `accuracy` do not simply return the `n` supplied to `N[...,n]`. Pure-imaginary values do not count an exactly-zero component as an error source, exact identities such as `+0` / `*1` and unary sign changes do not re-quantize the InformationEnclosure, and zero-centered values track information through absolute Accuracy rather than relative Precision.
 They are conservatively derived from guaranteed error bounds, so the result may be smaller than the requested number of digits.
 Exact values and exact symbolic expressions return `Infinity` in this sense.
 
@@ -430,7 +434,7 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
-v1.5.3 also adds `zeta`, `digamma`, `trigamma`, and the regularized incomplete beta `ibeta`, connected to representative exact reductions, derivative relations, and certified `N` on their supported real domains. Lightweight exact number theory now includes `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient`, deterministic over the `uint64` range; larger BigInts are not promoted from probable-prime evidence to certified truth.
+v1.5.3 also adds `zeta`, `digamma`, `trigamma`, and the regularized incomplete beta `ibeta`, connected to representative exact reductions, derivative relations, and certified `N` on their initial supported real domains. The current Unreleased tree additionally extends certified `digamma` / `trigamma` evaluation to complex arguments. Lightweight exact number theory now includes `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient`, deterministic over the `uint64` range; larger BigInts are not promoted from probable-prime evidence to certified truth.
 
 Representative reductions include:
 
@@ -580,7 +584,7 @@ normalize[{3,4}]
 `dot` covers vector-vector, matrix-vector, vector-matrix, and matrix-matrix contraction.
 `A*B` is deliberately not matrix multiplication: ordinary arithmetic supports same-shape Array `+` / `-` and scalar×Array, while matrix multiplication and inner products remain explicit as `dot[A,B]`.
 
-Integer and Rational matrices remain exact rather than being converted to BigFloat. `det`, `rref`, `matrixRank`, `nullSpace`, `inverse`, and `solveLinear` share per-row denominator clearing and Bareiss fraction-free elimination to suppress intermediate Rational growth; exact complex matrices fall back to the `Number` Gaussian backend. `solveLinear[A,b]` returns only unique solutions, including consistent overdetermined systems with full column rank. Inconsistent systems and systems with free variables are Domain errors rather than invented parametric answers. General symbolic determinant/inverse expansion has a work budget: triangular and sufficiently sparse cases are still evaluated, while potentially explosive dense cases remain unevaluated instead of constructing factorial-size expressions. `luDecomposition[A]` returns `{P,L,U}` for square matrices. `qrDecomposition[A]` is a rectangular reduced Householder QR: for m×n input with `k=min[m,n]`, it returns `{Q,R}` with `Q:m×k` and `R:k×n`. `svd[A]` likewise returns rectangular reduced `{U,S,V}`; its general numerical backend avoids forming `A^H A` and instead uses Householder bidiagonalization plus one-sided Jacobi. Factors are extracted with prefix indexing such as `at[result,0]`. General exact QR is limited to 3x3 to prevent expression explosion, while upper-triangular/trapezoidal cases retain an any-size fast path. `eigenvalues`, `eigenvectors`, and `eigensystem` target square matrices: exact triangular/diagonal and distinct-root exact Number 2x2 cases remain exact, while general `N[...]` uses Hessenberg reduction plus implicit shifted complex QR and audits Schur/eigenpair relations against the certified input intervals. Defective or near-multiple cases are not supplied with guessed independent eigenvectors.
+Integer and Rational matrices remain exact rather than being converted to BigFloat. All exact real Matrix paths first clear denominators per row into an integer workspace. `rref`, `matrixRank`, and `nullSpace`, together with small or sparse `det` / `solveLinear` workloads, use Bareiss fraction-free elimination. Larger dense `det` workloads can dispatch to 31-bit prime images plus CRT; larger dense `solveLinear` workloads use CRT plus rational reconstruction, and a reconstructed candidate is accepted only after exact verification against the original integer system. Bad primes and unsuccessful reconstruction fall back to Bareiss. A modular adjugate-based inverse backend is implemented as well, but current GCC crossover measurements keep automatic `inverse` on Bareiss. Exact complex matrices fall back to the `Number` Gaussian backend. `solveLinear[A,b]` returns only unique solutions, including consistent overdetermined systems with full column rank. Inconsistent systems and systems with free variables are Domain errors rather than invented parametric answers. General symbolic determinant/inverse expansion has a work budget: triangular and sufficiently sparse cases are still evaluated, while potentially explosive dense cases remain unevaluated instead of constructing factorial-size expressions. `luDecomposition[A]` returns `{P,L,U}` for square matrices. `qrDecomposition[A]` is a rectangular reduced Householder QR: for m×n input with `k=min[m,n]`, it returns `{Q,R}` with `Q:m×k` and `R:k×n`. `svd[A]` likewise returns rectangular reduced `{U,S,V}`; its general numerical backend avoids forming `A^H A` and instead uses Householder bidiagonalization plus one-sided Jacobi. Factors are extracted with prefix indexing such as `at[result,0]`. General exact QR is limited to 3x3 to prevent expression explosion, while upper-triangular/trapezoidal cases retain an any-size fast path. `eigenvalues`, `eigenvectors`, and `eigensystem` target square matrices: exact triangular/diagonal and distinct-root exact Number 2x2 cases remain exact, while general `N[...]` uses Hessenberg reduction plus implicit shifted complex QR and audits Schur/eigenpair relations against the certified input intervals. Defective or near-multiple cases are not supplied with guessed independent eigenvectors.
 
 Under `N`, matrix operations dispatch directly to a precision-aware backend just like FFT:
 
@@ -662,14 +666,21 @@ WARN: integrate could not fully prove the symbolic antiderivative or definite in
 This does not mean that the expression itself is the mathematical result. It means that **the current implementation could not safely complete the calculation**.
 Unsupported regions will continue to be expanded. I'm working on it.
 
-## 11. CLI display settings
+## 11. CLI help and display settings
 
 ```text
+:help
+:help sin
+:help functions
+:help constants
 :fix 16
 :fix off
 :status
 ```
 
+`:help function` derives the function name, aliases, and arity from `BuiltinRegistry`. Every callable builtin has a curated description, explicit input rules, and one or more examples; multi-form functions such as `integrate`, `root`, `qrDecomposition`, `svd`, and `solve` show each accepted form and additional notes. `:help Pi` and `:help constants` cover protected constants, domains, and angle-unit symbols. Unknown names offer a nearby topic when one is unambiguous, for example `sdv` -> `svd` and `qr` -> `qrDecomposition`.
+`:help functions` lists the available canonical names and callable aliases.
+`:help`, `:fix`, and `:status` are CLI commands rather than evaluated expressions, so they do not advance `In[n]` or enter history.
 `:fix n` only rounds the **display** to at most `n` digits after the decimal point; it does not change the stored value or the semantics of `precision` / `accuracy`.
 `:status` shows the current angle mode, display mode, number of definitions, history count, and similar state.
 The console title also shows the angle and display mode as auxiliary information.
@@ -697,6 +708,8 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — Internal architecture for developers
 - `docs/grammar.ebnf` — Machine-readable overview of the grammar
 - `docs/performance_optimization.md` — Performance work adopted or rejected for v1.5.1–v1.5.3, with benchmark rationale
+- `docs/evaluation_budget.ja.md` — Request-scoped evaluation limits, cancellation, telemetry, and diagnostic contract (Japanese)
+- `docs/roadmap.md` — Intentional omissions, bounded searches, and current priorities
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
 - `CHANGELOG.md` — Major changes by release
 

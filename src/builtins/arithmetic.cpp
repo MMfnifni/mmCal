@@ -1,8 +1,10 @@
 // 四則演算、冪
 #include "arithmetic.hpp"
+#include "builtin_helpers.hpp"
 
 #include "approximation/expression_interval.hpp"
 #include "error/error_message.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "names.hpp"
 #include "mathematics/value_facts.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -29,19 +31,50 @@ using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
 
+[[nodiscard]] std::size_t realNumberBits(const RealNumber& value) {
+    if (value.isInteger())
+        return value.asInteger().bitLength();
+    const Rational& rational = value.asRational();
+    return std::max(
+        rational.numerator().bitLength(),
+        rational.denominator().bitLength());
+}
+
+[[nodiscard]] std::size_t numberBits(const Number& value) {
+    if (value.isReal())
+        return realNumberBits(value.asReal());
+    return std::max(
+        realNumberBits(value.asComplex().real),
+        realNumberBits(value.asComplex().imaginary));
+}
+
+void checkNumberBudget(const Number& number) {
+    evaluation::checkEvaluationBigIntegerBits(numberBits(number));
+}
+
 [[nodiscard]] Expr numberExpr(Number number) {
+    checkNumberBudget(number);
     return Expr{std::move(number)};
 }
 
-[[nodiscard]] Expr integerExpr(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
+[[nodiscard]] Expr numberArray(
+    std::vector<std::size_t> shape,
+    std::vector<Number> values) {
+    for (const Number& value : values)
+        checkNumberBudget(value);
+    return Expr::numberArray(std::move(shape), std::move(values));
 }
 
-void requireArity(std::span<const Expr> arguments, std::size_t expected, std::string_view name) {
-    if (arguments.size() != expected)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects " + std::to_string(expected) + " argument(s)");
+[[nodiscard]] Expr integerExpr(std::int64_t value) {
+    return numberExpr(Number{BigInt{value}});
+}
+
+[[nodiscard]] bool isExactZero(const Expr& value) noexcept {
+    return value.isNumber() && value.asNumber().isZero();
+}
+
+[[nodiscard]] bool isExactOne(const Expr& value) noexcept {
+    return value.isNumber() && value.asNumber() == Number{BigInt{1}};
 }
 
 [[nodiscard]] std::optional<std::uint64_t> toUint64(const BigInt& value) {
@@ -191,9 +224,25 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             break;
         }
         sum += argument.asNumber();
+        checkNumberBudget(sum);
     }
     if (numeric)
         return numberExpr(std::move(sum));
+
+    const Expr* soleNonZero = nullptr;
+    bool additiveIdentityOnly = true;
+    for (const Expr& argument : arguments) {
+        if (isExactZero(argument))
+            continue;
+        if (soleNonZero) {
+            additiveIdentityOnly = false;
+            break;
+        }
+        soleNonZero = &argument;
+    }
+    if (additiveIdentityOnly && soleNonZero)
+        return *soleNonZero;
+
     if (const auto algebraic = algebraicFold(arguments, symbolic::AlgebraicBinaryOperation::Add, registry))
         return *algebraic;
     if (const auto approximate = approximation::addApproximateScalars(arguments))
@@ -212,9 +261,25 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             break;
         }
         product *= argument.asNumber();
+        checkNumberBudget(product);
     }
     if (numeric)
         return numberExpr(std::move(product));
+
+    const Expr* soleNonOne = nullptr;
+    bool multiplicativeIdentityOnly = true;
+    for (const Expr& argument : arguments) {
+        if (isExactOne(argument))
+            continue;
+        if (soleNonOne) {
+            multiplicativeIdentityOnly = false;
+            break;
+        }
+        soleNonOne = &argument;
+    }
+    if (multiplicativeIdentityOnly && soleNonOne)
+        return *soleNonOne;
+
     if (const auto algebraic = algebraicFold(arguments, symbolic::AlgebraicBinaryOperation::Multiply, registry))
         return *algebraic;
     if (const auto approximate = approximation::multiplyApproximateScalars(arguments))
@@ -228,6 +293,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const evaluation::BuiltinRegistry& registry) {
     if (lhs.isNumber() && rhs.isNumber())
         return numberExpr(lhs.asNumber() - rhs.asNumber());
+    if (isExactZero(rhs))
+        return lhs;
     if (const auto algebraic = algebraicBinary(
         lhs, rhs, symbolic::AlgebraicBinaryOperation::Subtract, registry))
         return *algebraic;
@@ -253,18 +320,15 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return Expr::call(registry.symbol(evaluation::BuiltinId::Negate), {value});
 }
 
-[[nodiscard]] bool isCertifiedExactZero(const Expr& value) noexcept {
+[[nodiscard]] bool isInformationExactZero(const Expr& value) noexcept {
     if (value.isNumber())
         return value.asNumber().isZero();
-    if (value.isDecimalApproximation()) {
-        const auto& decimal = value.asDecimalApproximation();
-        return decimal.certifiedEnclosureIsPoint() && decimal.certifiedLower().isZero();
-    }
+    if (value.isDecimalApproximation())
+        return value.asDecimalApproximation().informationExactlyZero();
     if (value.isComplexDecimalApproximation()) {
         const auto& complex = value.asComplexDecimalApproximation();
-        return complex.real().certifiedEnclosureIsPoint() && complex.real().certifiedLower().isZero()
-            && complex.imaginary().certifiedEnclosureIsPoint()
-            && complex.imaginary().certifiedLower().isZero();
+        return complex.realInformationExactlyZero()
+            && complex.imaginaryInformationExactlyZero();
     }
     return false;
 }
@@ -302,7 +366,7 @@ Expr evaluateAdd(
             for (std::size_t i = 0; i < values.size(); ++i)
                 values[i] += array.exactNumber(i);
         }
-        return Expr::numberArray(first.shape, std::move(values));
+        return numberArray(first.shape, std::move(values));
     }
 
     std::vector<Expr> elements;
@@ -336,7 +400,7 @@ Expr evaluateSubtract(
             values.reserve(lhs.asArray().size());
             for (std::size_t i = 0; i < lhs.asArray().size(); ++i)
                 values.push_back(lhs.asArray().exactNumber(i) - rhs.asArray().exactNumber(i));
-            return Expr::numberArray(lhs.asArray().shape, std::move(values));
+            return numberArray(lhs.asArray().shape, std::move(values));
         }
 
         std::vector<Expr> elements;
@@ -386,7 +450,7 @@ Expr evaluateMultiply(
         values.reserve(array.size());
         for (std::size_t i = 0; i < array.size(); ++i)
             values.push_back(array.exactNumber(i) * scalar);
-        return Expr::numberArray(array.shape, std::move(values));
+        return numberArray(array.shape, std::move(values));
     }
 
     std::vector<Expr> elements;
@@ -409,8 +473,10 @@ Expr evaluateDivide(
 
     const Expr& numerator = arguments[0];
     const Expr& denominator = arguments[1];
-    if (isCertifiedExactZero(denominator))
+    if (isInformationExactZero(denominator))
         error::throwCalcError(error::CalcErrorType::Domain, "Division by zero");
+    if (isExactOne(denominator))
+        return numerator;
     if (numerator.isNumber() && denominator.isNumber())
         return numberExpr(numerator.asNumber() / denominator.asNumber());
     if (const auto algebraic = algebraicBinary(
@@ -470,7 +536,7 @@ Expr evaluatePower(
 
     const BigInt& integerExponent = exponent.asNumber().asReal().asInteger();
     if (integerExponent.isZero()) {
-        // 0^0をDomainErrorとしている以上、未知のsymbolic baseに対してx^0 -> 1 と無条件簡約するのは安全ではない。
+        // 0^0をIndeterminateとしている以上、未知のsymbolic baseに対してx^0 -> 1 と無条件簡約するのは安全ではない。
         // baseが非零と証明できる場合だけ1へ畳み込み、未知ならPower式を保持する。
         if (base.isNumber())
             return integerExpr(1);
@@ -531,6 +597,17 @@ Expr evaluatePower(
             error::CalcErrorType::Domain,
             "Zero cannot be raised to a negative power");
 
+    // 巨大値を構築してから検査するのでは遅い。既約なexact realの整数冪では，
+    // numerator/denominatorの少なくとも一方が概ね exponent*(bits-1) bitになる。
+    if (base.asNumber().isReal()) {
+        if (evaluation::EvaluationBudget* budget = evaluation::currentEvaluationBudget()) {
+            const std::size_t bits = realNumberBits(base.asNumber().asReal());
+            const std::size_t limit = budget->limits().maxBigIntegerBits;
+            if (bits > 1 && *magnitude > (limit == 0 ? 0 : (limit - 1) / (bits - 1)))
+                budget->checkBigIntegerBits(limit + (limit != std::numeric_limits<std::size_t>::max()));
+        }
+    }
+
     Number result = numeric::integerPower(base.asNumber(), *magnitude);
     if (negativeExponent)
         result = Number{BigInt{1}} / result;
@@ -549,7 +626,7 @@ Expr evaluateNegate(
             values.reserve(array.size());
             for (std::size_t i = 0; i < array.size(); ++i)
                 values.push_back(-array.exactNumber(i));
-            return Expr::numberArray(array.shape, std::move(values));
+            return numberArray(array.shape, std::move(values));
         }
         std::vector<Expr> elements;
         elements.reserve(array.size());
@@ -583,7 +660,18 @@ Expr evaluateFactorial(std::span<const Expr> arguments) {
             error::CalcErrorType::Overflow,
             "Factorial argument is too large for exact evaluation");
 
-    return Expr{Number{numeric::factorial(*count)}};
+    if (evaluation::EvaluationBudget* budget = evaluation::currentEvaluationBudget()) {
+        const std::size_t limit = budget->limits().maxBigIntegerBits;
+        if (*count >= 4) {
+            const std::uint64_t half = *count / 2;
+            const std::size_t lowerBitsPerFactor = BigInt::fromUnsigned(half).bitLength() - 1;
+            if (lowerBitsPerFactor != 0
+                && half > limit / lowerBitsPerFactor)
+                budget->checkBigIntegerBits(limit + (limit != std::numeric_limits<std::size_t>::max()));
+        }
+    }
+
+    return numberExpr(Number{numeric::factorial(*count)});
 }
 
 Expr evaluateSqrt(

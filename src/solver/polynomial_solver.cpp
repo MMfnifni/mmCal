@@ -11,11 +11,14 @@
 #include "simplification/simplifier.hpp"
 #include "solver/solve_constraints.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/groebner.hpp"
+#include "symbolic/substitution.hpp"
 #include "symbolic/algebraic_expression.hpp"
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/algebra_transforms.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -1813,6 +1816,203 @@ SolutionSet solvePolynomialEquation(
         return SolutionSet::finite(variables, std::move(branches));
     }
     return SolutionSet::unresolved(variables);
+}
+
+std::optional<SolutionSet> solvePolynomialSystem(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variableSymbols,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (equations.empty() || variableSymbols.size() < 2)
+        return std::nullopt;
+
+    std::vector<SolverVariable> variables;
+    variables.reserve(variableSymbols.size());
+    for (const expression::Symbol& variable : variableSymbols)
+        variables.push_back(SolverVariable{variable, mathematics::NumericDomain::Complex});
+
+    const symbolic::PolynomialRing ring{
+        std::vector<expression::Symbol>{variableSymbols.begin(), variableSymbols.end()},
+        symbolic::MonomialOrder::Lex};
+    std::vector<symbolic::MultivariateRationalPolynomial> generators;
+    generators.reserve(equations.size());
+    std::vector<Expr> zeroForms;
+    zeroForms.reserve(equations.size());
+    bool nonlinear = false;
+
+    for (const Expr& equation : equations) {
+        const auto relation = relationKindOf(equation, builtins);
+        if (!relation || *relation != RelationKind::Equal)
+            return std::nullopt;
+        Expr zeroForm = equationZeroForm(equation, builtins, mathematics, angles);
+        const auto polynomial = symbolic::toMultivariateRationalPolynomial(
+            zeroForm, ring, builtins,
+            symbolic::PolynomialConversionOptions{4096, 100'000});
+        if (!polynomial)
+            return std::nullopt;
+        nonlinear = nonlinear || polynomial->totalDegree() > 1;
+        generators.push_back(*polynomial);
+        zeroForms.push_back(std::move(zeroForm));
+    }
+    if (!nonlinear)
+        return std::nullopt;
+
+    symbolic::GroebnerComputation computation;
+    try {
+        computation = symbolic::groebnerBasis(generators, ring);
+    }
+    catch (const std::length_error&) {
+        return SolutionSet::unresolved(std::move(variables));
+    }
+
+    if (computation.basis.size() == 1) {
+        const auto leading = computation.basis.front().leadingTerm(ring);
+        if (leading && leading->monomial.isOne())
+            return SolutionSet::empty(std::move(variables));
+    }
+
+    const expression::Symbol& lastVariable = variableSymbols.back();
+    const symbolic::MultivariateRationalPolynomial* eliminant = nullptr;
+    for (const auto& polynomial : computation.basis) {
+        if (polynomial.degree(lastVariable) == 0)
+            continue;
+        bool onlyLast = true;
+        for (const expression::Symbol& symbol : polynomial.variables())
+            onlyLast = onlyLast && symbol == lastVariable;
+        if (onlyLast && (!eliminant
+                || polynomial.degree(lastVariable) < eliminant->degree(lastVariable)))
+            eliminant = &polynomial;
+    }
+    if (!eliminant)
+        return SolutionSet::unresolved(std::move(variables));
+
+    const Expr eliminantExpr = symbolic::polynomialToExpandedExpr(*eliminant, builtins);
+    const Expr eliminantEquation = Expr::call(
+        builtins.symbol(BuiltinId::Equal), {eliminantExpr, zeroExpr()});
+    const SolutionSet lastSolutions = solvePolynomialEquation(
+        eliminantEquation, lastVariable, builtins, mathematics, angles);
+    if (lastSolutions.kind() != SolutionSetKind::Finite)
+        return SolutionSet::unresolved(std::move(variables));
+
+    // Shape-position relationをまず最後の変数の多項式として構築する。
+    // Root式へ代入してからsimplifyで0判定すると，minimal polynomialの知識が
+    // 必要になるため，公開候補を作る前にQ[t]上の剰余として一括検証する。
+    std::vector<SolutionBinding> shapeBindings;
+    shapeBindings.push_back(SolutionBinding{lastVariable, Expr{lastVariable}});
+    for (std::size_t reverse = variableSymbols.size() - 1; reverse-- > 0;) {
+        const expression::Symbol& variable = variableSymbols[reverse];
+        const symbolic::MultivariateRationalPolynomial* relationPolynomial = nullptr;
+        Rational variableCoefficient{BigInt{0}};
+
+        for (const auto& polynomial : computation.basis) {
+            if (polynomial.degree(variable) != 1)
+                continue;
+            bool containsEarlier = false;
+            bool validVariableTerm = false;
+            Rational coefficient{BigInt{0}};
+            for (const symbolic::PolynomialTerm& term : polynomial.terms()) {
+                for (std::size_t earlier = 0; earlier < reverse; ++earlier)
+                    if (term.monomial.exponentOf(variableSymbols[earlier]) != 0)
+                        containsEarlier = true;
+                const std::size_t exponent = term.monomial.exponentOf(variable);
+                if (exponent == 0)
+                    continue;
+                if (exponent != 1 || term.monomial.totalDegree() != 1) {
+                    containsEarlier = true;
+                    break;
+                }
+                coefficient += term.coefficient;
+                validVariableTerm = true;
+            }
+            if (!containsEarlier && validVariableTerm && !coefficient.isZero()) {
+                relationPolynomial = &polynomial;
+                variableCoefficient = coefficient;
+                break;
+            }
+        }
+        if (!relationPolynomial)
+            return SolutionSet::unresolved(std::move(variables));
+
+        std::vector<symbolic::PolynomialTerm> restTerms;
+        for (const symbolic::PolynomialTerm& term : relationPolynomial->terms()) {
+            if (term.monomial.exponentOf(variable) == 1
+                && term.monomial.totalDegree() == 1)
+                continue;
+            restTerms.push_back(term);
+        }
+        Expr rest = symbolic::polynomialToExpandedExpr(
+            symbolic::MultivariateRationalPolynomial{std::move(restTerms)}, builtins);
+        for (const SolutionBinding& binding : shapeBindings)
+            rest = symbolic::substituteSymbol(rest, binding.variable, binding.value);
+        Expr value = simplify(
+            mathematics::scaleExactExpression(
+                -Rational{BigInt{1}} / variableCoefficient,
+                std::move(rest), builtins),
+            builtins, mathematics, angles);
+        shapeBindings.push_back(SolutionBinding{variable, std::move(value)});
+    }
+
+    const symbolic::PolynomialRing eliminantRing{{lastVariable}, symbolic::MonomialOrder::Lex};
+    const auto eliminantInOneVariable = symbolic::toMultivariateRationalPolynomial(
+        eliminantExpr, eliminantRing, builtins,
+        symbolic::PolynomialConversionOptions{4096, 100'000});
+    if (!eliminantInOneVariable)
+        return SolutionSet::unresolved(std::move(variables));
+    const std::array<symbolic::MultivariateRationalPolynomial, 1> divisorBasis{
+        *eliminantInOneVariable};
+
+    for (const Expr& zeroForm : zeroForms) {
+        Expr verified = zeroForm;
+        for (const SolutionBinding& binding : shapeBindings) {
+            if (binding.variable == lastVariable)
+                continue;
+            verified = symbolic::substituteSymbol(verified, binding.variable, binding.value);
+        }
+        verified = simplify(std::move(verified), builtins, mathematics, angles);
+        const auto polynomial = symbolic::toMultivariateRationalPolynomial(
+            verified, eliminantRing, builtins,
+            symbolic::PolynomialConversionOptions{4096, 100'000});
+        if (!polynomial)
+            return SolutionSet::unresolved(std::move(variables));
+        if (!symbolic::normalForm(*polynomial, divisorBasis, eliminantRing).isZero())
+            return SolutionSet::unresolved(std::move(variables));
+    }
+
+    std::vector<SolutionBranch> resultBranches;
+    resultBranches.reserve(lastSolutions.branches().size());
+    for (const SolutionBranch& lastBranch : lastSolutions.branches()) {
+        if (lastBranch.bindings.size() != 1
+            || !(lastBranch.bindings.front().variable == lastVariable))
+            return SolutionSet::unresolved(std::move(variables));
+
+        const Expr& root = lastBranch.bindings.front().value;
+        std::vector<SolutionBinding> bindings;
+        bindings.reserve(variableSymbols.size());
+        for (const expression::Symbol& variable : variableSymbols) {
+            if (variable == lastVariable) {
+                bindings.push_back(SolutionBinding{variable, root});
+                continue;
+            }
+            const auto found = std::find_if(
+                shapeBindings.begin(), shapeBindings.end(),
+                [&](const SolutionBinding& binding) { return binding.variable == variable; });
+            if (found == shapeBindings.end())
+                return SolutionSet::unresolved(std::move(variables));
+            Expr value = symbolic::substituteSymbol(found->value, lastVariable, root);
+            value = simplify(std::move(value), builtins, mathematics, angles);
+            bindings.push_back(SolutionBinding{variable, std::move(value)});
+        }
+
+        SolutionBranch branchResult;
+        branchResult.bindings = std::move(bindings);
+        branchResult.bindingsCertifiedDomain = mathematics::NumericDomain::Complex;
+        resultBranches.push_back(std::move(branchResult));
+    }
+
+    if (resultBranches.empty())
+        return SolutionSet::empty(std::move(variables));
+    return SolutionSet::finite(std::move(variables), std::move(resultBranches));
 }
 
 SolutionSet solveLinearPolynomialSystem(

@@ -150,7 +150,9 @@ Current protected predefined symbols:
 | `Rational`      | Rational domain                                                                                                                                  |
 | `Real`          | Real domain                                                                                                                                      |
 | `Complex`       | Complex domain                                                                                                                                   |
-| `Infinity`      | Infinite-precision sentinel returned by `precision/accuracy` for exact values. Automatic extended-real arithmetic simplification remains limited |
+| `Infinity`      | Positive extended-real infinity; also returned by `precision/accuracy` for exact values                                                          |
+| `ComplexInfinity` | Infinite magnitude with undetermined direction, produced by a provably nonzero value divided by exact zero                                     |
+| `Indeterminate` | Protected nonnumeric result for an expression whose numerical value is not unambiguously defined                                                  |
 
 The legacy constants `Tau`, `NA`, and `ESP` are no longer predefined.
 
@@ -471,6 +473,8 @@ rect -> polar
 | `expm1[x]` | Stable evaluation of `exp[x]-1` near zero |
 | `log1p[x]` | Stable evaluation of `log[1+x]` near zero |
 
+`expm1` and `log1p` do not form `exp[x]-1` or `1+x` only at the requested precision when `x` is tiny. Extra working precision is derived from the binary scale of the input, and the result is rounded only after the cancellation-sensitive operation.
+
 Examples:
 
 ```text
@@ -553,7 +557,7 @@ tanhc[0] -> 1
 expc[0]  -> 1
 ```
 
-Trigonometric cardinal functions normalize angle expressions to radian quantities before forming the ratio.
+Trigonometric cardinal functions normalize angle expressions to radian quantities before forming the ratio. If a finite-precision InformationEnclosure crosses zero, `sinc/cosc/sinhc/expc` use a local Taylor polynomial with an explicit remainder bound and `tanc/tanhc` use safe continuous-extension forms, so a removable singularity does not by itself force the result to remain unevaluated.
 
 ```text
 sinc[Pi/2]
@@ -671,7 +675,12 @@ N[gamma[1/3],20]
 ```
 
 General real arguments use Stirling–Bernoulli with a rigorous remainder bound; negative real arguments use reflection.
-Non-positive integer poles produce DomainError.
+Non-positive integer poles produce DomainError. For exact complex input, `N` applies recurrence shifts into a suitable right half-plane and evaluates a `ComplexInterval` Stirling expansion with an explicit remainder bound.
+
+```text
+N[gamma[1+I],20]
+-> 0.49801566811835604271-0.15494982830181068512I
+```
 
 `lgamma[x]` currently means **`log[abs[gamma[x]]]` on the real axis**. It is kept separate from complex `LogGamma`.
 
@@ -686,7 +695,11 @@ erfc[x]
 erf[0]  -> 0
 erfc[0] -> 1
 N[erf[1],20] -> 0.84270079294971486934
+N[erf[1+I],20]
+-> 1.3161512816979476449+0.19045346923783468628I
 ```
+
+Complex input is evaluated by the entire power series on `ComplexInterval` with an explicit tail bound.
 
 ## 14.3 Beta
 
@@ -709,20 +722,24 @@ trigamma[x]
 ibeta[a,b,x]
 ```
 
-`zeta` denotes the Riemann zeta function. Representative exact values and trivial zeros are simplified exactly. The current certified real `N` backend evaluates the real axis `s>1` with Euler-Maclaurin summation and an explicit remainder bound.
+`zeta` denotes the Riemann zeta function. Representative exact values and trivial zeros are simplified exactly. The certified `N` backend evaluates real or complex input with `Re[s]>1` by Euler-Maclaurin summation with an explicit remainder bound. Exact negative Rational arguments are transformed by the functional equation before entering a certified region.
 
 ```text
 zeta[0]  -> -1/2
 zeta[-2] -> 0
 zeta[2]  -> Pi^2/6
 N[zeta[3],20] -> 1.2020569031595942854
+N[zeta[2+I],20]
+-> 1.1503557032549026717-0.43753086591960788112I
 ```
 
-`digamma[x]` is the derivative of `lgamma[x]`; `trigamma[x]` is the derivative of `digamma[x]`. Non-positive integer poles are DomainErrors. The certified backend currently covers positive real inputs using recurrence plus Bernoulli asymptotics. Positive-integer trigamma values reduce exactly to `Pi^2/6` minus a finite second-order harmonic sum.
+`digamma[x]` is the derivative of `lgamma[x]`; `trigamma[x]` is the derivative of `digamma[x]`. Non-positive integer poles are DomainErrors. The certified backend covers positive real inputs and general complex inputs by recurrence into the right half-plane followed by Bernoulli asymptotics on `ComplexInterval` with an explicit remainder bound. Intervals containing poles and inputs beyond the bounded planner are distinguished as domain/backend failures. Positive-integer trigamma values reduce exactly to `Pi^2/6` minus a finite second-order harmonic sum.
 
 ```text
 N[digamma[1],20]  -> -0.57721566490153286061
 N[trigamma[1],20] -> 1.6449340668482264365
+N[digamma[1+I],30]  -> 0.0946503206224769772718784827219+1.07667404746858117413405079475I
+N[trigamma[1+I],30] -> 0.463000096622763786298326518184-0.794233542759318865583013617157I
 trigamma[2]        -> Pi^2/6-1
 D[gamma[x],x]      -> digamma[x]gamma[x]
 D[lgamma[x],x]     -> digamma[x]
@@ -737,7 +754,7 @@ ibeta[2,3,1/2] -> 11/16
 N[ibeta[1/3,2/3,1/4],20] -> 0.53302858123542523627
 ```
 
-General complex zeta continuation, higher polygamma, and certified approximate `a,b` parameter propagation for `ibeta` remain intentionally deferred.
+General complex zeta continuation for `Re[s]<=1` (apart from the exact negative-Rational path above), higher polygamma, and certified approximate `a,b` parameter propagation for `ibeta` remain intentionally deferred.
 
 ## 14.5 Generalized factorial family
 
@@ -764,13 +781,16 @@ fresnelc[x] = integral_0^x cos[Pi t^2/2] dt
 fresnels[x] = integral_0^x sin[Pi t^2/2] dt
 ```
 
-as entire odd functions. Arguments that do not close exactly remain symbolic, while `N` performs certified real evaluation.
+as entire odd functions. Arguments that do not close exactly remain symbolic, while `N` certifies both real and complex input through the entire series with an explicit tail bound on `ComplexInterval`.
+The current complex backend uses the Maclaurin series only, so bounded work is guaranteed for `|z|<8`; larger complex inputs remain unevaluated rather than entering the audited performance cliff. The real backend has a separate large-argument asymptotic path.
 
 ```text
 fresnelc[0] -> 0
 fresnels[0] -> 0
 N[fresnelc[1],20] -> 0.77989340037682282947
 N[fresnels[1],20] -> 0.43825914739035476608
+N[fresnelc[1+I],20] -> 2.5557937781024390246+2.5557937781024390246I
+N[fresnels[1+I],20] -> -2.0618882191948404681+2.0618882191948404681I
 
 D[fresnelc[x],x] -> cos[Pi x^2/2 Rad]
 D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
@@ -786,7 +806,7 @@ Kummer's confluent hypergeometric function is written as
 hypergeometric1F1[a,b,z]
 ```
 
-It is entire in `z`; in general `b = 0,-1,-2,...` is a parameter pole, so those cases are not unconditionally simplified to finite values. Exact evaluation currently handles safely terminating series, `z=0`, `a=b`, and related closed cases. The certified real `N` backend currently accepts exact Rational `a,b,z`.
+It is entire in `z`; in general `b = 0,-1,-2,...` is a parameter pole, so those cases are not unconditionally simplified to finite values. Exact evaluation currently handles safely terminating series, `z=0`, `a=b`, and related closed cases. The certified `N` backend accepts exact Rational parameters `a,b` and real or complex `z`, evaluating the entire series on `ComplexInterval` with an explicit tail bound. Approximate parameters themselves remain unsupported.
 
 ```text
 hypergeometric1F1[0,3,2] -> 1
@@ -794,6 +814,8 @@ hypergeometric1F1[-2,3,2] -> 0
 hypergeometric1F1[2,2,1] -> E
 N[hypergeometric1F1[1/6,7/6,1],20]
 -> 1.1920688079818883008
+N[hypergeometric1F1[1/2,5/4,1+I],20]
+-> 1.2988692086674201067+0.72862412303674683434I
 ```
 
 When the parameters do not depend on the differentiation variable,
@@ -829,13 +851,17 @@ The Gauss hypergeometric function is written as
 hypergeometric2F1[a,b,c,z]
 ```
 
-In general `c = 0,-1,-2,...` is a parameter pole, and mmCal uses the principal branch in `z`. Exact evaluation currently handles terminating series generated by non-positive-integer numerator parameters and other safe degenerations such as `a=0` or `b=0`. The certified real `N` backend currently accepts exact Rational parameters with real `|z|<1`.
+In general `c = 0,-1,-2,...` is a parameter pole, and mmCal uses the principal branch in `z`. Exact evaluation currently handles terminating series generated by non-positive-integer numerator parameters and other safe degenerations such as `a=0` or `b=0`. The certified `N` backend lifts supported exact numeric parameters to `ComplexInterval`. For `|z|<1` it uses the Gauss series with a rigorous tail bound. For provable `|z|>1`, it may use the principal `1/z` connection formula only when parameter degeneracies and branch-cut hazards are provably excluded and `|1/z|<1` is certified. An exact real `z>1` is evaluated using the defined principal-cut continuation value. By contrast, a finite-precision input such as `2+I*N[0,p]` that still permits both sides of the cut returns `N::precision` instead of selecting one side. Other unproved boundary or degenerate cases remain unevaluated.
 
 ```text
 hypergeometric2F1[-2,1,3,1/2] -> 17/24
 hypergeometric2F1[0,2,3,x] -> 1
 N[hypergeometric2F1[1/2,1/2,3/2,1/4],20]
 -> 1.0471975511965977462
+N[hypergeometric2F1[1/2,1/3,5/4,1/2+I/4],20]
+-> 1.0768624682230010329+0.057258816434281232216I
+N[hypergeometric2F1[3.4,5.6,4+I,4.6+2I],20]
+-> 0.0046136876612922014955+0.0019659119401108294965I
 ```
 
 When the parameters do not depend on the differentiation variable,
@@ -925,11 +951,12 @@ li[x]
 polylog[s,z]
 ```
 
-`Ei`, `Ci`, `li`, and `polylog` generally have branch structure and are registered as principal-branch functions. `Si` is entire and odd. The current certified real backends deliberately cover only regions where a rigorous tail bound is available; unsupported regions are not filled with heuristic numeric values.
+`Ei`, `Ci`, `li`, and `polylog` generally have branch structure and are registered as principal-branch functions. `Si` is entire and odd. `Ei/Si/Ci` now certify supported complex series regions directly on `ComplexInterval`; `polylog[n,z]` currently supports positive integer order with provable `|z|<1` through a complex series and tail bound. Branch cuts and convergence boundaries are not filled with heuristic values.
 
 ```text
 Si[0] -> 0
 Si[-1] -> -Si[1]
+li[0] -> 0
 polylog[0,z] -> z/(1-z)
 polylog[1,z] -> -log[1-z]
 polylog[2,1] -> Pi^2/6
@@ -940,22 +967,31 @@ N[Si[1],20] -> 0.94608307036718301494
 N[Ci[1],20] -> 0.33740392290096813466
 N[li[2],20] -> 1.0451637801174927848
 N[polylog[2,1/2],20] -> 0.5822405264650125059
+N[Ei[1+I],20] -> 1.7646259855638540684+2.3877698515105224193I
+N[Si[1+I],20] -> 1.1042226582355817396+0.88245380500791774338I
+N[Ci[1+I],20] -> 0.88217218055593632505+0.28724913351995593953I
+N[polylog[2,1/2+I/4],20]
+-> 0.54586750496407962676+0.33913769923976904082I
 ```
+
+Certified special-function series backends also have bounded-work implementation thresholds that are separate from their mathematical domains. The current limits are `|z|<=160` for `1F1`, `|z|<=9/10` for the `2F1` Gauss series, `|m|<=9/10` for elliptic `F/E` (and additionally `|n|<=9/10` for `Pi`), `|x|<=96` for real `Ei/Si`, `0<x<=96` for real `Ci`, `|z|<=512` for complex `Ei`, `|z|<=128` for complex `Ci`, and `|z|<=49/50` for positive-order `polylog`. `Si/Ci` and complex `Ei/Ci` add argument-dependent working precision to survive cancellation of large intermediate series terms. Complex `2F1` additionally uses the principal `1/z` connection only when `|z|>1` is certified and degenerate parameters and branch-cut hazards can be excluded.
+
+A value existing mathematically outside one of these thresholds does not imply that the current backend can certify it. Fixed series ranges, fixed term caps, and fixed planner budgets return `N::unsupported` with the original expression instead of repeatedly increasing precision without changing the applicable algorithm. For example, `N[zeta[1/2],p]` and `N[zeta[1/2+I],p]` are currently outside the Euler-Maclaurin backend but are not domain errors; only the pole at `s=1` is a domain singularity. Guard precision is increased when interval width may be responsible for straddling a backend boundary or branch cut, but top-level `N` is bounded to 16 local refinement attempts. If an existing finite-precision input enclosure keeps the decision ambiguous and the requested digits cannot be certified, `N::precision` preserves the unevaluated expression instead of exhausting the global resource budget.
 
 When the argument and order parameters are independent of the differentiation variable, the derivative knowledge includes
 
 ```text
 D[Ei[x],x] -> exp[x]/x
-D[Si[x],x] -> sin[x]/x
+D[Si[x],x] -> sinc[x Rad]
 D[Ci[x],x] -> cos[x]/x
 D[li[x],x] -> 1/log[x]
-D[polylog[s,x],x] -> polylog[s-1,x]/x
+D[polylog[s,x],x] -> cases[polylog[s-1, x]/x if x != 0; 1 if x == 0]
 ```
 
 The exact degeneration `polylog[1,x] -> -log[1-x]` gives
 
 ```text
-D[polylog[2,x],x] -> -log[1-x]/x
+D[polylog[2,x],x] -> cases[-log[1-x]/x if x != 0; 1 if x == 0]
 ```
 
 and the same shared knowledge closes
@@ -965,6 +1001,7 @@ integrate[exp[x]/x,x] -> Ei[x]
 integrate[sin[x]/x,x] -> Si[x]
 integrate[cos[x]/x,x] -> Ci[x]
 integrate[1/log[x],x] -> li[x]
+integrate[li[x],x] -> x li[x]-Ei[2log[x]]
 integrate[log[1-x]/x,x] -> -polylog[2,x]
 ```
 
@@ -984,7 +1021,7 @@ lambertw[0] -> 0
 lambertw[E] -> 1
 lambertw[-1/E] -> -1
 lambertw[-1,-1/E] -> -1
-D[lambertw[x],x] -> lambertw[x]/(x*(1+lambertw[x]))
+D[lambertw[x],x] -> cases[lambertw[x]/(x*(1+lambertw[x])) if x != 0; 1 if x == 0]
 ```
 
 On the real axis the Solver distinguishes the real `k=0` and `k=-1` branches where required. Both real branches have a certified `N` backend that evaluates Lambert W as the monotone real inverse of `w exp[w]=z` with rigorous interval refinement. Certified numerical evaluation of general Complex branches is still not implemented; unsupported values remain exact symbolic expressions.
@@ -1199,6 +1236,9 @@ solveLinear[A,b]
 luDecomposition[A]
 qrDecomposition[A]
 svd[A]
+conditionNumber[A]
+pseudoInverse[A]
+leastSquares[A,b]
 eigenvalues[A]
 eigenvectors[A]
 eigensystem[A]
@@ -1230,8 +1270,11 @@ solveLinear[{{2,1},{1,-1}},{5,1}] -> {2,1}
 ```
 
 `nullSpace[A]` returns a canonical RREF basis by taking free columns in ascending order and setting each corresponding free variable to one. Its result shape is `{nullity, columns}`; full column rank therefore formats as `reshape[{}, {0,n}]` so the vector dimension of the empty basis is not lost. Exact integer/Rational inputs share the Bareiss forward elimination path, exact complex matrices use the Gaussian fallback, and symbolic matrices produce a basis only when pivot nonzero status is provable.
+For a matrix that already contains finite-precision elements, both pivot existence and the absence of a pivot in a free column must be certified from the InformationEnclosure before nullity is fixed. Thus `nullSpace[N[{{Pi,1}},12]]` may evaluate when the pivot structure is certified by the declared input information, while a finite-precision zero column is not treated as exact zero merely because its hidden CertifiedEnclosure is a point.
 
 `solveLinear[A,b]` treats `A` as an m×n matrix and `b` as a length-m vector. It returns a length-n vector only when the solution is unique. The matrix need not be square: a consistent overdetermined system is accepted when it has full column rank. Inconsistent systems and systems with free variables are Domain errors; this function does not invent a parametric solution.
+
+Exact integer/Rational matrices clear denominators per row into an integer workspace and automatically choose Bareiss or the 31-bit modular backend according to order, coefficient height, and density. Modular `det` reconstructs a unique integer by CRT through an integer Hadamard bound. Modular `solveLinear` applies rational reconstruction after CRT and returns a candidate only after exact verification against the original integer system; bad primes or unsuccessful reconstruction fall back to Bareiss. A modular inverse backend also exists, but automatic `inverse` remains on Bareiss because Bareiss still wins throughout the currently measured GCC range.
 
 `luDecomposition[A]` currently targets square matrices and returns shape `{3,n,n}` containing `{P,L,U}`, with the convention `P A = L U`. Certified approximate LU uses partial pivoting among provably nonzero candidates, maximizing the certified lower bound of `|pivot|^2`; no epsilon threshold is used. Row pivoting is used, exact Number input remains exact for Rational and complex values, triangular symbolic matrices avoid unnecessary division, and a general symbolic decomposition remains unevaluated when a required pivot cannot be proved nonzero. Prefix indexing extracts each factor.
 
@@ -1242,7 +1285,7 @@ at[lu,1] -> L
 at[lu,2] -> U
 ```
 
-`qrDecomposition[A]` uses reduced Householder QR for rectangular m×n matrices. With `k=min(m,n)` it returns the general brace `{Q,R}` with `Q:m×k`, `R:k×n`, and `A = Q R`. Equal-shape square factors may be optimized internally to a dense Array, but the user representation is the same. Exact real matrices can produce radical exact expressions; general exact QR is limited to 3x3 after measured expression explosion at 4x4, while safe upper-triangular/trapezoidal cases use fast paths. `N[qrDecomposition[A],p]` bypasses exact expansion and dispatches directly to a certified interval Householder backend for both real and complex matrices.
+`qrDecomposition[A]` uses reduced QR for rectangular m×n matrices. With `k=min(m,n)` it returns the general brace `{Q,R}` with `Q:m×k`, `R:k×n`, and `A = Q R`. Equal-shape square factors may be optimized internally to a dense Array, but the user representation is the same. Exact real matrices first reduce each column to a primitive integer direction and use division-free fraction-free projection; square roots are not generated during orthogonalization and are introduced only when Q/R are materialized as final expressions. For full-rank leading columns, a symmetric Bareiss factorization of the Gram matrix (a fraction-free LDLᵀ-equivalent path) reconstructs the orthogonal integer basis; rank-deficient cases fall back to direct fraction-free orthogonalization. The former 3x3 hard cap is removed. Safe upper-triangular/trapezoidal cases retain their fast path. `N[qrDecomposition[A],p]` bypasses exact expansion and dispatches directly to a certified interval Householder backend for both real and complex matrices. QR factor column signs are not mathematically unique, so componentwise sign equality between the exact fraction-free backend and the certified Householder backend is not part of the contract. The contract is `A = Q R` with orthonormal Q columns; the exact backend uses a deterministic orientation induced by its primitive integer directions.
 
 ```text
 qr = qrDecomposition[A]
@@ -1253,6 +1296,21 @@ at[qr,1] -> R
 Householder application also has a column-block kernel that processes multiple columns during one row-major scan. On the current no-BLAS BigFloat/interval backend, measurements at orders 8/16/24 did not show a consistent speedup, so automatic blocking is not enabled; the unblocked-equivalent path remains the default and the block kernel/benchmark are retained for later backend optimization.
 
 `svd[A]` returns reduced `{U,S,V}`. For m×n input, `k=min(m,n)`, `U:m×k`, `S:k×k`, and `V:n×k`. Real input satisfies `A = U S Transpose[V]`; complex input satisfies `A = U S conjugateTranspose[V]`. The general numerical backend deliberately does not form `A^H A`: it uses Householder bidiagonalization followed by one-sided Jacobi column orthogonalization. Candidate factors are returned only after interval checks validate reconstruction residual and `U^H U` / `V^H V` orthogonality more strictly than the requested output digits; otherwise guard digits are increased and the calculation is retried. Exact SVD is restricted to natural closed cases such as exact real diagonal matrices. Singular vectors are not unique inside repeated-singular-value subspaces, so the certificate concerns reconstruction and orthogonality rather than a unique componentwise vector.
+
+`conditionNumber[A]` returns the spectral 2-norm condition number `sigma_max/sigma_min`. Proven exact rank deficiency returns `Infinity`; a nonzero rectangular matrix with only one singular value returns `1`, and exact real diagonal matrices return an exact ratio. A general exact nondiagonal matrix is not forced into a large singular-value expression; use `N[...]` to dispatch it to certified SVD. The condition number of an empty matrix is a DomainError.
+
+`pseudoInverse[A]` returns the Moore-Penrose pseudoinverse. Exact numeric matrices use rank factorization `A=FG` and evaluate `A^+=G^H(GG^H)^-1(F^H F)^-1F^H` with exact arithmetic, so rank-deficient Rational and complex matrices remain exact. Zero-by-n and n-by-zero inputs return an empty matrix with transposed shape. For `N[pseudoInverse[A],p]` with exact `A`, the requested-precision path uses certified SVD. A matrix that already contains finite-precision elements is currently kept unevaluated because the SVD backend does not yet certify the full input perturbation through singular subspaces; hidden CertifiedEnclosure points are not used to reconstruct rank or singular values.
+
+`leastSquares[A,b]` returns the minimum-norm least-squares solution `A^+ b`. The length of `b` must equal the row count of `A`. Exact numeric inputs remain exact, including rank-deficient cases. The outer-`N` path for an exact matrix may use certified SVD, while a matrix that already contains finite-precision elements follows the same conservative rule as `pseudoInverse` and remains unevaluated.
+
+```text
+conditionNumber[{{3,0},{0,4}}] -> 4/3
+conditionNumber[{{1,2},{2,4}}] -> Infinity
+pseudoInverse[{{1,2},{2,4}}] -> {{1/25,2/25},{2/25,4/25}}
+pseudoInverse[{{I,0},{0,2I}}] -> {{-I,0},{0,-I/2}}
+leastSquares[{{1,0},{0,1},{1,1}},{1,2,4}] -> {4/3,7/3}
+dimensions[pseudoInverse[zeros[0,3]]] -> {3,0}
+```
 
 `eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` handle eigenvalues, eigenvectors, and the paired result for square matrices. Eigenvectors are returned as **columns**, and `eigensystem[A]` returns `{values,vectors}`. The exact path handles diagonal entries of upper-triangular matrices, the standard basis of diagonal matrices, and exact Number 2x2 matrices with distinct eigenvalues. A nondiagonal repeated-root 2x2 matrix is not given duplicated vectors merely to fill a basis. General `N[...]` uses Complex BigFloat Hessenberg reduction followed by implicit shifted QR to obtain a Schur relation `A Q ≈ Q T`; eigenvectors are then recovered from triangular back substitution. The original certified input intervals are used to audit the Schur relation, `A v ≈ λ v` residuals, and Schur-vector unitarity more strictly than the requested display digits, retrying with more guard digits when necessary. For a general non-normal matrix, individual eigenvalue/eigenvector components can be perturbation-sensitive, so mmCal does not claim that every displayed component is a unique componentwise enclosure of a mathematically distinguished exact value; the certificate concerns the computed Schur/eigenpair relations. Near-multiple or defective cases that do not yield a stable independent eigenvector basis remain unevaluated rather than being guessed.
 
@@ -1279,12 +1337,15 @@ N[solveLinear[A,b],100]
 N[luDecomposition[A],100]
 N[qrDecomposition[A],100]
 N[svd[A],100]
+N[conditionNumber[A],100]
+N[pseudoInverse[A],100]
+N[leastSquares[A,b],100]
 N[eigenvalues[A],100]
 N[eigensystem[A],100]
 N[norm[v],100]
 ```
 
-can pass the requested precision directly to the BigFloat/interval backend instead of first constructing a potentially huge exact intermediate expression. `solveLinear` uses augmented interval elimination and never replaces an unproved pivot or consistency condition with an epsilon guess; dependent overdetermined rows may remain difficult to certify because interval evaluation loses correlation. `matrixRank` and `nullSpace` are discontinuous with respect to rank deficiency, so exact inputs prefer exact elimination. Approximate inputs use no arbitrary floating threshold: results are returned only when the interval backend certifies the pivot structure rather than guessing rank deficiency.
+can pass the requested precision directly to the BigFloat/interval backend instead of first constructing a potentially huge exact intermediate expression. When an exact matrix is sent into an outer `N`, its input enclosure can be recomputed at the requested working precision. When matrix elements already contain `DecimalApproximation` / `ComplexDecimalApproximation` leaves, value computation uses the CertifiedEnclosure while zero/nonzero, pivot, and rank decisions use the InformationEnclosure, so undeclared guard information cannot reappear. `solveLinear`, `inverse`, `rref`, `matrixRank`, and `nullSpace` return results only when InformationEnclosures certify the required pivot structure; uncertain cases are not completed with epsilon thresholds or hidden point values. Continuous quantities such as `det`, `dot`, and `norm` propagate Certified/Information enclosures in parallel so cancellation naturally reduces output Precision. The current `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, and `eigen*` perturbation certificates are not yet defined for matrices that already contain finite-precision leaves, so those inputs remain conservatively unevaluated. Exact matrices evaluated through `N[...,p]` continue to use the certified numerical backends.
 
 ## 17.3 Compatibility Vector / Matrix functions
 
@@ -1332,9 +1393,9 @@ convolve[{1,2},{3,4}]
 
 For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey. For non-power-of-two lengths of at least 5, inputs that can be certified as exact Rational/Gaussian Rational values or expressions in the same cyclotomic quotient are transformed in Rational power-basis coordinates of `Q[t]/Phi_n(t)`. Gaussian Rational inputs extend the conductor to `lcm(n,4)` when needed so that `I` lies in the same cyclotomic field. This lets exact `ifft[fft[v]]` close without asking the generic Simplifier to rediscover root-of-unity identities. If the current cyclotomic-degree budget of 64 is exceeded, or symbolic inputs cannot be proven to lie in the quotient field, the legacy generic exact DFT remains the fallback. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
 
-`N[fft[v],p]` does not first expand the full exact Fourier expression. `N` propagates the requested precision into the FFT call, which performs butterflies directly on certified `ComplexInterval`/BigFloat endpoints and returns decimal components only after their requested rounding is proven unique. `fft[v]` with approximate operands dispatches to the same backend.
+`N[fft[v],p]` does not first expand the full exact Fourier expression. `N` propagates the requested precision into the FFT call, which performs butterflies directly on certified `ComplexInterval`/BigFloat endpoints and returns decimal components only after their requested rounding is proven unique. For approximate operands, CertifiedEnclosure and InformationEnclosure are transformed independently through the same FFT, so cancellation cannot resurrect hidden guard digits. A difference smaller than the information carried by finite-precision inputs therefore becomes a low-Precision zero-centered result rather than a high-precision tiny value.
 
-The approximate path uses radix-2 for power-of-two sizes and Bluestein convolution for sufficiently large non-power-of-two sizes. Small non-power-of-two transforms keep direct DFT because its constant factor wins there; the current measured crossover policy uses direct evaluation below 96 points and should be remeasured with `mmCal.Benchmarks` on MSVC.
+The approximate path uses radix-2 for power-of-two sizes and Bluestein convolution for sufficiently large non-power-of-two sizes. Small non-power-of-two transforms keep direct DFT because its constant factor wins there. The current conservative policy uses direct evaluation below 384 points, based on a forced-algorithm GCC sweep together with the MSVC `--full` results. This is not a mathematical boundary; rerun `mmCal.Benchmarks --fft-threshold 1` for the current compiler and machine.
 
 ---
 
@@ -1377,6 +1438,18 @@ D[sin[x],x]
 
 Functions such as `abs/sign/re/im/conj/arg`, which do not in general have an ordinary holomorphic derivative with respect to a complex variable, are not given fabricated derivatives; unevaluated `D[...]` is retained instead.
 
+Stable functions whose removable singularity is filled at zero retain that point after differentiation. For example:
+
+```text
+D[sinc[x],x]
+-> cases[(x cos[x]-sin[x])/x^2 if x != 0; 0 if x == 0]
+
+D[cosc[x],x]
+-> cases[(-1+x sin[x]+cos[x])/x^2 if x != 0; 1/2 if x == 0]
+```
+
+These are first-class scalar `cases[...]` values, not evaluation-control `if[...]` and not `SolutionSet` objects. `if[...]` selects one branch during evaluation; `cases[...]` preserves mathematical branch conditions symbolically; `SolutionSet` remains reserved for equation solution sets.
+
 Integration reuses the same derivative knowledge.
 
 ```text
@@ -1396,7 +1469,8 @@ diff[expr,x,at]
 diff[expr,x,at,digits]
 ```
 
-This is not a separate finite-difference formula. mmCal first constructs an exact derivative Expr using `D`, then passes that expression to the CertifiedEvaluator at the specified point.
+This is not a separate finite-difference formula. mmCal first constructs an exact derivative Expr using `D`, then passes that expression to the `CertifiedEvaluator` at the specified point. For finite-precision inputs, `CertifiedEnclosure` and `InformationEnclosure` are evaluated separately, so the result cannot claim more precision than the input carries. Held `N[...]` subexpressions obey the same rule. If the available input information cannot determine a singularity or branch-cut side, `diff` returns an EvaluationError rather than guessing a value.
+The fourth argument `digits` counts fractional decimal places; it is not the significant-digit convention used by `N[...,p]`. If a finite-precision input carries less information, the `InformationEnclosure` remains the upper bound on the precision that can be claimed.
 
 ```text
 diff[x^2,x,3]
@@ -1693,9 +1767,10 @@ integrate[1/(x-2),{x,1,Infinity}]
 limit[expr,x,a]
 limit[expr,x,a,-1]   // left-hand limit
 limit[expr,x,a,1]    // right-hand limit
+limit[expr,{x,a,direction}]
 ```
 
-The fourth argument specifies direction: `-1` means left and `1` means right. If omitted, a two-sided limit is requested. Direction is not merely a display option; it is supplied to `KnowledgeContext` as a temporary assumption `x<a` / `x>a`.
+The fourth argument, or the third element of the brace form, specifies direction: `-1` means left and `1` means right. If omitted, a two-sided limit is requested. `limit[expr,{x,a,direction}]` is equivalent to the four-argument form. Direction is not merely a display option; it is supplied to `KnowledgeContext` as a temporary assumption `x<a` / `x>a`.
 
 ```text
 limit[sin[x]/x,x,0]
@@ -1721,9 +1796,53 @@ limit[atan[x],x,Infinity]
 
 limit[exp[-x],x,Infinity]
 -> 0
+
+limit[sin[1/x],x,0]
+-> Indeterminate
+
+limit[sin[1/x],x,0,1]
+-> Indeterminate
+
+limit[x sin[1/x],x,0]
+-> 0
+
+limit[Ei[x],x,0]
+-> -Infinity
+
+limit[Ei[x],x,Infinity]
+-> Infinity
+
+limit[Ei[x],x,-Infinity]
+-> 0
+
+limit[Ci[x],x,0]
+-> -Infinity
+
+limit[Ci[x],x,Infinity]
+-> 0
+
+limit[Ci[x],x,-Infinity]
+-> I Pi
+
+limit[li[x],x,0]
+-> 0
+
+limit[li[x],x,1]
+-> -Infinity
+
+limit[li[x],{x,1,1}]
+-> -Infinity
+
+limit[li[x],x,Infinity]
+-> Infinity
+
+limit[li[x],x,-Infinity]
+-> ComplexInfinity
 ```
 
-For indeterminate `0/0` forms, repeated l'Hôpital evaluation using the existing `D` implementation is available with safety limits. Local zero/pole orders of Rational functions and degree comparisons at infinity are handled exactly. Unresolved two-sided limits are not collapsed into principal values or other guessed results.
+`Ei`, `Ci`, and `li` are interpreted on their principal branches. Along the real axis, `Ei[x]` tends to `-Infinity` at zero and to 0 as `x -> -Infinity`. `Ci[x]` tends to `-Infinity` at zero and to 0 at positive infinity, while the negative real axis lies on its branch cut and `Ci[x] -> I Pi` as `x -> -Infinity`. `li[x]` tends to 0 at the origin. For `li[x]` along the negative real axis as `x -> -Infinity`, the current direction representation does not collapse the unbounded complex value to real `-Infinity`; mmCal returns the direction-unspecified complex infinity `ComplexInfinity`.
+
+For indeterminate `0/0` forms, repeated l'Hôpital evaluation using the existing `D` implementation is available with safety limits. Local zero/pole orders of Rational functions and degree comparisons at infinity are handled exactly. For `sin` / `cos` / `tan`, when the real argument is proved to run to `+/-Infinity` on a one-sided approach or at infinity, periodic oscillation proves that no single limiting value exists and the result is `Indeterminate`; for a finite two-sided limit, oscillation on either side is already sufficient. The engine also uses the real bound `abs(sin[u]), abs(cos[u]) <= 1` for exact Rational-function arguments to close two-factor squeeze cases such as `x sin[1/x] -> 0`. Unresolved two-sided limits are not collapsed into principal values or other guessed results.
 
 ```text
 limit[1/x,x,0]
@@ -1744,7 +1863,8 @@ nintegrate[x^2,{x,0,1},12]
 
 Internally, the interval is normalized with `x=a+(b-a)t`. Newton–Cotes quadrature on exact Rational grids is combined with certified bounds on higher derivatives to enclose the quadrature error.
 
-This is not a `double`-based Simpson calculation that returns a value because it merely appears close. A result is returned only when the final rounding is uniquely determined.
+This is not a `double`-based Simpson calculation that returns a value because it merely appears close. A result is returned only when the final rounding is uniquely determined. For finite-precision bounds or integrands, `CertifiedEnclosure` and `InformationEnclosure` are integrated in parallel, preventing the result from claiming more information than its inputs. Held `N[...]` subexpressions retain the same information limit.
+The third argument `digits` counts fractional decimal places. Thus, when the input information is sufficient, a large integer part does not reduce the requested number of decimal places. If finite-precision input information is the tighter limit, the output is capped by that information instead.
 
 Before constructing higher derivatives, the original integrand is preflighted over the full interval so obvious singularities can be rejected early. No accidental cancellation across a singularity is accepted.
 
@@ -1786,7 +1906,33 @@ fullSimplify[(x^2-1)/(x-1)]
 
 fullSimplify[(x^2-1)/(x-1), x != 1]
 -> 1 + x
+
+simplify[1/x-1/x]
+-> 1/x-1/x
+
+simplify[1/x-1/x, x != 0]
+-> 0
+
+simplify[x^0]
+-> x^0
+
+simplify[x^0, x != 0]
+-> 1
 ```
+
+Rules that collapse an expression to a constant while potentially erasing a hole—such as `F-F -> 0`, `0*F -> 0`, `F/F -> 1`, and `F^0 -> 1`—are applied only when `F` is proven defined under the current assumptions. Because mmCal defines `0^0 -> Indeterminate`, symbolic `x^0` is likewise preserved unless `x != 0` is proven.
+
+The same rule applies when a special/combinatorial function degenerates to a constant and a parameter disappears from the value. For example, `hypergeometric2F1[0,2,3,z]`, `polylog[s,0]`, and `binom[x,0]` have constant degenerations, but an undefined disappearing argument is not silently erased.
+
+```text
+simplify[hypergeometric2F1[0,2,3,1/x]]
+-> hypergeometric2F1[0, 2, 3, 1/x]
+
+simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
+-> 1
+```
+
+`Power` definedness distinguishes exact Rational exponents: a positive non-integer Rational exponent permits a zero base where the evaluator defines it, while a negative Rational exponent retains a nonzero-base requirement. `zeta[s]` is not treated as globally unknown for definedness; its sole pole is represented by the finite condition `s != 1`.
 
 ---
 
@@ -1855,6 +2001,36 @@ solve[{2x+3y==5,x-2y==9},{x,y}]
 
 `SolutionSet` distinguishes Empty / Finite / Universal / Conditional / Unresolved.
 Unsupported expressions are not misreported as having no solutions.
+
+### Multivariate polynomials and Gröbner bases
+
+Exact rational multivariate polynomials use a dedicated `Q[x1,...,xn]` ring representation.
+
+```text
+groebnerBasis[polys,{x,y,...}]
+groebnerBasis[polys,{x,y,...},Lex]
+groebnerBasis[polys,{x,y,...},GrLex]
+groebnerBasis[polys,{x,y,...},GrevLex]
+polynomialReduce[f,G,{x,y,...}]
+polynomialReduce[f,G,{x,y,...},order]
+```
+
+The default term order is `GrevLex`. The exact backend implements multivariate division, normal forms, S-polynomials, Buchberger product/chain criteria, sugar pair selection, interreduction, and reduced Gröbner bases. Variable and degree counts are not hard-coded, but pair, reduction, basis-size, and term-count work is bounded.
+
+```text
+groebnerBasis[{x y-1,y^2-x},{x,y},Lex]
+-> {x-y^2, y^3-1}
+
+polynomialReduce[x^2+y^2,{x-y,y^2-1},{x,y},Lex]
+-> {{x+y, 2}, 2}
+
+polynomialReduce[x y-1,groebnerBasis[{x y-1,y^2-x},{x,y},Lex],{x,y},Lex]
+-> {{y, 1}, 0}
+```
+
+A direct `groebnerBasis[...]` result may be composed inside `polynomialReduce[...]` (or another `groebnerBasis[...]`) without evaluating the held polynomial variables against current session bindings.
+
+For nonlinear polynomial equality systems, `solve[{...},{...}]` attempts Lex Gröbner elimination. Inconsistent ideals return `{}`; supported zero-dimensional shape-position bases are enumerated through exact univariate roots plus back substitution and exact remainder verification. General positive-dimensional varieties remain `UnresolvedSolutionSet[...]`.
 
 Because `solve` is `HoldAll`, its input is not sent through the general Evaluator before classification. A dedicated **solve-safe normalization** layer canonicalizes builtin aliases and applies proof-safe Simplifier rewrites only. This avoids evaluation side effects while making equivalent spellings such as `E^x` / `exp[x]`, `ln` / `log`, and `log2` / `log10` share solver capabilities.
 
@@ -2089,7 +2265,7 @@ solve[x == sqrt[2],x,Real]
 -> {x == sqrt[2]}
 ```
 
-The bridge has node and small-integer-power budgets and falls back to the previous symbolic path when conversion cannot be certified. It never guesses a minimal polynomial from an approximation. Undefined held forms such as `0^0` are not assigned a bridge-only value either; `a^0=1` is used only when exact nonzeroness of the base can be proven.
+The bridge has node and small-integer-power budgets and falls back to the previous symbolic path when conversion cannot be certified. It never guesses a minimal polynomial from an approximation. Undefined forms such as `0^0` become `Indeterminate` before entering the algebraic bridge; `a^0=1` is used only when exact nonzeroness of the base can be proven.
 
 To bound resultant and primitive-element growth, the current **algebraic-field candidate-degree budget is 16**. Complete arbitrary-degree Q-factorization, general number-field merging/canonicalization across different primitive generators or subfield relations, general reduction of overlapping extensions when the current simple-extension certificate fails, complete cross-context equality for unproven/nonminimal representations, ordering beyond the current refinement/algebraic-construction budgets, and `rootApproximant` remain deferred. The current layer is therefore a persistent-lineage bounded exact algebraic-field backend with exact comparison support, not yet a complete number-field canonicalizer.
 
@@ -2116,11 +2292,12 @@ N[x+Pi,20]
 N[sin[x]+Pi,20]
 -> 3.1415926535897932385+sin[x]
 
-N[True,20]     -> True
-N[Infinity,20] -> Infinity
+N[True,20]          -> True
+N[Infinity,20]      -> Infinity
+N[Indeterminate,20] -> Indeterminate
 ```
 
-Leaving a free symbol, Boolean, or `Infinity` exact is not itself a Warning. If an inner operation such as `D`, `limit`, `solve`, or `rref` has already emitted a more specific Warning, the enclosing `N` suppresses a redundant generic `N::unevaluated`. A mathematically existing value whose certified backend is unavailable produces `N::unsupported` and remains symbolic rather than being reported as DomainError. Thus unsupported complex Lambert W cases such as `N[lambertw[-1,-1/2],p]` remain held with a Warning, while the genuine real-branch singularity `W_-1(0)` is still a DomainError.
+Leaving a free symbol, Boolean, `Infinity`, `ComplexInfinity`, or `Indeterminate` exact is not itself a Warning. If an inner operation such as `D`, `limit`, `solve`, or `rref` has already emitted a more specific Warning, the enclosing `N` suppresses a redundant generic `N::unevaluated`. A mathematically existing value whose certified backend is unavailable produces `N::unsupported` and remains symbolic rather than being reported as DomainError. If increasing guard precision cannot overcome the width of an already finite-precision `InformationEnclosure`, `N::precision` returns the expression after bounded refinement instead of consuming the global refinement budget. Therefore exact `gamma[0]` or a `2F1` denominator parameter known exactly to be a non-positive integer is a DomainError, while `gamma[N[0,5]]` or `hypergeometric2F1[1,2,N[0,5],2]` yields `N::precision` because the finite input information still permits nearby nonsingular values. Likewise, `log[-1+I*N[0,5]]` is not collapsed to one side of its branch cut. Unsupported complex Lambert W cases remain held with `N::unsupported`.
 
 ```text
 N[Pi,20]
@@ -2145,7 +2322,7 @@ When an exact Rational has a terminating decimal representation, unnecessary tra
 
 `DecimalApproximation` and `ComplexDecimalApproximation` retain two different intervals for every approximate component.
 
-- **CertifiedEnclosure** — an interval that the backend has proved contains the true value. Internal guard digits may make it much narrower than the precision declared to the user. Correctness checks, exact-zero checks, and unique decimal-rounding checks use this interval.
+- **CertifiedEnclosure** — an interval that the backend has proved contains the true value. Internal guard digits may make it much narrower than the precision declared to the user. Truth-containment checks and unique decimal-rounding checks use this interval.
 - **InformationEnclosure** — an interval describing how much information later computation is allowed to reuse from the approximation. For nonzero `N[x,p]`, if `e=floor(log10(|d|))` for displayed value `d`, it contains both the CertifiedEnclosure and at least `d ± 0.5*10^(e-p+1)`. The information contract therefore follows the value scale and prevents hidden guard digits from later reappearing as user-visible Accuracy. For zero-centered approximations, the InformationEnclosure directly expresses absolute Accuracy instead of relative Precision.
 
 The invariant is always
@@ -2154,13 +2331,53 @@ The invariant is always
 CertifiedEnclosure ⊆ InformationEnclosure
 ```
 
-`Infinity` is an extended-real sentinel, not an ordinary finite algebraic symbol. General finite-symbol cancellation rules are therefore not applied: `Infinity-Infinity`, `0*Infinity`, and `Infinity/Infinity` remain unevaluated rather than being fabricated as `0` or another finite result. Full extended-real arithmetic is a separate future specification.
+`Infinity` is positive extended-real infinity. `ComplexInfinity` records infinite magnitude without a determined real or complex direction, while `Indeterminate` records that no unambiguous numerical value exists. These are protected atoms rather than finite algebraic symbols. The evaluator currently canonicalizes the following proof-safe exceptional forms:
+
+| Form | Result |
+| --- | --- |
+| `0/0`, `Infinity/Infinity`, `Infinity-Infinity`, `0*Infinity` | `Indeterminate` |
+| `0^0`, `1^Infinity`, `Infinity^0`, `(-1)^Infinity`, `0^I` | `Indeterminate` |
+| `z^Infinity` when `abs[z]==1` is proved | `Indeterminate` |
+| `a/0` when `a` is proved nonzero | `ComplexInfinity` |
+| `x^(1/0)` for any `x` | `Indeterminate` |
+
+For an exact numeric base, unit magnitude is checked with exact Rational real and imaginary parts. For a symbolic base it is used only under an explicit proof such as `simplify[z^Infinity,abs[z]==1]`; a numerical approximation near the unit circle is never guessed to be exactly on it. `Indeterminate` propagates through arithmetic and registered scalar mathematical functions, `N[Indeterminate,p]` preserves it, and `Indeterminate==Indeterminate` is `False`. This is a deliberately bounded exceptional-value contract, not yet a complete algebra of all directed infinities.
 
 The InformationEnclosure is not a probability distribution or a statistical confidence interval, nor does it claim that the backend considers every point in the wider interval mathematically possible. Truth certification belongs exclusively to the CertifiedEnclosure. The InformationEnclosure is an **information contract**: a narrower internal certificate alone does not grant later code permission to recover undeclared digits.
 
+Whenever a later operation must make a discrete semantic decision—proving an approximate value exactly zero/nonzero, selecting a branch side, excluding a pole, or certifying a matrix pivot/rank—it uses the **InformationEnclosure alone**. A CertifiedEnclosure that happens to collapse to an internal point does not authorize such a decision when the InformationEnclosure still crosses the boundary. Consequently `N[0,5]^0` and `1/N[0,5]` are not silently reinterpreted as exact `0^0` or `1/0`.
+
 Ordinary `+ - * /` and unary `-` propagate both intervals independently. Exact `Number` operands enter both paths as identical point intervals.
 
-In v1.5.3, `DecimalApproximation` / `ComplexDecimalApproximation` are first-class leaves for the certified scalar evaluator. Functions with interval backends, including `sin`, `exp`, `log`, `sqrt`, hyperbolic/inverse functions, `gamma`, `erf`, `Ei`, `Si`, and `Ci`, propagate both enclosures independently. Functions such as `log2`, `log10`, and `fract` that rewrite to supported primitives re-enter the same path after rewriting. Ordered comparisons and discrete selectors such as `min` / `max` are resolved only when the **InformationEnclosure alone** proves the result, preventing hidden guard digits from leaking through Boolean decisions. Backends that currently require exact Rational parameters, including parts of `1F1` / `2F1`, elliptic functions, and `polylog`, remain conservatively unevaluated for unsupported approximate parameters.
+For complex approximations, mmCal does not compute whole-value quality by taking the minimum of two component-wise relative precisions. Precision/Accuracy are derived from the whole complex InformationEnclosure and value magnitude, and a component proved exactly zero contributes the point interval `{0,0}` to that effective enclosure. An irrelevant exact zero component therefore cannot collapse the precision of a pure-imaginary value.
+
+```text
+precision[N[I,20]]
+-> 19
+
+precision[N[I/10^100,20]]
+-> 19
+accuracy[N[I/10^100,20]]
+-> 119
+```
+
+Exact identities `+0`, `-0`, `*1`, `/1`, and unary `-` do not consume information, so they preserve or mirror the existing Certified/Information metadata instead of re-quantizing the approximation. Exact powers-of-ten scaling likewise does not lose an extra relative digit. Zero-centered results select their display quantum from absolute Accuracy carried by the InformationEnclosure rather than from relative Precision.
+
+```text
+precision[N[Pi,20]*10]
+-> 19
+accuracy[N[Pi,20]*10]
+-> 18
+
+precision[sin[N[Pi,20]]]
+-> 0
+accuracy[sin[N[Pi,20]]]
+-> 19
+```
+
+If an operation proves `q` significant digits from its InformationEnclosure, formatting may retain up to `q+1` significant display digits. This does not invent information; it prevents the decimal output quantum from being made one decade coarser than the already-guaranteed half-quantum.
+
+In v1.5.3, `DecimalApproximation` / `ComplexDecimalApproximation` are first-class leaves for the certified scalar evaluator. Functions with interval backends, including `sin`, `exp`, `log`, `sqrt`, hyperbolic/inverse functions, `gamma`, `erf`, `Ei`, `Si`, and `Ci`, plus supported regions of Fresnel C/S, `1F1`, `2F1`, `zeta`, and `polylog`, propagate both enclosures independently on `ComplexInterval`. Functions such as `log2`, `log10`, and `fract` that rewrite to supported primitives re-enter the same path after rewriting. Ordered comparisons and discrete selectors such as `min` / `max` are resolved only when the **InformationEnclosure alone** proves the result, preventing hidden guard digits from leaking through Boolean decisions. Backends that currently require exact Rational parameters, including parts of `1F1` / `2F1`, elliptic functions, and `polylog`, remain conservatively unevaluated for unsupported approximate parameters.
 
 ```text
 N[Pi,20] + 1/3
@@ -2428,14 +2645,16 @@ N[randn[],8]
 
 ---
 
-# 27. Conditional evaluation
+# 27. Conditional evaluation and mathematical cases
 
 ```text
 if[condition,trueExpr,falseExpr]
+cases[value1 if condition1; value2 if condition2; ...]
 ```
 
-As a special form, `if` evaluates the condition first and evaluates only the selected branch.
-Therefore a DomainError or random-number consumption in the unselected branch does not occur.
+`if[...]` is evaluation control: the condition is evaluated first and only the selected branch is evaluated. Therefore DomainError or random-number consumption in the unselected branch does not occur.
+
+`cases[...]` is a first-class scalar piecewise mathematical expression. Proven-false branches are removed without evaluating their values; a proven-true branch short-circuits; undecidable predicates remain symbolic. `simplify` may select branches from assumptions, `N` approximates branch values without numericalizing predicates, and `D` / `integrate` / `limit` distribute only when the branch conditions are independent of the calculus variable.
 
 ---
 
@@ -2475,23 +2694,23 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 29. Current source-callable function list
 
-The current development tree contains **263 registered builtin/alias names / 245 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **270 registered builtin/alias names / 251 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
 Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
-arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt,
-ceil, choice, cis, collect, cols, comb, conj, conjugateTranspose, convolve, corr, corrspearman,
+arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt, cases,
+ceil, choice, cis, collect, cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman,
 cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
 det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
-integrate, inverse, iqr, isprime, kurtp, kurts, lcm, length, lgamma, lambertw, limit, ln, log,
+gamma, gcd, geomean, groebnerBasis, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
+integrate, inverse, iqr, isprime, kurtp, kurts, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
 luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
-pow, precision, prod, quantile, quotient, rand, randSeed, randint, randn, range, rank,
+polynomialReduce, pow, precision, prod, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
 qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
 sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
@@ -2515,7 +2734,7 @@ Main `CalcError` categories:
 - Evaluation
 - Internal
 
-When evaluation itself succeeds but an algorithmic built-in cannot complete its work, a Warning is returned separately from the result Expr. This applies to `D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `eigenvalues`, `eigenvectors`, `eigensystem` (including the compatibility alias `rank`), and `integrate`, as well as cases where `precision/accuracy/rationalize` retain unsupported input unevaluated.
+When evaluation itself succeeds but an algorithmic built-in cannot complete its work, a Warning is returned separately from the result Expr. This applies to `D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, `eigenvalues`, `eigenvectors`, `eigensystem` (including the compatibility alias `rank`), and `integrate`, as well as cases where `precision/accuracy/rationalize` retain unsupported input unevaluated.
 
 Info diagnostics are used for normal state-change notifications. Currently this includes variable and function redefinition notices.
 
@@ -2581,7 +2800,7 @@ Representative items:
 - Condition number / least squares / general parametric linear systems
 - `hilbert` (legacy naming/specification still to be confirmed)
 - Engineering functions, financial functions, and unit conversion
-- Legacy colon commands such as `:defs`, `:help`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:fix` / `:status` remain as presentation commands
+- Legacy colon commands such as `:defs`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:help` / `:fix` / `:status` are frontend commands
 - `for`, `plot`
 - General Machine/double evaluation mode
 
@@ -2611,6 +2830,8 @@ mmCal --batch < expressions.txt
 
 Automation modes emit no banner, prompt, `Out[...]` label, or farewell. Successful values go to stdout and warnings/errors to stderr. Exit codes are `0` for success, `2` for argument errors, `3` for `SyntaxError` / `ResourceLimitError`, `4` for evaluation errors, and `5` for `InternalError`. Batch processing continues after line errors and returns the greatest code observed. `--eval` and `--batch` are mutually exclusive.
 
+During an active top-level evaluation, the CLI connects an `EvaluationCancellationToken` to console interruption. Windows handles Ctrl-C / Ctrl-Break and POSIX handles SIGINT. A long-running kernel stops when it next polls cancellation and reports `ResourceLimitError: Evaluation cancelled by frontend`; non-interactive `--eval` therefore returns exit code `3`. Cancellation is cooperative rather than an asynchronous forced stop of every subsystem.
+
 The Lexer/Parser has independent budgets for tokens, AST nodes, nesting, operator chains, numeric-literal digits, function arguments, and Array elements. Exceeding a budget stops before AST lowering with a source-spanned `ResourceLimitError`.
 
 ```text
@@ -2625,7 +2846,23 @@ Out[1]> 1/3
 - `Defs[]`, `UnDef[...]`: Inspect and remove user definitions
 - History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In [n]` and snapshot `Out[n]`
 
-## 33.1 `:fix` — presentation-only decimal display
+## 33.1 `:help`
+
+```text
+:help
+:help sin
+:help functions
+:help constants
+:help Pi
+```
+
+With no argument, `:help` prints a concise REPL-command summary. `:help function` uses `BuiltinRegistry` as the source of truth for canonical names, callable aliases, and arity. A separate user-facing catalog supplies a curated description, explicit input rules, notes where necessary, and one or more examples for **every** registered source-callable builtin. Multi-form operations such as `D`, `integrate`, `root`, `qrDecomposition`, `svd`, and `solve` display multiple usage lines and examples rather than an arity-only placeholder. The internal test suite enumerates `BuiltinRegistry::sourceFunctionNames()` and rejects a missing detailed entry.
+
+`:help Pi` and the `:help constants` index cover protected mathematical constants, Boolean values, numeric domains, `Infinity`, and the `Rad` / `Deg` / `Grad` unit symbols. `:help functions` prints a sorted index of callable canonical names and aliases. An unknown topic remains a successful frontend query and may offer one deterministic nearby topic; adjacent transpositions such as `sdv` suggest `svd`, while common discoverability shorthand such as `qr` suggests the callable `qrDecomposition` without registering `qr` as a new function alias.
+
+Help lookup is handled before parsing or evaluation. Successful, constant, and unknown lookups therefore neither advance `In[n]` nor enter history; an unknown name also points to the function and constant indexes.
+
+## 33.2 `:fix` — presentation-only decimal display
 
 ```text
 :fix 16
@@ -2645,7 +2882,7 @@ Out[2]> 1/3
 
 An entire expression that can be certified numerically is approximated only for display. Symbolic expressions containing free variables retain exact notation.
 
-## 33.2 `:status`
+## 33.3 `:status`
 
 ```text
 :status
@@ -2656,9 +2893,9 @@ Definitions: 0
 History: 0
 ```
 
-`:status` is also a CLI command and is not stored in history. The design boundary is maintained: mathematical state changes use Kernel functions such as `angleMode[...]`, while presentation state changes use CLI commands such as `:fix`.
+`:status` is also a CLI command and is not stored in history. The design boundary is maintained: mathematical state changes use Kernel functions such as `angleMode[...]`, while frontend queries and presentation changes use CLI commands such as `:help` and `:fix`.
 
-## 33.3 Console title
+## 33.4 Console title
 
 As auxiliary information, the title is updated to forms such as:
 
@@ -2673,7 +2910,7 @@ mmCal 1.5.0 - Deg - Fixed(16)
 
 Failure to change the title is never treated as a calculation Error. `:status` is authoritative for state inspection; terminal software overriding the title has no effect on semantics.
 
-## 33.4 Canonical formatter
+## 33.5 Canonical formatter
 
 Ordinary `Out[n]` uses compact, reparsable mathematical notation rather than an AST dump.
 

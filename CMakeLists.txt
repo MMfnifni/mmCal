@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(MMCAL_ENABLE_LTO "Enable interprocedural optimization/LTO in Release builds" ON)
 option(MMCAL_NATIVE_OPTIMIZATION "Optimize for the CPU performing the build (-march=native)" OFF)
 option(MMCAL_LINUX_OUT_SUFFIX "Name the Linux executable mmCal.out" ON)
+option(MMCAL_PARALLEL_COMPILE "Enable compiler-side parallel compilation where supported" ON)
 
 file(GLOB_RECURSE MMCAL_CORE_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 list(REMOVE_ITEM MMCAL_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/main.cpp")
@@ -21,6 +22,7 @@ target_include_directories(mmCal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 add_executable(mmCal.Benchmarks EXCLUDE_FROM_ALL
     benchmarks/benchmark_main.cpp
+    benchmarks/certification_boundary_fuzzer.cpp
     benchmarks/random_expression_fuzzer.cpp)
 target_link_libraries(mmCal.Benchmarks PRIVATE mmCal.Core)
 target_include_directories(mmCal.Benchmarks PRIVATE
@@ -39,6 +41,15 @@ set(MMCAL_TARGETS mmCal.Core mmCal mmCal.Tests mmCal.Benchmarks)
 if(MSVC)
     foreach(target IN LISTS MMCAL_TARGETS)
         target_compile_options(${target} PRIVATE /W4 /utf-8)
+        if(MMCAL_PARALLEL_COMPILE)
+            target_compile_options(${target} PRIVATE /MP)
+        endif()
+    endforeach()
+
+    # CAS評価は式木を再帰的に辿るため，MSVC既定の1 MiB stackでは深い正当入力でも不足し得る。
+    # reserveだけを16 MiBへ広げ，commitはOS既定の増分commitへ任せる。
+    foreach(target IN ITEMS mmCal mmCal.Tests mmCal.Benchmarks)
+        target_link_options(${target} PRIVATE /STACK:16777216)
     endforeach()
 else()
     foreach(target IN LISTS MMCAL_TARGETS)

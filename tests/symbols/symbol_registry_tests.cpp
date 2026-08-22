@@ -19,7 +19,7 @@ void runSymbolRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     SymbolRegistry registry = SymbolRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{14},
+    tests.expectEqual(registry.size(), std::size_t{16},
         "SymbolRegistry: registers all predefined symbols");
 
     const PredefinedSymbolDefinition* pi = registry.find("Pi");
@@ -48,6 +48,17 @@ void runSymbolRegistryTests(TestRunner& tests) {
     tests.expect(!registry.isSymbolicConstant("True"),
         "SymbolRegistry: Boolean literals are not symbolic constants");
 
+    const PredefinedSymbolDefinition* indeterminate = registry.find(
+        PredefinedSymbolId::Indeterminate);
+    tests.expect(indeterminate
+        && indeterminate->kind == PredefinedSymbolKind::ExceptionalValue
+        && indeterminate->protectedName
+        && !registry.isSymbolicConstant("Indeterminate"),
+        "SymbolRegistry: Indeterminate is a protected exceptional value, not a constant");
+    tests.expect(registry.isSymbolicConstant("ComplexInfinity")
+        && registry.find(PredefinedSymbolId::ComplexInfinity) != nullptr,
+        "SymbolRegistry: ComplexInfinity is a protected directionless infinity constant");
+
     const PredefinedSymbolDefinition* radians = registry.find("Rad");
     tests.expect(radians && radians->kind == PredefinedSymbolKind::EnumeratedValue
         && radians->protectedName && registry.contains("Deg") && registry.contains("Grad"),
@@ -55,7 +66,9 @@ void runSymbolRegistryTests(TestRunner& tests) {
 
     const auto constants = registry.sourcePredefinedNames();
     tests.expect(constants.contains("Pi") && constants.contains("I")
-        && constants.contains("True") && constants.contains("False"),
+        && constants.contains("True") && constants.contains("False")
+        && constants.contains("ComplexInfinity")
+        && constants.contains("Indeterminate"),
         "SymbolRegistry: exports all protected literal and constant names to the parser");
     tests.expect(!registry.contains("Tau") && !registry.contains("NA") && !registry.contains("ESP"),
         "SymbolRegistry: removed legacy constants are no longer predefined");

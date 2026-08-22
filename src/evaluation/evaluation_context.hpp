@@ -1,6 +1,7 @@
 #pragma once
 
 #include "diagnostic.hpp"
+#include "evaluation_budget.hpp"
 #include "expression/expr.hpp"
 #include "mathematics/angle.hpp"
 
@@ -24,6 +25,8 @@ struct EvaluationContext final {
     bool* clearRequested = nullptr;
     bool* definitionsChanged = nullptr;
     mathematics::AngleSemantics* angleSemantics = nullptr;
+    // nullptrの場合、Evaluatorが自身の既定limitsから要求単位budgetを補う。
+    EvaluationBudget* budget = nullptr;
 };
 
 } // namespace mmcal::evaluation

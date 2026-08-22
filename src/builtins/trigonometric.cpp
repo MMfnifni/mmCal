@@ -1,38 +1,10 @@
 // 三角函数、逆三角函数
 #include "trigonometric.hpp"
+#include "builtin_helpers.hpp"
 
-#include "error/error_message.hpp"
 
-#include <string>
-#include <string_view>
-#include <vector>
 
 namespace mmcal::builtins {
-namespace {
-
-void requireArity(
-    std::span<const expression::Expr> arguments,
-    std::size_t arity,
-    std::string_view name) {
-    if (arguments.size() != arity)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects " + std::to_string(arity) + " argument(s)");
-}
-
-[[nodiscard]] expression::Expr holdFunction(
-    evaluation::BuiltinId id,
-    std::string_view name,
-    std::span<const expression::Expr> arguments,
-    std::size_t arity,
-    const evaluation::BuiltinRegistry& registry) {
-    requireArity(arguments, arity, name);
-    return expression::Expr::call(
-        registry.symbol(id),
-        std::vector<expression::Expr>{arguments.begin(), arguments.end()});
-}
-
-} // namespace
 
 #define MMCAL_HOLD_TRIG_UNARY(NAME, ID, TEXT) \
 expression::Expr NAME( \
@@ -42,7 +14,7 @@ expression::Expr NAME( \
     const mathematics::AngleSemantics& angleSemantics) { \
     static_cast<void>(mathematics); \
     static_cast<void>(angleSemantics); \
-    return holdFunction(evaluation::BuiltinId::ID, TEXT, arguments, 1, registry); \
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::ID, TEXT); \
 }
 
 MMCAL_HOLD_TRIG_UNARY(evaluateSin, Sin, "sin")
@@ -64,7 +36,7 @@ expression::Expr evaluateAtan2(
     const mathematics::AngleSemantics& angleSemantics) {
     static_cast<void>(mathematics);
     static_cast<void>(angleSemantics);
-    return holdFunction(evaluation::BuiltinId::Atan2, "atan2", arguments, 2, registry);
+    return holdBuiltin(arguments, registry, evaluation::BuiltinId::Atan2, "atan2", 2);
 }
 
 } // namespace mmcal::builtins

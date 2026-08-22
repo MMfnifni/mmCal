@@ -184,10 +184,14 @@ void runLowererTests(TestRunner& tests) {
         const expression::Expr generated = generatedExpression(random, 4, builtins, symbolTable);
         const std::string formatted = formatting::formatExpr(generated);
         try {
-            const std::string reformatted = formatting::formatExpr(lower(formatted));
-            if (reformatted != formatted) {
+            // Display-only polynomial ordering can canonicalize a deliberately noncanonical
+            // generated AST on its first parse. Require the normalized textual form to be
+            // a fixed point, rather than requiring every synthetic raw AST to already be normalized.
+            const std::string normalized = formatting::formatExpr(lower(formatted));
+            const std::string reformatted = formatting::formatExpr(lower(normalized));
+            if (reformatted != normalized) {
                 generatedRoundTrip = false;
-                failedInput = formatted;
+                failedInput = normalized;
                 failedOutput = reformatted;
                 break;
             }
@@ -208,7 +212,7 @@ void runLowererTests(TestRunner& tests) {
 
     const std::vector<std::string> lexicalBoundaries{
         "2exp[x]", "2E", "2E^x", "2e3", "2e-3", "-2^2", "(-2)^2",
-        "2sqrt[2]", "(x+1)(x-1)", "x!^2", "1/(x/y)", "{{1,2},{3,4}}"};
+        "2sqrt[2]", "(x+1)(x-1)", "x!^2", "1/(x/y)", "Pi^0*x", "{{1,2},{3,4}}"};
     bool lexicalRoundTrip = true;
     for (const std::string& source : lexicalBoundaries) {
         const std::string once = formatting::formatExpr(lower(source));

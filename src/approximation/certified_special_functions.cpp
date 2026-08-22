@@ -3,11 +3,13 @@
 
 #include "certification_error.hpp"
 #include "certified_constants.hpp"
+#include "certified_complex_transcendental.hpp"
 #include "certified_exponential.hpp"
 #include "certified_logarithm.hpp"
 #include "certified_sqrt.hpp"
 #include "certified_trigonometry.hpp"
 #include "interval_math.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/rational.hpp"
@@ -31,6 +33,11 @@ using numeric::Rational;
 
 [[nodiscard]] Rational rational(std::int64_t numerator, std::int64_t denominator = 1) {
     return Rational{BigInt{numerator}, BigInt{denominator}};
+}
+
+inline void consumeCertifiedWork(std::size_t amount = 1) {
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::CertifiedRefinement, amount);
 }
 
 [[nodiscard]] std::size_t checkedAdd(
@@ -60,6 +67,21 @@ using numeric::Rational;
 
 [[nodiscard]] RealInterval exactInterval(std::int64_t value, std::size_t bits) {
     return exactInterval(rational(value), bits);
+}
+
+[[nodiscard]] bool exactZeroPoint(const RealInterval& value) noexcept {
+    return value.isPoint() && value.lower().isZero();
+}
+
+[[nodiscard]] bool exactZeroPoint(const ComplexInterval& value) noexcept {
+    return exactZeroPoint(value.real()) && exactZeroPoint(value.imaginary());
+}
+
+[[nodiscard]] bool exactNonPositiveIntegerPoint(const ComplexInterval& value) {
+    if (!exactZeroPoint(value.imaginary()) || !value.real().isPoint())
+        return false;
+    const Rational real = value.real().lower().toRational();
+    return real.isInteger() && real <= rational(0);
 }
 
 /*
@@ -397,12 +419,14 @@ struct StirlingPlan final {
     std::size_t high = 8;
     while (!stirlingBoundMeetsBinaryThreshold(
         inputLower, maximumK, high, thresholdBits)) {
+        consumeCertifiedWork();
         if (high >= 1'000'000 / 2)
             throw std::overflow_error("Gamma precision requires an excessive recurrence shift");
         high *= 2;
     }
 
     while (low + 1 < high) {
+        consumeCertifiedWork();
         const std::size_t middle = low + (high - low) / 2;
         if (stirlingBoundMeetsBinaryThreshold(
             inputLower, maximumK, middle, thresholdBits))
@@ -428,6 +452,7 @@ struct StirlingPlan final {
     const Rational& threshold,
     std::size_t maximumK) {
     for (std::size_t shift = 0; shift <= 1'000'000; shift += 8) {
+        consumeCertifiedWork();
         const Rational x = inputLower + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(shift))};
         if (x < rational(4))
             continue;
@@ -435,6 +460,7 @@ struct StirlingPlan final {
         const Rational inverseSquare = rational(1) / (x * x);
         Rational inverseOdd = rational(1) / x;
         for (std::size_t k = 1; k <= maximumK; ++k) {
+            consumeCertifiedWork();
             const Rational bound = absRational(stirlingCoefficient(k)) * inverseOdd;
             if (bound <= threshold)
                 return StirlingPlan{shift, k, bound};
@@ -537,6 +563,7 @@ struct StirlingPlan final {
     std::size_t count) {
     if (count == 0)
         return rational(1);
+    consumeCertifiedWork(count);
 
     const BigInt numerator = balancedArithmeticProgressionProduct(
         input.numerator(), input.denominator(), first, count);
@@ -593,6 +620,7 @@ struct StirlingPlan final {
         const RealInterval inverseSquare = multiply(inverseX, inverseX, workBits);
         RealInterval series = exactInterval(stirlingCoefficient(plan.omittedK - 1), workBits);
         for (std::size_t k = plan.omittedK - 1; k > 1; --k) {
+            consumeCertifiedWork();
             series = add(
                 exactInterval(stirlingCoefficient(k - 1), workBits),
                 multiply(inverseSquare, series, workBits),
@@ -625,6 +653,7 @@ struct StirlingPlan final {
             // 非point intervalは旧来の包含安全な逐次interval productを維持する。
             RealInterval product = exactInterval(1, workBits);
             for (std::size_t j = 0; j < plan.shift; ++j) {
+                consumeCertifiedWork();
                 const RealInterval factor = add(
                     input.roundedOutward(workBits),
                     exactInterval(Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))}, workBits),
@@ -756,6 +785,7 @@ struct StirlingPlan final {
 
     constexpr std::size_t maximumTerms = 1'000'000;
     for (std::size_t n = 0; n < maximumTerms; ++n) {
+        consumeCertifiedWork();
         const std::size_t numeratorIndex = cosineIntegral ? 4 * n + 1 : 4 * n + 3;
         const std::size_t d0 = cosineIntegral ? 2 * n + 1 : 2 * n + 2;
         const std::size_t d1 = cosineIntegral ? 2 * n + 2 : 2 * n + 3;
@@ -813,6 +843,7 @@ struct FresnelPair final {
     constexpr std::size_t maximumTerms = 4096;
     Rational remainderBound;
     for (std::size_t m = 0; m < maximumTerms; ++m) {
+        consumeCertifiedWork();
         RealInterval realPart = exactInterval(0, workBits);
         RealInterval imagPart = exactInterval(0, workBits);
         switch (m & 3U) {
@@ -914,6 +945,8 @@ struct FresnelPair final {
     Rational tailBound;
     std::uint64_t n = 0;
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const std::uint64_t next = n + 1;
         const Rational ratio = -x2
             * Rational{BigInt::parse(std::to_string(2 * n + 1))}
@@ -963,6 +996,7 @@ struct FresnelPair final {
     Rational sum = term;
     Rational previousMagnitude = absRational(term);
     for (std::uint64_t n = 0; n < 1'000'000; ++n) {
+        consumeCertifiedWork();
         const Rational nextTerm = -term
             * Rational{BigInt::parse(std::to_string(2 * n + 1))}
             / (rational(2) * x2);
@@ -1031,6 +1065,8 @@ enum class LambertProductOrder {
     std::size_t workBits = checkedAdd(
         precisionBits, 24, "Lambert W comparison precision is too large");
     for (std::size_t attempt = 0; attempt < 12; ++attempt) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const RealInterval wInterval = exactInterval(w, workBits);
         const RealInterval exponential = encloseExp(wInterval, workBits).interval;
         const RealInterval product = multiply(wInterval, exponential, workBits);
@@ -1071,6 +1107,7 @@ enum class LambertProductOrder {
         // W_-1(x) -> -infinity as x -> 0-.  Find a certified left bracket by
         // doubling its magnitude until f(lower)>target on the decreasing branch.
         for (std::size_t i = 0; i < 64; ++i) {
+            consumeCertifiedWork();
             if (compareLambertProduct(lower, target, precisionBits)
                 == LambertProductOrder::AboveTarget)
                 break;
@@ -1089,6 +1126,7 @@ enum class LambertProductOrder {
         precisionBits, 4096, "Lambert W iteration budget is too large");
 
     for (std::size_t iteration = 0; upper - lower > targetWidth; ++iteration) {
+        consumeCertifiedWork();
         if (iteration >= maximumIterations)
             throw PrecisionInsufficient{"Lambert W bisection did not converge"};
         const Rational midpoint = (lower + upper) / rational(2);
@@ -1145,12 +1183,15 @@ enum class LambertProductOrder {
         throw std::domain_error("hypergeometric1F1 has a pole at a non-positive integer b");
     if (z.isZero())
         return exactInterval(1, precisionBits);
+    if (absRational(z) > rational(160))
+        throw CertifiedBackendUnsupported{
+            "hypergeometric1F1 certified series currently requires |z| <= 160 for bounded work"};
 
     const auto absA = ceilAbsToUint64(a);
     const auto absB = ceilAbsToUint64(b);
     const auto absZ = ceilAbsToUint64(z);
     if (!absA || !absB || !absZ)
-        throw PrecisionInsufficient{"hypergeometric1F1 argument is too large for the series backend"};
+        throw CertifiedBackendUnsupported{"hypergeometric1F1 argument is too large for the series backend"};
 
     // j>=2|a|,2|b|,6|z| なら
     // |t_{j+1}/t_j| = |z||a+j|/(|b+j|(j+1)) <= 1/2。
@@ -1161,7 +1202,7 @@ enum class LambertProductOrder {
         6U * *absZ + 2U});
     constexpr std::uint64_t maximumTerms = 200000;
     if (ratioStart > maximumTerms)
-        throw PrecisionInsufficient{"hypergeometric1F1 requires too many series terms"};
+        throw CertifiedBackendUnsupported{"hypergeometric1F1 requires too many series terms"};
 
     Rational term{BigInt{1}};
     Rational sum{BigInt{1}};
@@ -1169,6 +1210,7 @@ enum class LambertProductOrder {
         precisionBits, 16, "hypergeometric1F1 precision is too large"));
 
     for (std::uint64_t n = 0; n < maximumTerms; ++n) {
+        consumeCertifiedWork();
         const Rational numeratorFactor = a + Rational{BigInt::fromUnsigned(n)};
         const Rational denominatorFactor = b + Rational{BigInt::fromUnsigned(n)};
         if (denominatorFactor.isZero())
@@ -1190,7 +1232,7 @@ enum class LambertProductOrder {
             return exactInterval(sum, precisionBits);
     }
 
-    throw PrecisionInsufficient{"hypergeometric1F1 series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"hypergeometric1F1 series did not converge within the term limit"};
 }
 
 
@@ -1206,31 +1248,48 @@ enum class LambertProductOrder {
         return exactInterval(1, precisionBits);
 
     const Rational absZ = absRational(z);
-    if (absZ >= rational(1))
-        throw PrecisionInsufficient{"hypergeometric2F1 certified series currently requires |z| < 1"};
+    if (absZ > rational(9, 10))
+        throw CertifiedBackendUnsupported{
+            "hypergeometric2F1 certified series currently requires |z| <= 9/10 for bounded work"};
 
     const auto absA = ceilAbsToUint64(a);
     const auto absB = ceilAbsToUint64(b);
     const auto absC = ceilAbsToUint64(c);
     if (!absA || !absB || !absC)
-        throw PrecisionInsufficient{"hypergeometric2F1 parameter is too large for the series backend"};
+        throw CertifiedBackendUnsupported{"hypergeometric2F1 parameter is too large for the series backend"};
 
+    // exact RationalのGauss級数は反復ごとに分子・分母が肥大化し，
+    // 小さい分母パラメータの近傍では数値結果だけが必要でも計算量を支配する。
+    // tail bound用のパラメータはexactのまま保ち，級数和だけ外向き丸め区間で累積する。
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 64, "hypergeometric2F1 working precision is too large");
     constexpr std::uint64_t maximumTerms = 250000;
     const Rational tolerance = binaryThreshold(checkedAdd(
         precisionBits, 20, "hypergeometric2F1 precision is too large"));
-    Rational term{BigInt{1}};
-    Rational sum{BigInt{1}};
+    RealInterval term = exactInterval(1, workBits);
+    RealInterval sum = term;
+    const RealInterval zInterval = exactInterval(z, workBits);
+
+    const auto intervalAbsUpper = [](const RealInterval& value) {
+        const Rational lower = absRational(value.lower().toRational());
+        const Rational upper = absRational(value.upper().toRational());
+        return lower > upper ? lower : upper;
+    };
 
     for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         const Rational index{BigInt::fromUnsigned(k)};
         const Rational denominatorFactor = c + index;
         if (denominatorFactor.isZero())
             throw std::domain_error("hypergeometric2F1 denominator parameter reaches a pole");
-        const Rational next = term * (a + index) * (b + index) * z
-            / (denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)});
 
-        if (next.isZero())
-            return exactInterval(sum, precisionBits);
+        RealInterval next = multiply(
+            term, exactInterval(a + index, workBits), workBits);
+        next = multiply(next, exactInterval(b + index, workBits), workBits);
+        next = multiply(next, zInterval, workBits);
+        next = divide(next, exactInterval(denominatorFactor, workBits), workBits);
+        next = divide(next,
+            exactInterval(Rational{BigInt::fromUnsigned(k + 1)}, workBits), workBits);
 
         // j>=Nなら |a+j|<=j+A, |b+j|<=j+B, |c+j|>=j-C。
         // N>Cを満たす領域では、将来全ての項比を一つのq<1で押さえられる。
@@ -1242,17 +1301,18 @@ enum class LambertProductOrder {
                 * (Rational{BigInt{1}} + Rational{BigInt::fromUnsigned(*absB)} / N)
                 / (Rational{BigInt{1}} - Rational{BigInt::fromUnsigned(*absC)} / N);
             if (q < rational(1)) {
-                const Rational tail = absRational(next) / (rational(1) - q);
-                if (tail <= tolerance)
-                    return RealInterval::fromRationalBounds(
-                        sum - tail, sum + tail, precisionBits);
+                const Rational tail = intervalAbsUpper(next) / (rational(1) - q);
+                if (tail <= tolerance) {
+                    sum = add(sum, symmetricError(tail, workBits), workBits);
+                    return sum.roundedOutward(precisionBits);
+                }
             }
         }
 
-        term = next;
-        sum += term;
+        term = std::move(next);
+        sum = add(sum, term, workBits);
     }
-    throw PrecisionInsufficient{"hypergeometric2F1 series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"hypergeometric2F1 series did not converge within the term limit"};
 }
 
 [[nodiscard]] RealInterval intervalTimesRational(
@@ -1296,10 +1356,12 @@ enum class EllipticSeriesKind { F, E, Pi };
 
     const Rational absM = absRational(m);
     const Rational absN = absRational(n);
-    if (absM >= rational(1))
-        throw PrecisionInsufficient{"elliptic certified series currently requires |m| < 1"};
-    if (kind == EllipticSeriesKind::Pi && absN >= rational(1))
-        throw PrecisionInsufficient{"ellipticPi certified series currently requires |n| < 1"};
+    if (absM > rational(9, 10))
+        throw CertifiedBackendUnsupported{
+            "elliptic certified series currently requires |m| <= 9/10 for bounded work"};
+    if (kind == EllipticSeriesKind::Pi && absN > rational(9, 10))
+        throw CertifiedBackendUnsupported{
+            "ellipticPi certified series currently requires |n| <= 9/10 for bounded work"};
 
     const std::size_t bits = checkedAdd(
         precisionBits, 32, "elliptic working precision is too large");
@@ -1325,6 +1387,7 @@ enum class EllipticSeriesKind { F, E, Pi };
     Rational rPower = r;
     constexpr std::size_t maximumTerms = 200000;
     for (std::size_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         integral = evenSinePowerIntegral(
             k, cosBox, integral, sineOdd, sinSquared, bits);
         mPower *= m;
@@ -1364,7 +1427,106 @@ enum class EllipticSeriesKind { F, E, Pi };
             return add(sum, error, bits).roundedOutward(precisionBits);
         }
     }
-    throw PrecisionInsufficient{"elliptic series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"elliptic series did not converge within the term limit"};
+}
+
+[[nodiscard]] RealInterval intervalEllipticSeries(
+    EllipticSeriesKind kind,
+    const RealInterval& n,
+    const RealInterval& phi,
+    const RealInterval& m,
+    std::size_t precisionBits) {
+    const std::size_t bits = checkedAdd(
+        precisionBits, 40, "elliptic interval working precision is too large");
+    const RealInterval nWork = n.roundedOutward(bits);
+    const RealInterval phiWork = phi.roundedOutward(bits);
+    const RealInterval mWork = m.roundedOutward(bits);
+
+    const RealInterval absMInterval = absoluteInterval(mWork, bits);
+    const RealInterval absNInterval = absoluteInterval(nWork, bits);
+    const Rational absM = absMInterval.upper().toRational();
+    const Rational absN = absNInterval.upper().toRational();
+    const Rational limit = rational(9, 10);
+    if (absM > limit) {
+        if (absMInterval.lower().toRational() <= limit)
+            throw PrecisionInsufficient{
+                "Elliptic parameter interval straddles the |m| = 9/10 work boundary"};
+        throw CertifiedBackendUnsupported{
+            "elliptic certified series currently requires |m| <= 9/10 for bounded work"};
+    }
+    if (kind == EllipticSeriesKind::Pi && absN > limit) {
+        if (absNInterval.lower().toRational() <= limit)
+            throw PrecisionInsufficient{
+                "Elliptic Pi parameter interval straddles the |n| = 9/10 work boundary"};
+        throw CertifiedBackendUnsupported{
+            "ellipticPi certified series currently requires |n| <= 9/10 for bounded work"};
+    }
+
+    const RealInterval sine = encloseSinRadianInterval(phiWork, bits).interval;
+    const RealInterval cosine = encloseCosRadianInterval(phiWork, bits).interval;
+    const RealInterval sineSquared = multiply(sine, sine, bits);
+    RealInterval sineOdd = sine;
+    RealInterval integral = phiWork;
+    RealInterval sum = integral;
+
+    Rational c{BigInt{1}};
+    Rational e{BigInt{1}};
+    RealInterval mPower = exactInterval(1, bits);
+    RealInterval q = exactInterval(1, bits);
+    const Rational r = kind == EllipticSeriesKind::Pi
+        ? (absM < absN ? absN : absM) : absM;
+    const Rational phiMagnitude = intervalAbsUpper(phiWork, bits);
+    const Rational tolerance = binaryThreshold(checkedAdd(
+        precisionBits, 18, "elliptic interval precision is too large"));
+
+    Rational rPower = r;
+    constexpr std::size_t maximumTerms = 200000;
+    for (std::size_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
+        integral = evenSinePowerIntegral(
+            k, cosine, integral, sineOdd, sineSquared, bits);
+        mPower = multiply(mPower, mWork, bits);
+        c *= Rational{BigInt::fromUnsigned(2 * k - 1), BigInt::fromUnsigned(2 * k)};
+
+        RealInterval coefficient = exactInterval(0, bits);
+        if (kind == EllipticSeriesKind::F) {
+            coefficient = intervalTimesRational(mPower, c, bits);
+        }
+        else if (kind == EllipticSeriesKind::E) {
+            e *= Rational{BigInt{static_cast<std::int64_t>(2 * k) - 3},
+                BigInt::fromUnsigned(2 * k)};
+            coefficient = intervalTimesRational(mPower, e, bits);
+        }
+        else {
+            q = add(
+                multiply(nWork, q, bits),
+                intervalTimesRational(mPower, c, bits),
+                bits);
+            coefficient = q;
+        }
+        sum = add(sum, multiply(integral, coefficient, bits), bits);
+
+        rPower *= r;
+        Rational tail;
+        if (kind != EllipticSeriesKind::Pi) {
+            tail = r.isZero()
+                ? Rational{}
+                : phiMagnitude * rPower / (rational(1) - r);
+        }
+        else {
+            const Rational kp1{BigInt::fromUnsigned(k + 1)};
+            const Rational kp2{BigInt::fromUnsigned(k + 2)};
+            tail = r.isZero()
+                ? Rational{}
+                : phiMagnitude * rPower
+                    * (kp2 - kp1 * r)
+                    / ((rational(1) - r) * (rational(1) - r));
+        }
+        if (tail <= tolerance)
+            return add(sum, symmetricError(tail, bits), bits).roundedOutward(precisionBits);
+    }
+    throw CertifiedBackendUnsupported{
+        "elliptic interval series did not converge within the term limit"};
 }
 
 
@@ -1382,17 +1544,20 @@ enum class EllipticSeriesKind { F, E, Pi };
 
     std::uint64_t n = 64;
     while (eulerGammaRemainderBound(n) > target) {
+        consumeCertifiedWork();
         if (n >= (1ULL << 20))
-            throw PrecisionInsufficient{"EulerGamma backend does not support this precision yet"};
+            throw CertifiedBackendUnsupported{"EulerGamma backend does not support this precision yet"};
         n *= 2;
     }
 
     const std::size_t workBits = checkedAdd(
         precisionBits, 40, "EulerGamma working precision is too large");
     RealInterval harmonic = exactInterval(0, workBits);
-    for (std::uint64_t k = 1; k <= n; ++k)
+    for (std::uint64_t k = 1; k <= n; ++k) {
+        consumeCertifiedWork();
         harmonic = add(harmonic,
             exactInterval(Rational{BigInt{1}, BigInt::fromUnsigned(k)}, workBits), workBits);
+    }
 
     const Rational nR{BigInt::fromUnsigned(n)};
     RealInterval result = subtract(
@@ -1407,6 +1572,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         / (nR * nR);
     Rational inverseEven = inverseSquare;
     for (std::size_t k = 1; k < 64; ++k) {
+        consumeCertifiedWork();
         const Rational coefficient = bernoulliEven(k)
             / Rational{BigInt::fromUnsigned(2 * k)};
         result = add(result,
@@ -1427,8 +1593,9 @@ enum class EllipticSeriesKind { F, E, Pi };
     if (x.isZero())
         throw std::domain_error("Ei is undefined at zero");
     const Rational absX = absRational(x);
-    if (absX > rational(8))
-        throw PrecisionInsufficient{"Ei certified series currently requires |x| <= 8"};
+    constexpr std::int64_t maximumCertifiedSeriesArgument = 96;
+    if (absX > rational(maximumCertifiedSeriesArgument))
+        throw CertifiedBackendUnsupported{"Ei certified series currently requires |x| <= 96"};
 
     const std::size_t workBits = checkedAdd(
         precisionBits, 56, "Ei working precision is too large");
@@ -1442,6 +1609,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         precisionBits, 18, "Ei target precision is too large"));
     constexpr std::uint64_t maximumTerms = 200'000;
     for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         const Rational term = factorialPower / Rational{BigInt::fromUnsigned(k)};
         sum = add(sum, exactInterval(term, workBits), workBits);
 
@@ -1460,7 +1628,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         factorialPower *= x;
         factorialPower /= Rational{BigInt::fromUnsigned(k + 1)};
     }
-    throw PrecisionInsufficient{"Ei series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"Ei series did not converge within the term limit"};
 }
 
 [[nodiscard]] RealInterval pointSineIntegralSi(
@@ -1470,11 +1638,17 @@ enum class EllipticSeriesKind { F, E, Pi };
         return exactInterval(0, precisionBits);
     if (x.numerator().isNegative())
         return negate(pointSineIntegralSi(-x, precisionBits));
-    if (x > rational(8))
-        throw PrecisionInsufficient{"Si certified series currently requires |x| <= 8"};
+    constexpr std::int64_t maximumCertifiedSeriesArgument = 96;
+    if (x > rational(maximumCertifiedSeriesArgument))
+        throw CertifiedBackendUnsupported{"Si certified series currently requires |x| <= 96"};
 
+    const auto magnitude = ceilAbsToUint64(x);
+    if (!magnitude || *magnitude > std::numeric_limits<std::size_t>::max() / 2)
+        throw CertifiedBackendUnsupported{"Si argument is too large for cancellation planning"};
+    const std::size_t cancellationBits = static_cast<std::size_t>(*magnitude) * 2;
     const std::size_t workBits = checkedAdd(
-        precisionBits, 48, "Si working precision is too large");
+        checkedAdd(precisionBits, 48, "Si working precision is too large"),
+        cancellationBits, "Si cancellation precision is too large");
     const Rational x2 = x * x;
     Rational term = x;
     RealInterval sum = exactInterval(term, workBits);
@@ -1483,6 +1657,7 @@ enum class EllipticSeriesKind { F, E, Pi };
 
     constexpr std::uint64_t maximumTerms = 200'000;
     for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         const std::uint64_t a = 2 * k + 1;
         const std::uint64_t b = 2 * k + 2;
         const std::uint64_t c = 2 * k + 3;
@@ -1501,7 +1676,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         term = -(term * ratio);
         sum = add(sum, exactInterval(term, workBits), workBits);
     }
-    throw PrecisionInsufficient{"Si series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"Si series did not converge within the term limit"};
 }
 
 [[nodiscard]] RealInterval pointCosineIntegralCiPositive(
@@ -1509,11 +1684,17 @@ enum class EllipticSeriesKind { F, E, Pi };
     std::size_t precisionBits) {
     if (x <= rational(0))
         throw std::domain_error("Ci real certified backend requires x > 0");
-    if (x > rational(8))
-        throw PrecisionInsufficient{"Ci certified series currently requires 0 < x <= 8"};
+    constexpr std::int64_t maximumCertifiedSeriesArgument = 96;
+    if (x > rational(maximumCertifiedSeriesArgument))
+        throw CertifiedBackendUnsupported{"Ci certified series currently requires 0 < x <= 96"};
 
+    const auto magnitude = ceilAbsToUint64(x);
+    if (!magnitude || *magnitude > std::numeric_limits<std::size_t>::max() / 2)
+        throw CertifiedBackendUnsupported{"Ci argument is too large for cancellation planning"};
+    const std::size_t cancellationBits = static_cast<std::size_t>(*magnitude) * 2;
     const std::size_t workBits = checkedAdd(
-        precisionBits, 56, "Ci working precision is too large");
+        checkedAdd(precisionBits, 56, "Ci working precision is too large"),
+        cancellationBits, "Ci cancellation precision is too large");
     RealInterval sum = add(
         encloseEulerGamma(workBits),
         encloseLogPositive(exactInterval(x, workBits), workBits).interval,
@@ -1525,6 +1706,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         precisionBits, 18, "Ci target precision is too large"));
     constexpr std::uint64_t maximumTerms = 200'000;
     for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         sum = add(sum, exactInterval(term, workBits), workBits);
         const std::uint64_t a = 2 * k;
         const std::uint64_t b = 2 * k + 1;
@@ -1543,7 +1725,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         }
         term = -(term * ratio);
     }
-    throw PrecisionInsufficient{"Ci series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"Ci series did not converge within the term limit"};
 }
 
 [[nodiscard]] RealInterval pointPolylogPositiveOrder(
@@ -1553,8 +1735,9 @@ enum class EllipticSeriesKind { F, E, Pi };
     if (order == 0)
         throw std::invalid_argument("polylog certified series requires positive order");
     const Rational absZ = absRational(z);
-    if (absZ >= rational(1))
-        throw PrecisionInsufficient{"polylog certified series currently requires |z| < 1"};
+    if (absZ > rational(49, 50))
+        throw CertifiedBackendUnsupported{
+            "polylog certified series currently requires |z| <= 49/50 for bounded work"};
     if (z.isZero())
         return exactInterval(0, precisionBits);
 
@@ -1567,6 +1750,7 @@ enum class EllipticSeriesKind { F, E, Pi };
 
     constexpr std::uint64_t maximumTerms = 1'000'000;
     for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
         zPower *= z;
         const BigInt denominator = numeric::pow(BigInt::fromUnsigned(k), order);
         const Rational term = zPower / Rational{denominator};
@@ -1580,12 +1764,13 @@ enum class EllipticSeriesKind { F, E, Pi };
             return sum.roundedOutward(precisionBits);
         }
     }
-    throw PrecisionInsufficient{"polylog series did not converge within the term limit"};
+    throw CertifiedBackendUnsupported{"polylog series did not converge within the term limit"};
 }
 
 [[nodiscard]] Rational rationalPowerInteger(Rational base, std::size_t exponent) {
     Rational result{BigInt{1}};
     while (exponent != 0) {
+        consumeCertifiedWork();
         if ((exponent & 1U) != 0)
             result *= base;
         exponent >>= 1U;
@@ -1597,8 +1782,10 @@ enum class EllipticSeriesKind { F, E, Pi };
 
 [[nodiscard]] Rational risingRational(Rational value, std::size_t count) {
     Rational result{BigInt{1}};
-    for (std::size_t i = 0; i < count; ++i)
+    for (std::size_t i = 0; i < count; ++i) {
+        consumeCertifiedWork();
         result *= value + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(i))};
+    }
     return result;
 }
 
@@ -1631,8 +1818,10 @@ enum class EllipticSeriesKind { F, E, Pi };
 [[nodiscard]] RealInterval pointZetaGreaterThanOne(
     const Rational& s,
     std::size_t precisionBits) {
-    if (s <= rational(1))
-        throw std::domain_error("zeta certified real backend requires s > 1");
+    if (s == rational(1))
+        throw std::domain_error("zeta has a pole at s = 1");
+    if (s < rational(1))
+        throw CertifiedBackendUnsupported{"zeta certified real backend currently requires s > 1"};
     const std::size_t workBits = checkedAdd(
         precisionBits, 40, "zeta working precision is too large");
     const Rational target = binaryThreshold(checkedAdd(
@@ -1643,7 +1832,9 @@ enum class EllipticSeriesKind { F, E, Pi };
     Rational chosenRising;
     RealInterval chosenPower = exactInterval(0, workBits);
     for (std::uint64_t n = 8; n <= 4096 && chosenN == 0; n *= 2) {
+        consumeCertifiedWork();
         for (std::size_t k = 2; k <= 64; ++k) {
+            consumeCertifiedWork();
             const Rational rising = risingRational(s, 2 * k - 1);
             const BigInt factorial = numeric::factorial(static_cast<std::uint64_t>(2 * k));
             const Rational coefficient = absRational(bernoulliEven(k))
@@ -1662,10 +1853,11 @@ enum class EllipticSeriesKind { F, E, Pi };
         }
     }
     if (chosenN == 0)
-        throw PrecisionInsufficient{"zeta Euler-Maclaurin budget is insufficient for the requested precision"};
+        throw CertifiedBackendUnsupported{"zeta Euler-Maclaurin budget is insufficient for the requested precision"};
 
     RealInterval result = exactInterval(0, workBits);
     for (std::uint64_t n = 1; n < chosenN; ++n) {
+        consumeCertifiedWork();
         const RealInterval term = positiveIntegerBasePower(n, -s, workBits);
         result = add(result, term, workBits);
     }
@@ -1679,6 +1871,7 @@ enum class EllipticSeriesKind { F, E, Pi };
         positiveIntegerBasePower(chosenN, -s, workBits), workBits), workBits);
 
     for (std::size_t k = 1; k < chosenK; ++k) {
+        consumeCertifiedWork();
         const Rational rising = risingRational(s, 2 * k - 1);
         const BigInt factorial = numeric::factorial(static_cast<std::uint64_t>(2 * k));
         const Rational coefficient = bernoulliEven(k) * rising / Rational{factorial};
@@ -1713,12 +1906,14 @@ struct PsiPlan final {
     const Rational target = binaryThreshold(checkedAdd(
         precisionBits, 18, "psi target precision is too large"));
     for (std::size_t shift = 0; shift <= 1'000'000; shift += 4) {
+        consumeCertifiedWork();
         const Rational x = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(shift))};
         if (x < rational(4))
             continue;
         const Rational xSquared = x * x;
         Rational power = trigamma ? xSquared * x : xSquared;
         for (std::size_t k = 1; k <= 64; ++k) {
+            consumeCertifiedWork();
             Rational bound = absRational(bernoulliEven(k));
             if (!trigamma)
                 bound /= Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
@@ -1728,7 +1923,7 @@ struct PsiPlan final {
             power *= xSquared;
         }
     }
-    throw PrecisionInsufficient{"psi asymptotic budget is insufficient for the requested precision"};
+    throw CertifiedBackendUnsupported{"psi asymptotic budget is insufficient for the requested precision"};
 }
 
 [[nodiscard]] RealInterval pointDigammaPositive(
@@ -1743,6 +1938,7 @@ struct PsiPlan final {
     const Rational xSquared = x * x;
     Rational power = xSquared;
     for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        consumeCertifiedWork();
         Rational term = bernoulliEven(k)
             / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
         term /= power;
@@ -1759,6 +1955,7 @@ struct PsiPlan final {
     result = add(result, remainder, workBits);
 
     for (std::size_t j = 0; j < plan.shift; ++j) {
+        consumeCertifiedWork();
         const Rational divisor = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))};
         result = subtract(result, exactInterval(rational(1) / divisor, workBits), workBits);
     }
@@ -1777,17 +1974,1011 @@ struct PsiPlan final {
     result = add(result, exactInterval(rational(1, 2) / xSquared, workBits), workBits);
     Rational power = xSquared * x;
     for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        consumeCertifiedWork();
         const Rational term = bernoulliEven(k) / power;
         result = add(result, exactInterval(term, workBits), workBits);
         power *= xSquared;
     }
     result = add(result, symmetricError(plan.remainderBound, workBits), workBits);
     for (std::size_t j = 0; j < plan.shift; ++j) {
+        consumeCertifiedWork();
         const Rational divisor = input + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))};
         result = add(result, exactInterval(rational(1) / (divisor * divisor), workBits), workBits);
     }
     return result.roundedOutward(precisionBits);
 }
+
+namespace {
+
+[[nodiscard]] ComplexInterval exactComplex(
+    const Rational& real,
+    const Rational& imaginary,
+    std::size_t precisionBits) {
+    return ComplexInterval{
+        exactInterval(real, precisionBits),
+        exactInterval(imaginary, precisionBits)};
+}
+
+[[nodiscard]] ComplexInterval exactComplex(
+    std::int64_t real,
+    std::size_t precisionBits) {
+    return exactComplex(rational(real), rational(0), precisionBits);
+}
+
+[[nodiscard]] Rational complexAbsUpper(
+    const ComplexInterval& value,
+    std::size_t precisionBits) {
+    const RealInterval magnitudeSquared = add(
+        squareInterval(value.real(), precisionBits),
+        squareInterval(value.imaginary(), precisionBits),
+        precisionBits);
+    return encloseSqrt(magnitudeSquared, precisionBits).interval.upper().toRational();
+}
+
+[[nodiscard]] Rational intervalAbsLower(const RealInterval& value) {
+    if (value.containsZero())
+        return rational(0);
+    const Rational lower = absRational(value.lower().toRational());
+    const Rational upper = absRational(value.upper().toRational());
+    return lower < upper ? lower : upper;
+}
+
+[[nodiscard]] Rational complexAbsLower(
+    const ComplexInterval& value,
+    std::size_t precisionBits) {
+    const Rational realLower = intervalAbsLower(value.real());
+    const Rational imaginaryLower = intervalAbsLower(value.imaginary());
+    const Rational squared = realLower * realLower + imaginaryLower * imaginaryLower;
+    return encloseSqrt(exactInterval(squared, precisionBits), precisionBits)
+        .interval.lower().toRational();
+}
+
+[[nodiscard]] ComplexInterval inflateComplex(
+    const ComplexInterval& value,
+    const Rational& radius,
+    std::size_t precisionBits) {
+    if (radius.isZero())
+        return value.roundedOutward(precisionBits);
+    const RealInterval error = symmetricError(radius, precisionBits);
+    return ComplexInterval{
+        add(value.real(), error, precisionBits),
+        add(value.imaginary(), error, precisionBits)};
+}
+
+[[nodiscard]] ComplexInterval multiplyByRational(
+    const ComplexInterval& value,
+    const Rational& factor,
+    std::size_t precisionBits) {
+    return multiply(
+        value,
+        ComplexInterval::fromReal(exactInterval(factor, precisionBits)),
+        precisionBits);
+}
+
+[[nodiscard]] ComplexInterval addReal(
+    const ComplexInterval& value,
+    const RealInterval& real,
+    std::size_t precisionBits) {
+    return add(value, ComplexInterval::fromReal(real), precisionBits);
+}
+
+[[nodiscard]] Rational rationalPower(
+    Rational base,
+    std::size_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
+[[nodiscard]] RealInterval eulerGammaInterval(std::size_t precisionBits) {
+    return encloseEulerGamma(precisionBits);
+}
+
+[[nodiscard]] bool crossesNegativeRealCut(const ComplexInterval& value) {
+    const BigFloat zero;
+    return value.real().lower() < zero && value.imaginary().containsZero();
+}
+
+[[nodiscard]] ComplexInterval pointErfComplex(
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 56, "complex erf working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    const Rational qSquared = q * q;
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex erf target precision is too large"));
+
+    ComplexInterval term = z.roundedOutward(workBits);
+    ComplexInterval sum = term;
+    Rational majorant = q;
+    constexpr std::uint64_t maximumTerms = 200000;
+    for (std::uint64_t n = 0; n < maximumTerms; ++n) {
+        consumeCertifiedWork();
+        const Rational ratio = qSquared
+            * Rational{BigInt::fromUnsigned(2 * n + 1)}
+            / Rational{
+                BigInt::fromUnsigned(n + 1)
+                * BigInt::fromUnsigned(2 * n + 3)};
+        const Rational futureRatio = qSquared
+            / Rational{BigInt::fromUnsigned(n + 1)};
+        const Rational nextMajorant = majorant * ratio;
+        if (futureRatio < rational(1)) {
+            const Rational tail = nextMajorant / (rational(1) - futureRatio);
+            if (tail <= target) {
+                const ComplexInterval enclosed = inflateComplex(sum, tail, workBits);
+                const RealInterval scale = divide(
+                    exactInterval(2, workBits),
+                    encloseSqrt(enclosePi(workBits).interval, workBits).interval,
+                    workBits);
+                return multiply(
+                    enclosed, ComplexInterval::fromReal(scale), workBits)
+                    .roundedOutward(precisionBits);
+            }
+        }
+
+        const Rational signedRatio = -Rational{BigInt::fromUnsigned(2 * n + 1)}
+            / Rational{
+                BigInt::fromUnsigned(n + 1)
+                * BigInt::fromUnsigned(2 * n + 3)};
+        term = multiplyByRational(
+            multiply(term, multiply(z, z, workBits), workBits),
+            signedRatio, workBits);
+        sum = add(sum, term, workBits);
+        majorant = nextMajorant;
+    }
+    throw CertifiedBackendUnsupported{"complex erf series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointEiComplex(
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (z.containsZero())
+        throw std::domain_error("Ei is singular at zero");
+    if (crossesNegativeRealCut(z))
+        throw PrecisionInsufficient{"complex Ei input crosses the principal branch cut"};
+
+    const std::size_t boundaryBits = checkedAdd(
+        precisionBits, 24, "complex Ei boundary precision is too large");
+    const Rational boundaryUpper = complexAbsUpper(z, boundaryBits);
+    if (boundaryUpper > rational(512)) {
+        if (complexAbsLower(z, boundaryBits) > rational(512))
+            throw CertifiedBackendUnsupported{
+                "complex Ei certified series currently requires |z| <= 512 for bounded work"};
+        throw PrecisionInsufficient{
+            "complex Ei magnitude interval straddles the |z| = 512 work boundary"};
+    }
+    const auto magnitude = ceilAbsToUint64(boundaryUpper);
+    if (!magnitude || *magnitude > std::numeric_limits<std::size_t>::max() / 2)
+        throw CertifiedBackendUnsupported{"complex Ei argument is too large for cancellation planning"};
+    const std::size_t workBits = checkedAdd(
+        checkedAdd(precisionBits, 40, "complex Ei working precision is too large"),
+        static_cast<std::size_t>(*magnitude) * 2,
+        "complex Ei cancellation precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex Ei target precision is too large"));
+    ComplexInterval sum = addReal(
+        enclosePrincipalComplexLog(z, workBits).interval,
+        eulerGammaInterval(workBits), workBits);
+    ComplexInterval term = z.roundedOutward(workBits); // k=1
+    sum = add(sum, term, workBits);
+    Rational majorant = q;
+
+    constexpr std::uint64_t maximumTerms = 200000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
+        const Rational ratio = q * Rational{BigInt::fromUnsigned(k)}
+            / Rational{numeric::pow(BigInt::fromUnsigned(k + 1), 2)};
+        const Rational nextMajorant = majorant * ratio;
+        const Rational futureRatio = q / Rational{BigInt::fromUnsigned(k + 1)};
+        if (futureRatio < rational(1)) {
+            const Rational tail = nextMajorant / (rational(1) - futureRatio);
+            if (tail <= target)
+                return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+        }
+        term = multiplyByRational(
+            multiply(term, z, workBits),
+            Rational{BigInt::fromUnsigned(k), numeric::pow(BigInt::fromUnsigned(k + 1), 2)},
+            workBits);
+        sum = add(sum, term, workBits);
+        majorant = nextMajorant;
+    }
+    throw CertifiedBackendUnsupported{"complex Ei series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointSiComplex(
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 48, "complex Si working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    const Rational qSquared = q * q;
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex Si target precision is too large"));
+    ComplexInterval term = z.roundedOutward(workBits);
+    ComplexInterval sum = term;
+    Rational majorant = q;
+
+    constexpr std::uint64_t maximumTerms = 200000;
+    for (std::uint64_t n = 0; n < maximumTerms; ++n) {
+        consumeCertifiedWork();
+        const BigInt a = BigInt::fromUnsigned(2 * n + 1);
+        const BigInt b = BigInt::fromUnsigned(2 * n + 2);
+        const BigInt c = BigInt::fromUnsigned(2 * n + 3);
+        const Rational ratio = qSquared * Rational{a}
+            / Rational{b * c * c};
+        const Rational nextMajorant = majorant * ratio;
+        const Rational futureRatio = qSquared / Rational{b * c};
+        if (futureRatio < rational(1)) {
+            const Rational tail = nextMajorant / (rational(1) - futureRatio);
+            if (tail <= target)
+                return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+        }
+        term = multiplyByRational(
+            multiply(term, multiply(z, z, workBits), workBits),
+            -Rational{a, b * c * c}, workBits);
+        sum = add(sum, term, workBits);
+        majorant = nextMajorant;
+    }
+    throw CertifiedBackendUnsupported{"complex Si series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointCiComplex(
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (z.containsZero())
+        throw std::domain_error("Ci is singular at zero");
+    if (crossesNegativeRealCut(z))
+        throw PrecisionInsufficient{"complex Ci input crosses the principal branch cut"};
+
+    const std::size_t boundaryBits = checkedAdd(
+        precisionBits, 24, "complex Ci boundary precision is too large");
+    const Rational boundaryUpper = complexAbsUpper(z, boundaryBits);
+    if (boundaryUpper > rational(128)) {
+        if (complexAbsLower(z, boundaryBits) > rational(128))
+            throw CertifiedBackendUnsupported{
+                "complex Ci certified series currently requires |z| <= 128 for bounded work"};
+        throw PrecisionInsufficient{
+            "complex Ci magnitude interval straddles the |z| = 128 work boundary"};
+    }
+    const auto magnitude = ceilAbsToUint64(boundaryUpper);
+    if (!magnitude || *magnitude > std::numeric_limits<std::size_t>::max() / 2)
+        throw CertifiedBackendUnsupported{"complex Ci argument is too large for cancellation planning"};
+    const std::size_t workBits = checkedAdd(
+        checkedAdd(precisionBits, 56, "complex Ci working precision is too large"),
+        static_cast<std::size_t>(*magnitude) * 2,
+        "complex Ci cancellation precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    const Rational qSquared = q * q;
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex Ci target precision is too large"));
+    ComplexInterval sum = addReal(
+        enclosePrincipalComplexLog(z, workBits).interval,
+        eulerGammaInterval(workBits), workBits);
+    ComplexInterval zSquared = multiply(z, z, workBits);
+    ComplexInterval term = multiplyByRational(zSquared, rational(-1, 4), workBits);
+    sum = add(sum, term, workBits);
+    Rational majorant = qSquared / rational(4);
+
+    constexpr std::uint64_t maximumTerms = 200000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
+        const BigInt a = BigInt::fromUnsigned(2 * k);
+        const BigInt b = BigInt::fromUnsigned(2 * k + 1);
+        const BigInt c = BigInt::fromUnsigned(2 * k + 2);
+        const Rational ratio = qSquared * Rational{a}
+            / Rational{b * c * c};
+        const Rational nextMajorant = majorant * ratio;
+        const Rational futureRatio = qSquared / Rational{b * c};
+        if (futureRatio < rational(1)) {
+            const Rational tail = nextMajorant / (rational(1) - futureRatio);
+            if (tail <= target)
+                return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+        }
+        term = multiplyByRational(
+            multiply(term, zSquared, workBits),
+            -Rational{a, b * c * c}, workBits);
+        sum = add(sum, term, workBits);
+        majorant = nextMajorant;
+    }
+    throw CertifiedBackendUnsupported{"complex Ci series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointFresnelComplex(
+    const ComplexInterval& z,
+    std::size_t precisionBits,
+    bool sineVariant) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 56, "complex Fresnel working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    const Rational qLower = complexAbsLower(z, workBits);
+    // 複素Fresnelは現状Maclaurin級数のみで，大きい|z|では巨大中間項の
+    // 相殺が性能の崖になる。実数経路には漸近backendがあるため，複素経路だけ
+    // audited boundary |z|=8 でbounded-workを保証する。
+    if (qLower >= rational(8))
+        throw CertifiedBackendUnsupported{
+            "complex Fresnel series currently requires |z| < 8 for bounded work"};
+    if (q >= rational(8))
+        throw PrecisionInsufficient{
+            "complex Fresnel magnitude interval straddles the |z| = 8 work boundary"};
+    const Rational qSquared = q * q;
+    const Rational qFourth = qSquared * qSquared;
+    const RealInterval pi = enclosePi(workBits).interval;
+    const RealInterval piSquaredQuarter = divide(
+        multiply(pi, pi, workBits), exactInterval(4, workBits), workBits);
+    const Rational piUpper = pi.upper().toRational();
+    const Rational baseMajorant = rationalPower(piUpper / rational(2), 2) * qFourth;
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex Fresnel target precision is too large"));
+    const ComplexInterval zSquared = multiply(z, z, workBits);
+    const ComplexInterval zFourth = multiply(zSquared, zSquared, workBits);
+
+    ComplexInterval term = z.roundedOutward(workBits);
+    Rational majorant = q;
+    if (sineVariant) {
+        term = multiply(term, zSquared, workBits);
+        term = multiply(term, ComplexInterval::fromReal(pi), workBits);
+        term = multiplyByRational(term, rational(1, 6), workBits);
+        majorant = piUpper * q * qSquared / rational(6);
+    }
+    ComplexInterval sum = term;
+
+    constexpr std::uint64_t maximumTerms = 200000;
+    for (std::uint64_t n = 0; n < maximumTerms; ++n) {
+        consumeCertifiedWork();
+        BigInt numerator;
+        BigInt denominator;
+        Rational futureRatio;
+        if (!sineVariant) {
+            numerator = BigInt::fromUnsigned(4 * n + 1);
+            denominator = BigInt::fromUnsigned(2 * n + 1)
+                * BigInt::fromUnsigned(2 * n + 2)
+                * BigInt::fromUnsigned(4 * n + 5);
+            futureRatio = baseMajorant
+                / Rational{BigInt::fromUnsigned(2 * n + 3)
+                    * BigInt::fromUnsigned(2 * n + 4)};
+        } else {
+            numerator = BigInt::fromUnsigned(4 * n + 3);
+            denominator = BigInt::fromUnsigned(2 * n + 2)
+                * BigInt::fromUnsigned(2 * n + 3)
+                * BigInt::fromUnsigned(4 * n + 7);
+            futureRatio = baseMajorant
+                / Rational{BigInt::fromUnsigned(2 * n + 4)
+                    * BigInt::fromUnsigned(2 * n + 5)};
+        }
+
+        ComplexInterval next = multiply(term, zFourth, workBits);
+        next = multiply(next, ComplexInterval::fromReal(piSquaredQuarter), workBits);
+        next = multiplyByRational(next, -Rational{numerator, denominator}, workBits);
+        const Rational nextMajorant = majorant
+            * baseMajorant * Rational{numerator, denominator};
+        if (futureRatio < rational(1)) {
+            const Rational tail = nextMajorant / (rational(1) - futureRatio);
+            if (tail <= target)
+                return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+        }
+        term = std::move(next);
+        sum = add(sum, term, workBits);
+        majorant = nextMajorant;
+    }
+    throw CertifiedBackendUnsupported{"complex Fresnel series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointHypergeometric1F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (exactNonPositiveIntegerPoint(b))
+        throw std::domain_error(
+            "hypergeometric1F1 has a pole at a non-positive integer b");
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 56, "complex hypergeometric1F1 working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    if (q > rational(160)) {
+        if (complexAbsLower(z, workBits) > rational(160))
+            throw CertifiedBackendUnsupported{
+                "complex hypergeometric1F1 certified series currently requires |z| <= 160 for bounded work"};
+        throw PrecisionInsufficient{
+            "complex hypergeometric1F1 magnitude interval straddles the |z| = 160 work boundary"};
+    }
+    const Rational absA = complexAbsUpper(a, workBits);
+    const Rational absB = complexAbsUpper(b, workBits);
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 22, "complex hypergeometric1F1 target precision is too large"));
+
+    ComplexInterval term = exactComplex(1, workBits);
+    ComplexInterval sum = term;
+    constexpr std::uint64_t maximumTerms = 250000;
+    for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
+        const ComplexInterval index = exactComplex(static_cast<std::int64_t>(k), workBits);
+        const ComplexInterval denominatorFactor = add(b, index, workBits);
+        if (denominatorFactor.containsZero()) {
+            if (exactZeroPoint(denominatorFactor))
+                throw std::domain_error(
+                    "hypergeometric1F1 denominator parameter reaches a pole");
+            throw PrecisionInsufficient{
+                "hypergeometric1F1 denominator parameter interval may contain a pole"};
+        }
+        ComplexInterval next = multiply(term, add(a, index, workBits), workBits);
+        next = multiply(next, z, workBits);
+        next = divide(next, denominatorFactor, workBits);
+        next = divide(next,
+            exactComplex(static_cast<std::int64_t>(k + 1), workBits), workBits);
+
+        const Rational N{BigInt::fromUnsigned(k + 1)};
+        if (N >= rational(2) * absA && N >= rational(2) * absB) {
+            const Rational Q = rational(3) * q / (N + rational(1));
+            if (Q < rational(1)) {
+                const Rational tail = complexAbsUpper(next, workBits)
+                    / (rational(1) - Q);
+                if (tail <= target)
+                    return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+            }
+        }
+        term = std::move(next);
+        sum = add(sum, term, workBits);
+    }
+    throw CertifiedBackendUnsupported{"complex hypergeometric1F1 series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval positiveIntegerComplexPower(
+    std::uint64_t base,
+    const ComplexInterval& exponent,
+    std::size_t precisionBits) {
+    if (base == 1)
+        return exactComplex(1, precisionBits);
+    const RealInterval logarithm = encloseLogPositive(
+        exactInterval(Rational{BigInt::fromUnsigned(base)}, precisionBits),
+        precisionBits).interval;
+    return encloseComplexExp(
+        multiply(exponent, ComplexInterval::fromReal(logarithm), precisionBits),
+        precisionBits).interval;
+}
+
+[[nodiscard]] ComplexInterval pointGammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 88, "complex Gamma working precision is too large");
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 24, "complex Gamma target precision is too large"));
+
+    // Stirling剰余を64 Bernoulli項以内で保証できる最小の右半平面へ移す。
+    // 固定shiftでは高精度Nが到達不能な剰余上界を何度も再試行するため，
+    // requested precisionから理論上必要な下限を先に選ぶ。
+    std::optional<Rational> targetReal;
+    for (const std::uint64_t candidate : {40ULL, 80ULL, 160ULL, 320ULL,
+             640ULL, 1280ULL, 2560ULL, 4096ULL}) {
+        const Rational lower{BigInt::fromUnsigned(candidate)};
+        bool sufficient = false;
+        for (std::size_t n = 1; n <= 64; ++n) {
+            consumeCertifiedWork();
+            const Rational coefficient = absRational(bernoulliEven(n))
+                / Rational{
+                    BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * n))
+                    * BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * n - 1))};
+            BigInt secPower{1};
+            secPower <<= n;
+            const Rational bound = coefficient * Rational{secPower}
+                / rationalPower(lower, 2 * n - 1);
+            if (bound <= target) {
+                sufficient = true;
+                break;
+            }
+        }
+        if (sufficient) {
+            targetReal = lower;
+            break;
+        }
+    }
+    if (!targetReal)
+        throw CertifiedBackendUnsupported{
+            "Certified complex Gamma precision exceeds the current Stirling budget"};
+
+    const Rational lowerReal = input.real().lower().toRational();
+    std::uint64_t shift = 0;
+    if (lowerReal < *targetReal) {
+        const Rational needed = *targetReal - lowerReal;
+        BigInt quotient = needed.numerator() / needed.denominator();
+        if (needed.numerator() % needed.denominator() != BigInt{0})
+            quotient += BigInt{1};
+        const auto count = numeric::tryToUint64(quotient);
+        if (!count || *count > 4096)
+            throw CertifiedBackendUnsupported{"complex Gamma requires too large a recurrence shift"};
+        shift = *count;
+    }
+
+    ComplexInterval shifted = input.roundedOutward(workBits);
+    if (shift != 0)
+        shifted = add(shifted, exactComplex(static_cast<std::int64_t>(shift), workBits), workBits);
+    const Rational positiveLower = shifted.real().lower().toRational();
+    if (positiveLower <= rational(0))
+        throw CertifiedBackendUnsupported{"complex Gamma could not move the argument into the right half-plane"};
+
+    const ComplexInterval logarithm = enclosePrincipalComplexLog(shifted, workBits).interval;
+    const ComplexInterval shiftedMinusHalf = subtract(
+        shifted, exactComplex(rational(1, 2), rational(0), workBits), workBits);
+    ComplexInterval logGamma = subtract(
+        multiply(shiftedMinusHalf, logarithm, workBits), shifted, workBits);
+    const RealInterval twoPi = multiply(
+        enclosePi(workBits).interval, exactInterval(2, workBits), workBits);
+    const RealInterval halfLogTwoPi = multiply(
+        encloseLogPositive(twoPi, workBits).interval,
+        exactInterval(rational(1, 2), workBits), workBits);
+    logGamma = addReal(logGamma, halfLogTwoPi, workBits);
+
+    std::size_t omittedN = 0;
+    Rational remainderBound;
+    for (std::size_t n = 1; n <= 64; ++n) {
+        consumeCertifiedWork();
+        const Rational coefficient = absRational(bernoulliEven(n))
+            / Rational{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * n))
+                * BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * n - 1))};
+        BigInt secPower{1};
+        secPower <<= n; // Re(z)>0 => sec(arg(z)/2)^(2n) <= 2^n.
+        const Rational denominator = rationalPower(positiveLower, 2 * n - 1);
+        const Rational bound = coefficient * Rational{secPower} / denominator;
+        if (bound <= target) {
+            omittedN = n;
+            remainderBound = bound;
+            break;
+        }
+    }
+    if (omittedN == 0)
+        throw CertifiedBackendUnsupported{"complex Gamma Stirling remainder did not reach the target precision"};
+
+    const ComplexInterval inverse = divide(exactComplex(1, workBits), shifted, workBits);
+    const ComplexInterval inverseSquared = multiply(inverse, inverse, workBits);
+    ComplexInterval inversePower = inverse;
+    for (std::size_t k = 1; k < omittedN; ++k) {
+        consumeCertifiedWork();
+        const Rational coefficient = bernoulliEven(k)
+            / Rational{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))
+                * BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k - 1))};
+        logGamma = add(
+            logGamma, multiplyByRational(inversePower, coefficient, workBits), workBits);
+        inversePower = multiply(inversePower, inverseSquared, workBits);
+    }
+    logGamma = inflateComplex(logGamma, remainderBound, workBits);
+    ComplexInterval gamma = encloseComplexExp(logGamma, workBits).interval;
+
+    if (shift != 0) {
+        ComplexInterval product = exactComplex(1, workBits);
+        for (std::uint64_t j = 0; j < shift; ++j) {
+            consumeCertifiedWork();
+            const ComplexInterval factor = add(
+                input.roundedOutward(workBits),
+                exactComplex(static_cast<std::int64_t>(j), workBits), workBits);
+            if (factor.containsZero())
+                throw std::domain_error("gamma is undefined at a non-positive integer");
+            product = multiply(product, factor, workBits);
+        }
+        gamma = divide(gamma, product, workBits);
+    }
+    return gamma.roundedOutward(precisionBits);
+}
+
+struct ComplexPsiPlan final {
+    std::uint64_t shift = 0;
+    std::size_t omittedK = 0;
+    Rational remainderBound;
+};
+
+[[nodiscard]] ComplexPsiPlan chooseComplexPsiPlan(
+    const ComplexInterval& input,
+    std::size_t precisionBits,
+    bool trigamma) {
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 24, "complex psi target precision is too large"));
+    const Rational inputLower = input.real().lower().toRational();
+
+    // Re(z)>0 へ移した後に評価する。digammaの複素漸近剰余は
+    // sec(arg(z)/2)^(2n+1) 倍で抑えられる。Re(z)>0なら
+    // sec(arg/2)<sqrt(2)なので，2^(n+1)を安全な有理上界として使う。
+    // trigammaはEuler-Maclaurin remainderを実軸方向に積分し，
+    // |R_n| <= |B_2n| / Re(z)^(2n+1) を使う。
+    for (const std::uint64_t targetReal : {20ULL, 40ULL, 80ULL, 160ULL,
+             320ULL, 640ULL, 1280ULL, 2560ULL, 4096ULL}) {
+        const Rational targetLower{BigInt::fromUnsigned(targetReal)};
+        std::uint64_t shift = 0;
+        if (inputLower < targetLower) {
+            const Rational needed = targetLower - inputLower;
+            BigInt quotient = needed.numerator() / needed.denominator();
+            if (needed.numerator() % needed.denominator() != BigInt{0})
+                quotient += BigInt{1};
+            const auto converted = numeric::tryToUint64(quotient);
+            if (!converted || *converted > 4096)
+                continue;
+            shift = *converted;
+        }
+
+        const Rational lower = inputLower
+            + Rational{BigInt::fromUnsigned(shift)};
+        if (lower <= rational(0))
+            continue;
+
+        for (std::size_t k = 1; k <= 64; ++k) {
+            consumeCertifiedWork();
+            Rational bound = absRational(bernoulliEven(k));
+            if (trigamma) {
+                bound /= rationalPower(lower, 2 * k + 1);
+            } else {
+                bound /= Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
+                BigInt sectorFactor{1};
+                sectorFactor <<= k + 1; // > 2^(k+1/2)
+                bound *= Rational{sectorFactor};
+                bound /= rationalPower(lower, 2 * k);
+            }
+            if (bound <= target)
+                return ComplexPsiPlan{shift, k, bound};
+        }
+    }
+    throw CertifiedBackendUnsupported{
+        trigamma
+            ? "Certified complex trigamma precision exceeds the current Euler-Maclaurin budget"
+            : "Certified complex digamma precision exceeds the current asymptotic budget"};
+}
+
+[[nodiscard]] bool isExactComplexZero(const ComplexInterval& value) {
+    return value.real().isPoint() && value.real().lower().isZero()
+        && value.imaginary().isPoint() && value.imaginary().lower().isZero();
+}
+
+[[nodiscard]] ComplexInterval pointDigammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 72, "complex digamma working precision is too large");
+    const ComplexPsiPlan plan = chooseComplexPsiPlan(input, workBits, false);
+
+    ComplexInterval shifted = input.roundedOutward(workBits);
+    if (plan.shift != 0)
+        shifted = add(
+            shifted, exactComplex(static_cast<std::int64_t>(plan.shift), workBits), workBits);
+    if (shifted.real().lower().toRational() <= rational(0))
+        throw CertifiedBackendUnsupported{
+            "complex digamma could not move the argument into the right half-plane"};
+
+    ComplexInterval result = enclosePrincipalComplexLog(shifted, workBits).interval;
+    const ComplexInterval inverse = divide(exactComplex(1, workBits), shifted, workBits);
+    result = subtract(result, multiplyByRational(inverse, rational(1, 2), workBits), workBits);
+    const ComplexInterval inverseSquared = multiply(inverse, inverse, workBits);
+    ComplexInterval inversePower = inverseSquared;
+    for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        consumeCertifiedWork();
+        const Rational coefficient = bernoulliEven(k)
+            / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
+        result = subtract(
+            result, multiplyByRational(inversePower, coefficient, workBits), workBits);
+        inversePower = multiply(inversePower, inverseSquared, workBits);
+    }
+    result = inflateComplex(result, plan.remainderBound, workBits);
+
+    for (std::uint64_t j = 0; j < plan.shift; ++j) {
+        consumeCertifiedWork();
+        const ComplexInterval divisor = add(
+            input.roundedOutward(workBits),
+            exactComplex(static_cast<std::int64_t>(j), workBits), workBits);
+        if (isExactComplexZero(divisor))
+            throw std::domain_error("digamma is undefined at a non-positive integer");
+        if (divisor.containsZero())
+            throw PrecisionInsufficient{"complex digamma recurrence interval may contain a pole"};
+        result = subtract(
+            result, divide(exactComplex(1, workBits), divisor, workBits), workBits);
+    }
+    return result.roundedOutward(precisionBits);
+}
+
+[[nodiscard]] ComplexInterval pointTrigammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 72, "complex trigamma working precision is too large");
+    const ComplexPsiPlan plan = chooseComplexPsiPlan(input, workBits, true);
+
+    ComplexInterval shifted = input.roundedOutward(workBits);
+    if (plan.shift != 0)
+        shifted = add(
+            shifted, exactComplex(static_cast<std::int64_t>(plan.shift), workBits), workBits);
+    if (shifted.real().lower().toRational() <= rational(0))
+        throw CertifiedBackendUnsupported{
+            "complex trigamma could not move the argument into the right half-plane"};
+
+    const ComplexInterval inverse = divide(exactComplex(1, workBits), shifted, workBits);
+    const ComplexInterval inverseSquared = multiply(inverse, inverse, workBits);
+    ComplexInterval result = add(
+        inverse, multiplyByRational(inverseSquared, rational(1, 2), workBits), workBits);
+    ComplexInterval inversePower = multiply(inverseSquared, inverse, workBits);
+    for (std::size_t k = 1; k < plan.omittedK; ++k) {
+        consumeCertifiedWork();
+        result = add(
+            result, multiplyByRational(inversePower, bernoulliEven(k), workBits), workBits);
+        inversePower = multiply(inversePower, inverseSquared, workBits);
+    }
+    result = inflateComplex(result, plan.remainderBound, workBits);
+
+    for (std::uint64_t j = 0; j < plan.shift; ++j) {
+        consumeCertifiedWork();
+        const ComplexInterval divisor = add(
+            input.roundedOutward(workBits),
+            exactComplex(static_cast<std::int64_t>(j), workBits), workBits);
+        if (isExactComplexZero(divisor))
+            throw std::domain_error("trigamma is undefined at a non-positive integer");
+        if (divisor.containsZero())
+            throw PrecisionInsufficient{"complex trigamma recurrence interval may contain a pole"};
+        const ComplexInterval inverseDivisor = divide(
+            exactComplex(1, workBits), divisor, workBits);
+        result = add(
+            result, multiply(inverseDivisor, inverseDivisor, workBits), workBits);
+    }
+    return result.roundedOutward(precisionBits);
+}
+
+[[nodiscard]] ComplexInterval pointPolylogComplex(
+    std::uint64_t order,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (order == 0)
+        throw std::invalid_argument("polylog certified complex series requires positive order");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 48, "complex polylog working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+    if (q > rational(49, 50)) {
+        if (complexAbsLower(z, workBits) > rational(49, 50))
+            throw CertifiedBackendUnsupported{
+                "polylog certified complex series currently requires |z| <= 49/50 for bounded work"};
+        throw PrecisionInsufficient{
+            "complex polylog magnitude interval straddles the |z| = 49/50 work boundary"};
+    }
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 20, "complex polylog target precision is too large"));
+    ComplexInterval sum = exactComplex(0, workBits);
+    ComplexInterval power = exactComplex(1, workBits);
+    Rational qPower{BigInt{1}};
+    constexpr std::uint64_t maximumTerms = 1'000'000;
+    for (std::uint64_t k = 1; k < maximumTerms; ++k) {
+        consumeCertifiedWork();
+        power = multiply(power, z, workBits);
+        qPower *= q;
+        const BigInt denominator = numeric::pow(BigInt::fromUnsigned(k), order);
+        sum = add(sum, multiplyByRational(
+            power, Rational{BigInt{1}, denominator}, workBits), workBits);
+
+        const BigInt nextDenominator = numeric::pow(BigInt::fromUnsigned(k + 1), order);
+        const Rational nextBound = qPower * q / Rational{nextDenominator};
+        const Rational tail = nextBound / (rational(1) - q);
+        if (tail <= target)
+            return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+    }
+    throw CertifiedBackendUnsupported{"complex polylog series did not converge within the term limit"};
+}
+
+[[nodiscard]] ComplexInterval pointHypergeometric2F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& c,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (exactNonPositiveIntegerPoint(c))
+        throw std::domain_error(
+            "hypergeometric2F1 has a pole at a non-positive integer c");
+
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "complex hypergeometric2F1 working precision is too large");
+    const Rational q = complexAbsUpper(z, workBits);
+
+    if (q <= rational(9, 10)) {
+        const Rational absA = complexAbsUpper(a, workBits);
+        const Rational absB = complexAbsUpper(b, workBits);
+        const Rational absC = complexAbsUpper(c, workBits);
+        const Rational target = binaryThreshold(checkedAdd(
+            precisionBits, 22, "complex hypergeometric2F1 target precision is too large"));
+
+        ComplexInterval term = exactComplex(1, workBits);
+        ComplexInterval sum = term;
+        constexpr std::uint64_t maximumTerms = 250000;
+        for (std::uint64_t k = 0; k < maximumTerms; ++k) {
+            consumeCertifiedWork();
+            const ComplexInterval index = exactComplex(static_cast<std::int64_t>(k), workBits);
+            const ComplexInterval denominatorFactor = add(c, index, workBits);
+            if (denominatorFactor.containsZero()) {
+                if (exactZeroPoint(denominatorFactor))
+                    throw std::domain_error(
+                        "hypergeometric2F1 denominator parameter reaches a pole");
+                throw PrecisionInsufficient{
+                    "hypergeometric2F1 denominator parameter interval may contain a pole"};
+            }
+            ComplexInterval next = multiply(term, add(a, index, workBits), workBits);
+            next = multiply(next, add(b, index, workBits), workBits);
+            next = multiply(next, z, workBits);
+            next = divide(next, denominatorFactor, workBits);
+            next = divide(next,
+                exactComplex(static_cast<std::int64_t>(k + 1), workBits), workBits);
+
+            const std::uint64_t n = k + 1;
+            const Rational N{BigInt::fromUnsigned(n)};
+            if (N > absC) {
+                const Rational Q = q
+                    * (rational(1) + absA / N)
+                    * (rational(1) + absB / N)
+                    / (rational(1) - absC / N);
+                if (Q < rational(1)) {
+                    const Rational tail = complexAbsUpper(next, workBits)
+                        / (rational(1) - Q);
+                    if (tail <= target)
+                        return inflateComplex(sum, tail, workBits).roundedOutward(precisionBits);
+                }
+            }
+            term = std::move(next);
+            sum = add(sum, term, workBits);
+        }
+        throw CertifiedBackendUnsupported{"complex hypergeometric2F1 series did not converge within the term limit"};
+    }
+
+    const Rational qLower = complexAbsLower(z, workBits);
+    if (qLower <= rational(9, 10))
+        throw PrecisionInsufficient{
+            "complex hypergeometric2F1 magnitude interval straddles the |z| = 9/10 work boundary"};
+    if (qLower < rational(1))
+        throw CertifiedBackendUnsupported{
+            "complex hypergeometric2F1 series currently requires |z| <= 9/10 for bounded work"};
+    if (qLower <= rational(1))
+        throw PrecisionInsufficient{
+            "complex hypergeometric2F1 magnitude interval straddles the |z| = 1 continuation boundary"};
+
+    // |z|>1 ではprincipal-valueの1/z connection formulaへ送る。
+    // a-bが整数の退化公式はdigammaを含む別展開になるため，Gamma poleを検出したら
+    // このbackendでは扱わず未評価へ戻す。
+    if (z.containsZero())
+        throw CertifiedBackendUnsupported{"hypergeometric2F1 continuation requires z != 0"};
+    const ComplexInterval reciprocalZ = divide(exactComplex(1, workBits), z, workBits);
+    if (complexAbsUpper(reciprocalZ, workBits) >= rational(1))
+        throw CertifiedBackendUnsupported{
+            "Certified complex hypergeometric2F1 currently supports |z|<1 or a provable |z|>1 connection"};
+
+    const ComplexInterval minusZ = negate(z);
+    // z>1 のexact real pointは principal continuation の規約値を持つ。
+    // -z が負実軸上のpointである場合は principal Log の +Pi 側をそのまま使う。
+    // 幅を持つ区間がcutを跨ぐ場合だけ保守的に未対応へ戻す。
+    if (crossesNegativeRealCut(minusZ) && !exactZeroPoint(minusZ.imaginary()))
+        throw CertifiedBackendUnsupported{
+            "hypergeometric2F1 1/z connection crosses the principal (-z) branch cut"};
+    const ComplexInterval logMinusZ = enclosePrincipalComplexLog(minusZ, workBits).interval;
+    const auto principalPower = [&](const ComplexInterval& exponent) {
+        return encloseComplexExp(multiply(exponent, logMinusZ, workBits), workBits).interval;
+    };
+
+    try {
+        const ComplexInterval gammaC = pointGammaComplex(c, workBits);
+        const ComplexInterval gammaBMinusA = pointGammaComplex(subtract(b, a, workBits), workBits);
+        const ComplexInterval gammaAMinusB = pointGammaComplex(subtract(a, b, workBits), workBits);
+        const ComplexInterval gammaB = pointGammaComplex(b, workBits);
+        const ComplexInterval gammaA = pointGammaComplex(a, workBits);
+        const ComplexInterval gammaCMinusA = pointGammaComplex(subtract(c, a, workBits), workBits);
+        const ComplexInterval gammaCMinusB = pointGammaComplex(subtract(c, b, workBits), workBits);
+
+        const ComplexInterval one = exactComplex(1, workBits);
+        const ComplexInterval firstHyper = pointHypergeometric2F1Complex(
+            a,
+            add(subtract(one, c, workBits), a, workBits),
+            add(subtract(one, b, workBits), a, workBits),
+            reciprocalZ, workBits);
+        const ComplexInterval secondHyper = pointHypergeometric2F1Complex(
+            b,
+            add(subtract(one, c, workBits), b, workBits),
+            add(subtract(one, a, workBits), b, workBits),
+            reciprocalZ, workBits);
+
+        ComplexInterval firstCoefficient = multiply(gammaC, gammaBMinusA, workBits);
+        firstCoefficient = divide(firstCoefficient,
+            multiply(gammaB, gammaCMinusA, workBits), workBits);
+        ComplexInterval secondCoefficient = multiply(gammaC, gammaAMinusB, workBits);
+        secondCoefficient = divide(secondCoefficient,
+            multiply(gammaA, gammaCMinusB, workBits), workBits);
+
+        const ComplexInterval firstPower = principalPower(negate(a));
+        const ComplexInterval secondPower = principalPower(negate(b));
+        const ComplexInterval first = multiply(
+            multiply(firstCoefficient, firstPower, workBits), firstHyper, workBits);
+        const ComplexInterval second = multiply(
+            multiply(secondCoefficient, secondPower, workBits), secondHyper, workBits);
+        return add(first, second, workBits).roundedOutward(precisionBits);
+    } catch (const std::domain_error&) {
+        throw CertifiedBackendUnsupported{
+            "hypergeometric2F1 1/z connection is degenerate for these parameters"};
+    }
+}
+
+[[nodiscard]] ComplexInterval pointZetaComplex(
+    const ComplexInterval& s,
+    std::size_t precisionBits) {
+    const Rational sigma = s.real().lower().toRational();
+    if (sigma <= rational(1))
+        throw CertifiedBackendUnsupported{"zeta certified complex backend currently requires Re(s) > 1"};
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 72, "complex zeta working precision is too large");
+    const Rational target = binaryThreshold(checkedAdd(
+        precisionBits, 24, "complex zeta target precision is too large"));
+    const Rational absS = complexAbsUpper(s, workBits);
+    const Rational twoPiLower = rational(2) * enclosePi(workBits).interval.lower().toRational();
+
+    std::uint64_t chosenN = 0;
+    std::size_t chosenK = 0;
+    Rational remainderBound;
+    for (std::uint64_t N : {8ULL, 16ULL, 32ULL, 64ULL, 128ULL}) {
+        for (std::size_t k = 2; k <= 40; ++k) {
+            consumeCertifiedWork();
+            Rational risingBound{BigInt{1}};
+            for (std::size_t j = 0; j < 2 * k; ++j)
+                risingBound *= absS + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(j))};
+            const Rational fourierDenominator = rationalPower(twoPiLower, 2 * k);
+            const Rational exponent = rational(1) - sigma
+                - Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k))};
+            const Rational nPower = positiveIntegerBasePower(N, exponent, workBits)
+                .upper().toRational();
+            // |B_2k({x})| <= 2(2k)! zeta(2k)/(2pi)^(2k), zeta(2k)<2.
+            const Rational bound = rational(4) * risingBound * nPower
+                / (fourierDenominator
+                    * (sigma + Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k - 1))}));
+            if (bound <= target) {
+                chosenN = N;
+                chosenK = k;
+                remainderBound = bound;
+                break;
+            }
+        }
+        if (chosenN != 0)
+            break;
+    }
+    if (chosenN == 0)
+        throw CertifiedBackendUnsupported{"complex zeta Euler-Maclaurin budget is insufficient"};
+
+    ComplexInterval result = exactComplex(0, workBits);
+    const ComplexInterval negativeS = negate(s);
+    for (std::uint64_t n = 1; n < chosenN; ++n) {
+        consumeCertifiedWork();
+        result = add(result, positiveIntegerComplexPower(n, negativeS, workBits), workBits);
+    }
+
+    const ComplexInterval oneMinusS = subtract(exactComplex(1, workBits), s, workBits);
+    const ComplexInterval integralNumerator = positiveIntegerComplexPower(
+        chosenN, oneMinusS, workBits);
+    const ComplexInterval sMinusOne = subtract(s, exactComplex(1, workBits), workBits);
+    result = add(result, divide(integralNumerator, sMinusOne, workBits), workBits);
+    result = add(result, multiplyByRational(
+        positiveIntegerComplexPower(chosenN, negativeS, workBits), rational(1, 2), workBits), workBits);
+
+    for (std::size_t k = 1; k < chosenK; ++k) {
+        consumeCertifiedWork();
+        ComplexInterval rising = exactComplex(1, workBits);
+        for (std::size_t j = 0; j < 2 * k - 1; ++j)
+            rising = multiply(rising,
+                add(s, exactComplex(static_cast<std::int64_t>(j), workBits), workBits), workBits);
+        const BigInt factorial = numeric::factorial(static_cast<std::uint64_t>(2 * k));
+        const Rational coefficient = bernoulliEven(k) / Rational{factorial};
+        const ComplexInterval exponent = negate(add(
+            s, exactComplex(static_cast<std::int64_t>(2 * k - 1), workBits), workBits));
+        ComplexInterval correction = multiply(
+            rising, positiveIntegerComplexPower(chosenN, exponent, workBits), workBits);
+        correction = multiplyByRational(correction, coefficient, workBits);
+        result = add(result, correction, workBits);
+    }
+    return inflateComplex(result, remainderBound, workBits).roundedOutward(precisionBits);
+}
+
+} // namespace
 
 /*
 旧実装
@@ -2013,6 +3204,32 @@ RealInterval encloseErfcReal(
     return RealInterval{lower.lower(), upper.upper()};
 }
 
+ComplexInterval encloseErfComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("erf precision must be at least one bit");
+    return pointErfComplex(input, precisionBits);
+}
+
+ComplexInterval encloseErfcComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 24, "complex erfc working precision is too large");
+    return subtract(
+        exactComplex(1, workBits), pointErfComplex(input, workBits), workBits)
+        .roundedOutward(precisionBits);
+}
+
+ComplexInterval encloseGammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Gamma precision must be at least one bit");
+    return pointGammaComplex(input, precisionBits);
+}
+
 [[nodiscard]] RealInterval encloseBetaLogPositiveRational(
     const Rational& a,
     const Rational& b,
@@ -2078,6 +3295,22 @@ RealInterval encloseFresnelSReal(
 }
 
 
+ComplexInterval encloseFresnelCComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Fresnel C precision must be at least one bit");
+    return pointFresnelComplex(input, precisionBits, false);
+}
+
+ComplexInterval encloseFresnelSComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Fresnel S precision must be at least one bit");
+    return pointFresnelComplex(input, precisionBits, true);
+}
+
 RealInterval encloseHypergeometric1F1Real(
     const Rational& a,
     const Rational& b,
@@ -2086,6 +3319,16 @@ RealInterval encloseHypergeometric1F1Real(
     if (precisionBits == 0)
         throw std::invalid_argument("hypergeometric1F1 precision must be at least one bit");
     return pointHypergeometric1F1(a, b, z, precisionBits);
+}
+
+ComplexInterval encloseHypergeometric1F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("hypergeometric1F1 precision must be at least one bit");
+    return pointHypergeometric1F1Complex(a, b, z, precisionBits);
 }
 
 RealInterval encloseHypergeometric2F1Real(
@@ -2097,6 +3340,17 @@ RealInterval encloseHypergeometric2F1Real(
     if (precisionBits == 0)
         throw std::invalid_argument("hypergeometric2F1 precision must be at least one bit");
     return pointHypergeometric2F1(a, b, c, z, precisionBits);
+}
+
+ComplexInterval encloseHypergeometric2F1Complex(
+    const ComplexInterval& a,
+    const ComplexInterval& b,
+    const ComplexInterval& c,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("hypergeometric2F1 precision must be at least one bit");
+    return pointHypergeometric2F1Complex(a, b, c, z, precisionBits);
 }
 
 RealInterval encloseEllipticFReal(
@@ -2112,6 +3366,31 @@ RealInterval encloseEllipticEReal(
 RealInterval encloseEllipticPiReal(
     const Rational& n, const Rational& phi, const Rational& m, std::size_t precisionBits) {
     return pointEllipticSeries(EllipticSeriesKind::Pi, n, phi, m, precisionBits);
+}
+
+RealInterval encloseEllipticFReal(
+    const RealInterval& phi, const RealInterval& m, std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("ellipticF precision must be at least one bit");
+    return intervalEllipticSeries(
+        EllipticSeriesKind::F, exactInterval(0, precisionBits), phi, m, precisionBits);
+}
+
+RealInterval encloseEllipticEReal(
+    const RealInterval& phi, const RealInterval& m, std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("ellipticE precision must be at least one bit");
+    return intervalEllipticSeries(
+        EllipticSeriesKind::E, exactInterval(0, precisionBits), phi, m, precisionBits);
+}
+
+RealInterval encloseEllipticPiReal(
+    const RealInterval& n, const RealInterval& phi, const RealInterval& m,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("ellipticPi precision must be at least one bit");
+    return intervalEllipticSeries(
+        EllipticSeriesKind::Pi, n, phi, m, precisionBits);
 }
 
 
@@ -2180,6 +3459,44 @@ RealInterval encloseLogarithmicIntegralLiPositive(
     return encloseExponentialIntegralEiReal(logarithm, workBits).roundedOutward(precisionBits);
 }
 
+ComplexInterval encloseExponentialIntegralEiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Ei precision must be at least one bit");
+    return pointEiComplex(input, precisionBits);
+}
+
+ComplexInterval encloseSineIntegralSiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Si precision must be at least one bit");
+    return pointSiComplex(input, precisionBits);
+}
+
+ComplexInterval encloseCosineIntegralCiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("Ci precision must be at least one bit");
+    return pointCiComplex(input, precisionBits);
+}
+
+ComplexInterval encloseLogarithmicIntegralLiComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("li precision must be at least one bit");
+    const std::size_t workBits = checkedAdd(
+        precisionBits, 32, "li complex working precision is too large");
+    const ComplexInterval logarithm = enclosePrincipalComplexLog(
+        input.roundedOutward(workBits), workBits).interval;
+    // li(z)=Ei(Log(z)) はこのEiが最終演算である。Logの入力区間はガード桁で
+    // 作るが，Eiの出力まで同じ余分な32bitを要求するとEi自身のガードと二重になる。
+    return pointEiComplex(logarithm, precisionBits);
+}
+
 RealInterval enclosePolylogReal(
     std::uint64_t order,
     const Rational& z,
@@ -2187,6 +3504,15 @@ RealInterval enclosePolylogReal(
     if (precisionBits == 0)
         throw std::invalid_argument("polylog precision must be at least one bit");
     return pointPolylogPositiveOrder(order, z, precisionBits);
+}
+
+ComplexInterval enclosePolylogComplex(
+    std::uint64_t order,
+    const ComplexInterval& z,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("polylog precision must be at least one bit");
+    return pointPolylogComplex(order, z, precisionBits);
 }
 
 RealInterval encloseBetaRational(
@@ -2213,13 +3539,40 @@ RealInterval encloseBetaPositive(
 RealInterval encloseZetaReal(
     const RealInterval& input,
     std::size_t precisionBits) {
-    if (input.lower().toRational() <= rational(1))
-        throw std::domain_error("zeta certified real backend currently requires s > 1");
     const Rational lower = input.lower().toRational();
     const Rational upper = input.upper().toRational();
+    if (input.isPoint() && lower == rational(1))
+        throw std::domain_error("zeta has a pole at s = 1");
+    if (lower <= rational(1))
+        throw CertifiedBackendUnsupported{
+            "zeta certified real backend currently requires s > 1"};
     const RealInterval lowValue = pointZetaGreaterThanOne(upper, precisionBits);
     const RealInterval highValue = pointZetaGreaterThanOne(lower, precisionBits);
     return RealInterval{lowValue.lower(), highValue.upper()};
+}
+
+ComplexInterval encloseZetaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("zeta precision must be at least one bit");
+    return pointZetaComplex(input, precisionBits);
+}
+
+ComplexInterval encloseDigammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("digamma precision must be at least one bit");
+    return pointDigammaComplex(input, precisionBits);
+}
+
+ComplexInterval encloseTrigammaComplex(
+    const ComplexInterval& input,
+    std::size_t precisionBits) {
+    if (precisionBits == 0)
+        throw std::invalid_argument("trigamma precision must be at least one bit");
+    return pointTrigammaComplex(input, precisionBits);
 }
 
 RealInterval encloseDigammaPositive(

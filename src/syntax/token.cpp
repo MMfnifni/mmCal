@@ -53,6 +53,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
         return "}";
     case TokenKind::Comma:
         return ",";
+    case TokenKind::Semicolon:
+        return ";";
     case TokenKind::Percent:
         return "%";
     case TokenKind::At:

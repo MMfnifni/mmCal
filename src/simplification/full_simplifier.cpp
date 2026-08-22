@@ -3,6 +3,7 @@
 #include "expression/array_utils.hpp"
 
 #include "expression_cost.hpp"
+#include "mathematics/definedness.hpp"
 #include "mathematics/predicate.hpp"
 #include "mathematics/trigonometric_polynomial.hpp"
 #include "numeric/big_int.hpp"
@@ -30,6 +31,25 @@ using expression::Expr;
     const evaluation::BuiltinRegistry& builtins,
     evaluation::BuiltinId id) {
     return builtins.isCallTo(expression, id);
+}
+
+
+[[nodiscard]] bool provablyDefined(
+    const Expr& expression,
+    const SimplificationContext& context) {
+    if (context.assumeExpressionsDefined)
+        return true;
+
+    const auto conditions = mathematics::expressionDomainConditions(
+        expression, context.builtins, context.mathematics);
+    if (!conditions)
+        return false;
+
+    const mathematics::KnowledgeContext knowledge = context.knowledge();
+    for (const mathematics::Predicate& condition : conditions->predicates())
+        if (knowledge.prove(condition) != mathematics::TruthValue::True)
+            return false;
+    return true;
 }
 
 [[nodiscard]] Expr integer(std::int64_t value) {
@@ -67,7 +87,8 @@ using expression::Expr;
         for (std::size_t j = 0; j < denominatorFactors.size(); ++j) {
             if (!(numeratorFactors[i] == denominatorFactors[j]))
                 continue;
-            if (knowledge.prove(mathematics::relation(
+            if (!provablyDefined(numeratorFactors[i], context)
+                || knowledge.prove(mathematics::relation(
                     mathematics::RelationKind::NotEqual,
                     numeratorFactors[i], integer(0))) != mathematics::TruthValue::True)
                 continue;
@@ -392,10 +413,12 @@ using expression::Expr;
     // 高次三角冪を常時展開すると式が大きくなるためSimplifierの既定規則にはしない。
     // FullSimplifyのbounded candidateとしてだけ有限Fourier恒等式を試し、
     // D[F]-fのように展開後に大きく相殺できる場合だけcost比較で採用する。
-    if (const auto reduced = mathematics::reduceTrigMonomial(expression, context.builtins))
-        variants.push_back(*reduced);
-    if (const auto reduced = mathematics::reduceTrigProduct(expression, context.builtins))
-        variants.push_back(*reduced);
+    if (provablyDefined(expression, context)) {
+        if (const auto reduced = mathematics::reduceTrigMonomial(expression, context.builtins))
+            variants.push_back(*reduced);
+        if (const auto reduced = mathematics::reduceTrigProduct(expression, context.builtins))
+            variants.push_back(*reduced);
+    }
     return variants;
 }
 
@@ -468,6 +491,19 @@ Expr fullSimplify(
     auto consider = [&](Expr candidate) {
         if (seen.size() >= options.maximumCandidates)
             return;
+        if (context.budget)
+            context.budget->consume(
+                evaluation::EvaluationResource::SimplificationCandidate);
+        else
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::SimplificationCandidate);
+        const ExpressionCost generatedCost = measureExpressionCost(candidate);
+        if (context.budget)
+            context.budget->consume(
+                evaluation::EvaluationResource::GeneratedNode, generatedCost.nodes);
+        else
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::GeneratedNode, generatedCost.nodes);
         candidate = simplifier.simplify(candidate, context);
         if (contains(seen, candidate))
             return;

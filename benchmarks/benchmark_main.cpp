@@ -7,6 +7,8 @@
 #include "builtins/signal_processing.hpp"
 #include "builtins/linear_algebra.hpp"
 #include "linear_algebra/decomposition.hpp"
+#include "linear_algebra/fraction_free_elimination.hpp"
+#include "linear_algebra/modular_linear_algebra.hpp"
 #include "kernel/kernel_session.hpp"
 #include "evaluation/builtin_registry.hpp"
 #include "expression/expr.hpp"
@@ -20,6 +22,7 @@
 #include "symbols/symbol_table.hpp"
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/number_field.hpp"
+#include "certification_boundary_fuzzer.hpp"
 #include "random_expression_fuzzer.hpp"
 
 #include <algorithm>
@@ -31,9 +34,11 @@
 #include <iostream>
 #include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -42,6 +47,20 @@ using Clock = std::chrono::steady_clock;
 using mmcal::numeric::BigInt;
 using mmcal::numeric::Rational;
 using mmcal::numeric::RealNumber;
+
+class BenchmarkFailure final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+[[noreturn]] void reportUnavailableBenchmarkResult(
+    std::string_view operation,
+    std::size_t size,
+    std::size_t digits) {
+    throw BenchmarkFailure{
+        std::string{operation} + " returned no certified result (size="
+        + std::to_string(size) + ", digits=" + std::to_string(digits) + ")"};
+}
 
 [[nodiscard]] BigInt randomPositiveBigInt(
     std::mt19937_64& rng,
@@ -335,6 +354,118 @@ void runExactCyclotomicFftBenchmark(std::size_t iterations) {
     return std::chrono::duration<double, std::milli>(end - start).count() / iterations;
 }
 
+struct ApproximateFftCrossoverTiming final {
+    double directMilliseconds = 0.0;
+    double bluesteinMilliseconds = 0.0;
+};
+
+[[nodiscard]] ApproximateFftCrossoverTiming benchmarkApproximateFftCrossover(
+    std::size_t size,
+    std::size_t digits,
+    std::size_t iterations) {
+    FourierFixture fixture;
+    const mmcal::expression::Expr input = fourierInput(size);
+    const std::array<mmcal::expression::Expr, 1> arguments{input};
+
+    std::optional<mmcal::expression::Expr> directResult;
+    const auto directStart = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i) {
+        directResult = mmcal::builtins::evaluateApproximateDft(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles,
+            mmcal::approximation::ApproximationContext{digits});
+        if (!directResult)
+            std::abort();
+    }
+    const auto directEnd = Clock::now();
+
+    std::optional<mmcal::expression::Expr> bluesteinResult;
+    const auto bluesteinStart = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i) {
+        bluesteinResult = mmcal::builtins::evaluateApproximateBluesteinFftForBenchmark(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles,
+            mmcal::approximation::ApproximationContext{digits});
+        if (!bluesteinResult)
+            std::abort();
+    }
+    const auto bluesteinEnd = Clock::now();
+
+    const auto displayedComponents = [](const mmcal::expression::Expr& value)
+        -> std::optional<std::pair<Rational, Rational>> {
+        if (value.isDecimalApproximation())
+            return std::pair{value.asDecimalApproximation().displayedValue(), Rational{}};
+        if (value.isComplexDecimalApproximation()) {
+            const auto& complex = value.asComplexDecimalApproximation();
+            return std::pair{
+                complex.real().displayedValue(), complex.imaginary().displayedValue()};
+        }
+        return std::nullopt;
+    };
+    const auto sameDisplayedArray = [&] {
+        const auto& directArray = directResult->asArray();
+        const auto& bluesteinArray = bluesteinResult->asArray();
+        if (directArray.shape != bluesteinArray.shape)
+            return false;
+        for (std::size_t index = 0; index < directArray.size(); ++index) {
+            const auto direct = displayedComponents(directArray.element(index));
+            const auto bluestein = displayedComponents(bluesteinArray.element(index));
+            if (!direct || !bluestein || *direct != *bluestein)
+                return false;
+        }
+        return true;
+    };
+
+    if (!sameDisplayedArray()) {
+        const auto& directArray = directResult->asArray();
+        const auto& bluesteinArray = bluesteinResult->asArray();
+        for (std::size_t index = 0;
+             index < std::min(directArray.size(), bluesteinArray.size()); ++index) {
+            const auto direct = displayedComponents(directArray.element(index));
+            const auto bluestein = displayedComponents(bluesteinArray.element(index));
+            if (!direct || !bluestein || *direct != *bluestein) {
+                throw BenchmarkFailure{
+                    "Direct DFT and forced Bluestein differ at size "
+                    + std::to_string(size) + ", index " + std::to_string(index)
+                    + ": direct=" + mmcal::formatting::formatExpr(directArray.element(index))
+                    + ", Bluestein="
+                    + mmcal::formatting::formatExpr(bluesteinArray.element(index))};
+            }
+        }
+        throw BenchmarkFailure{
+            "Direct DFT and forced Bluestein result shapes differ at size "
+            + std::to_string(size)};
+    }
+
+    return ApproximateFftCrossoverTiming{
+        std::chrono::duration<double, std::milli>(directEnd - directStart).count()
+            / static_cast<double>(iterations),
+        std::chrono::duration<double, std::milli>(bluesteinEnd - bluesteinStart).count()
+            / static_cast<double>(iterations)};
+}
+
+void runApproximateFftThresholdBenchmark(std::size_t iterations) {
+    if (iterations == 0)
+        throw std::invalid_argument("FFT threshold benchmark iterations must be positive");
+
+    constexpr std::array<std::size_t, 15> sizes{
+        65, 95, 127, 191, 255, 257, 319, 335, 351, 367, 383, 384, 385, 447, 509};
+    std::cout << "certified FFT direct/Bluestein threshold sweep"
+              << " (16 digits, " << iterations << " iteration"
+              << (iterations == 1 ? "" : "s") << ")\n"
+              << "current policy: direct below "
+              << mmcal::builtins::approximateFftBluesteinThreshold
+              << " points, Bluestein at or above it\n";
+    for (const std::size_t size : sizes) {
+        const ApproximateFftCrossoverTiming timing =
+            benchmarkApproximateFftCrossover(size, 16, iterations);
+        std::cout << std::setw(5) << size << " points  direct="
+                  << std::fixed << std::setprecision(3) << timing.directMilliseconds
+                  << " ms  Bluestein=" << timing.bluesteinMilliseconds
+                  << " ms  faster="
+                  << (timing.directMilliseconds <= timing.bluesteinMilliseconds
+                      ? "direct" : "Bluestein") << '\n';
+    }
+}
+
 struct MatrixFixture final {
     mmcal::symbols::SymbolTable symbols;
     mmcal::evaluation::BuiltinRegistry registry;
@@ -355,6 +486,33 @@ struct MatrixFixture final {
             const std::int64_t value = row == column
                 ? static_cast<std::int64_t>(4 * size + 1 + salt % 3)
                 : static_cast<std::int64_t>((row * 17 + column * 29 + salt) % 5) - 2;
+            builder.append(BigInt{value});
+        }
+    }
+    return mmcal::expression::Expr::array(builder.finish({size, size}));
+}
+
+// Eigen / eigensystemのtimingにはsimple spectrumを構成的に保証した密実対称行列を使う。
+// 非対角成分の絶対値は高々2，隣接する対角値の間隔は4n+1なので，各Gershgorin円板は
+// 互いに素になる。したがって各円板は固有値をちょうど1個含み，重複固有値は生じない。
+[[nodiscard]] mmcal::expression::Expr simpleSpectrumMatrixInput(
+    std::size_t size,
+    unsigned salt) {
+    mmcal::expression::ArrayBuilder builder;
+    builder.reserve(size * size);
+    const std::int64_t spacing = static_cast<std::int64_t>(4 * size + 1);
+    const std::int64_t diagonalBase = spacing + static_cast<std::int64_t>(salt % 3);
+    for (std::size_t row = 0; row < size; ++row) {
+        for (std::size_t column = 0; column < size; ++column) {
+            std::int64_t value = 0;
+            if (row == column) {
+                value = diagonalBase + spacing * static_cast<std::int64_t>(row);
+            }
+            else {
+                const std::size_t low = std::min(row, column);
+                const std::size_t high = std::max(row, column);
+                value = static_cast<std::int64_t>((low * 17 + high * 29 + salt) % 5) - 2;
+            }
             builder.append(BigInt{value});
         }
     }
@@ -613,7 +771,7 @@ struct MatrixFixture final {
 [[nodiscard]] double benchmarkApproximateEigenvalues(
     std::size_t size, std::size_t digits, int iterations) {
     MatrixFixture fixture;
-    const mmcal::expression::Expr input = matrixInput(size, 29);
+    const mmcal::expression::Expr input = simpleSpectrumMatrixInput(size, 29);
     const std::array<mmcal::expression::Expr, 1> arguments{input};
     std::size_t checksum = 0;
     const auto start = Clock::now();
@@ -622,7 +780,7 @@ struct MatrixFixture final {
             arguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
-            std::abort();
+            reportUnavailableBenchmarkResult("N[eigenvalues]", size, digits);
         checksum += result->asArray().size();
     }
     const auto end = Clock::now();
@@ -634,7 +792,7 @@ struct MatrixFixture final {
 [[nodiscard]] double benchmarkApproximateEigensystem(
     std::size_t size, std::size_t digits, int iterations) {
     MatrixFixture fixture;
-    const mmcal::expression::Expr input = matrixInput(size, 29);
+    const mmcal::expression::Expr input = simpleSpectrumMatrixInput(size, 29);
     const std::array<mmcal::expression::Expr, 1> arguments{input};
     std::size_t checksum = 0;
     const auto start = Clock::now();
@@ -643,7 +801,7 @@ struct MatrixFixture final {
             arguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{digits});
         if (!result)
-            std::abort();
+            reportUnavailableBenchmarkResult("N[eigensystem]", size, digits);
         checksum += result->isArray() ? result->asArray().size() : result->asList().elements.size();
     }
     const auto end = Clock::now();
@@ -741,6 +899,28 @@ struct MatrixFixture final {
             const std::int64_t value = row == column
                 ? static_cast<std::int64_t>(4 * size + 1 + rng() % 5)
                 : static_cast<std::int64_t>(rng() % 7) - 3;
+            values.emplace_back(mmcal::numeric::Number{BigInt{value}});
+        }
+    }
+    return mmcal::expression::Expr::array({size, size}, std::move(values));
+}
+
+// eigensystemには完全な固有vector基底が存在する入力を渡す。可逆性だけでは
+// defective Jordan blockを排除できないため，互いに異なる対角値を持つ上三角行列を
+// 構成し，distinct eigenvalueによる対角化可能性を保証する。
+[[nodiscard]] mmcal::expression::Expr randomSimpleSpectrumMatrix(
+    std::mt19937_64& rng,
+    std::size_t size) {
+    std::vector<mmcal::expression::Expr> values;
+    values.reserve(size * size);
+    const std::int64_t diagonalBase = static_cast<std::int64_t>(5 * size + 3);
+    for (std::size_t row = 0; row < size; ++row) {
+        for (std::size_t column = 0; column < size; ++column) {
+            std::int64_t value = 0;
+            if (row == column)
+                value = diagonalBase + static_cast<std::int64_t>(7 * row);
+            else if (row < column)
+                value = static_cast<std::int64_t>(rng() % 7) - 3;
             values.emplace_back(mmcal::numeric::Number{BigInt{value}});
         }
     }
@@ -917,6 +1097,7 @@ struct DisplayedComplex final {
         const auto lambda = displayedComplex(lambdas.element(column));
         if (!lambda)
             return false;
+        bool nonzeroVector = false;
         for (std::size_t row = 0; row < size; ++row) {
             DisplayedComplex av{Rational{BigInt{0}}, Rational{BigInt{0}}};
             for (std::size_t k = 0; k < size; ++k) {
@@ -931,11 +1112,16 @@ struct DisplayedComplex final {
             const auto vr = displayedComplex(v.element(row * size + column));
             if (!vr)
                 return false;
+            nonzeroVector = nonzeroVector
+                || absoluteRational(vr->real) > tolerance
+                || absoluteRational(vr->imaginary) > tolerance;
             const DisplayedComplex lv = multiplyDisplayed(*lambda, *vr);
             if (absoluteRational(av.real - lv.real) > tolerance
                 || absoluteRational(av.imaginary - lv.imaginary) > tolerance)
                 return false;
         }
+        if (!nonzeroVector)
+            return false;
     }
     return true;
 }
@@ -943,36 +1129,74 @@ struct DisplayedComplex final {
 [[nodiscard]] bool runRandomMatrixChecks(std::size_t count) {
     MatrixFixture fixture;
     std::mt19937_64 rng{0x4D41545249584345ULL};
+    std::mt19937_64 eigenRng{0x454947454E434552ULL};
+
+    // timingで使う全サイズをrandom-onlyでも直接監視し，測定開始後のabortを防ぐ。
+    constexpr std::array<std::size_t, 4> eigenTimingSizes{4, 8, 12, 16};
+    for (const std::size_t size : eigenTimingSizes) {
+        const auto matrix = simpleSpectrumMatrixInput(size, 29);
+        const std::array<mmcal::expression::Expr, 1> arguments{matrix};
+        const auto system = mmcal::builtins::evaluateApproximateEigensystem(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles,
+            mmcal::approximation::ApproximationContext{16});
+        if (!system || !system->isList() || system->asList().elements.size() != 2) {
+            std::cerr << "Fixed Eigen timing input failure: stage=shape size=" << size
+                << " matrix=" << mmcal::formatting::formatExpr(matrix) << '\n';
+            return false;
+        }
+        const auto& values = system->asList().elements[0];
+        const auto& vectors = system->asList().elements[1];
+        if (!values.isArray() || values.asArray().shape != std::vector<std::size_t>{size}
+            || !vectors.isArray()
+            || vectors.asArray().shape != std::vector<std::size_t>{size, size}
+            || !verifyDisplayedEigenRelation(matrix, values, vectors)) {
+            std::cerr << "Fixed Eigen timing input failure: stage=relation size=" << size
+                << " matrix=" << mmcal::formatting::formatExpr(matrix) << '\n';
+            return false;
+        }
+    }
 
     for (std::size_t caseIndex = 0; caseIndex < count; ++caseIndex) {
         const std::size_t size = 1 + rng() % 5;
         const auto matrix = randomInvertibleMatrix(rng, size);
         const std::array<mmcal::expression::Expr, 1> unary{matrix};
+        const auto reportFailure = [&](std::string_view stage,
+            const mmcal::expression::Expr& subject) {
+            std::cerr << "Random certified Matrix failure: stage=" << stage
+                << " case=" << (caseIndex + 1)
+                << " case-index=" << caseIndex
+                << " size=" << subject.asArray().shape[0]
+                << " matrix=" << mmcal::formatting::formatExpr(subject) << '\n';
+            return false;
+        };
+        const auto fail = [&](std::string_view stage) {
+            return reportFailure(stage, matrix);
+        };
 
         const auto determinant = mmcal::builtins::evaluateDeterminant(
             unary, fixture.registry, fixture.mathematics, fixture.angles);
         if (!determinant.isNumber() || !determinant.asNumber().isReal()
             || determinant.asNumber().isZero())
-            return false;
+            return fail("exact-determinant");
 
         const auto transposed = mmcal::builtins::evaluateTranspose(unary, fixture.registry);
         const std::array<mmcal::expression::Expr, 1> transposedArguments{transposed};
         const auto transposedDeterminant = mmcal::builtins::evaluateDeterminant(
             transposedArguments, fixture.registry, fixture.mathematics, fixture.angles);
         if (!(transposedDeterminant == determinant))
-            return false;
+            return fail("transpose-determinant");
 
         const auto inverse = mmcal::builtins::evaluateMatrixInverse(
             unary, fixture.registry, fixture.mathematics, fixture.angles);
         const std::array<mmcal::expression::Expr, 2> productArguments{matrix, inverse};
         if (!isExactIdentity(mmcal::builtins::evaluateDot(
                 productArguments, fixture.registry, fixture.mathematics, fixture.angles)))
-            return false;
+            return fail("exact-inverse");
 
         const auto lu = mmcal::builtins::evaluateLuDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles);
         if (!lu.isArray() || lu.asArray().shape != std::vector<std::size_t>{3, size, size})
-            return false;
+            return fail("exact-lu-shape");
         const auto permutation = packedMatrixFactor(lu, 0);
         const auto lower = packedMatrixFactor(lu, 1);
         const auto upper = packedMatrixFactor(lu, 2);
@@ -982,14 +1206,14 @@ struct DisplayedComplex final {
                 paArguments, fixture.registry, fixture.mathematics, fixture.angles)
             == mmcal::builtins::evaluateDot(
                 luArguments, fixture.registry, fixture.mathematics, fixture.angles)))
-            return false;
+            return fail("exact-lu-reconstruction");
 
         const auto approximateQr = mmcal::builtins::evaluateApproximateQrDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!approximateQr || !approximateQr->isArray()
             || approximateQr->asArray().shape != std::vector<std::size_t>{2, size, size})
-            return false;
+            return fail("certified-qr-shape");
         const auto q = packedMatrixFactor(*approximateQr, 0);
         const auto r = packedMatrixFactor(*approximateQr, 1);
         const std::array<mmcal::expression::Expr, 2> qrArguments{q, r};
@@ -997,7 +1221,7 @@ struct DisplayedComplex final {
             qrArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{18});
         if (!reconstructed || !approximateMatrixContainsExact(*reconstructed, matrix))
-            return false;
+            return fail("certified-qr-reconstruction");
 
         const std::array<mmcal::expression::Expr, 1> qUnary{q};
         const auto qt = mmcal::builtins::evaluateTranspose(qUnary, fixture.registry);
@@ -1012,14 +1236,14 @@ struct DisplayedComplex final {
                 identityElements.emplace_back(mmcal::numeric::Number{BigInt{row == column ? 1 : 0}});
         const auto identity = mmcal::expression::Expr::array({size, size}, std::move(identityElements));
         if (!qtq || !approximateMatrixContainsExact(*qtq, identity))
-            return false;
+            return fail("certified-qr-orthogonality");
 
         const auto approximateSvd = mmcal::builtins::evaluateApproximateSingularValueDecomposition(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!approximateSvd || !approximateSvd->isArray()
             || approximateSvd->asArray().shape != std::vector<std::size_t>{3, size, size})
-            return false;
+            return fail("certified-svd-shape");
         const auto svdU = packedMatrixFactor(*approximateSvd, 0);
         const auto svdS = packedMatrixFactor(*approximateSvd, 1);
         const auto svdV = packedMatrixFactor(*approximateSvd, 2);
@@ -1028,7 +1252,7 @@ struct DisplayedComplex final {
             usArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{18});
         if (!us)
-            return false;
+            return fail("certified-svd-us-product");
         const std::array<mmcal::expression::Expr, 1> svdVUnary{svdV};
         const auto svdVt = mmcal::builtins::evaluateTranspose(svdVUnary, fixture.registry);
         const std::array<mmcal::expression::Expr, 2> svdReconstructArguments{*us, svdVt};
@@ -1036,7 +1260,7 @@ struct DisplayedComplex final {
             svdReconstructArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{18});
         if (!svdReconstructed || !approximateMatrixContainsExact(*svdReconstructed, matrix))
-            return false;
+            return fail("certified-svd-reconstruction");
 
         // SVD backend自体は20桁でreconstruction/直交性をcertifyする。
         // ここでは20桁へ丸めて公開されたfactorを12桁interval演算へ再投入し，
@@ -1048,10 +1272,8 @@ struct DisplayedComplex final {
             complexUnary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!complexSvd || !complexSvd->isArray()
-            || complexSvd->asArray().shape != std::vector<std::size_t>{3, complexSize, complexSize}) {
-            std::cerr << "complex SVD factor failure case=" << caseIndex << " size=" << complexSize << "\n";
-            return false;
-        }
+            || complexSvd->asArray().shape != std::vector<std::size_t>{3, complexSize, complexSize})
+            return reportFailure("certified-complex-svd-shape", complexMatrix);
         const auto complexU = packedMatrixFactor(*complexSvd, 0);
         const auto complexS = packedMatrixFactor(*complexSvd, 1);
         const auto complexV = packedMatrixFactor(*complexSvd, 2);
@@ -1060,7 +1282,7 @@ struct DisplayedComplex final {
             complexUsArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{12});
         if (!complexUs)
-            return false;
+            return reportFailure("certified-complex-svd-us-product", complexMatrix);
         const std::array<mmcal::expression::Expr, 1> complexVUnary{complexV};
         const auto complexVh = mmcal::builtins::evaluateConjugateTranspose(
             complexVUnary, fixture.registry, fixture.mathematics, fixture.angles);
@@ -1068,10 +1290,8 @@ struct DisplayedComplex final {
         const auto complexReconstructed = mmcal::builtins::evaluateApproximateDot(
             complexReconstructArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{12});
-        if (!complexReconstructed || !approximateMatrixContainsExact(*complexReconstructed, complexMatrix)) {
-            std::cerr << "complex SVD reconstruction failure case=" << caseIndex << " size=" << complexSize << "\n";
-            return false;
-        }
+        if (!complexReconstructed || !approximateMatrixContainsExact(*complexReconstructed, complexMatrix))
+            return reportFailure("certified-complex-svd-reconstruction", complexMatrix);
 
         std::vector<mmcal::expression::Expr> complexIdentityElements;
         complexIdentityElements.reserve(complexSize * complexSize);
@@ -1088,36 +1308,34 @@ struct DisplayedComplex final {
         const auto complexUhu = mmcal::builtins::evaluateApproximateDot(
             complexUOrthogonalArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{12});
-        if (!complexUhu || !approximateMatrixContainsExact(*complexUhu, complexIdentity)) {
-            std::cerr << "complex SVD U orthogonality failure case=" << caseIndex << " size=" << complexSize << "\n";
-            return false;
-        }
+        if (!complexUhu || !approximateMatrixContainsExact(*complexUhu, complexIdentity))
+            return reportFailure("certified-complex-svd-u-orthogonality", complexMatrix);
         const std::array<mmcal::expression::Expr, 2> complexVOrthogonalArguments{complexVh, complexV};
         const auto complexVhv = mmcal::builtins::evaluateApproximateDot(
             complexVOrthogonalArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{12});
-        if (!complexVhv || !approximateMatrixContainsExact(*complexVhv, complexIdentity)) {
-            std::cerr << "complex SVD V orthogonality failure case=" << caseIndex << " size=" << complexSize << "\n";
-            return false;
-        }
+        if (!complexVhv || !approximateMatrixContainsExact(*complexVhv, complexIdentity))
+            return reportFailure("certified-complex-svd-v-orthogonality", complexMatrix);
 
+        const auto eigenMatrix = randomSimpleSpectrumMatrix(eigenRng, size);
+        const std::array<mmcal::expression::Expr, 1> eigenUnary{eigenMatrix};
         const auto eigenSystem = mmcal::builtins::evaluateApproximateEigensystem(
-            unary, fixture.registry, fixture.mathematics, fixture.angles,
+            eigenUnary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!eigenSystem || !eigenSystem->isList() || eigenSystem->asList().elements.size() != 2)
-            return false;
+            return reportFailure("certified-eigensystem-shape", eigenMatrix);
         const auto& eigenValues = eigenSystem->asList().elements[0];
         const auto& eigenVectors = eigenSystem->asList().elements[1];
         if (!eigenValues.isArray() || eigenValues.asArray().shape != std::vector<std::size_t>{size}
             || !eigenVectors.isArray()
             || eigenVectors.asArray().shape != std::vector<std::size_t>{size, size})
-            return false;
-        if (!verifyDisplayedEigenRelation(matrix, eigenValues, eigenVectors))
-            return false;
+            return reportFailure("certified-eigensystem-component-shape", eigenMatrix);
+        if (!verifyDisplayedEigenRelation(eigenMatrix, eigenValues, eigenVectors))
+            return reportFailure("certified-eigen-relation", eigenMatrix);
 
         if (!isExactIdentity(mmcal::builtins::evaluateRref(
                 unary, fixture.registry, fixture.mathematics, fixture.angles)))
-            return false;
+            return fail("exact-rref");
 
         const auto rationalMatrix = rationallyScaledMatrix(matrix);
         const std::array<mmcal::expression::Expr, 1> rationalUnary{rationalMatrix};
@@ -1127,10 +1345,10 @@ struct DisplayedComplex final {
             rationalMatrix, rationalInverse};
         if (!isExactIdentity(mmcal::builtins::evaluateDot(
                 rationalProductArguments, fixture.registry, fixture.mathematics, fixture.angles)))
-            return false;
+            return fail("rational-inverse");
         if (!isExactIdentity(mmcal::builtins::evaluateRref(
                 rationalUnary, fixture.registry, fixture.mathematics, fixture.angles)))
-            return false;
+            return fail("rational-rref");
 
         const auto expectedSolution = integerSolutionVector(size);
         const std::array<mmcal::expression::Expr, 2> rhsArguments{matrix, expectedSolution};
@@ -1140,7 +1358,7 @@ struct DisplayedComplex final {
         const auto solution = mmcal::builtins::evaluateSolveLinear(
             solveArguments, fixture.registry, fixture.mathematics, fixture.angles);
         if (!(solution == expectedSolution))
-            return false;
+            return fail("exact-linear-solve");
 
         const std::array<mmcal::expression::Expr, 2> rationalRhsArguments{
             rationalMatrix, expectedSolution};
@@ -1151,7 +1369,7 @@ struct DisplayedComplex final {
         if (!(mmcal::builtins::evaluateSolveLinear(
                 rationalSolveArguments, fixture.registry, fixture.mathematics, fixture.angles)
                 == expectedSolution))
-            return false;
+            return fail("rational-linear-solve");
 
         const auto dependentMatrix = matrixWithDependentColumn(matrix);
         const std::array<mmcal::expression::Expr, 1> dependentUnary{dependentMatrix};
@@ -1159,7 +1377,7 @@ struct DisplayedComplex final {
             dependentUnary, fixture.registry, fixture.mathematics, fixture.angles);
         if (!nullSpace.isArray() || nullSpace.asArray().shape != std::vector<std::size_t>{1, size + 1}
             || !validatesNullSpace(dependentMatrix, nullSpace, fixture))
-            return false;
+            return fail("exact-null-space");
 
         const auto rationalDependentMatrix = rationallyScaledMatrix(dependentMatrix);
         const std::array<mmcal::expression::Expr, 1> rationalDependentUnary{rationalDependentMatrix};
@@ -1168,25 +1386,25 @@ struct DisplayedComplex final {
         if (!rationalNullSpace.isArray()
             || rationalNullSpace.asArray().shape != std::vector<std::size_t>{1, size + 1}
             || !validatesNullSpace(rationalDependentMatrix, rationalNullSpace, fixture))
-            return false;
+            return fail("rational-null-space");
 
         const auto approximateSolution = mmcal::builtins::evaluateApproximateSolveLinear(
             solveArguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!approximateSolution || !approximateSolution->isArray()
             || approximateSolution->asArray().size() != size)
-            return false;
+            return fail("certified-linear-solve-shape");
         for (std::size_t i = 0; i < size; ++i)
             if (!approximateContainsInteger(approximateSolution->asArray().element(i),
                     Rational{BigInt{static_cast<std::int64_t>(i + 1)}}))
-                return false;
+                return fail("certified-linear-solve-containment");
 
         const auto approximateDeterminant = mmcal::builtins::evaluateApproximateDeterminant(
             unary, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{20});
         if (!approximateDeterminant || !approximateContainsInteger(
                 *approximateDeterminant, determinant.asNumber().asReal().toRational()))
-            return false;
+            return fail("certified-determinant-containment");
     }
     return true;
 }
@@ -1458,9 +1676,8 @@ void runLargeMatrixBenchmark(std::string_view operation, std::size_t size, std::
 
 void runBenchmarks(bool full) {
     std::cout << "BigInt multiply/division\n";
-    for (const std::size_t limbs : full
-        ? std::initializer_list<std::size_t>{64, 128, 256, 512, 1024, 2048, 4096}
-        : std::initializer_list<std::size_t>{64, 128, 256, 512, 1024}) {
+    constexpr std::array<std::size_t, 7> limbCases{64, 128, 256, 512, 1024, 2048, 4096};
+    for (const std::size_t limbs : std::span{limbCases}.first(full ? limbCases.size() : 5)) {
         const int iterations = limbs <= 256 ? 200 : limbs <= 1024 ? 40 : 8;
         std::cout << std::setw(5) << limbs << " limbs  mul="
                   << std::fixed << std::setprecision(3)
@@ -1470,30 +1687,26 @@ void runBenchmarks(bool full) {
     }
 
     std::cout << "factorial\n";
-    for (const std::uint64_t n : full
-        ? std::initializer_list<std::uint64_t>{10000, 20000, 40000, 80000}
-        : std::initializer_list<std::uint64_t>{10000, 20000, 40000}) {
+    constexpr std::array<std::uint64_t, 4> factorialCases{10000, 20000, 40000, 80000};
+    for (const std::uint64_t n : std::span{factorialCases}.first(full ? factorialCases.size() : 3)) {
         std::cout << std::setw(6) << n << "!  "
                   << benchmarkFactorial(n, n <= 10000 ? 3 : 1) << " ms\n";
     }
 
     std::cout << "decimal conversion\n";
-    for (const std::uint64_t n : full
-        ? std::initializer_list<std::uint64_t>{10000, 20000, 40000}
-        : std::initializer_list<std::uint64_t>{10000, 20000})
+    constexpr std::array<std::uint64_t, 3> decimalCases{10000, 20000, 40000};
+    for (const std::uint64_t n : std::span{decimalCases}.first(full ? decimalCases.size() : 2))
         benchmarkDecimalConversion(n);
 
     std::cout << "exact/certified Matrix\n";
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{16, 32, 64, 96}
-        : std::initializer_list<std::size_t>{16, 32, 64}) {
+    constexpr std::array<std::size_t, 4> exactDotCases{16, 32, 64, 96};
+    for (const std::size_t size : std::span{exactDotCases}.first(full ? exactDotCases.size() : 3)) {
         const int iterations = size <= 32 ? 5 : 2;
         std::cout << std::setw(5) << size << "x" << size << " dot="
                   << benchmarkExactDot(size, iterations) << " ms\n";
     }
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{8, 12, 16, 20}
-        : std::initializer_list<std::size_t>{8, 12, 16}) {
+    constexpr std::array<std::size_t, 4> exactMatrixCases{8, 12, 16, 20};
+    for (const std::size_t size : std::span{exactMatrixCases}.first(full ? exactMatrixCases.size() : 3)) {
         const int iterations = size <= 12 ? 3 : 1;
         std::cout << std::setw(5) << size << "x" << size << " det="
                   << benchmarkExactDeterminant(size, iterations) << " ms  rref="
@@ -1507,15 +1720,14 @@ void runBenchmarks(bool full) {
                   << benchmarkApproximateQr(size, 16, iterations) << " ms\n";
     }
 
-    std::cout << "exact Householder QR (small-order symbolic path)\n";
-    for (const std::size_t size : std::initializer_list<std::size_t>{2, 3})
+    std::cout << "exact fraction-free QR\n";
+    for (const std::size_t size : std::initializer_list<std::size_t>{2, 4, 8, 16})
         std::cout << std::setw(5) << size << "x" << size << " exact QR="
                   << benchmarkExactQr(size, 1) << " ms\n";
 
     std::cout << "certified Householder QR block sweep\n";
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{8, 16, 24, 32}
-        : std::initializer_list<std::size_t>{8, 16, 24}) {
+    constexpr std::array<std::size_t, 4> qrBlockCases{8, 16, 24, 32};
+    for (const std::size_t size : std::span{qrBlockCases}.first(full ? qrBlockCases.size() : 3)) {
         const int iterations = size <= 16 ? 2 : 1;
         std::cout << std::setw(5) << size << "x" << size
                   << " b1=" << benchmarkApproximateQrBlock(size, 16, iterations, 1) << " ms"
@@ -1525,9 +1737,7 @@ void runBenchmarks(bool full) {
     }
 
     std::cout << "certified reduced SVD\n";
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{4, 8, 12, 16}
-        : std::initializer_list<std::size_t>{4, 8, 12, 16}) {
+    for (const std::size_t size : std::initializer_list<std::size_t>{4, 8, 12, 16}) {
         const int iterations = size <= 8 ? 2 : 1;
         std::cout << std::setw(5) << size << "x" << size << " N[SVD,16]="
                   << benchmarkApproximateSvd(size, 16, iterations) << " ms\n";
@@ -1536,32 +1746,36 @@ void runBenchmarks(bool full) {
     std::cout << "certified eigen / eigensystem\n";
     for (const std::size_t size : std::initializer_list<std::size_t>{4, 8, 12, 16}) {
         const int iterations = size <= 8 ? 2 : 1;
+        const double eigenvaluesMilliseconds =
+            benchmarkApproximateEigenvalues(size, 16, iterations);
+        const double eigensystemMilliseconds =
+            benchmarkApproximateEigensystem(size, 16, iterations);
         std::cout << std::setw(5) << size << "x" << size << " N[eigenvalues,16]="
-                  << benchmarkApproximateEigenvalues(size, 16, iterations) << " ms  N[eigensystem,16]="
-                  << benchmarkApproximateEigensystem(size, 16, iterations) << " ms\n";
+                  << eigenvaluesMilliseconds << " ms  N[eigensystem,16]="
+                  << eigensystemMilliseconds << " ms\n";
     }
 
     std::cout << "exact/certified FFT\n";
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{32, 64, 128, 256, 512}
-        : std::initializer_list<std::size_t>{32, 64, 128}) {
+    constexpr std::array<std::size_t, 5> radixTwoFftCases{32, 64, 128, 256, 512};
+    for (const std::size_t size : std::span{radixTwoFftCases}.first(
+            full ? radixTwoFftCases.size() : 3)) {
         const int exactIterations = size <= 64 ? 3 : 1;
         const int approximateIterations = size <= 128 ? 5 : 2;
         std::cout << std::setw(5) << size << " points  exact="
                   << benchmarkExactFft(size, exactIterations) << " ms  N[...,16]="
                   << benchmarkApproximateFft(size, 16, approximateIterations) << " ms\n";
     }
-    for (const std::size_t size : full
-        ? std::initializer_list<std::size_t>{65, 127, 257, 509}
-        : std::initializer_list<std::size_t>{65, 127})
+    constexpr std::array<std::size_t, 4> directFftCases{65, 127, 257, 509};
+    for (const std::size_t size : std::span{directFftCases}.first(
+            full ? directFftCases.size() : 2))
         std::cout << std::setw(5) << size << " points  direct="
                   << benchmarkApproximateDft(size, 16, 2) << " ms  FFT="
                   << benchmarkApproximateFft(size, 16, 2) << " ms\n";
 
     std::cout << "certified exp/log\n";
-    for (const std::size_t digits : full
-        ? std::initializer_list<std::size_t>{100, 500, 1000, 2000, 5000, 10000}
-        : std::initializer_list<std::size_t>{100, 500, 1000, 2000}) {
+    constexpr std::array<std::size_t, 6> precisionCases{100, 500, 1000, 2000, 5000, 10000};
+    for (const std::size_t digits : std::span{precisionCases}.first(
+            full ? precisionCases.size() : 4)) {
         const int iterations = digits <= 500 ? 5 : digits <= 2000 ? 2 : 1;
         std::cout << std::setw(5) << digits << " digits  exp(1)="
                   << benchmarkExp(digits, iterations) << " ms  log(2)="
@@ -1752,6 +1966,358 @@ void runCertifiedSpecialFunctionBenchmark(std::size_t iterations) {
 }
 
 
+[[nodiscard]] mmcal::linear_algebra::IntegerMatrixBuffer exactBackendMatrix(
+    std::size_t size,
+    std::size_t coefficientBits,
+    unsigned salt) {
+    mmcal::linear_algebra::IntegerMatrixBuffer matrix{size, size};
+    BigInt diagonalBase{1};
+    if (coefficientBits > 1)
+        diagonalBase <<= coefficientBits - 1;
+
+    const BigInt diagonalScale{static_cast<std::int64_t>(2 * size + 3)};
+    for (std::size_t row = 0; row < size; ++row) {
+        for (std::size_t column = 0; column < size; ++column) {
+            const std::int64_t perturbation = 1 + static_cast<std::int64_t>(
+                (row * 37 + column * 53 + salt) % 127);
+            if (row == column) {
+                matrix(row, column) = diagonalBase * diagonalScale + BigInt{perturbation};
+                continue;
+            }
+
+            BigInt value = diagonalBase + BigInt{perturbation};
+            if (((row * 11 + column * 7 + salt) & 1U) != 0)
+                value = -value;
+            matrix(row, column) = std::move(value);
+        }
+    }
+    return matrix;
+}
+
+[[nodiscard]] mmcal::expression::Expr exactBackendExpr(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& matrix) {
+    std::vector<mmcal::expression::Expr> elements;
+    elements.reserve(matrix.size());
+    for (const BigInt& value : matrix.elements())
+        elements.emplace_back(mmcal::numeric::Number{value});
+    return mmcal::expression::Expr::array(
+        {matrix.rows(), matrix.columns()}, std::move(elements));
+}
+
+[[nodiscard]] double benchmarkExactPublicPath(
+    std::string_view operation,
+    const mmcal::expression::Expr& input) {
+    MatrixFixture fixture;
+    const std::array<mmcal::expression::Expr, 1> arguments{input};
+    std::size_t checksum = 0;
+    const auto start = Clock::now();
+    if (operation == "inverse") {
+        const auto result = mmcal::builtins::evaluateMatrixInverse(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles);
+        checksum = result.asArray().size();
+    } else if (operation == "rref") {
+        const auto result = mmcal::builtins::evaluateRref(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles);
+        checksum = result.asArray().size();
+    } else if (operation == "rank") {
+        const auto result = mmcal::builtins::evaluateMatrixRank(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles);
+        checksum = result.asNumber().asReal().toRational().numerator().bitLength();
+    } else if (operation == "null") {
+        const auto result = mmcal::builtins::evaluateNullSpace(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles);
+        checksum = result.asArray().size();
+    } else if (operation == "qr") {
+        const auto result = mmcal::builtins::evaluateQrDecomposition(
+            arguments, fixture.registry, fixture.mathematics, fixture.angles);
+        checksum = result.asArray().size();
+    } else {
+        throw std::invalid_argument("Unknown exact public-path benchmark operation");
+    }
+    const auto end = Clock::now();
+    if (checksum == 0 && operation != "null")
+        std::abort();
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+[[nodiscard]] mmcal::linear_algebra::IntegerMatrixBuffer exactBackendAugmented(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& matrix,
+    bool inverseRhs) {
+    const std::size_t size = matrix.rows();
+    const std::size_t rhsColumns = inverseRhs ? size : 1;
+    mmcal::linear_algebra::IntegerMatrixBuffer augmented{size, size + rhsColumns};
+    for (std::size_t row = 0; row < size; ++row) {
+        BigInt rowSum;
+        for (std::size_t column = 0; column < size; ++column) {
+            augmented(row, column) = matrix(row, column);
+            rowSum += matrix(row, column);
+        }
+        if (inverseRhs)
+            augmented(row, size + row) = BigInt{1};
+        else
+            augmented(row, size) = std::move(rowSum);
+    }
+    return augmented;
+}
+
+[[nodiscard]] double benchmarkBareissDeterminantBackend(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& matrix,
+    std::size_t iterations) {
+    std::size_t checksum = 0;
+    const auto start = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i)
+        checksum += mmcal::linear_algebra::bareissDeterminant(matrix).bitLength();
+    const auto end = Clock::now();
+    if (checksum == 0)
+        std::abort();
+    return std::chrono::duration<double, std::milli>(end - start).count()
+        / static_cast<double>(iterations);
+}
+
+[[nodiscard]] double benchmarkModularDeterminantBackend(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& matrix,
+    std::size_t iterations,
+    std::size_t& primes) {
+    std::size_t checksum = 0;
+    primes = 0;
+    const auto start = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i) {
+        mmcal::linear_algebra::ModularLinearAlgebraStats stats;
+        checksum += mmcal::linear_algebra::modularDeterminant(matrix, &stats).bitLength();
+        primes += stats.primesAccepted;
+    }
+    const auto end = Clock::now();
+    if (checksum == 0)
+        std::abort();
+    primes /= iterations;
+    return std::chrono::duration<double, std::milli>(end - start).count()
+        / static_cast<double>(iterations);
+}
+
+[[nodiscard]] double benchmarkBareissAugmentedCore(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& augmented,
+    std::size_t variables,
+    std::size_t iterations) {
+    std::size_t checksum = 0;
+    const auto start = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i)
+        checksum += mmcal::linear_algebra::bareissEchelon(augmented, variables).pivotColumns.size();
+    const auto end = Clock::now();
+    if (checksum == 0)
+        std::abort();
+    return std::chrono::duration<double, std::milli>(end - start).count()
+        / static_cast<double>(iterations);
+}
+
+[[nodiscard]] double benchmarkModularSolveBackend(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& augmented,
+    std::size_t variables,
+    std::size_t iterations,
+    std::size_t& primes) {
+    std::size_t checksum = 0;
+    primes = 0;
+    const auto start = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i) {
+        mmcal::linear_algebra::ModularLinearAlgebraStats stats;
+        const auto solution = mmcal::linear_algebra::modularSolve(augmented, variables, &stats);
+        if (!solution)
+            std::abort();
+        checksum += solution->size();
+        primes += stats.primesAccepted;
+    }
+    const auto end = Clock::now();
+    if (checksum == 0)
+        std::abort();
+    primes /= iterations;
+    return std::chrono::duration<double, std::milli>(end - start).count()
+        / static_cast<double>(iterations);
+}
+
+[[nodiscard]] double benchmarkModularInverseBackend(
+    const mmcal::linear_algebra::IntegerMatrixBuffer& matrix,
+    std::size_t iterations,
+    std::size_t& primes) {
+    std::size_t checksum = 0;
+    primes = 0;
+    const auto start = Clock::now();
+    for (std::size_t i = 0; i < iterations; ++i) {
+        mmcal::linear_algebra::ModularLinearAlgebraStats stats;
+        const auto inverse = mmcal::linear_algebra::modularInverse(matrix, &stats);
+        if (!inverse)
+            std::abort();
+        checksum += inverse->size();
+        primes += stats.primesAccepted;
+    }
+    const auto end = Clock::now();
+    if (checksum == 0)
+        std::abort();
+    primes /= iterations;
+    return std::chrono::duration<double, std::milli>(end - start).count()
+        / static_cast<double>(iterations);
+}
+
+void runExactLinearAlgebraBackendBenchmark(std::size_t iterations) {
+    if (iterations == 0)
+        throw std::invalid_argument("Exact linear algebra benchmark iterations must be positive");
+
+    std::cout << "exact integer linear algebra backend crossover\n";
+    std::cout << "determinant / solveLinear\n";
+    for (const std::size_t coefficientBits : {16U, 96U, 256U, 512U}) {
+        std::cout << "coefficient height: " << coefficientBits << " bits\n";
+        for (const std::size_t size : {4U, 6U, 8U, 10U, 12U, 16U, 20U, 24U, 32U}) {
+            const auto matrix = exactBackendMatrix(size, coefficientBits, 31);
+            const auto solveAugmented = exactBackendAugmented(matrix, false);
+            const std::size_t localIterations = size <= 8 ? iterations : 1;
+
+            std::size_t detPrimes = 0;
+            std::size_t solvePrimes = 0;
+            const double bareissDet = benchmarkBareissDeterminantBackend(
+                matrix, localIterations);
+            const double modularDet = benchmarkModularDeterminantBackend(
+                matrix, localIterations, detPrimes);
+            const double bareissSolve = benchmarkBareissAugmentedCore(
+                solveAugmented, size, localIterations);
+            const double modularSolve = benchmarkModularSolveBackend(
+                solveAugmented, size, localIterations, solvePrimes);
+
+            std::cout << std::setw(4) << size << "x" << size
+                      << " det[B/M]=" << bareissDet << '/' << modularDet << " ms"
+                      << " p=" << detPrimes
+                      << " auto=" << (mmcal::linear_algebra::preferModularDeterminant(matrix)
+                          ? "M" : "B")
+                      << "  solve-core[B/M]=" << bareissSolve << '/' << modularSolve << " ms"
+                      << " p=" << solvePrimes
+                      << " auto=" << (mmcal::linear_algebra::preferModularSolve(solveAugmented, size)
+                          ? "M" : "B") << '\n';
+        }
+    }
+
+    // inverseは32x32・256-bitまでcrossoverが観測されていないため別枠で測る。
+    // 512-bit sweepまで毎回含めると開発用benchmark自体が過度に重くなる。
+    std::cout << "inverse\n";
+    for (const std::size_t coefficientBits : {16U, 96U, 256U}) {
+        std::cout << "coefficient height: " << coefficientBits << " bits\n";
+        for (const std::size_t size : {4U, 6U, 8U, 10U, 12U, 16U, 24U, 32U}) {
+            const auto matrix = exactBackendMatrix(size, coefficientBits, 31);
+            const auto inverseAugmented = exactBackendAugmented(matrix, true);
+            const std::size_t localIterations = size <= 8 ? iterations : 1;
+
+            std::size_t inversePrimes = 0;
+            const double bareissInverse = benchmarkBareissAugmentedCore(
+                inverseAugmented, size, localIterations);
+            const double modularInverse = benchmarkModularInverseBackend(
+                matrix, localIterations, inversePrimes);
+            std::cout << std::setw(4) << size << "x" << size
+                      << " inverse-core[B/M]=" << bareissInverse << '/' << modularInverse << " ms"
+                      << " p=" << inversePrimes
+                      << " auto=" << (mmcal::linear_algebra::preferModularInverse(matrix)
+                          ? "M" : "B") << '\n';
+        }
+    }
+
+    std::cout << "public exact paths (including final Rational/radical materialization)\n";
+    for (const std::size_t coefficientBits : {16U, 96U, 256U}) {
+        std::cout << "coefficient height: " << coefficientBits << " bits\n";
+        for (const std::size_t size : {8U, 16U, 24U, 32U}) {
+            const auto matrix = exactBackendExpr(exactBackendMatrix(size, coefficientBits, 47));
+            const auto dependent = matrixWithDependentColumn(matrix);
+            std::cout << std::setw(4) << size << "x" << size
+                      << " inverse=" << benchmarkExactPublicPath("inverse", matrix) << " ms"
+                      << " rref=" << benchmarkExactPublicPath("rref", matrix) << " ms"
+                      << " rank=" << benchmarkExactPublicPath("rank", matrix) << " ms"
+                      << " null(dep)=" << benchmarkExactPublicPath("null", dependent) << " ms"
+                      << " qr=" << benchmarkExactPublicPath("qr", matrix) << " ms\n";
+        }
+    }
+
+    std::cout << "rank-deficient structural paths\n";
+    for (const std::size_t coefficientBits : {16U, 96U, 256U}) {
+        std::cout << "coefficient height: " << coefficientBits << " bits\n";
+        for (const std::size_t size : {48U, 64U}) {
+            if (coefficientBits >= 256 && size > 48)
+                continue;
+            const auto matrix = exactBackendExpr(exactBackendMatrix(size, coefficientBits, 59));
+            const auto dependent = matrixWithDependentColumn(matrix);
+            std::cout << std::setw(4) << size << "x" << (size + 1)
+                      << " rref=" << benchmarkExactPublicPath("rref", dependent) << " ms"
+                      << " rank=" << benchmarkExactPublicPath("rank", dependent) << " ms"
+                      << " null=" << benchmarkExactPublicPath("null", dependent) << " ms\n";
+        }
+    }
+}
+
+[[nodiscard]] std::string denseShiftedIdentityExpression(std::size_t order) {
+    std::string result{"{"};
+    for (std::size_t row = 0; row < order; ++row) {
+        if (row != 0)
+            result += ',';
+        result += '{';
+        for (std::size_t column = 0; column < order; ++column) {
+            if (column != 0)
+                result += ',';
+            result += row == column ? "2" : "1";
+        }
+        result += '}';
+    }
+    result += '}';
+    return result;
+}
+
+[[nodiscard]] std::string repeatedIntegerVectorExpression(
+    std::size_t count,
+    std::size_t value) {
+    std::string result{"{"};
+    for (std::size_t index = 0; index < count; ++index) {
+        if (index != 0)
+            result += ',';
+        result += std::to_string(value);
+    }
+    result += '}';
+    return result;
+}
+
+void printEvaluationUsage(
+    std::string_view label,
+    std::string_view expression,
+    mmcal::kernel::KernelSession& session) {
+    const auto start = Clock::now();
+    static_cast<void>(session.evaluate(expression));
+    const auto end = Clock::now();
+    const auto& usage = session.lastEvaluationUsage();
+    std::cout << label << "  "
+              << std::chrono::duration<double, std::milli>(end - start).count() << " ms\n"
+              << "  input=" << usage.inputBytes
+              << " steps=" << usage.evaluationSteps
+              << " depth=" << usage.maximumDepth
+              << " nodes=" << usage.generatedNodes
+              << " simplify=" << usage.simplificationCandidates
+              << " solver=" << usage.solverBranches
+              << " integrate=" << usage.integrationCandidates
+              << " certified=" << usage.certifiedRefinements << '\n'
+              << "  dense=" << usage.denseArrayElements
+              << " matrix-temp=" << usage.temporaryMatrixElements
+              << " bigint-max=" << usage.maximumBigIntegerBits
+              << " precision-max=" << usage.maximumRequestedPrecisionDigits
+              << " algebraic-degree-max=" << usage.maximumAlgebraicDegree
+              << " algebraic-refine=" << usage.algebraicRefinements
+              << " modular-primes=" << usage.modularPrimes << '\n';
+}
+
+void runEvaluationBudgetTelemetry() {
+    mmcal::kernel::KernelSession session;
+    std::cout << "EvaluationBudget representative workload telemetry\n";
+    printEvaluationUsage("algebra", "factor[expand[(x+1)^12]]", session);
+    const std::string dense48 = denseShiftedIdentityExpression(48);
+    printEvaluationUsage("exact-det-modular", "det[" + dense48 + "]", session);
+    const std::string dense32 = denseShiftedIdentityExpression(32);
+    printEvaluationUsage("exact-solve-modular",
+        "solveLinear[" + dense32 + "," + repeatedIntegerVectorExpression(32, 33) + "]",
+        session);
+    printEvaluationUsage("certified-exp", "N[exp[1],100]", session);
+    printEvaluationUsage("integration", "integrate[sin[x]^2,x]", session);
+}
+
+
 void printUsage() {
     std::cout
         << "mmCal.Benchmarks [--full] [--random-only] [--benchmark-only]\n"
@@ -1763,14 +2329,19 @@ void printUsage() {
         << "  --algebraic-field [iterations]  benchmark persistent compositum/embedding reuse\n"
         << "  --special-functions [iterations] benchmark certified gamma/ibeta scaling\n"
         << "  --exact-cyclotomic-fft [iterations] benchmark exact non-power-of-two FFT round trips\n"
+        << "  --fft-threshold [iterations] compare certified direct DFT with forced Bluestein\n"
+        << "  --exact-linear-algebra [iterations] compare Bareiss and modular exact backends\n"
+        << "  --budget-telemetry collect representative EvaluationBudget usage\n"
         << "    op: transpose trace ndot det ndet ninv rref rank nrank nsolve nnull lu nlu nqr nsvd neigen neigensystem\n"
         << "  --random-expressions [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--max-depth N] [--report-every N]\n"
-        << "    grammar-aware semantic fuzzer; --loop stops on the first FAIL, --nostop-loop reports FAILs and continues\n";
+        << "    grammar-aware semantic fuzzer; --loop stops on the first FAIL, --nostop-loop reports FAILs and continues\n"
+        << "  --certification-boundaries [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--report-every N] [--timeout-ms N]\n"
+        << "    branch/pole/backend-boundary fuzzer; closed numeric cases classify Value/Domain/Precision/Unsupported\n";
 }
 
 } // namespace
 
-int main(int argc, char** argv) {
+int runBenchmarkMain(int argc, char** argv) {
     bool full = false;
     bool randomOnly = false;
     bool benchmarkOnly = false;
@@ -1783,12 +2354,28 @@ int main(int argc, char** argv) {
     std::size_t specialFunctionIterations = 1;
     bool exactCyclotomicFftBenchmark = false;
     std::size_t exactCyclotomicFftIterations = 3;
+    bool approximateFftThresholdBenchmark = false;
+    std::size_t approximateFftThresholdIterations = 1;
+    bool exactLinearAlgebraBenchmark = false;
+    std::size_t exactLinearAlgebraIterations = 3;
+    bool budgetTelemetry = false;
     bool randomExpressions = false;
+    bool certificationBoundaries = false;
     mmcal::benchmarks::RandomExpressionFuzzerOptions expressionOptions;
-    expressionOptions.seed = static_cast<std::uint64_t>(
+    mmcal::benchmarks::CertificationBoundaryFuzzerOptions boundaryOptions;
+    const std::uint64_t defaultFuzzSeed = static_cast<std::uint64_t>(
         std::chrono::high_resolution_clock::now().time_since_epoch().count())
         ^ (static_cast<std::uint64_t>(std::random_device{}()) << 32)
         ^ static_cast<std::uint64_t>(std::random_device{}());
+    expressionOptions.seed = defaultFuzzSeed;
+    boundaryOptions.seed = defaultFuzzSeed;
+
+    // 共通の--seed/--case等を引数順に依存せずrouteするため，modeだけ先に判定する。
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view{argv[i]} == "--certification-boundaries")
+            certificationBoundaries = true;
+    }
+
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg{argv[i]};
         if (arg == "--full")
@@ -1822,50 +2409,111 @@ int main(int argc, char** argv) {
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 exactCyclotomicFftIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
         }
+        else if (arg == "--fft-threshold") {
+            approximateFftThresholdBenchmark = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                approximateFftThresholdIterations =
+                    static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--exact-linear-algebra") {
+            exactLinearAlgebraBenchmark = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                exactLinearAlgebraIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--budget-telemetry")
+            budgetTelemetry = true;
         else if (arg == "--random-expressions")
             randomExpressions = true;
+        else if (arg == "--certification-boundaries")
+            certificationBoundaries = true;
         else if (arg == "--loop") {
-            expressionOptions.loop = true;
-            randomExpressions = true;
+            if (certificationBoundaries)
+                boundaryOptions.loop = true;
+            else {
+                expressionOptions.loop = true;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--nostop-loop") {
-            expressionOptions.loop = true;
-            expressionOptions.noStopLoop = true;
-            randomExpressions = true;
+            if (certificationBoundaries) {
+                boundaryOptions.loop = true;
+                boundaryOptions.noStopLoop = true;
+            }
+            else {
+                expressionOptions.loop = true;
+                expressionOptions.noStopLoop = true;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--threads") {
-            randomExpressions = true;
             if (i + 1 >= argc) {
                 std::cerr << "--threads requires N\n";
                 return 2;
             }
-            expressionOptions.threads = static_cast<std::size_t>(std::stoull(argv[++i]));
+            const auto value = static_cast<std::size_t>(std::stoull(argv[++i]));
+            if (certificationBoundaries)
+                boundaryOptions.threads = value;
+            else {
+                expressionOptions.threads = value;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--seed") {
-            randomExpressions = true;
             if (i + 1 >= argc) {
                 std::cerr << "--seed requires N\n";
                 return 2;
             }
-            expressionOptions.seed = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            const auto value = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            if (certificationBoundaries)
+                boundaryOptions.seed = value;
+            else {
+                expressionOptions.seed = value;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--case") {
             if (i + 1 >= argc) {
                 std::cerr << "--case requires N\n";
                 return 2;
             }
-            expressionOptions.singleCase = static_cast<std::uint64_t>(std::stoull(argv[++i]));
-            randomExpressions = true;
+            const auto value = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            if (certificationBoundaries)
+                boundaryOptions.singleCase = value;
+            else {
+                expressionOptions.singleCase = value;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--cases") {
-            randomExpressions = true;
             if (i + 1 >= argc) {
                 std::cerr << "--cases requires N\n";
                 return 2;
             }
-            expressionOptions.cases = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            const auto value = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            if (certificationBoundaries)
+                boundaryOptions.cases = value;
+            else {
+                expressionOptions.cases = value;
+                randomExpressions = true;
+            }
+        }
+        else if (arg == "--timeout-ms") {
+            if (!certificationBoundaries) {
+                std::cerr << "--timeout-ms is only valid with --certification-boundaries\n";
+                return 2;
+            }
+            if (i + 1 >= argc) {
+                std::cerr << "--timeout-ms requires N\n";
+                return 2;
+            }
+            boundaryOptions.caseTimeoutMilliseconds =
+                static_cast<std::uint64_t>(std::stoull(argv[++i]));
         }
         else if (arg == "--max-depth") {
+            if (certificationBoundaries) {
+                std::cerr << "--max-depth is only valid with --random-expressions\n";
+                return 2;
+            }
             randomExpressions = true;
             if (i + 1 >= argc) {
                 std::cerr << "--max-depth requires N\n";
@@ -1874,12 +2522,17 @@ int main(int argc, char** argv) {
             expressionOptions.maxDepth = static_cast<std::size_t>(std::stoull(argv[++i]));
         }
         else if (arg == "--report-every") {
-            randomExpressions = true;
             if (i + 1 >= argc) {
                 std::cerr << "--report-every requires N\n";
                 return 2;
             }
-            expressionOptions.reportEvery = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            const auto value = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+            if (certificationBoundaries)
+                boundaryOptions.reportEvery = value;
+            else {
+                expressionOptions.reportEvery = value;
+                randomExpressions = true;
+            }
         }
         else if (arg == "--help" || arg == "-h") {
             printUsage();
@@ -1894,6 +2547,10 @@ int main(int argc, char** argv) {
 
     if (randomOnly && benchmarkOnly) {
         std::cerr << "--random-only and --benchmark-only cannot be combined\n";
+        return 2;
+    }
+    if (randomExpressions && certificationBoundaries) {
+        std::cerr << "--random-expressions and --certification-boundaries cannot be combined\n";
         return 2;
     }
 
@@ -1927,6 +2584,53 @@ int main(int argc, char** argv) {
         }
         runExactCyclotomicFftBenchmark(exactCyclotomicFftIterations);
         return 0;
+    }
+
+    if (approximateFftThresholdBenchmark) {
+        if (approximateFftThresholdIterations == 0) {
+            std::cerr << "--fft-threshold iterations must be at least 1\n";
+            return 2;
+        }
+        runApproximateFftThresholdBenchmark(approximateFftThresholdIterations);
+        return 0;
+    }
+
+    if (exactLinearAlgebraBenchmark) {
+        if (exactLinearAlgebraIterations == 0) {
+            std::cerr << "--exact-linear-algebra iterations must be at least 1\n";
+            return 2;
+        }
+        runExactLinearAlgebraBackendBenchmark(exactLinearAlgebraIterations);
+        return 0;
+    }
+
+    if (budgetTelemetry) {
+        runEvaluationBudgetTelemetry();
+        return 0;
+    }
+
+    if (certificationBoundaries) {
+        if (boundaryOptions.caseTimeoutMilliseconds == 0) {
+            std::cerr << "--timeout-ms must be at least 1\n";
+            return 2;
+        }
+        if (boundaryOptions.threads == 0) {
+            std::cerr << "--threads must be at least 1\n";
+            return 2;
+        }
+        if (boundaryOptions.noStopLoop && boundaryOptions.singleCase) {
+            std::cerr << "--nostop-loop cannot be combined with --case\n";
+            return 2;
+        }
+        if (boundaryOptions.singleCase && *boundaryOptions.singleCase == 0) {
+            std::cerr << "--case is 1-based and must be at least 1\n";
+            return 2;
+        }
+        if (!boundaryOptions.loop && !boundaryOptions.singleCase && boundaryOptions.cases == 0) {
+            std::cerr << "--cases must be at least 1\n";
+            return 2;
+        }
+        return mmcal::benchmarks::runCertificationBoundaryFuzzer(boundaryOptions) ? 0 : 1;
     }
 
     if (randomExpressions) {
@@ -1988,4 +2692,14 @@ int main(int argc, char** argv) {
     if (!randomOnly)
         runBenchmarks(full);
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return runBenchmarkMain(argc, argv);
+    }
+    catch (const BenchmarkFailure& error) {
+        std::cerr << "Benchmark failed: " << error.what() << '\n';
+        return 1;
+    }
 }

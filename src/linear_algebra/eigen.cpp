@@ -9,6 +9,7 @@
 #include "approximation/precision.hpp"
 #include "builtins/exact_operations.hpp"
 #include "expression/array_utils.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "linear_algebra/complex_point.hpp"
 #include "numeric/big_float.hpp"
 #include "numeric/big_int.hpp"
@@ -816,12 +817,17 @@ enum class ApproximateEigenOutput {
         return std::nullopt;
     approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         try {
             if (const auto result = approximateAtPrecision(
                 matrix, context.workingBinaryBits(), context.decimalDigits(), certified, output))
                 return result;
         }
         catch (const approximation::PrecisionInsufficient&) {
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
         context.setGuardDigits(approximation::nextGuardDigits(context.guardDigits()));
     }

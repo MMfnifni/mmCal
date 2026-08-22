@@ -14,6 +14,15 @@ enum class ApproximationOrigin {
     CertifiedInterval
 };
 
+// 明示InformationEnclosureを表示量子とどう合成するかを指定する。
+// 既定は表示丸めによって失われる情報もenclosureへ含める。
+// PreserveExactPointは，呼出側が「表示値・certified truth・informationが同一point」
+// であることを保証できる場合だけpoint informationを保持する。
+enum class InformationQuantization {
+    IncludeDisplayRounding,
+    PreserveExactPoint
+};
+
 // 厳密実数やcertified区間を、ユーザーへ提示する10進表現として保持する値型。
 // 反復算法の作業値ではなく「確定した表示結果 + certified enclosure」であり、BigFloat/RealIntervalとは責務を分ける。保存enclosureは後続のcertified四則演算へ再利用できる。
 class DecimalApproximation final {
@@ -53,14 +62,16 @@ public:
         const Rational& certifiedUpper,
         const Rational& informationLower,
         const Rational& informationUpper,
-        std::size_t fractionalDigits);
+        std::size_t fractionalDigits,
+        InformationQuantization quantization = InformationQuantization::IncludeDisplayRounding);
 
     [[nodiscard]] static std::optional<DecimalApproximation> fromCertifiedIntervalWithInformationSignificant(
         const Rational& certifiedLower,
         const Rational& certifiedUpper,
         const Rational& informationLower,
         const Rational& informationUpper,
-        std::size_t significantDigits);
+        std::size_t significantDigits,
+        InformationQuantization quantization = InformationQuantization::IncludeDisplayRounding);
 
     [[nodiscard]] std::string_view text() const noexcept;
     [[nodiscard]] std::size_t fractionalDigits() const noexcept;
@@ -77,6 +88,13 @@ public:
     [[nodiscard]] const Rational& informationUpper() const noexcept;
     [[nodiscard]] bool certifiedEnclosureIsPoint() const noexcept;
     [[nodiscard]] bool informationEnclosureIsPoint() const noexcept;
+    [[nodiscard]] bool certifiedExactlyZero() const noexcept;
+    [[nodiscard]] bool informationExactlyZero() const noexcept;
+
+    // 符号反転は数値情報を失う演算ではないため，表示桁・要求精度・両enclosureを
+    // 再量子化せずそのまま鏡映する。
+    [[nodiscard]] DecimalApproximation negated() const;
+
     [[nodiscard]] bool operator==(const DecimalApproximation&) const = default;
 
 private:

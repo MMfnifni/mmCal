@@ -4,6 +4,7 @@
 #include "approximation/approximation_context.hpp"
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
+#include "approximation/expression_interval.hpp"
 #include "approximation/complex_interval.hpp"
 #include "approximation/real_interval.hpp"
 #include "error/error_message.hpp"
@@ -149,30 +150,6 @@ constexpr std::size_t newtonCotesDegree = 8;
     return false;
 }
 
-[[nodiscard]] bool exactZero(const RealInterval& interval) noexcept {
-    return interval.isPoint() && interval.lower().isZero();
-}
-
-[[nodiscard]] std::optional<Expr> decimalExpression(const CertifiedValue& value, std::size_t digits) {
-    if (value.isReal()) {
-        const auto decimal = numeric::DecimalApproximation::fromCertifiedInterval(
-            value.asReal().lower().toRational(),
-            value.asReal().upper().toRational(),
-            digits);
-        return decimal ? std::optional<Expr>{Expr{*decimal}} : std::nullopt;
-    }
-
-    const ComplexInterval& complex = value.asComplex();
-    const auto real = numeric::DecimalApproximation::fromCertifiedInterval(
-        complex.real().lower().toRational(), complex.real().upper().toRational(), digits);
-    const auto imaginary = numeric::DecimalApproximation::fromCertifiedInterval(
-        complex.imaginary().lower().toRational(), complex.imaginary().upper().toRational(), digits);
-    if (!real || !imaginary)
-        return std::nullopt;
-    return Expr{numeric::ComplexDecimalApproximation::fromComponents(
-        *real, *imaginary, exactZero(complex.real()), exactZero(complex.imaginary()))};
-}
-
 [[nodiscard]] CertifiedValue addValue(
     const CertifiedValue& lhs, const CertifiedValue& rhs, std::size_t bits) {
     if (lhs.isReal() && rhs.isReal())
@@ -213,11 +190,13 @@ constexpr std::size_t newtonCotesDegree = 8;
     const Expr& expression,
     const expression::Symbol& variable,
     const Rational& point,
-    std::size_t bits) {
+    std::size_t bits,
+    CertifiedEvaluator::EnclosureKind enclosureKind) {
     const CertifiedBinding binding{
         variable,
         CertifiedValue{RealInterval::fromRational(point, bits)}};
-    return evaluator.enclose(expression, bits, std::span<const CertifiedBinding>{&binding, 1});
+    return evaluator.enclose(
+        expression, bits, std::span<const CertifiedBinding>{&binding, 1}, enclosureKind);
 }
 
 [[nodiscard]] std::optional<CertifiedValue> encloseOn(
@@ -226,11 +205,13 @@ constexpr std::size_t newtonCotesDegree = 8;
     const expression::Symbol& variable,
     const Rational& lower,
     const Rational& upper,
-    std::size_t bits) {
+    std::size_t bits,
+    CertifiedEvaluator::EnclosureKind enclosureKind) {
     const CertifiedBinding binding{
         variable,
         CertifiedValue{RealInterval::fromRationalBounds(lower, upper, bits)}};
-    return evaluator.enclose(expression, bits, std::span<const CertifiedBinding>{&binding, 1});
+    return evaluator.enclose(
+        expression, bits, std::span<const CertifiedBinding>{&binding, 1}, enclosureKind);
 }
 
 struct ErrorBound final {
@@ -351,7 +332,8 @@ struct NewtonCotesRule final {
     const Rational& upper,
     std::size_t subintervals,
     const ErrorBound& errorBound,
-    std::size_t bits) {
+    std::size_t bits,
+    CertifiedEvaluator::EnclosureKind enclosureKind) {
     const NewtonCotesRule& rule = integrationRule();
     const Rational h = (upper - lower) / rationalFromSize(subintervals);
     CertifiedValue total{RealInterval::fromRational(rational(0), bits)};
@@ -360,7 +342,8 @@ struct NewtonCotesRule final {
         const Rational a = lower + h * rationalFromSize(panel);
         for (std::size_t node = 0; node <= rule.degree; ++node) {
             const Rational x = a + h * rationalFromSize(node);
-            const auto value = encloseAt(evaluator, integrand, variable, x, bits);
+            const auto value = encloseAt(
+                evaluator, integrand, variable, x, bits, enclosureKind);
             if (!value)
                 return std::nullopt;
             panelValue = addValue(
@@ -389,6 +372,36 @@ struct NewtonCotesRule final {
 }
 
 } // namespace
+
+[[nodiscard]] std::size_t requestedSignificantDigits(const Expr& value) {
+    if (value.isDecimalApproximation())
+        return value.asDecimalApproximation().requestedSignificantDigits();
+    if (value.isComplexDecimalApproximation()) {
+        const auto& complex = value.asComplexDecimalApproximation();
+        return std::min(
+            complex.real().requestedSignificantDigits(),
+            complex.imaginary().requestedSignificantDigits());
+    }
+    return 0;
+}
+
+[[nodiscard]] std::optional<Expr> finalizeNumericalCalculusApproximation(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t fractionalDigits) {
+    // まずNと同じ有効桁評価でfinite-input由来の上限を検査する。
+    // 情報量が要求値を下回る場合はその表示を採用し，十分な情報がある場合だけ
+    // diff/nintegrate従来契約の「小数部p桁」で確定する。
+    const auto limited = approximation::finalizeCertifiedApproximation(
+        certified, information, fractionalDigits);
+    if (!limited)
+        return std::nullopt;
+    const std::size_t available = requestedSignificantDigits(*limited);
+    if (available != 0 && available < fractionalDigits)
+        return limited;
+    return approximation::finalizeCertifiedApproximationFixed(
+        certified, information, fractionalDigits);
+}
 
 Expr evaluateNumericDerivative(
     std::span<const Expr> arguments,
@@ -419,15 +432,29 @@ Expr evaluateNumericDerivative(
     approximation::ApproximationContext context{digits};
     for (;;) {
         try {
-            const auto enclosed = evaluator.enclose(atPoint, context.workingBinaryBits());
-            if (!enclosed)
+            const std::size_t bits = context.workingBinaryBits();
+            const auto information = evaluator.enclose(
+                atPoint, bits, CertifiedEvaluator::EnclosureKind::Information);
+            const auto enclosed = evaluator.enclose(
+                atPoint, bits, CertifiedEvaluator::EnclosureKind::Certified);
+            if (!information || !enclosed)
                 error::throwCalcError(
                     error::CalcErrorType::Evaluation,
                     "diff point or derivative is not numerically evaluable");
-            if (const auto decimal = decimalExpression(*enclosed, digits))
+            if (const auto decimal = finalizeNumericalCalculusApproximation(
+                    *enclosed, *information, digits))
                 return *decimal;
         }
-        catch (const approximation::PrecisionInsufficient&) {
+        catch (const approximation::PrecisionInsufficient& exception) {
+            if (!exception.refinable())
+                error::throwCalcError(
+                    error::CalcErrorType::Evaluation,
+                    "diff cannot resolve finite-precision input information");
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "diff encountered an expression unsupported by certified evaluation");
         }
         context.setGuardDigits(nextGuardDigits(context.guardDigits()));
     }
@@ -490,6 +517,11 @@ Expr evaluateNumericIntegral(
                     error::CalcErrorType::Evaluation,
                     "nintegrate could not certify real finite bounds");
         }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "nintegrate bounds are unsupported by certified evaluation");
+        }
         catch (const std::domain_error&) {
             error::throwCalcError(
                 error::CalcErrorType::Domain,
@@ -520,9 +552,15 @@ Expr evaluateNumericIntegral(
         static_cast<void>(encloseOn(
             evaluator, transformedIntegrand, parameter,
             Rational{BigInt{0}}, Rational{BigInt{1}},
-            context.workingBinaryBits()));
+            context.workingBinaryBits(),
+            CertifiedEvaluator::EnclosureKind::Information));
     }
     catch (const approximation::PrecisionInsufficient&) {
+    }
+    catch (const approximation::CertifiedBackendUnsupported&) {
+        error::throwCalcError(
+            error::CalcErrorType::Evaluation,
+            "nintegrate encountered an expression unsupported by certified evaluation");
     }
     catch (const std::domain_error&) {
         error::throwCalcError(
@@ -548,9 +586,13 @@ Expr evaluateNumericIntegral(
         try {
             const Rational lower{BigInt{0}};
             const Rational upper{BigInt{1}};
+            const auto informationDerivativeRange = encloseOn(
+                evaluator, errorDerivative, parameter, lower, upper, bits,
+                CertifiedEvaluator::EnclosureKind::Information);
             const auto derivativeRange = encloseOn(
-                evaluator, errorDerivative, parameter, lower, upper, bits);
-            if (!derivativeRange)
+                evaluator, errorDerivative, parameter, lower, upper, bits,
+                CertifiedEvaluator::EnclosureKind::Certified);
+            if (!informationDerivativeRange || !derivativeRange)
                 error::throwCalcError(
                     error::CalcErrorType::Evaluation,
                     "nintegrate cannot certify the required derivative over the interval");
@@ -567,16 +609,32 @@ Expr evaluateNumericIntegral(
                     error::CalcErrorType::Evaluation,
                     "nintegrate requires too many Newton-Cotes subintervals for the requested precision");
 
+            const ErrorBound informationBound = compositeNewtonCotesErrorBound(
+                *informationDerivativeRange, upper - lower, n);
+            auto information = integrateWithPanels(
+                evaluator, transformedIntegrand, parameter, lower, upper, n,
+                informationBound, bits, CertifiedEvaluator::EnclosureKind::Information);
             auto enclosed = integrateWithPanels(
-                evaluator, transformedIntegrand, parameter, lower, upper, n, bound, bits);
-            if (!enclosed)
+                evaluator, transformedIntegrand, parameter, lower, upper, n,
+                bound, bits, CertifiedEvaluator::EnclosureKind::Certified);
+            if (!information || !enclosed)
                 error::throwCalcError(
                     error::CalcErrorType::Evaluation,
                     "nintegrate encountered an expression unsupported by certified evaluation");
-            if (const auto decimal = decimalExpression(*enclosed, digits))
+            if (const auto decimal = finalizeNumericalCalculusApproximation(
+                    *enclosed, *information, digits))
                 return *decimal;
         }
-        catch (const approximation::PrecisionInsufficient&) {
+        catch (const approximation::PrecisionInsufficient& exception) {
+            if (!exception.refinable())
+                error::throwCalcError(
+                    error::CalcErrorType::Evaluation,
+                    "nintegrate cannot resolve finite-precision input information");
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "nintegrate encountered an expression unsupported by certified evaluation");
         }
         catch (const std::domain_error&) {
             error::throwCalcError(

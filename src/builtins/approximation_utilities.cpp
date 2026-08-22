@@ -5,8 +5,9 @@
 #include "error/error_message.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
-#include "numeric/integer_algorithms.hpp"
+#include "numeric/approximation_quality.hpp"
 #include "numeric/number.hpp"
+#include "numeric/rational_rounding.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -24,97 +25,6 @@ using numeric::DecimalApproximation;
 using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
-
-[[nodiscard]] Rational absRational(const Rational& value) {
-    return value.numerator().isNegative() ? -value : value;
-}
-
-[[nodiscard]] BigInt floorRational(const Rational& value) {
-    BigInt quotient = value.numerator() / value.denominator();
-    const BigInt remainder = value.numerator() % value.denominator();
-    if (value.numerator().isNegative() && !remainder.isZero())
-        quotient -= BigInt{1};
-    return quotient;
-}
-
-[[nodiscard]] Rational maximum(const Rational& lhs, const Rational& rhs) {
-    return lhs < rhs ? rhs : lhs;
-}
-
-[[nodiscard]] Rational informationAbsoluteError(const DecimalApproximation& value) {
-    const Rational lowerError = absRational(value.displayedValue() - value.informationLower());
-    const Rational upperError = absRational(value.displayedValue() - value.informationUpper());
-    return maximum(lowerError, upperError);
-}
-
-[[nodiscard]] std::size_t decimalIntegerDigits(const Rational& value) {
-    const BigInt integerPart = value.numerator().abs() / value.denominator();
-    if (integerPart.isZero())
-        return 1;
-    return integerPart.toString().size();
-}
-
-[[nodiscard]] std::size_t guaranteedDigits(const Rational& error, std::size_t cap) {
-    if (error.isZero())
-        return cap;
-
-    Rational threshold{BigInt{1}};
-    std::size_t digits = 0;
-    for (std::size_t next = 1; next <= cap; ++next) {
-        threshold /= Rational{BigInt{10}};
-        if (!(error < threshold))
-            break;
-        digits = next;
-    }
-    return digits;
-}
-
-[[nodiscard]] std::size_t guaranteedDigits(const Rational& error) {
-    if (error.isZero())
-        return 0;
-    if (error >= Rational{BigInt{1}})
-        return 0;
-
-    const std::size_t numeratorDigits = error.numerator().abs().toString().size();
-    const std::size_t denominatorDigits = error.denominator().toString().size();
-    if (denominatorDigits <= numeratorDigits)
-        return 0;
-
-    std::size_t candidate = denominatorDigits - numeratorDigits;
-    const BigInt scaledNumerator = error.numerator().abs()
-        * numeric::pow(BigInt{10}, static_cast<std::uint64_t>(candidate));
-    if (scaledNumerator < error.denominator())
-        return candidate;
-    return candidate == 0 ? 0 : candidate - 1;
-}
-
-[[nodiscard]] std::size_t accuracyDigits(const DecimalApproximation& value) {
-    const Rational error = informationAbsoluteError(value);
-    if (error.isZero())
-        return value.requestedSignificantDigits() != 0
-            ? value.requestedSignificantDigits()
-            : value.requestedFractionalDigits();
-    return guaranteedDigits(error);
-}
-
-[[nodiscard]] std::size_t precisionDigits(const DecimalApproximation& value) {
-    const Rational& lower = value.informationLower();
-    const Rational& upper = value.informationUpper();
-    if (lower <= Rational{} && upper >= Rational{})
-        return 0;
-
-    const Rational minimumMagnitude = lower > Rational{}
-        ? lower
-        : -upper;
-    if (minimumMagnitude.isZero())
-        return 0;
-
-    const Rational relativeError = informationAbsoluteError(value) / minimumMagnitude;
-    const std::size_t cap = value.requestedSignificantDigits() != 0
-        ? value.requestedSignificantDigits()
-        : value.requestedFractionalDigits() + decimalIntegerDigits(value.displayedValue()) + 2;
-    return guaranteedDigits(relativeError, cap);
-}
 
 [[nodiscard]] Expr integerResult(std::size_t value) {
     return Expr{Number{BigInt::parse(std::to_string(value))}};
@@ -157,13 +67,9 @@ using numeric::RealNumber;
     if (value.isNumber())
         return Expr{infinity};
     if (value.isDecimalApproximation())
-        return integerResult(accuracyDigits(value.asDecimalApproximation()));
-    if (value.isComplexDecimalApproximation()) {
-        const auto& complex = value.asComplexDecimalApproximation();
-        return integerResult(std::min(
-            accuracyDigits(complex.real()),
-            accuracyDigits(complex.imaginary())));
-    }
+        return integerResult(numeric::accuracyDigits(value.asDecimalApproximation()));
+    if (value.isComplexDecimalApproximation())
+        return integerResult(numeric::accuracyDigits(value.asComplexDecimalApproximation()));
     if (isExactNumericLike(value) && !containsApproximation(value))
         return Expr{infinity};
     return {};
@@ -173,13 +79,9 @@ using numeric::RealNumber;
     if (value.isNumber())
         return Expr{infinity};
     if (value.isDecimalApproximation())
-        return integerResult(precisionDigits(value.asDecimalApproximation()));
-    if (value.isComplexDecimalApproximation()) {
-        const auto& complex = value.asComplexDecimalApproximation();
-        return integerResult(std::min(
-            precisionDigits(complex.real()),
-            precisionDigits(complex.imaginary())));
-    }
+        return integerResult(numeric::precisionDigits(value.asDecimalApproximation()));
+    if (value.isComplexDecimalApproximation())
+        return integerResult(numeric::precisionDigits(value.asComplexDecimalApproximation()));
     if (isExactNumericLike(value) && !containsApproximation(value))
         return Expr{infinity};
     return {};
@@ -192,8 +94,8 @@ using numeric::RealNumber;
     if (lower.isInteger())
         return lower;
 
-    const BigInt lowerFloor = floorRational(lower);
-    const BigInt upperFloor = floorRational(upper);
+    const BigInt lowerFloor = numeric::floorToInteger(lower);
+    const BigInt upperFloor = numeric::floorToInteger(upper);
     if (lowerFloor != upperFloor)
         return Rational{lowerFloor + BigInt{1}};
 

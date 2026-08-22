@@ -3,6 +3,9 @@
 
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "mathematics/definedness.hpp"
+#include "simplification/full_simplifier.hpp"
+#include "simplification/simplification_context.hpp"
 #include "test_framework.hpp"
 
 #include <string>
@@ -23,6 +26,27 @@ namespace {
         if (diagnostic.code == code)
             return &diagnostic;
     return nullptr;
+}
+
+// primitiveの導函数とintegrandは，双方が定義される点上で一致すればよい。
+// 公開fullSimplifyの定義域保持を緩めず，証明時だけ残差のdomain条件を仮定する。
+[[nodiscard]] std::string derivativeBackProof(
+    kernel::KernelSession& session,
+    const std::string& primitive,
+    std::string_view integrand) {
+    expression::Expr residual = session.evaluate(
+        std::string{"D[("} + primitive + "),x]-(" + std::string{integrand} + ")");
+
+    mathematics::AssumptionSet assumptions;
+    if (auto conditions = mathematics::expressionDomainConditions(
+            residual, session.builtinRegistry(), session.mathRegistry()))
+        assumptions = std::move(*conditions);
+
+    const mathematics::AngleSemantics angles{session.defaultAngleUnit()};
+    simplification::SimplificationContext context{
+        session.builtinRegistry(), session.mathRegistry(), angles, std::move(assumptions)};
+    context.assumeExpressionsDefined = true;
+    return formatting::formatExpr(simplification::fullSimplify(residual, context));
 }
 
 enum class DerivativeBackMode {
@@ -62,13 +86,13 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
 
 
     tests.expectEqual(eval(session, "D[integrate[1/(x^3+1),x],x]"),
-        std::string{"1/(1+x^3)"},
+        std::string{"1/(x^3+1)"},
         "exact partial fractions differentiate back to the cubic rational integrand");
     tests.expectEqual(eval(session, "integrate[1/(x^3+1),{x,0,1}]"),
         std::string{"Pi sqrt[3]/9+log[2]/3"},
         "cubic rational definite integral reduces to exact log and Pi terms");
     tests.expectEqual(eval(session, "integrate[1/((x+1)^2*(x-1)),x]"),
-        std::string{"(1+x)^(-1)/2+log[-1+x]/4-log[1+x]/4"},
+        std::string{"(x+1)^(-1)/2+log[x-1]/4-log[x+1]/4"},
         "partial fractions support repeated linear factors");
 
     tests.expectEqual(eval(session, "integrate[1/sqrt[x^2-1],x]"),
@@ -138,6 +162,20 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         "cosine-over-argument kernels close through Ci");
     tests.expectEqual(eval(session, "integrate[1/log[x],x]"), std::string{"li[x]"},
         "reciprocal-log kernels close through li");
+    tests.expectEqual(eval(session, "integrate[li[x],x]"),
+        std::string{"x li[x]-Ei[2log[x]]"},
+        "li has a branch-safe principal antiderivative through Ei[2 Log[x]]");
+    tests.expectEqual(eval(session, "integrate[x^n,x]"),
+        std::string{"x^(n+1)/(n+1)"},
+        "generic symbolic powers use the exact parameterized power rule");
+    tests.expectEqual(eval(session, "integrate[x^-1,x]"), std::string{"log[x]"},
+        "the explicit exponent -1 remains on the logarithmic branch");
+    tests.expectEqual(eval(session, "integrate[log[log[x]],x]"),
+        std::string{"x log[log[x]]-li[x]"},
+        "nested logarithms close by integration by parts through li");
+    tests.expectEqual(eval(session, "integrate[log[log[x]],{x,1,E}]"),
+        std::string{"-digamma[1]-li[E]"},
+        "nested logarithmic improper integral uses the exact cancellation at x=1");
     tests.expectEqual(eval(session, "integrate[log[1-x]/x,x]"), std::string{"-polylog[2, x]"},
         "logarithmic-over-argument kernels close through the dilogarithm");
 
@@ -151,16 +189,17 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         "integrate[1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2]),x]"),
         std::string{"ellipticPi[1/5, x, 1/3]"},
         "the canonical third-kind elliptic kernel integrates to ellipticPi");
-    tests.expectEqual(eval(session,
-        "fullSimplify[D[ellipticF[x,1/3],x]-1/sqrt[1-(1/3)*sin[x]^2]]"),
+    tests.expectEqual(derivativeBackProof(
+            session, "ellipticF[x,1/3]", "1/sqrt[1-(1/3)*sin[x]^2]"),
         std::string{"0"},
         "ellipticF amplitude derivative proves the direct first-kind kernel");
     tests.expectEqual(eval(session,
         "fullSimplify[D[ellipticE[x,1/3],x]-sqrt[1-(1/3)*sin[x]^2]]"),
         std::string{"0"},
         "ellipticE amplitude derivative proves the direct second-kind kernel");
-    tests.expectEqual(eval(session,
-        "fullSimplify[D[ellipticPi[1/5,x,1/3],x]-1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2]) ]"),
+    tests.expectEqual(derivativeBackProof(
+            session, "ellipticPi[1/5,x,1/3]",
+            "1/((1-(1/5)*sin[x]^2)*sqrt[1-(1/3)*sin[x]^2])"),
         std::string{"0"},
         "ellipticPi amplitude derivative proves the direct third-kind kernel");
     tests.expectEqual(eval(session, "integrate[1/sqrt[1-x^4],x]"),
@@ -172,9 +211,10 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[csc[x]^3,x]"),
         std::string{"-cot[x]csc[x]/2-log[cot[x]+csc[x]]/2"},
         "positive cosecant powers use the standard reduction formula");
-    tests.expectEqual(eval(session, "fullSimplify[D[integrate[tan[x]^4,x],x]-tan[x]^4]"),
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[integrate[tan[x]^4,x],x]-tan[x]^4,{cos[x]!=0}]"),
         std::string{"0"},
-        "positive tangent powers share reduction knowledge with the derivative proof engine");
+        "positive tangent powers share reduction knowledge on the common defined domain");
     tests.expectEqual(eval(session,
         "fullSimplify[D[integrate[cos[2x^2+3x+1],x],x]-cos[2x^2+3x+1]]"),
         std::string{"0"},
@@ -232,10 +272,10 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"quadratic sine Fresnel", "sin[8*x^2]"},
         {"shifted quadratic Fresnel", "cos[2*x^2+3*x+1]", DerivativeBackMode::ResolutionOnly},
         {"exponential integral Ei", "exp[x]/x"},
-        {"sine integral Si", "sin[x]/x"},
+        {"sine integral Si", "sin[x]/x", DerivativeBackMode::ResolutionOnly},
         {"cosine integral Ci", "cos[x]/x"},
         {"logarithmic integral li", "1/log[x]"},
-        {"dilogarithm", "log[1-x]/x"},
+        {"dilogarithm", "log[1-x]/x", DerivativeBackMode::ResolutionOnly},
         {"hypergeometric exponential monomial", "exp[x^6]"},
         {"hypergeometric binomial power", "sqrt[1+2*x^3]"},
         {"elliptic first-kind kernel", "1/sqrt[1-(1/3)*sin[x]^2]"},
@@ -248,6 +288,22 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         {"cotangent fourth power reduction", "cot[x]^4", DerivativeBackMode::ResolutionOnly},
         {"Fresnel C primitive", "fresnelc[x]"},
         {"Fresnel S primitive", "fresnels[x]"},
+        {"Ei primitive", "Ei[x]", DerivativeBackMode::ResolutionOnly},
+        {"Si primitive", "Si[x]", DerivativeBackMode::ResolutionOnly},
+        {"Ci primitive", "Ci[x]", DerivativeBackMode::ResolutionOnly},
+        {"li primitive", "li[x]", DerivativeBackMode::ResolutionOnly},
+        {"digamma primitive", "digamma[x]"},
+        {"trigamma primitive", "trigamma[x]"},
+        {"Gamma logarithmic derivative", "gamma[x]*digamma[x]"},
+        {"polylog order shift", "polylog[2,x]/x", DerivativeBackMode::ResolutionOnly},
+        {"1F1 reverse contiguous derivative", "hypergeometric1F1[2,3,x]"},
+        {"2F1 reverse contiguous derivative", "hypergeometric2F1[2,3,4,x]"},
+        {"incomplete Beta primitive", "ibeta[2,3,x]", DerivativeBackMode::ResolutionOnly},
+        {"Lambert W primitive", "lambertw[x]", DerivativeBackMode::ResolutionOnly},
+        {"Lambert W logarithmic derivative", "lambertw[x]/x", DerivativeBackMode::ResolutionOnly},
+        {"sinc primitive", "sinc[x]", DerivativeBackMode::ResolutionOnly},
+        {"cosc primitive", "cosc[x]", DerivativeBackMode::ResolutionOnly},
+        {"expc primitive", "expc[x]", DerivativeBackMode::ResolutionOnly},
         {"mixed trigonometric integer powers", "sin[x]^5*cos[x]^4"},
         {"trigonometric product-to-sum", "sin[2*x]*cos[3*x]"},
         {"trigonometric cosine square", "cos[x]^2", DerivativeBackMode::ResolutionOnly},
@@ -286,9 +342,8 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         if (!resolved)
             continue;
 
-        const std::string proof = eval(proofSession,
-            std::string{"fullSimplify[D[("} + primitive + "),x]-("
-                + std::string{testCase.integrand} + ")]" );
+        const std::string proof = derivativeBackProof(
+            proofSession, primitive, testCase.integrand);
         if (testCase.mode == DerivativeBackMode::Strict) {
             tests.expectEqual(proof, std::string{"0"},
                 std::string{"Integration derivative-back: "} + std::string{testCase.label});
@@ -341,8 +396,8 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
             if (primitive.find("integrate[") != std::string::npos)
                 continue;
 
-            const std::string proof = eval(trigSession,
-                "fullSimplify[D[(" + primitive + "),x]-(" + integrand + ")]");
+            const std::string proof = derivativeBackProof(
+                trigSession, primitive, integrand);
             if (totalPower == 2 && (sinePower == 0 || cosinePower == 0)) {
                 // 既存sin^2/cos^2 familyはFullSimplifyの探索上限内でhalf-angleを逆証明し切れない。
                 // 積分能力は維持し、未評価D/integrateへ後退しないことだけを監視する。

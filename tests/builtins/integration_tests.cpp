@@ -4,17 +4,42 @@
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "mathematics/definedness.hpp"
+#include "simplification/full_simplifier.hpp"
+#include "simplification/simplification_context.hpp"
 #include "test_framework.hpp"
 
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace mmcal::tests {
 namespace {
 
 [[nodiscard]] std::string eval(kernel::KernelSession& session, std::string_view source) {
     return formatting::formatExpr(session.evaluate(source));
+}
+
+// primitiveとintegrandは，双方が定義される点上で一致すればよい。
+// 公開fullSimplifyのdomain-hole保持とは分離して，test proofだけ定義条件を仮定する。
+[[nodiscard]] std::string derivativeBackProof(
+    kernel::KernelSession& session,
+    const std::string& primitive,
+    std::string_view integrand) {
+    expression::Expr residual = session.evaluate(
+        std::string{"D[("} + primitive + "),x]-(" + std::string{integrand} + ")");
+
+    mathematics::AssumptionSet assumptions;
+    if (auto conditions = mathematics::expressionDomainConditions(
+            residual, session.builtinRegistry(), session.mathRegistry()))
+        assumptions = std::move(*conditions);
+
+    const mathematics::AngleSemantics angles{session.defaultAngleUnit()};
+    simplification::SimplificationContext context{
+        session.builtinRegistry(), session.mathRegistry(), angles, std::move(assumptions)};
+    context.assumeExpressionsDefined = true;
+    return formatting::formatExpr(simplification::fullSimplify(residual, context));
 }
 
 [[nodiscard]] const evaluation::EvaluationDiagnostic* findDiagnostic(
@@ -48,7 +73,7 @@ void runIntegrationTests(TestRunner& tests) {
         "integrates cosine");
     tests.expectEqual(eval(session, "integrate[2*x*cos[x^2],x]"), std::string{"sin[x^2]"},
         "reverse chain rule is discovered and verified through D");
-    tests.expectEqual(eval(session, "integrate[2*x/(x^2+1),x]"), std::string{"log[1+x^2]"},
+    tests.expectEqual(eval(session, "integrate[2*x/(x^2+1),x]"), std::string{"log[x^2+1]"},
         "logarithmic substitution is discovered and verified");
     tests.expectEqual(eval(session, "integrate[1/(1+x^2),x]"), std::string{"atan[x]"},
         "inverse tangent derivative knowledge is reusable by integration");
@@ -64,13 +89,13 @@ void runIntegrationTests(TestRunner& tests) {
         "integrates principal square root when D verifies the result");
 
     tests.expectEqual(eval(session, "integrate[(2*x+3)^5,x]"),
-        std::string{"(3+2x)^6/12"},
+        std::string{"(2x+3)^6/12"},
         "affine power rule keeps a compact exact primitive");
     tests.expectEqual(eval(session, "integrate[1/(2*x+3),x]"),
-        std::string{"log[3+2x]/2"},
+        std::string{"log[2x+3]/2"},
         "affine reciprocal integrates to principal Log");
     tests.expectEqual(eval(session, "integrate[exp[2*x+1],x]"),
-        std::string{"exp[1+2x]/2"},
+        std::string{"exp[2x+1]/2"},
         "affine exponential chain rule");
     tests.expectEqual(eval(session, "integrate[tan[x],x]"),
         std::string{"-log[cos[x]]"},
@@ -85,7 +110,7 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"x^2log[x]/2-x^2/4"},
         "monomial times Log uses the exact integration-by-parts formula");
     tests.expectEqual(eval(session, "integrate[acosh[x],x]"),
-        std::string{"x acosh[x]-sqrt[1+x]sqrt[x-1]"},
+        std::string{"x acosh[x]-sqrt[x+1]sqrt[x-1]"},
         "principal acosh primitive uses the same branch convention as D");
     tests.expectEqual(eval(session, "integrate[sin[x Deg],x]"),
         std::string{"-180cos[x Deg]/Pi"},
@@ -116,16 +141,16 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"sin[x]^2/2"},
         "reverse-chain candidate set recognizes trig products");
     tests.expectEqual(eval(session, "integrate[2*x/sqrt[1+x^2],x]"),
-        std::string{"2sqrt[1+x^2]"},
+        std::string{"2sqrt[x^2+1]"},
         "reverse-chain candidate set recognizes square-root derivatives");
     tests.expectEqual(eval(session, "integrate[2*x*(1+x^2)^5,x]"),
-        std::string{"(1+x^2)^6/6"},
+        std::string{"(x^2+1)^6/6"},
         "power-chain Knowledge keeps f-prime times f-to-a-power compact");
     tests.expectEqual(eval(session, "integrate[3*x^2*sqrt[1+x^3],x]"),
-        std::string{"2(1+x^3)^(3/2)/3"},
+        std::string{"2(x^3+1)^(3/2)/3"},
         "power-chain Knowledge recognizes square-root compositions without relying on D expansion");
     tests.expectEqual(eval(session, "integrate[x*sqrt[1+x^2],x]"),
-        std::string{"(1+x^2)^(3/2)/3"},
+        std::string{"(x^2+1)^(3/2)/3"},
         "power-chain Knowledge determines the proportional derivative factor exactly");
     tests.expectEqual(eval(session, "integrate[sqrt[x]/(1+x),x]"),
         std::string{"-2atan[sqrt[x]]+2sqrt[x]"},
@@ -143,7 +168,7 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"atanh[x/2]/2"},
         "exact quadratic reciprocal completes the square to atanh");
     tests.expectEqual(eval(session, "integrate[1/(x+1)^2,x]"),
-        std::string{"-1/(1+x)"},
+        std::string{"-1/(x+1)"},
         "repeated linear quadratic uses the rational primitive");
     tests.expectEqual(eval(session, "integrate[1/sqrt[4-x^2],x]"),
         std::string{"asin[x/2]"},
@@ -183,19 +208,20 @@ void runIntegrationTests(TestRunner& tests) {
         "Fresnel C itself has an exact primitive from shared derivative knowledge");
 
     tests.expectEqual(eval(session, "integrate[(x+1)/(x+2),x]"),
-        std::string{"x-log[2+x]"},
+        std::string{"x-log[x+2]"},
         "rational function with a linear denominator uses exact polynomial division");
     tests.expectEqual(eval(session, "integrate[(x+1)/(x^2+4),x]"),
-        std::string{"atan[x/2]/2+log[4+x^2]/2"},
+        std::string{"atan[x/2]/2+log[x^2+4]/2"},
         "rational function over a quadratic splits into log and reciprocal parts");
-    tests.expectEqual(eval(session, "fullSimplify[D[integrate[1/(x*(x+1)),x],x]-1/(x*(x+1))]"),
+    tests.expectEqual(derivativeBackProof(
+            session, eval(session, "integrate[1/(x*(x+1)),x]"), "1/(x*(x+1))"),
         std::string{"0"},
         "explicit multiplication syntax exercises exact partial fractions without confusing x(...) with a function call");
 
     tests.expectEqual(eval(session, "integrate[log[1+x]/x,x]"),
         std::string{"-polylog[2, -x]"},
         "dilogarithm Knowledge connects the plus-sign logarithmic kernel");
-    tests.expectEqual(eval(session, "integrate[log[1+x^2]/x,x]"),
+    tests.expectEqual(eval(session, "integrate[log[x^2+1]/x,x]"),
         std::string{"-polylog[2, -x^2]/2"},
         "dilogarithm Knowledge generalizes to monomial arguments");
     tests.expectEqual(eval(session, "integrate[exp[-x^4],x]"),
@@ -213,13 +239,15 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"-1/tan[x/2]"},
         "Weierstrass substitution reduces the complementary cosine kernel");
     tests.expectEqual(eval(session,
-        "fullSimplify[D[integrate[1/(1+sin[x]),x],x]-1/(1+sin[x])]"),
+        "fullSimplify[D[integrate[1/(1+sin[x]),x],x]-1/(1+sin[x]),"
+        "{cos[x/2]!=0,1+tan[x/2]!=0,1+sin[x]!=0}]"),
         std::string{"0"},
-        "Weierstrass substitution differentiates back for the positive sine kernel");
+        "Weierstrass substitution differentiates back on the common defined domain for the positive sine kernel");
     tests.expectEqual(eval(session,
-        "fullSimplify[D[integrate[1/(1-sin[x]),x],x]-1/(1-sin[x])]"),
+        "fullSimplify[D[integrate[1/(1-sin[x]),x],x]-1/(1-sin[x]),"
+        "{cos[x/2]!=0,-1+tan[x/2]!=0,1-sin[x]!=0}]"),
         std::string{"0"},
-        "Weierstrass substitution differentiates back for the negative sine kernel");
+        "Weierstrass substitution differentiates back on the common defined domain for the negative sine kernel");
     tests.expect(eval(session, "integrate[1/(2+cos[x]),x]").find("integrate[") == std::string::npos,
         "Weierstrass substitution is a rational transformation rather than four hard-coded identities");
 

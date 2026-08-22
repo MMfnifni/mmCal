@@ -1,5 +1,6 @@
 // 複素超越函数の保証付き評価
 #include "certified_complex_transcendental.hpp"
+#include "certified_precision.hpp"
 
 #include "certified_atan.hpp"
 #include "certification_error.hpp"
@@ -26,14 +27,6 @@ using numeric::Rational;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] std::size_t checkedAdd(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
 [[nodiscard]] RealInterval exactReal(
     std::int64_t value,
@@ -77,7 +70,7 @@ CertifiedArgumentResult enclosePrincipalArgument(
     const BigFloat zero;
     const RealInterval& x = value.real();
     const RealInterval& y = value.imaginary();
-    const std::size_t workBits = checkedAdd(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 16, "Certified Arg working precision is too large");
 
     // z=0はArgの定義域外。区間が単に0を含むだけなら、真値が非零である可能性もあるため即DomainErrorにはしない。上位Nはprecisionを増やせる。
@@ -145,7 +138,7 @@ CertifiedComplexTranscendentalResult enclosePrincipalComplexLog(
     if (precisionBits == 0)
         throw std::invalid_argument("Certified complex Log precision must be at least one bit");
 
-    const std::size_t workBits = checkedAdd(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 24, "Certified complex Log working precision is too large");
 
     // |z| = sqrt(x^2+y^2)。同一変数の平方にはsquareIntervalを使い、[-a,a]*[-a,a] のようなdependencyによる偽の負値を作らない。
@@ -181,7 +174,7 @@ CertifiedComplexTranscendentalResult encloseComplexExp(
     if (precisionBits == 0)
         throw std::invalid_argument("Certified complex Exp precision must be at least one bit");
 
-    const std::size_t workBits = checkedAdd(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 24, "Certified complex Exp working precision is too large");
 
     // 複素指数函数の定義
@@ -217,7 +210,7 @@ CertifiedComplexTranscendentalResult enclosePrincipalPower(
     //   Power(z,w) := Exp(w * Log(z))
     // ここでLogはprincipal Log、Argのbranchは (-Pi,Pi]。
     // したがって例えば (-8)^(1/3) は「実立方根 -2」ではなくprincipal値 1 + I*sqrt(3) を選ぶ。方程式 z^3=-8 の全3解はSolverのSolutionSetの責務。
-    const std::size_t workBits = checkedAdd(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 32, "Certified Power working precision is too large");
     const CertifiedComplexTranscendentalResult logarithm =
         enclosePrincipalComplexLog(base, workBits);

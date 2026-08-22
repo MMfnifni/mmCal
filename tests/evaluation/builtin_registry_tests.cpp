@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{263},
+    tests.expectEqual(registry.size(), std::size_t{270},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -173,8 +173,8 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: integrate uses symbolic binder semantics with optional assumptions");
     const BuiltinDefinition* limit = registry.find(builtins::names::limit);
     tests.expect(limit && limit->sourceCallable
-        && limit->argumentEvaluation == ArgumentEvaluation::HoldFirstTwo
-        && limit->acceptsArity(3) && limit->acceptsArity(4),
+        && limit->argumentEvaluation == ArgumentEvaluation::HoldFirstAndIteratorSpec
+        && limit->acceptsArity(2) && limit->acceptsArity(3) && limit->acceptsArity(4),
         "BuiltinRegistry: limit holds the expression and variable and accepts one-sided direction");
 
     const BuiltinDefinition* simplify = registry.find(builtins::names::simplify);
@@ -220,7 +220,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: table holds the body and binds its iterator specification");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{245},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{251},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")

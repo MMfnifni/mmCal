@@ -32,6 +32,7 @@ public:
     [[nodiscard]] std::size_t trailingZeroBits() const noexcept;
     [[nodiscard]] std::size_t populationCount() const noexcept;
     [[nodiscard]] bool testBit(std::size_t index) const;
+    [[nodiscard]] std::uint32_t modulo(std::uint32_t divisor) const;
     [[nodiscard]] BigInt abs() const;
     [[nodiscard]] std::string toString(unsigned radix = 10) const;
 

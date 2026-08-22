@@ -26,6 +26,9 @@ public:
     KernelSession();
 
     [[nodiscard]] expression::Expr evaluate(std::string_view sourceText);
+    [[nodiscard]] expression::Expr evaluate(
+        std::string_view sourceText,
+        const evaluation::EvaluationCancellationToken& cancellation);
 
     [[nodiscard]] const expression::Expr* history(std::size_t depth = 1) const noexcept;
     [[nodiscard]] const expression::Expr* inputHistory(std::size_t index) const noexcept;
@@ -53,6 +56,9 @@ public:
 
     void setEvaluationDepthLimit(std::size_t limit);
     [[nodiscard]] std::size_t evaluationDepthLimit() const noexcept;
+    void setEvaluationLimits(evaluation::EvaluationLimits limits);
+    [[nodiscard]] const evaluation::EvaluationLimits& evaluationLimits() const noexcept;
+    [[nodiscard]] const evaluation::EvaluationUsage& lastEvaluationUsage() const noexcept;
 
 private:
     symbols::SymbolTable symbolTable_;
@@ -72,9 +78,13 @@ private:
     bool exitRequested_ = false;
     bool clearRequested_ = false;
     bool definitionsChanged_ = false;
+    evaluation::EvaluationUsage lastEvaluationUsage_{};
 
     void rememberSuccessfulDefinition(const syntax::SyntaxTree& tree);
     void resetKnownNames();
+    [[nodiscard]] expression::Expr evaluateImpl(
+        std::string_view sourceText,
+        const evaluation::EvaluationCancellationToken* cancellation);
 };
 
 } // namespace mmcal::kernel

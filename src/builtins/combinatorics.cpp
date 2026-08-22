@@ -1,5 +1,6 @@
 // 組合せ・Fibonacci
 #include "combinatorics.hpp"
+#include "builtin_helpers.hpp"
 
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
@@ -20,13 +21,6 @@ using evaluation::BuiltinId;
 using expression::Expr;
 using numeric::BigInt;
 using numeric::Number;
-
-void requireArity(std::span<const Expr> arguments, std::size_t expected, std::string_view name) {
-    if (arguments.size() != expected)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects " + std::to_string(expected) + " argument(s)");
-}
 
 [[nodiscard]] Expr integer(BigInt value) {
     return Expr{Number{std::move(value)}};

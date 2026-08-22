@@ -15,6 +15,7 @@
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "simplification/simplifier.hpp"
+#include "simplification/expression_cost.hpp"
 #include "solver/solution_set.hpp"
 
 #include <algorithm>
@@ -71,6 +72,13 @@ struct IfConditionTask final {
     std::size_t childDepth = 1;
 };
 
+struct CasesConditionTask final {
+    expression::Expr expression;
+    std::size_t branchIndex = 0;
+    const expression::OriginMap* origins = nullptr;
+    std::size_t childDepth = 1;
+};
+
 struct EnterUserFunctionTask final {
     expression::Expr expression;
     const UserFunctionDefinition* definition = nullptr;
@@ -112,6 +120,7 @@ using EvaluationTask = std::variant<
     BuildListTask,
     DispatchBuiltinTask,
     IfConditionTask,
+    CasesConditionTask,
     EnterUserFunctionTask,
     FinishUserFunctionTask,
     BeginLocalScopeTask,
@@ -147,6 +156,9 @@ Overloaded(Ts...) -> Overloaded<Ts...>;
             return TaskSource{&value.expression, value.origins};
         },
         [](const IfConditionTask& value) noexcept {
+            return TaskSource{&value.expression, value.origins};
+        },
+        [](const CasesConditionTask& value) noexcept {
             return TaskSource{&value.expression, value.origins};
         },
         [](const EnterUserFunctionTask& value) noexcept {
@@ -205,6 +217,41 @@ void scheduleTableIteratorSpecArgument(
     tasks.emplace_back(BuildArrayTask{argument, indices, origins});
     for (std::size_t i = spec->size(); i-- > 1;)
         tasks.emplace_back(EvaluateTask{spec->element(i), origins, depth});
+}
+
+[[nodiscard]] std::optional<std::vector<expression::Expr>> tableIteratorSequence(
+    const expression::Expr& expression) {
+    std::vector<expression::Expr> specs;
+
+    if (expression.isArray()) {
+        const expression::ArrayExpr& array = expression.asArray();
+        if (array.rank() != 2 || array.shape[0] == 0 || array.shape[1] < 2 || array.shape[1] > 4)
+            return std::nullopt;
+
+        specs.reserve(array.shape[0]);
+        for (std::size_t row = 0; row < array.shape[0]; ++row) {
+            std::vector<expression::Expr> elements;
+            elements.reserve(array.shape[1]);
+            for (std::size_t column = 0; column < array.shape[1]; ++column)
+                elements.push_back(array.element(row * array.shape[1] + column));
+            expression::Expr spec = expression::Expr::array({array.shape[1]}, std::move(elements));
+            if (!parseTableIteratorSpec(spec))
+                return std::nullopt;
+            specs.push_back(std::move(spec));
+        }
+        return specs;
+    }
+
+    if (!expression.isList() || expression.asList().elements.empty())
+        return std::nullopt;
+
+    specs.reserve(expression.asList().elements.size());
+    for (const expression::Expr& element : expression.asList().elements) {
+        if (!parseTableIteratorSpec(element))
+            return std::nullopt;
+        specs.push_back(element);
+    }
+    return specs;
 }
 
 [[nodiscard]] expression::Expr mapLeafCalls(
@@ -325,47 +372,13 @@ struct HistoryIndex final {
     return result;
 }
 
+constexpr std::size_t maximumNumericalApproximationRefinements = 16;
+
 [[nodiscard]] std::size_t nextApproximationGuardDigits(std::size_t current) {
     const std::size_t growth = std::max<std::size_t>(8, current / 2);
     if (growth > std::numeric_limits<std::size_t>::max() - current)
         throw std::overflow_error("Approximation precision is too large");
     return current + growth;
-}
-
-[[nodiscard]] bool intervalIsExactZero(
-    const approximation::RealInterval& interval) noexcept {
-    return interval.isPoint() && interval.lower().isZero();
-}
-
-[[nodiscard]] std::optional<expression::Expr> certifiedDecimalExpression(
-    const approximation::CertifiedValue& value,
-    std::size_t precisionDigits) {
-    if (value.isReal()) {
-        const auto decimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-            value.asReal().lower().toRational(),
-            value.asReal().upper().toRational(),
-            precisionDigits);
-        return decimal ? std::optional<expression::Expr>{expression::Expr{*decimal}}
-                       : std::nullopt;
-    }
-
-    const approximation::ComplexInterval& complex = value.asComplex();
-    const auto real = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-        complex.real().lower().toRational(),
-        complex.real().upper().toRational(),
-        precisionDigits);
-    const auto imaginary = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-        complex.imaginary().lower().toRational(),
-        complex.imaginary().upper().toRational(),
-        precisionDigits);
-    if (!real || !imaginary)
-        return std::nullopt;
-
-    return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
-        *real,
-        *imaginary,
-        intervalIsExactZero(complex.real()),
-        intervalIsExactZero(complex.imaginary()))};
 }
 
 [[nodiscard]] numeric::DecimalApproximation reduceApproximationPrecision(
@@ -415,6 +428,87 @@ struct HistoryIndex final {
         || head == builtins::names::logicalAnd;
 }
 
+void checkExpressionBigIntegerBits(const expression::Expr& expression) {
+    if (!currentEvaluationBudget())
+        return;
+
+    const auto realBits = [](const numeric::RealNumber& value) {
+        if (value.isInteger())
+            return value.asInteger().bitLength();
+        const numeric::Rational& rational = value.asRational();
+        return std::max(
+            rational.numerator().bitLength(),
+            rational.denominator().bitLength());
+    };
+    const auto checkNumber = [&](const numeric::Number& value) {
+        const std::size_t bits = value.isReal()
+            ? realBits(value.asReal())
+            : std::max(
+                realBits(value.asComplex().real),
+                realBits(value.asComplex().imaginary));
+        checkEvaluationBigIntegerBits(bits);
+    };
+
+    std::vector<expression::Expr> pending{expression};
+    while (!pending.empty()) {
+        expression::Expr current = std::move(pending.back());
+        pending.pop_back();
+        if (current.isNumber()) {
+            checkNumber(current.asNumber());
+            continue;
+        }
+        if (current.isCall()) {
+            for (const expression::Expr& argument : current.asCall().arguments)
+                pending.push_back(argument);
+            continue;
+        }
+        if (current.isArray()) {
+            const expression::ArrayExpr& array = current.asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                switch (array.storedKindAt(i)) {
+                case expression::ArrayStorageKind::Integer:
+                case expression::ArrayStorageKind::Rational:
+                case expression::ArrayStorageKind::Number:
+                    checkNumber(array.exactNumber(i));
+                    break;
+                case expression::ArrayStorageKind::Generic:
+                    pending.push_back(array.element(i));
+                    break;
+                case expression::ArrayStorageKind::DecimalApproximation:
+                case expression::ArrayStorageKind::ComplexDecimalApproximation:
+                    break;
+                }
+            }
+            continue;
+        }
+        if (current.isList()) {
+            for (const expression::Expr& element : current.asList().elements)
+                pending.push_back(element);
+            continue;
+        }
+        if (current.isSolutionSet()) {
+            const solver::SolutionSet& solutions = current.asSolutionSet();
+            for (const solver::SolutionBranch& branch : solutions.branches())
+                for (const solver::SolutionBinding& binding : branch.bindings)
+                    pending.push_back(binding.value);
+            for (const solver::SolutionCase& solutionCase : solutions.cases())
+                for (const solver::SolutionBranch& branch : solutionCase.branches)
+                    for (const solver::SolutionBinding& binding : branch.bindings)
+                        pending.push_back(binding.value);
+        }
+    }
+}
+
+void consumeGeneratedExpression(const expression::Expr& expression) {
+    if (!currentEvaluationBudget())
+        return;
+
+    checkExpressionBigIntegerBits(expression);
+    consumeEvaluationBudget(
+        EvaluationResource::GeneratedNode,
+        simplification::measureExpressionCost(expression).nodes);
+}
+
 } // namespace
 
 Evaluator::Evaluator(
@@ -432,19 +526,30 @@ Evaluator::Evaluator(
       angleSemantics_(angleSemantics) {}
 
 expression::Expr Evaluator::evaluate(const expression::Expr& expression) {
-    return evaluateMachine(expression, nullptr, nullptr);
+    EvaluationBudget budget{limits_};
+    EvaluationContext context{};
+    context.budget = &budget;
+    return evaluateMachine(expression, nullptr, &context);
 }
 
 expression::Expr Evaluator::evaluate(
     const expression::Expr& expression,
     const expression::OriginMap& origins) {
-    return evaluateMachine(expression, &origins, nullptr);
+    EvaluationBudget budget{limits_};
+    EvaluationContext context{};
+    context.budget = &budget;
+    return evaluateMachine(expression, &origins, &context);
 }
 
 expression::Expr Evaluator::evaluate(
     const expression::Expr& expression,
     const expression::OriginMap& origins,
     EvaluationContext context) {
+    if (!context.budget) {
+        EvaluationBudget budget{limits_};
+        context.budget = &budget;
+        return evaluateMachine(expression, &origins, &context);
+    }
     return evaluateMachine(expression, &origins, &context);
 }
 
@@ -452,11 +557,21 @@ void Evaluator::setDepthLimit(std::size_t limit) {
     if (limit == 0)
         throw std::invalid_argument("Evaluation depth limit must be greater than zero");
 
-    depthLimit_ = limit;
+    limits_.maxDepth = limit;
 }
 
 std::size_t Evaluator::depthLimit() const noexcept {
-    return depthLimit_;
+    return limits_.maxDepth;
+}
+
+void Evaluator::setEvaluationLimits(EvaluationLimits limits) {
+    if (limits.maxDepth == 0)
+        throw std::invalid_argument("Evaluation depth limit must be greater than zero");
+    limits_ = std::move(limits);
+}
+
+const EvaluationLimits& Evaluator::evaluationLimits() const noexcept {
+    return limits_;
 }
 
 void Evaluator::reseedRandomFromEntropy() {
@@ -468,6 +583,7 @@ expression::Expr Evaluator::evaluateMachine(
     const expression::OriginMap* origins,
     const EvaluationContext* context) {
     const std::size_t initialLocalDepth = environment_.localDepth();
+    EvaluationBudgetScope budgetScope{context ? context->budget : nullptr};
     context_ = context;
     origins_ = origins;
     resolvingSymbols_.clear();
@@ -492,6 +608,7 @@ expression::Expr Evaluator::evaluateMachine(
 
     try {
         while (!tasks.empty()) {
+            consumeEvaluationBudget(EvaluationResource::EvaluationStep);
             EvaluationTask task = std::move(tasks.back());
             tasks.pop_back();
             const TaskSource source = taskSource(task);
@@ -500,18 +617,24 @@ expression::Expr Evaluator::evaluateMachine(
             try {
                 std::visit(Overloaded{
                     [&](const EvaluateTask& current) {
-                        if (current.depth > depthLimit_)
-                            error::throwCalcError(
-                                error::CalcErrorType::Evaluation,
-                                "Evaluation depth limit exceeded");
+                        if (EvaluationBudget* budget = currentEvaluationBudget())
+                            budget->checkDepth(current.depth);
 
                         switch (current.expression.kind()) {
                         case expression::ExprKind::Number:
+                            checkExpressionBigIntegerBits(current.expression);
+                            results.push_back(current.expression);
+                            return;
+
                         case expression::ExprKind::DecimalApproximation:
                         case expression::ExprKind::ComplexDecimalApproximation:
                         case expression::ExprKind::Boolean:
                         case expression::ExprKind::String:
+                            results.push_back(current.expression);
+                            return;
+
                         case expression::ExprKind::SolutionSet:
+                            checkExpressionBigIntegerBits(current.expression);
                             results.push_back(current.expression);
                             return;
 
@@ -540,6 +663,9 @@ expression::Expr Evaluator::evaluateMachine(
 
                         case expression::ExprKind::Array: {
                             const expression::ArrayExpr& array = current.expression.asArray();
+                            consumeEvaluationBudget(
+                                EvaluationResource::DenseArrayElement, array.size());
+                            checkExpressionBigIntegerBits(current.expression);
                             const auto entries = array.expressionEntries();
                             if (entries.empty()) {
                                 results.push_back(current.expression);
@@ -590,6 +716,42 @@ expression::Expr Evaluator::evaluateMachine(
                                         current.origins,
                                         current.depth + 1
                                     });
+                                    return;
+                                }
+
+                                if (definition->id == BuiltinId::Cases) {
+                                    const auto scheduleBranch = [&](std::size_t index) {
+                                        if (index >= call.arguments.size()) {
+                                            const auto* indeterminate = symbolRegistry_.find(
+                                                symbols::PredefinedSymbolId::Indeterminate);
+                                            if (!indeterminate)
+                                                error::throwCalcError(
+                                                    error::CalcErrorType::Internal,
+                                                    "Indeterminate symbol is not registered");
+                                            results.emplace_back(indeterminate->symbol);
+                                            return;
+                                        }
+                                        const expression::Expr& branchExpression = call.arguments[index];
+                                        if (!branchExpression.isCall()
+                                            || !branchExpression.asCall().head.sameIdentity(
+                                                registry_.symbol(BuiltinId::CaseBranch))
+                                            || branchExpression.asCall().arguments.empty()
+                                            || branchExpression.asCall().arguments.size() > 2)
+                                            error::throwCalcError(
+                                                error::CalcErrorType::Type,
+                                                "cases contains an invalid branch");
+                                        const auto& branch = branchExpression.asCall().arguments;
+                                        if (branch.size() == 1) {
+                                            tasks.emplace_back(EvaluateTask{
+                                                branch[0], current.origins, current.depth + 1});
+                                            return;
+                                        }
+                                        tasks.emplace_back(CasesConditionTask{
+                                            current.expression, index, current.origins, current.depth + 1});
+                                        tasks.emplace_back(EvaluateTask{
+                                            branch[1], current.origins, current.depth + 1});
+                                    };
+                                    scheduleBranch(0);
                                     return;
                                 }
 
@@ -702,34 +864,22 @@ expression::Expr Evaluator::evaluateMachine(
                     [&](const BuildArrayTask& current) {
                         std::vector<expression::Expr> elements = takeResults(
                             results, current.expressionIndices.size());
-                        results.push_back(expression::rebuildEvaluatedArray(
+                        expression::Expr rebuilt = expression::rebuildEvaluatedArray(
                             current.sourceExpression.asArray(),
                             current.expressionIndices,
-                            std::move(elements)));
+                            std::move(elements));
+                        consumeGeneratedExpression(rebuilt);
+                        results.push_back(std::move(rebuilt));
                     },
                     [&](const BuildListTask& current) {
                         std::vector<expression::Expr> elements = takeResults(results, current.elementCount);
-                        results.push_back(expression::braceValue(std::move(elements)));
+                        expression::Expr rebuilt = expression::braceValue(std::move(elements));
+                        consumeGeneratedExpression(rebuilt);
+                        results.push_back(std::move(rebuilt));
                     },
                     [&](const DispatchBuiltinTask& current) {
                         const expression::CallExpr& call = current.expression.asCall();
                         std::vector<expression::Expr> arguments = takeResults(results, call.arguments.size());
-
-                        // 評価後に0になった除数でも、元の除数範囲をエラー位置として使う。
-                        if (current.definition->id == BuiltinId::Divide
-                            && arguments[1].isNumber()
-                            && arguments[1].asNumber().isZero()) {
-                            if (current.origins) {
-                                if (const auto origin = current.origins->find(call.arguments[1]))
-                                    error::throwCalcError(
-                                        error::CalcErrorType::Domain,
-                                        "Division by zero",
-                                        *origin);
-                            }
-                            error::throwCalcError(
-                                error::CalcErrorType::Domain,
-                                "Division by zero");
-                        }
 
                         if (current.definition->id == BuiltinId::Map) {
                             if (!arguments[0].isSymbol())
@@ -744,11 +894,23 @@ expression::Expr Evaluator::evaluateMachine(
                         }
 
                         if (current.definition->id == BuiltinId::Table) {
+                            // {{i,...},{j,...},...} は左から外側iteratorとして解釈する。
+                            // 既存の単一iterator評価器へ nested table callとして落とすことで，
+                            // scope・range・budget semanticsを二重実装しない。
+                            if (const auto sequence = tableIteratorSequence(arguments[1])) {
+                                expression::Expr nested = arguments[0];
+                                for (auto iterator = sequence->rbegin(); iterator != sequence->rend(); ++iterator)
+                                    nested = expression::Expr::call(call.head, {std::move(nested), *iterator});
+                                tasks.emplace_back(EvaluateTask{
+                                    std::move(nested), current.origins, current.depth + 1});
+                                return;
+                            }
+
                             const auto spec = parseTableIteratorSpec(arguments[1]);
                             if (!spec)
                                 error::throwCalcError(
                                     error::CalcErrorType::Type,
-                                    "table iterator must be {symbol, end}, {symbol, lower, upper}, or {symbol, lower, upper, step}");
+                                    "table iterator must be {symbol, end}, {symbol, lower, upper}, {symbol, lower, upper, step}, or a brace value of such iterators");
                             std::vector<expression::Expr> values = builtins::exactRangeValues(
                                 spec->rangeArguments, "table");
                             tasks.emplace_back(BuildTableTask{values.size()});
@@ -796,6 +958,8 @@ expression::Expr Evaluator::evaluateMachine(
                             current.definition->id != BuiltinId::Set
                             && current.definition->id != BuiltinId::SetDelayed
                             && current.definition->id != BuiltinId::If
+                            && current.definition->id != BuiltinId::Cases
+                            && current.definition->id != BuiltinId::CaseBranch
                             && current.definition->id != BuiltinId::History
                             && current.definition->id != BuiltinId::InputHistory
                             && current.definition->id != BuiltinId::OutputHistory
@@ -811,18 +975,21 @@ expression::Expr Evaluator::evaluateMachine(
                             && current.definition->id != BuiltinId::Collect
                             && current.definition->id != BuiltinId::Solve;
                         if (pureForPostSimplification) {
-                            const simplification::SimplificationContext simplificationContext{
+                            simplification::SimplificationContext simplificationContext{
                                 registry_, mathematics_, angleSemantics_};
+                            simplificationContext.predefinedSymbols = &symbolRegistry_;
                             dispatched = simplification::Simplifier{}.simplify(
                                 dispatched, simplificationContext);
                         }
 
                         // In[n]は保存した入力Exprを「貼り戻す」意味とし、取得したExprを現在の環境で通常評価する。Out[n]は保存済み結果なので再評価しない。
                         if (current.definition->id == BuiltinId::InputHistory) {
+                            consumeGeneratedExpression(dispatched);
                             tasks.emplace_back(EvaluateTask{
                                 std::move(dispatched), nullptr, current.depth + 1});
                             return;
                         }
+                        consumeGeneratedExpression(dispatched);
                         results.push_back(std::move(dispatched));
                     },
                     [&](const IfConditionTask& current) {
@@ -858,6 +1025,82 @@ expression::Expr Evaluator::evaluateMachine(
                         error::throwCalcError(
                             error::CalcErrorType::Type,
                             "If condition must evaluate to True or False");
+                    },
+                    [&](const CasesConditionTask& current) {
+                        std::vector<expression::Expr> conditionResult = takeResults(results, 1);
+                        expression::Expr condition = conditionResult.front();
+                        const expression::CallExpr& call = current.expression.asCall();
+                        if (current.branchIndex >= call.arguments.size())
+                            error::throwCalcError(
+                                error::CalcErrorType::Internal,
+                                "cases branch index is out of range");
+                        const expression::Expr& branchExpression = call.arguments[current.branchIndex];
+                        if (!branchExpression.isCall()
+                            || !branchExpression.asCall().head.sameIdentity(
+                                registry_.symbol(BuiltinId::CaseBranch))
+                            || branchExpression.asCall().arguments.size() != 2)
+                            error::throwCalcError(
+                                error::CalcErrorType::Internal,
+                                "cases condition task references an invalid branch");
+                        const auto& branch = branchExpression.asCall().arguments;
+
+                        if (condition.isBoolean()) {
+                            if (condition.asBoolean()) {
+                                tasks.emplace_back(EvaluateTask{
+                                    branch[0], current.origins, current.childDepth});
+                                return;
+                            }
+
+                            const std::size_t next = current.branchIndex + 1;
+                            if (next >= call.arguments.size()) {
+                                const auto* indeterminate = symbolRegistry_.find(
+                                    symbols::PredefinedSymbolId::Indeterminate);
+                                if (!indeterminate)
+                                    error::throwCalcError(
+                                        error::CalcErrorType::Internal,
+                                        "Indeterminate symbol is not registered");
+                                results.emplace_back(indeterminate->symbol);
+                                return;
+                            }
+                            const expression::Expr& nextExpression = call.arguments[next];
+                            if (!nextExpression.isCall()
+                                || !nextExpression.asCall().head.sameIdentity(
+                                    registry_.symbol(BuiltinId::CaseBranch))
+                                || nextExpression.asCall().arguments.empty()
+                                || nextExpression.asCall().arguments.size() > 2)
+                                error::throwCalcError(
+                                    error::CalcErrorType::Type,
+                                    "cases contains an invalid branch");
+                            const auto& nextBranch = nextExpression.asCall().arguments;
+                            if (nextBranch.size() == 1) {
+                                tasks.emplace_back(EvaluateTask{
+                                    nextBranch[0], current.origins, current.childDepth});
+                                return;
+                            }
+                            tasks.emplace_back(CasesConditionTask{
+                                current.expression, next, current.origins, current.childDepth});
+                            tasks.emplace_back(EvaluateTask{
+                                nextBranch[1], current.origins, current.childDepth});
+                            return;
+                        }
+
+                        if (isBooleanExpression(condition)) {
+                            std::vector<expression::Expr> remaining;
+                            remaining.reserve(call.arguments.size() - current.branchIndex);
+                            remaining.push_back(expression::Expr::call(
+                                registry_.symbol(BuiltinId::CaseBranch),
+                                {branch[0], std::move(condition)}));
+                            for (std::size_t i = current.branchIndex + 1;
+                                 i < call.arguments.size(); ++i)
+                                remaining.push_back(call.arguments[i]);
+                            results.push_back(expression::Expr::call(
+                                call.head, std::move(remaining)));
+                            return;
+                        }
+
+                        error::throwCalcError(
+                            error::CalcErrorType::Type,
+                            "cases condition must evaluate to True or False");
                     },
                     [&](const EnterUserFunctionTask& current) {
                         const expression::CallExpr& call = current.expression.asCall();
@@ -917,8 +1160,10 @@ expression::Expr Evaluator::evaluateMachine(
                         environment_.popScope();
                     },
                     [&](const BuildTableTask& current) {
-                        results.push_back(expression::braceValue(
-                            takeResults(results, current.elementCount)));
+                        expression::Expr rebuilt = expression::braceValue(
+                            takeResults(results, current.elementCount));
+                        consumeGeneratedExpression(rebuilt);
+                        results.push_back(std::move(rebuilt));
                     },
                     [&](const BeginNumericalApproximationTask& current) {
                         constexpr std::size_t defaultPrecisionDigits = 16;
@@ -942,6 +1187,8 @@ expression::Expr Evaluator::evaluateMachine(
                             }
                             precisionDigits = *requestedDigits;
                         }
+                        if (EvaluationBudget* budget = currentEvaluationBudget())
+                            budget->checkRequestedPrecisionDigits(precisionDigits);
 
                         std::size_t warningCountBefore = 0;
                         if (context_ && context_->diagnostics)
@@ -979,6 +1226,7 @@ expression::Expr Evaluator::evaluateMachine(
                             valueResult.front(), current.precisionDigits,
                             warningCountAfter == current.warningCountBefore);
                         approximationContexts_.pop_back();
+                        consumeGeneratedExpression(approximated);
                         results.push_back(std::move(approximated));
                     }
                 }, task);
@@ -1335,6 +1583,37 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         return false;
     };
 
+    // InformationEnclosureの幅が有限precision入力そのものに由来するかを判別する。
+    // exact式でも有限working precisionでは一時的にbranch cutを跨ぎ得るため，
+    // その場合はInputInformation例外を即停止条件にせずguard増加で再試行する。
+    std::function<bool(const expression::Expr&)> containsFinitePrecisionInput;
+    containsFinitePrecisionInput = [&](const expression::Expr& current) -> bool {
+        if (current.isDecimalApproximation() || current.isComplexDecimalApproximation())
+            return true;
+        if (current.isCall()) {
+            const auto& call = current.asCall();
+            if (const auto* definition = registry_.find(call.head);
+                definition && definition->id == BuiltinId::NumericalApproximation)
+                return true;
+            for (const auto& argument : call.arguments)
+                if (containsFinitePrecisionInput(argument))
+                    return true;
+            return false;
+        }
+        if (current.isArray()) {
+            for (std::size_t i = 0; i < current.asArray().size(); ++i)
+                if (containsFinitePrecisionInput(current.asArray().element(i)))
+                    return true;
+            return false;
+        }
+        if (current.isList()) {
+            for (const auto& element : current.asList().elements)
+                if (containsFinitePrecisionInput(element))
+                    return true;
+        }
+        return false;
+    };
+
     // Nはscalarだけでなく配列・SolutionSet・一般symbolic expressionへ部分的に作用する。
     // whole-expressionのcertificationを最優先し，失敗したときだけnumeric subpart traversalへ落とす。
     std::function<expression::Expr(const expression::Expr&, bool)> approximate;
@@ -1441,6 +1720,30 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             return expression::Expr::solutionSet(std::move(transformed));
         }
 
+        // casesは条件をexactのまま保持し，各branchの値だけへNを作用させる。
+        if (current.isCall()
+            && current.asCall().head.sameIdentity(registry_.symbol(BuiltinId::Cases))) {
+            std::vector<expression::Expr> branches;
+            branches.reserve(current.asCall().arguments.size());
+            for (const expression::Expr& branchExpression : current.asCall().arguments) {
+                if (!branchExpression.isCall()
+                    || !branchExpression.asCall().head.sameIdentity(
+                        registry_.symbol(BuiltinId::CaseBranch))
+                    || branchExpression.asCall().arguments.empty()
+                    || branchExpression.asCall().arguments.size() > 2)
+                    return current;
+                const auto& branch = branchExpression.asCall().arguments;
+                std::vector<expression::Expr> branchArguments{
+                    approximate(branch[0], false)};
+                if (branch.size() == 2)
+                    branchArguments.push_back(branch[1]);
+                branches.push_back(expression::Expr::call(
+                    registry_.symbol(BuiltinId::CaseBranch), std::move(branchArguments)));
+            }
+            return expression::Expr::call(
+                registry_.symbol(BuiltinId::Cases), std::move(branches));
+        }
+
         // UnitAppliedは単位文字列そのものを数値化せず、値の部分だけへNを作用させる。
         // arg等が返す明示Radも、この経路で近似値と単位を両立できる。
         if (current.isCall()) {
@@ -1473,10 +1776,26 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
 
         approximation::CertifiedEvaluator certified{registry_, mathematics_, angleSemantics_};
         approximation::ApproximationContext context{precisionDigits};
-        for (;;) {
+        std::string lastPrecisionFailure;
+        for (std::size_t refinement = 0;
+             refinement < maximumNumericalApproximationRefinements;
+             ++refinement) {
+            consumeEvaluationBudget(EvaluationResource::CertifiedRefinement);
             try {
-                const auto enclosed = certified.enclose(current, context.workingBinaryBits());
-                if (!enclosed) {
+                const std::size_t bits = context.workingBinaryBits();
+                // finite-precision入力を含む式では，値そのもののCertifiedEnclosureより先に
+                // InformationEnclosureでdomain/branchを検査する。exact入力だけなら両者は
+                // 同一なので，重い特殊函数を二度評価せずCertifiedEnclosureをそのまま再利用する。
+                const bool finitePrecisionInput = containsFinitePrecisionInput(current);
+                std::optional<approximation::CertifiedValue> information;
+                if (finitePrecisionInput)
+                    information = certified.enclose(
+                        current, bits, approximation::CertifiedEvaluator::EnclosureKind::Information);
+                const auto enclosed = certified.enclose(
+                    current, bits, approximation::CertifiedEvaluator::EnclosureKind::Certified);
+                if (!finitePrecisionInput && enclosed)
+                    information = *enclosed;
+                if (!enclosed || !information) {
                     // whole expressionをcertifyできない場合だけ，通常評価型のcallのnumeric subpartへNを作用させる。
                     // HoldAll/HoldFirst系は変数指定やiterator等の構文的引数を持つため勝手に書き換えない。
                     if (current.isCall()) {
@@ -1511,7 +1830,8 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                             "N could not certify a numerical value for part of the expression; it remains unevaluated");
                     return current;
                 }
-                if (const auto decimal = certifiedDecimalExpression(*enclosed, precisionDigits))
+                if (const auto decimal = approximation::finalizeCertifiedApproximation(
+                        *enclosed, *information, precisionDigits))
                     return *decimal;
             }
             catch (const approximation::CertifiedBackendUnsupported& exception) {
@@ -1520,11 +1840,28 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                         std::string{exception.what()} + "; the expression remains unevaluated");
                 return current;
             }
-            catch (const approximation::PrecisionInsufficient&) {
-                // 数学的domain errorではなく、現在の区間幅では分岐を証明できない。
+            catch (const approximation::PrecisionInsufficient& exception) {
+                // 数学的domain errorではなく，現在の区間幅では分岐・非零性等を証明できない。
+                // finite-precision入力自身のInformationEnclosureが原因ならguard増加では
+                // 改善しないため，局所retryを即座に終了する。
+                lastPrecisionFailure = exception.what();
+                if (!exception.refinable() && containsFinitePrecisionInput(current))
+                    break;
             }
-            context.setGuardDigits(nextApproximationGuardDigits(context.guardDigits()));
+
+            if (refinement + 1 < maximumNumericalApproximationRefinements)
+                context.setGuardDigits(nextApproximationGuardDigits(context.guardDigits()));
         }
+
+        if (allowWarning && !containsUnknownSymbol(current)) {
+            std::string message =
+                "N could not certify the requested decimal precision after bounded refinement";
+            if (!lastPrecisionFailure.empty())
+                message += ": " + lastPrecisionFailure;
+            message += "; the expression remains unevaluated";
+            emitWarning("N::precision", std::move(message));
+        }
+        return current;
     };
 
     return approximate(value, warnOnFailure);

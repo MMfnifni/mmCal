@@ -69,6 +69,18 @@ mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
 ```
 
+exact MatrixのBareiss / modular crossoverを単独測定：
+
+```text
+mmCal.Benchmarks --exact-linear-algebra 1
+```
+
+EvaluationBudgetの代表負荷telemetryを表示：
+
+```text
+mmCal.Benchmarks --budget-telemetry
+```
+
 大きなMatrixを一種類だけ測定：
 
 ```text
@@ -95,6 +107,12 @@ random expression fuzzerを有限回実行：
 
 ```text
 mmCal.Benchmarks --random-expressions --cases 50000 --seed 1234
+```
+
+Certification境界だけを集中監査する場合：
+
+```text
+mmCal.Benchmarks --certification-boundaries --cases 10000 --seed 1234
 ```
 
 FAILが出るまで無期限に回す：
@@ -183,6 +201,20 @@ random invariantを省略し，timingだけを測る。
 
 `--random-only`と`--benchmark-only`は同時指定できない。
 
+## 3.5 `--exact-linear-algebra` / `--budget-telemetry`
+
+```text
+mmCal.Benchmarks --exact-linear-algebra 1
+```
+
+exact整数行列の係数height 16 / 96 / 256 / 512 bitと複数次数について，`det`と`solveLinear`のBareiss / modular backendを強制比較する。`inverse`は16 / 96 / 256 bitを別sweepし，automatic採用に十分なcrossoverがあるか確認する。dispatcher thresholdは数学仕様ではなくcompiler・CPU依存の性能policyなので，変更時はこのrunnerを正本とする。
+
+```text
+mmCal.Benchmarks --budget-telemetry
+```
+
+代数式，modular determinant，modular solve，certified評価，積分の代表入力を1回ずつ評価し，step，depth，generated node，探索candidate，dense Array / Matrix temporary，BigInt，precision，algebraic refinementに加えて`modular-primes`を表示する。これは既定budget値の校正用telemetryであり，PASS/FAIL判定や数学的意味論を変更しない。
+
 ---
 
 # 4. 通常benchmarkの内容
@@ -253,11 +285,11 @@ BigInt -> decimal text -> BigInt
 
 exact整数 / Rational pathとprecision-aware certified pathを同じ表の中で比較できる。
 
-## 4.5 Exact Householder QR
+## 4.5 Exact fraction-free QR
 
-一般exact QRはradical式が急激に膨張するため，通常benchmarkでは2×2，3×3だけを測る。
+exact実数QRはprimitive整数vector上のfraction-free直交化を使い，平方根をQ/Rの最終materializationまで遅延する。full-rankではGram行列のsymmetric Bareiss経路，rank-deficientではdirect fraction-free fallbackを使う。旧3×3 hard capは撤去済みで，通常benchmarkも2/4/8/16次を測る。
 
-これは性能制約を意図的に監視するtestでもある。exact-firstは「巨大exact式を無条件に展開する」という意味ではない。
+`--exact-linear-algebra`では係数bit長を変えながら，final Rational/radical materialization込みの`inverse/rref/rank/nullSpace/QR`と，rank-deficient 48/64次の構造系pathも測る。
 
 ## 4.6 Householder QR block sweep
 
@@ -281,6 +313,12 @@ SVDはreconstruction / orthogonality relationを監査する数値backendであ�
 
 certified approximate eigenvalue / eigensystem backendを4，8，12，16次で測る。
 
+timing入力は，非対角成分の絶対値を2以下，隣接する対角値の間隔を`4n+1`とした密実対称行列である。Gershgorin円板が互いに素になるためsimple spectrumが構成的に保証され，完全な固有vector基底を持たない入力をtiming failureと混同しない。
+
+backendが結果を返さない場合は，途中までのtiming行を残して`abort`するのではなく，operation，size，digitsをstderrへ出してexit code 1で終了する。
+
+同じ4，8，12，16次の固定入力は`--random-only`でも固有関係と非零vectorを検査する。これにより，長いtiming列を開始する前に入力fixtureとbackend契約の不整合を検出する。
+
 一般非正規行列では固有値問題そのものが摂動に敏感であるため，時間だけでなくrandom invariant側のrelation checkと併せて評価する。
 
 ## 4.9 FFT
@@ -296,6 +334,16 @@ certified approximate eigenvalue / eigensystem backendを4，8，12，16次で�
 `--full`では512点まで拡大する。
 
 また非2冪長について，direct DFTとFFT/Bluesteinの実測を比較する。現在のdirect/Bluestein thresholdも，この測定から再評価する前提である。
+
+境界だけを旧policyから独立して再測定する場合：
+
+```text
+mmCal.Benchmarks --fft-threshold 1
+```
+
+65 / 95 / 127 / 191 / 255 / 257 / 319 / 335 / 351 / 367 / 383 / 384 / 385 / 447 / 509点について，direct DFTと強制Bluesteinを同一入力・16桁で比較し，速い側も表示する。反復数は省略時1。両算法の確定済み十進表示値が成分ごとに一致しなければbenchmark failureとする。現在の保守的policy境界は384点であり，compiler / CPUが変わればこのmodeで再測定する。
+
+GCC Releaseの2026-08-22再測定では383点でBluestein，384点でdirect，385点で再びBluesteinが優位となり，勝敗は境界近傍で単調ではなかった。このため単一crossoverへpolicyを過適合させず，384点を維持する。383/384/385の3点は，今後のcompiler / CPU変更時にこの非単調性も含めて確認するための境界監視点である。
 
 ## 4.9.1 Exact Cyclotomic FFT
 
@@ -364,7 +412,9 @@ Matrix random checkでは，単に期待文字列と比較するのではなく�
 - SVD reconstruction / orthogonality
 - Eigen relation
 
-整数・Rational・certified approximate pathを跨いで監視する。
+整数・Rational・certified approximate pathを跨いで監視する。可逆性だけでは完全な固有vector基底の存在を保証しないため，Eigen relationにはdistinct eigenvalueを持つ上三角行列を別生成する。defective / near-defective行列で`eigensystem`が未評価に留まることは仕様どおりであり，failureとして扱わない。
+
+失敗時は`stage`，1-originの`case`，0-originの`case-index`，size，反例行列を出力する。固定seedなので，同一version・同一case数なら反例を再現できる。
 
 ### FFT
 
@@ -464,7 +514,79 @@ v1.5.3の第一段階typed-node化では，同一GCC Release/LTO-offの`--matrix
 
 ---
 
-# 7. Random Expression Fuzzer
+
+# 7. Certification Boundary Fuzzer
+
+```text
+mmCal.Benchmarks --certification-boundaries
+```
+
+`N`のcertified evaluationについて，**branch cut・pole・domain境界・certified backend境界**の近傍を重点的に生成する専用fuzzerである。通常のRandom Expression Fuzzerが式全体のsemantic invariantを広く探索するのに対し，こちらはclosed numeric expressionだけを作り，結果を次の分類へ落として契約を監査する。
+
+```text
+Value
+DomainError
+PrecisionInsufficient       # N::precision
+CertifiedBackendUnsupported # N::unsupported
+Unevaluated
+ResourceLimit
+Timeout
+OtherError
+```
+
+主要な不変条件は次である。
+
+- exact pole / exact singularityは`DomainError`であり，有限precisionのInformationEnclosureがpoleを**含み得るだけ**なら`N::precision`である。
+- principal branch sideをInformationEnclosureから一意に決定できない場合，片側の値を捏造せず`N::precision`へ戻る。
+- 数学的な値が存在するが現certified backendの外側なら`N::unsupported`であり，`DomainError`へ誤分類しない。
+- finite information由来の境界曖昧性はguard digitを増やしても改善しないため，過剰なcertified refinementを消費しない。
+- generic `N::unevaluated`，resource exhaustion，case timeoutは通常の数学的分類とは別のfailureとして扱う。
+
+初期probe setは46種類で，`log/sqrt/Arg/atan2/Power`，逆三角・逆双曲線，Gamma/digamma/trigamma/zeta，`Ei/Ci/li/polylog`，`1F1/2F1`，`ibeta`，Lambert W，elliptic F等を横断する。各caseではprobeを選んだうえで，要求precisionを`2/5/20/50/100`桁，有限precision入力を`2/5/10/20`桁，exact branch-side epsilonの桁をseedから変化させる。
+
+## 7.1 有限実行
+
+既定は10000 caseである。
+
+```text
+mmCal.Benchmarks --certification-boundaries
+mmCal.Benchmarks --certification-boundaries --cases 50000 --seed 1234
+```
+
+case生成はmaster seedと1-based case番号だけで決まり，thread schedulingには依存しない。
+
+## 7.2 Caseの直接再現
+
+```text
+mmCal.Benchmarks --certification-boundaries --seed 1234 --case 817
+```
+
+FAIL時にはfamily，probe名，生成式，期待分類，実分類，diagnostic，EvaluationBudget使用量を表示し，同じcommandを`Reproduce`として出す。`--case`では評価開始前に式をflushして表示するため，重いcaseやtimeout候補でも何を実行しているか確認できる。
+
+## 7.3 Timeoutとbounded-work
+
+境界fuzzerは各caseをfrontend cancellation token付きで評価し，既定では**2000 ms/case**を超えるとcancelする。
+
+```text
+mmCal.Benchmarks --certification-boundaries --timeout-ms 5000
+```
+
+これはCoreへwall-clock deadlineを持ち込むものではない。benchmark frontendのwatchdogが既存`EvaluationCancellationToken`を要求するだけであり，timeoutは`DomainError`や`N::precision`とは別の`Timeout` failureとして報告する。
+
+また，`N::precision`が期待されるpersistent ambiguityで4096回を超えるcertified refinementを消費した場合もfailureとする。入力InformationEnclosureが境界を跨いだままなら，global budget近くまでguardを増やす挙動は性能退行とみなす。
+
+## 7.4 無限loop・複数thread
+
+```text
+mmCal.Benchmarks --certification-boundaries --loop --threads 8
+mmCal.Benchmarks --certification-boundaries --nostop-loop --threads 8
+```
+
+`--loop`は最初のFAILで停止する。`--nostop-loop`はFAILを表示して次caseへ進み，burn-inを継続する。各workerは独立した`KernelSession`を使用し，caseごとに独立したwatchdogを持つ。
+
+`--seed` / `--case` / `--cases` / `--threads` / `--report-every`はRandom Expression Fuzzerと同じ名前を使うが，`--certification-boundaries`が指定されている場合は境界fuzzerへrouteされる。両fuzzerを同一processで同時指定することはできない。
+
+# 8. Random Expression Fuzzer
 
 ```text
 mmCal.Benchmarks --random-expressions
@@ -480,7 +602,7 @@ mmCal.Benchmarks --random-expressions
 
 である。
 
-## 7.1 有限実行
+## 8.1 有限実行
 
 既定は10000 caseである。
 
@@ -500,7 +622,7 @@ mmCal.Benchmarks --random-expressions --cases 50000
 mmCal.Benchmarks --random-expressions --cases 50000 --seed 1234
 ```
 
-## 7.2 無限loop
+## 8.2 無限loop
 
 ```text
 mmCal.Benchmarks --random-expressions --loop
@@ -518,7 +640,7 @@ mmCal.Benchmarks --random-expressions --nostop-loop
 
 を使用する。こちらは各FAILをshrinking・表示した後，次caseへ進む。通常終了は`Ctrl+C`で行う。
 
-## 7.3 複数thread
+## 8.3 複数thread
 
 ```text
 mmCal.Benchmarks --random-expressions --cases 100000 --threads 8
@@ -533,7 +655,7 @@ worker内ではcase間・比較評価間に`KernelSession::resetForIndependentEv
 
 参考として，同一Release/LTO-off build，`--threads 8 --seed 1234`で有限実行した最大RSSは100,000 caseで`48136 KiB`，200,000 caseで`51364 KiB`だった。case数を2倍にしても履歴保持に相当する線形増加は見られない。これは長時間`--loop`の完全な定常性証明ではないため，overnight burn-inでは引き続きprocess RSSを監視する。
 
-## 7.4 FAIL時
+## 8.4 FAIL時
 
 FAILすると，概ね次の情報を表示する。
 
@@ -549,6 +671,7 @@ Reduced   : ...
 Reason    : ...
 Expected  : ...
 Actual    : ...
+Budget    : steps=... depth=... nodes=... simplify=... solve=... integrate=...
 Reproduce : mmCal.Benchmarks --random-expressions --seed 92847163 --case 48172
 ```
 
@@ -556,7 +679,7 @@ FAIL後は簡易shrinkingを行い，可能ならより小さい反例を`Reduce
 
 通常の`--loop`またはfinite modeでFAILした場合，processはexit code 1で終了する。`--nostop-loop`ではFAILは継続中の反例として扱われ，その場ではprocessを終了しない。
 
-## 7.5 Caseの直接再現
+## 8.5 Caseの直接再現
 
 ```text
 mmCal.Benchmarks --random-expressions --seed 92847163 --case 48172
@@ -568,7 +691,7 @@ case番号は**1-based**である。
 
 長時間`--loop`を回す上で重要な仕様である。
 
-## 7.6 Depth
+## 8.6 Depth
 
 既定最大depth：
 
@@ -586,7 +709,7 @@ depthは全caseで固定ではなく，caseごとに重み付きrandomで選択�
 
 浅い式を主体としつつ，稀に`--max-depth`付近の深い式を生成する。すべての枝を最大depthまで伸ばして巨大ASTを作ることが目的ではない。
 
-## 7.7 Progress表示
+## 8.7 Progress表示
 
 既定では10000 caseごとに進捗を表示する。
 
@@ -603,7 +726,7 @@ mmCal.Benchmarks --random-expressions --loop --threads 8 --report-every 100000
 
 `--report-every 0`を指定した場合は定期progress表示を行わない。
 
-## 7.8 現在のInvariant
+## 8.8 現在のInvariant
 
 初期実装では主に次を検証する。
 
@@ -639,11 +762,47 @@ transpose[transpose[A]] == A
 det[A] == det[transpose[A]]
 ```
 
-今後，`D` / `integrate` / `N` / `inverse` / `solveLinear` / `nullSpace`等のmetamorphic invariantを追加できる。
+### 微積分 derivative-back
+
+random polynomial `p`について，次をsymbolic residualとして検査する。
+
+```text
+fullSimplify[D[integrate[p,x],x]-p] == 0
+```
+
+### Solve
+
+異なる二つの整数根から方程式を構成し，`solve`が返した`SolutionSet` bindingを順序非依存で比較する。Formatterのbranch表示順をcorrectness条件にはしない。
+
+### Matrix inverse
+
+非零対角を持つ小型上三角整数行列を構成し，generator段階で非特異性を保証した上で検査する。
+
+```text
+dot[A,inverse[A]] == I
+```
+
+### FFT
+
+1～12点のexact Gaussian整数vectorについて，2冪・非2冪backendを跨いで検査する。
+
+```text
+ifft[fft[v]] == v
+```
+
+まず`fullSimplify`後のcanonical構造一致を検査する。generic exact DFTでroot-of-unityの相殺形が残る場合は，`actual-expected`を先に作らない。exact round-trip `Expr`の各成分を`CertifiedEvaluator`へ直接渡し，50桁のcertified enclosureが元のexact Gaussian整数点を含み，さらに実部・虚部ともその点から絶対`10^-40`以内に収まることを確認する。これにより`(-I/2+sqrt[3]/2)^3`や相殺する`sqrt[3]`線形項を含む式で，subtractive residual側だけがbounded refinementを使い切る偽FAILを避ける。Formatterによる文字列化・再parseもoracleへ挟まず，近似FFTへの置換ではなくexact FFT結果そのものを検証する二段目oracleである。
+
+二段目oracle自体もboundedである。`CertifiedEvaluator`は実再帰depth budgetを持ち，巨大なgeneric exact DFT式をWindowsのnative stack overflowまで再帰させない。oracleがこのdepth/work上限で判定できなかったcaseはFFTの数学的FAILとは区別して`inconclusive`として計数し，`--nostop-loop`の進捗表示にも件数を出す。単一`--case`再現では`[INCONCLUSIVE]`を表示する。
+
+### Domain / branch境界
+
+`1/0`，`0^0`，`cot[0]`，`atan2[0,0]`，`atanh[1]`が必ず`DomainError`へ分類されること，`sqrt[-1] == I`，`sqrt[(-3)^2] == 3`となるprincipal square-root branchを検査する。`ResourceLimitError`や一般exceptionへの分類退行もFAILである。
+
+FAIL時の`Budget`行は，直前評価の`EvaluationUsage`である。反例が資源上限そのものなのか，低い使用量で生じた意味論failureなのかをseed / caseと同時に判断できる。
 
 ---
 
-# 8. Fuzzerと通常random checkの違い
+# 9. Fuzzerと通常random checkの違い
 
 両者は目的が異なる。
 
@@ -673,9 +832,9 @@ mmCal.Benchmarks --random-expressions --loop
 
 ---
 
-# 9. Benchmark結果の読み方
+# 10. Benchmark結果の読み方
 
-## 9.1 1回の結果だけでthresholdを変えない
+## 10.1 1回の結果だけでthresholdを変えない
 
 CPU boost，background process，cache，allocator等で数%程度は容易に変動する。
 
@@ -693,7 +852,7 @@ threshold変更では，
 
 mmCalでは実際に，理論上有望でもbenchmarkで優位性が得られず棄却・保留した最適化が複数存在する。
 
-## 9.2 correctnessとspeedを混同しない
+## 10.2 correctnessとspeedを混同しない
 
 速い結果は正しい証明ではない。
 
@@ -709,7 +868,7 @@ benchmark
 
 の順に確認する。
 
-## 9.3 exactとapproximateを分けて読む
+## 10.3 exactとapproximateを分けて読む
 
 例えば，
 
@@ -726,7 +885,7 @@ exact pathはBigInt / Rational / symbolic expressionを維持し，approximate p
 
 ---
 
-# 10. 推奨workflow
+# 11. 推奨workflow
 
 ## 通常の変更
 
@@ -785,7 +944,7 @@ mmCal.Benchmarks --random-expressions --seed <seed> --case <case>
 
 ---
 
-# 11. Exit code
+# 12. Exit code
 
 | code | 意味 |
 |---:|---|
@@ -793,11 +952,11 @@ mmCal.Benchmarks --random-expressions --seed <seed> --case <case>
 | `1` | random invariant / random-expression fuzzer等でFAIL |
 | `2` | option不足，未知option，矛盾したoption等のCLI error |
 
-benchmark中の内部invariant違反等ではprogramがabortする場合がある。これはtiming値を誤って正常結果として採用しないためである。
+benchmark中の内部invariant違反等ではprogramがabortする場合がある。これはtiming値を誤って正常結果として採用しないためである。ただし，certified Eigen / Eigensystem backendが結果を返せない場合は診断を表示し，code 1で終了する。
 
 ---
 
-# 12. 現在の設計上の注意
+# 13. 現在の設計上の注意
 
 `mmCal.Benchmarks`は一般的なbenchmark frameworkではなく，**mmCal固有の算法選定と正当性監視のための開発tool**である。
 

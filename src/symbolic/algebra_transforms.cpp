@@ -199,6 +199,125 @@ using numeric::Rational;
     return Rational{*numerator, *denominator};
 }
 
+[[nodiscard]] std::optional<BigInt> exactIntegerNthRoot(
+    const BigInt& value,
+    std::uint64_t degree) {
+    if (degree == 0)
+        return std::nullopt;
+    if (degree == 1 || value.isZero())
+        return value;
+
+    const bool negative = value.isNegative();
+    if (negative && (degree % 2U) == 0U)
+        return std::nullopt;
+    const BigInt magnitude = value.abs();
+    const std::size_t rootBits = (magnitude.bitLength() + degree - 1) / degree;
+    BigInt low{0};
+    BigInt high = BigInt{1} << (rootBits + 1);
+    const BigInt one{1};
+    while (high - low > one) {
+        const BigInt middle = (low + high) / BigInt{2};
+        if (numeric::pow(middle, degree) <= magnitude)
+            low = middle;
+        else
+            high = middle;
+    }
+    if (numeric::pow(low, degree) != magnitude)
+        return std::nullopt;
+    return negative ? -low : low;
+}
+
+[[nodiscard]] std::optional<Rational> perfectRationalNthRoot(
+    const Rational& value,
+    std::uint64_t degree) {
+    const auto numerator = exactIntegerNthRoot(value.numerator(), degree);
+    const auto denominator = exactIntegerNthRoot(value.denominator(), degree);
+    if (!numerator || !denominator)
+        return std::nullopt;
+    return Rational{*numerator, *denominator};
+}
+
+[[nodiscard]] RationalPolynomial multiplyRationalPolynomials(
+    const RationalPolynomial& lhs,
+    const RationalPolynomial& rhs) {
+    if (lhs.isZero() || rhs.isZero())
+        return RationalPolynomial{};
+    std::vector<Rational> coefficients(lhs.degree() + rhs.degree() + 1, rational(0));
+    for (std::size_t i = 0; i <= lhs.degree(); ++i)
+        for (std::size_t j = 0; j <= rhs.degree(); ++j)
+            coefficients[i + j] += lhs.coefficient(i) * rhs.coefficient(j);
+    return RationalPolynomial{std::move(coefficients)};
+}
+
+[[nodiscard]] RationalPolynomial powerRationalPolynomial(
+    RationalPolynomial base,
+    std::uint64_t exponent) {
+    RationalPolynomial result{{rational(1)}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0U)
+            result = multiplyRationalPolynomials(result, base);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = multiplyRationalPolynomials(base, base);
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<RationalPolynomial> exactPolynomialPowerRoot(
+    const RationalPolynomial& polynomial,
+    std::uint64_t degree) {
+    if (degree < 2 || polynomial.isZero() || polynomial.degree() % degree != 0)
+        return std::nullopt;
+
+    const std::size_t rootDegree = polynomial.degree() / degree;
+    const auto leadingRoot = perfectRationalNthRoot(
+        polynomial.coefficient(polynomial.degree()), degree);
+    if (!leadingRoot || leadingRoot->isZero())
+        return std::nullopt;
+
+    std::vector<Rational> coefficients(rootDegree + 1, rational(0));
+    coefficients[rootDegree] = *leadingRoot;
+    const Rational linearScale = Rational{BigInt::fromUnsigned(degree)}
+        * Rational{numeric::pow(leadingRoot->numerator(), degree - 1),
+            numeric::pow(leadingRoot->denominator(), degree - 1)};
+
+    // q(x)^k の上位係数を順に一致させる。x^((k-1)m+j) の係数では
+    // 未知q_jは k*q_m^(k-1)*q_j と一次にしか現れないため，Q上でexactに決定できる。
+    for (std::size_t offset = 0; offset < rootDegree; ++offset) {
+        const std::size_t j = rootDegree - 1 - offset;
+        RationalPolynomial partial{coefficients};
+        const RationalPolynomial powered = powerRationalPolynomial(partial, degree);
+        const std::size_t targetExponent = (degree - 1) * rootDegree + j;
+        coefficients[j] = (polynomial.coefficient(targetExponent)
+            - powered.coefficient(targetExponent)) / linearScale;
+    }
+
+    RationalPolynomial root{std::move(coefficients)};
+    if (powerRationalPolynomial(root, degree).coefficients() != polynomial.coefficients())
+        return std::nullopt;
+    return root;
+}
+
+[[nodiscard]] std::optional<Expr> factorPerfectUnivariatePower(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    constexpr std::size_t maximumExponent = 64;
+    const std::size_t upper = std::min(polynomial.degree(), maximumExponent);
+    for (std::size_t exponent = upper; exponent >= 2; --exponent) {
+        if (polynomial.degree() % exponent != 0)
+            continue;
+        const auto root = exactPolynomialPowerRoot(polynomial, exponent);
+        if (!root)
+            continue;
+        return Expr::call(
+            builtins.symbol(BuiltinId::Power),
+            {polynomialToExpandedExpr(*root, variable, builtins),
+                Expr{Number{BigInt::fromUnsigned(exponent)}}});
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] Monomial divideMonomial(
     const Monomial& value,
     const Monomial& divisor) {
@@ -823,7 +942,12 @@ Expr factorExpression(
         if (variables.size() == 1) {
             if (const auto univariate = toRationalPolynomial(core, variables.front(), builtins);
                 univariate && univariate->degree() > 1) {
-                if (const auto result = factorUnivariate(
+                if (const auto perfectPower = factorPerfectUnivariatePower(
+                    *univariate, variables.front(), builtins)) {
+                    core = *perfectPower;
+                    factoredCore = true;
+                }
+                else if (const auto result = factorUnivariate(
                     *univariate, variables.front(), builtins, mathematics, angles)) {
                     core = *result;
                     factoredCore = true;

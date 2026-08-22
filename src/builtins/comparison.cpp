@@ -82,8 +82,8 @@ struct ComplexBounds final {
     if (value.isComplexDecimalApproximation()) {
         const auto& approximate = value.asComplexDecimalApproximation();
         return ComplexBounds{
-            RealBounds{approximate.real().informationLower(), approximate.real().informationUpper()},
-            RealBounds{approximate.imaginary().informationLower(), approximate.imaginary().informationUpper()}};
+            RealBounds{approximate.realInformationLower(), approximate.realInformationUpper()},
+            RealBounds{approximate.imaginaryInformationLower(), approximate.imaginaryInformationUpper()}};
     }
     return std::nullopt;
 }

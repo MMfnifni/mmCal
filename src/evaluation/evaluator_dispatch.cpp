@@ -2,6 +2,7 @@
 #include "evaluator.hpp"
 
 #include "mathematics/assumption_parser.hpp"
+#include "mathematics/value_facts.hpp"
 
 #include "builtins/arithmetic.hpp"
 #include "builtins/approximation_utilities.hpp"
@@ -20,6 +21,7 @@
 #include "builtins/iteration.hpp"
 #include "builtins/linear_algebra.hpp"
 #include "builtins/numerical_calculus.hpp"
+#include "builtins/polynomial_ideal.hpp"
 #include "builtins/trigonometric.hpp"
 #include "builtins/stable_elementary.hpp"
 #include "builtins/special_functions.hpp"
@@ -50,6 +52,273 @@
 
 namespace mmcal::evaluation {
 namespace {
+
+enum class InfiniteValue {
+    None,
+    Positive,
+    Negative,
+    Undirected
+};
+
+[[nodiscard]] bool isPredefinedAtom(
+    const expression::Expr& expression,
+    symbols::PredefinedSymbolId id,
+    const symbols::SymbolRegistry& symbolRegistry) noexcept {
+    if (!expression.isSymbol())
+        return false;
+    if (const auto* definition = symbolRegistry.find(expression.asSymbol()); definition)
+        return definition->id == id;
+    const auto* canonical = symbolRegistry.find(id);
+    return canonical && expression.asSymbol() == canonical->symbol;
+}
+
+[[nodiscard]] expression::Expr predefinedValue(
+    symbols::PredefinedSymbolId id,
+    const symbols::SymbolRegistry& symbolRegistry) {
+    const auto* definition = symbolRegistry.find(id);
+    if (!definition)
+        error::throwCalcError(
+            error::CalcErrorType::Internal,
+            "Required predefined exceptional value is not registered");
+    return expression::Expr{definition->symbol};
+}
+
+[[nodiscard]] bool isIndeterminate(
+    const expression::Expr& expression,
+    const symbols::SymbolRegistry& symbolRegistry) noexcept {
+    return isPredefinedAtom(
+        expression, symbols::PredefinedSymbolId::Indeterminate, symbolRegistry);
+}
+
+[[nodiscard]] InfiniteValue infiniteValue(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins,
+    const symbols::SymbolRegistry& symbolRegistry) noexcept {
+    if (isPredefinedAtom(
+            expression, symbols::PredefinedSymbolId::Infinity, symbolRegistry))
+        return InfiniteValue::Positive;
+    if (isPredefinedAtom(
+            expression, symbols::PredefinedSymbolId::ComplexInfinity, symbolRegistry))
+        return InfiniteValue::Undirected;
+
+    if (!builtins.isCallTo(expression, BuiltinId::Negate)
+        || expression.asCall().arguments.size() != 1)
+        return InfiniteValue::None;
+    const expression::Expr& operand = expression.asCall().arguments.front();
+    if (isPredefinedAtom(
+            operand, symbols::PredefinedSymbolId::Infinity, symbolRegistry))
+        return InfiniteValue::Negative;
+    if (isPredefinedAtom(
+            operand, symbols::PredefinedSymbolId::ComplexInfinity, symbolRegistry))
+        return InfiniteValue::Undirected;
+    return InfiniteValue::None;
+}
+
+[[nodiscard]] bool isExactlyZero(const expression::Expr& value) noexcept {
+    if (value.isNumber())
+        return value.asNumber().isZero();
+    if (value.isDecimalApproximation())
+        return value.asDecimalApproximation().informationExactlyZero();
+    if (value.isComplexDecimalApproximation()) {
+        const auto& complex = value.asComplexDecimalApproximation();
+        return complex.realInformationExactlyZero()
+            && complex.imaginaryInformationExactlyZero();
+    }
+    return false;
+}
+
+[[nodiscard]] bool isExactlyNonZero(const expression::Expr& value) noexcept {
+    if (value.isNumber())
+        return !value.asNumber().isZero();
+    if (value.isDecimalApproximation()) {
+        const auto& decimal = value.asDecimalApproximation();
+        return decimal.informationUpper() < numeric::Rational{}
+            || decimal.informationLower() > numeric::Rational{};
+    }
+    if (value.isComplexDecimalApproximation()) {
+        const auto& complex = value.asComplexDecimalApproximation();
+        const bool realExcludesZero = complex.realInformationUpper() < numeric::Rational{}
+            || complex.realInformationLower() > numeric::Rational{};
+        const bool imaginaryExcludesZero = complex.imaginaryInformationUpper() < numeric::Rational{}
+            || complex.imaginaryInformationLower() > numeric::Rational{};
+        return realExcludesZero || imaginaryExcludesZero;
+    }
+    return false;
+}
+
+[[nodiscard]] bool hasExactUnitMagnitude(const expression::Expr& value) {
+    if (!value.isNumber())
+        return false;
+    const numeric::RealNumber real = value.asNumber().realPart();
+    const numeric::RealNumber imaginary = value.asNumber().imaginaryPart();
+    return real * real + imaginary * imaginary
+        == numeric::RealNumber{numeric::BigInt{1}};
+}
+
+[[nodiscard]] bool propagatesIndeterminate(
+    const BuiltinDefinition& definition,
+    const mathematics::MathRegistry& mathRegistry) noexcept {
+    if (mathRegistry.findFunction(definition.symbol))
+        return true;
+    switch (definition.id) {
+    case BuiltinId::Add:
+    case BuiltinId::Subtract:
+    case BuiltinId::Multiply:
+    case BuiltinId::Divide:
+    case BuiltinId::Power:
+    case BuiltinId::Negate:
+    case BuiltinId::Factorial:
+    case BuiltinId::Floor:
+    case BuiltinId::Ceil:
+    case BuiltinId::Trunc:
+    case BuiltinId::Round:
+    case BuiltinId::Frac:
+    case BuiltinId::Fma:
+    case BuiltinId::Clamp:
+    case BuiltinId::Proj:
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] std::optional<expression::Expr> exceptionalArithmeticResult(
+    const BuiltinDefinition& definition,
+    std::span<const expression::Expr> arguments,
+    const BuiltinRegistry& builtins,
+    const symbols::SymbolRegistry& symbolRegistry,
+    const mathematics::MathRegistry& mathRegistry) {
+    const bool hasIndeterminate = std::any_of(
+        arguments.begin(), arguments.end(),
+        [&](const expression::Expr& argument) {
+            return isIndeterminate(argument, symbolRegistry);
+        });
+    if (hasIndeterminate) {
+        if (definition.id == BuiltinId::Equal)
+            return expression::Expr{false};
+        if (definition.id == BuiltinId::NotEqual)
+            return expression::Expr{true};
+        if (definition.id == BuiltinId::Element)
+            return expression::Expr{false};
+        if (propagatesIndeterminate(definition, mathRegistry))
+            return predefinedValue(
+                symbols::PredefinedSymbolId::Indeterminate, symbolRegistry);
+    }
+
+    const auto indeterminate = [&] {
+        return predefinedValue(
+            symbols::PredefinedSymbolId::Indeterminate, symbolRegistry);
+    };
+    const auto complexInfinity = [&] {
+        return predefinedValue(
+            symbols::PredefinedSymbolId::ComplexInfinity, symbolRegistry);
+    };
+
+    switch (definition.id) {
+    case BuiltinId::Add: {
+        bool positiveInfinity = false;
+        bool negativeInfinity = false;
+        for (const expression::Expr& argument : arguments) {
+            const InfiniteValue infinity = infiniteValue(
+                argument, builtins, symbolRegistry);
+            positiveInfinity = positiveInfinity || infinity == InfiniteValue::Positive;
+            negativeInfinity = negativeInfinity || infinity == InfiniteValue::Negative;
+        }
+        if (positiveInfinity && negativeInfinity)
+            return indeterminate();
+        break;
+    }
+    case BuiltinId::Subtract:
+        if (arguments.size() == 2) {
+            const InfiniteValue lhs = infiniteValue(
+                arguments[0], builtins, symbolRegistry);
+            const InfiniteValue rhs = infiniteValue(
+                arguments[1], builtins, symbolRegistry);
+            if (lhs != InfiniteValue::None && rhs != InfiniteValue::None
+                && (lhs == rhs || lhs == InfiniteValue::Undirected
+                    || rhs == InfiniteValue::Undirected))
+                return indeterminate();
+        }
+        break;
+    case BuiltinId::Multiply: {
+        const bool hasZero = std::any_of(
+            arguments.begin(), arguments.end(), isExactlyZero);
+        const bool hasInfinity = std::any_of(
+            arguments.begin(), arguments.end(),
+            [&](const expression::Expr& argument) {
+                return infiniteValue(argument, builtins, symbolRegistry)
+                    != InfiniteValue::None;
+            });
+        if (hasZero && hasInfinity)
+            return indeterminate();
+        break;
+    }
+    case BuiltinId::Divide:
+        if (arguments.size() == 2) {
+            const InfiniteValue numeratorInfinity =
+                infiniteValue(arguments[0], builtins, symbolRegistry);
+            const InfiniteValue denominatorInfinity =
+                infiniteValue(arguments[1], builtins, symbolRegistry);
+            if (numeratorInfinity != InfiniteValue::None
+                && denominatorInfinity != InfiniteValue::None)
+                return indeterminate();
+            if (isExactlyZero(arguments[1])) {
+                if (isExactlyZero(arguments[0]))
+                    return indeterminate();
+                if (isExactlyNonZero(arguments[0])
+                    || numeratorInfinity != InfiniteValue::None) {
+                    return complexInfinity();
+                }
+
+                const mathematics::ValueFacts facts = mathematics::inferValueFacts(
+                    arguments[0], builtins, mathRegistry);
+                if (facts.sign == mathematics::RealSign::Positive
+                    || facts.sign == mathematics::RealSign::Negative
+                    || facts.sign == mathematics::RealSign::NonZero)
+                    return complexInfinity();
+                return indeterminate();
+            }
+        }
+        break;
+    case BuiltinId::Power:
+        if (arguments.size() == 2) {
+            const expression::Expr& base = arguments[0];
+            const expression::Expr& exponent = arguments[1];
+            const InfiniteValue baseInfinity = infiniteValue(
+                base, builtins, symbolRegistry);
+            const InfiniteValue exponentInfinity = infiniteValue(
+                exponent, builtins, symbolRegistry);
+
+            if (exponentInfinity == InfiniteValue::Undirected)
+                return indeterminate();
+            if (baseInfinity != InfiniteValue::None && isExactlyZero(exponent))
+                return indeterminate();
+            if (isExactlyZero(base) && isExactlyZero(exponent))
+                return indeterminate();
+            if (isExactlyZero(base) && exponent.isNumber()) {
+                const numeric::Number& number = exponent.asNumber();
+                const numeric::RealNumber realPart = number.realPart();
+                if (number.isComplex() && realPart.isZero())
+                    return indeterminate();
+                if (realPart.isNegative())
+                    return complexInfinity();
+            }
+            if (exponentInfinity != InfiniteValue::None
+                && hasExactUnitMagnitude(base))
+                return indeterminate();
+        }
+        break;
+    case BuiltinId::Negate:
+        if (arguments.size() == 1
+            && infiniteValue(arguments.front(), builtins, symbolRegistry)
+                == InfiniteValue::Undirected)
+            return complexInfinity();
+        break;
+    default:
+        break;
+    }
+    return std::nullopt;
+}
 
 [[nodiscard]] std::optional<mathematics::NumericDomain> solveDomainSymbol(
     const expression::Expr& expression,
@@ -185,6 +454,15 @@ void validateSolveVariable(
         });
 }
 
+void consumeSolverSolutionBranches(const solver::SolutionSet& solutions) {
+    std::size_t branches = solutions.branches().size();
+    for (const solver::SolutionCase& item : solutions.cases())
+        branches += std::max<std::size_t>(1, item.branches.size());
+    consumeEvaluationBudget(
+        EvaluationResource::SolverBranch,
+        std::max<std::size_t>(1, branches));
+}
+
 [[nodiscard]] bool containsComplexAlgebraicRoot(
     const solver::SolutionSet& solutions,
     const BuiltinRegistry& registry) {
@@ -210,6 +488,10 @@ expression::Expr Evaluator::dispatchBuiltin(
     const BuiltinDefinition& definition,
     const expression::CallExpr& call,
     std::span<const expression::Expr> arguments) {
+    if (const auto exceptional = exceptionalArithmeticResult(
+            definition, arguments, registry_, symbolRegistry_, mathematics_))
+        return *exceptional;
+
     if (requiresRectangularArray(definition.id)) {
         const bool nonRectangular = std::any_of(arguments.begin(), arguments.end(),
             [](const expression::Expr& value) { return value.isList(); });
@@ -242,7 +524,34 @@ expression::Expr Evaluator::dispatchBuiltin(
             error::throwCalcError(error::CalcErrorType::Type,
                 "D expects an expression followed by one or more derivative specifications");
 
-        expression::Expr result = arguments[0];
+        // Dは変数指定や代入を不用意に評価しないためHoldAllだが，% / Out[n] は
+        // 「直前の値そのもの」を指すsnapshot参照である。これまでD[% ,x]ではHistory callを
+        // 未知函数として微分し0になっていたため，副作用を伴わない出力履歴だけ先に展開する。
+        const auto resolveOutputHistory = [&](const auto& self, const expression::Expr& value) -> expression::Expr {
+            if (!value.isCall())
+                return value;
+            const expression::CallExpr& heldCall = value.asCall();
+            if (const BuiltinDefinition* heldDefinition = registry_.find(heldCall.head)) {
+                if (heldDefinition->id == BuiltinId::History)
+                    return self(self, evaluateHistory(heldCall.arguments));
+                if (heldDefinition->id == BuiltinId::OutputHistory)
+                    return self(self, evaluateIndexedHistory(heldCall.arguments, false));
+            }
+
+            std::vector<expression::Expr> rebuiltArguments;
+            rebuiltArguments.reserve(heldCall.arguments.size());
+            bool changed = false;
+            for (const expression::Expr& argument : heldCall.arguments) {
+                expression::Expr rebuilt = self(self, argument);
+                changed = changed || !(rebuilt == argument);
+                rebuiltArguments.push_back(std::move(rebuilt));
+            }
+            return changed
+                ? expression::Expr::rebuildCall(heldCall, std::move(rebuiltArguments))
+                : value;
+        };
+
+        expression::Expr result = resolveOutputHistory(resolveOutputHistory, arguments[0]);
         for (std::size_t i = 1; i < arguments.size(); ++i) {
             expression::Symbol variable;
             std::uint64_t order = 1;
@@ -276,9 +585,13 @@ expression::Expr Evaluator::dispatchBuiltin(
                     "D derivative specification must be a symbol or {symbol, nonnegative integer}");
             }
 
-            for (std::uint64_t derivative = 0; derivative < order; ++derivative)
+            for (std::uint64_t derivative = 0; derivative < order; ++derivative) {
                 result = symbolic::differentiateExpression(
                     result, variable, registry_, mathematics_, angleSemantics_);
+                if (const auto normalized = symbolic::normalizeRationalExpression(
+                        result, variable, registry_, mathematics_, angleSemantics_))
+                    result = *normalized;
+            }
         }
 
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Derivative)))
@@ -350,17 +663,40 @@ expression::Expr Evaluator::dispatchBuiltin(
         return *result;
     }
     case BuiltinId::Limit: {
-        if (arguments.size() < 3 || arguments.size() > 4 || !arguments[1].isSymbol())
+        if (arguments.size() < 2 || arguments.size() > 4)
             error::throwCalcError(error::CalcErrorType::Type,
-                "limit expects limit[expression, variable, point] or limit[expression, variable, point, direction]");
+                "limit expects limit[expression, variable, point], limit[expression, variable, point, direction], or limit[expression, {variable, point, direction}]");
+
+        expression::Symbol variable;
+        std::optional<expression::Expr> point;
+        std::optional<expression::Expr> directionExpression;
+        if (arguments.size() == 2) {
+            const auto spec = parseRangeIteratorSpec(arguments[1]);
+            if (!spec)
+                error::throwCalcError(error::CalcErrorType::Type,
+                    "limit iterator must be {variable, point, direction}");
+            variable = spec->variable;
+            point = spec->lower;
+            directionExpression = spec->upper;
+        }
+        else {
+            if (!arguments[1].isSymbol())
+                error::throwCalcError(error::CalcErrorType::Type,
+                    "limit variable must be a symbol");
+            variable = arguments[1].asSymbol();
+            point = arguments[2];
+            if (arguments.size() == 4)
+                directionExpression = arguments[3];
+        }
 
         symbolic::LimitDirection direction = symbolic::LimitDirection::TwoSided;
-        if (arguments.size() == 4) {
-            if (!arguments[3].isNumber() || !arguments[3].asNumber().isReal()
-                || !arguments[3].asNumber().asReal().isInteger())
+        if (directionExpression) {
+            const auto& directionValue = *directionExpression;
+            if (!directionValue.isNumber() || !directionValue.asNumber().isReal()
+                || !directionValue.asNumber().asReal().isInteger())
                 error::throwCalcError(error::CalcErrorType::Type,
                     "limit direction must be -1 for left or 1 for right");
-            const auto& value = arguments[3].asNumber().asReal().asInteger();
+            const auto& value = directionValue.asNumber().asReal().asInteger();
             if (value == numeric::BigInt{-1})
                 direction = symbolic::LimitDirection::Left;
             else if (value == numeric::BigInt{1})
@@ -371,11 +707,15 @@ expression::Expr Evaluator::dispatchBuiltin(
         }
 
         const auto* infinity = symbolRegistry_.find("Infinity");
-        if (!infinity)
-            error::throwCalcError(error::CalcErrorType::Internal, "Infinity symbol is not registered");
+        const auto* complexInfinity = symbolRegistry_.find("ComplexInfinity");
+        const auto* indeterminate = symbolRegistry_.find("Indeterminate");
+        if (!infinity || !complexInfinity || !indeterminate)
+            error::throwCalcError(error::CalcErrorType::Internal,
+                "Limit exceptional symbols are not registered");
         expression::Expr result = symbolic::limitExpression(
-            arguments[0], arguments[1].asSymbol(), arguments[2], direction,
-            registry_, mathematics_, angleSemantics_, infinity->symbol);
+            arguments[0], variable, *point, direction,
+            registry_, mathematics_, angleSemantics_, infinity->symbol, {},
+            &complexInfinity->symbol, &indeterminate->symbol);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Limit)))
             emitWarning("limit::unevaluated",
                 "limit could not prove the requested limit; unevaluated limit[...] remains");
@@ -555,7 +895,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::QrDecomposition)))
             emitWarning("qrDecomposition::unevaluated",
-                "qrDecomposition exact Householder expansion is unavailable for this matrix; use N[...] for the certified numerical backend");
+                "qrDecomposition requires an exact real matrix for the exact fraction-free backend; N[...] uses the certified Householder backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
         return result;
     }
     case BuiltinId::SingularValueDecomposition: {
@@ -567,7 +907,43 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::SingularValueDecomposition)))
             emitWarning("svd::unevaluated",
-                "svd exact form is only emitted for natural exact cases; use N[...] for the numerical SVD backend");
+                "svd exact form is only emitted for natural exact cases; N[...] uses the numerical SVD backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
+        return result;
+    }
+    case BuiltinId::ConditionNumber: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateConditionNumber(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateConditionNumber(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::ConditionNumber)))
+            emitWarning("conditionNumber::unevaluated",
+                "conditionNumber exact form is unavailable; N[...] uses the numerical SVD backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
+        return result;
+    }
+    case BuiltinId::PseudoInverse: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximatePseudoInverse(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluatePseudoInverse(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::PseudoInverse)))
+            emitWarning("pseudoInverse::unevaluated",
+                "pseudoInverse could not determine a safe exact or numerical rank; the expression remains unevaluated");
+        return result;
+    }
+    case BuiltinId::LeastSquares: {
+        if (const auto* approximation = currentApproximationContext())
+            if (const auto result = builtins::evaluateApproximateLeastSquares(
+                arguments, registry_, mathematics_, angleSemantics_, *approximation))
+                return *result;
+        expression::Expr result = builtins::evaluateLeastSquares(
+            arguments, registry_, mathematics_, angleSemantics_);
+        if (containsBuiltinCall(result, registry_.symbol(BuiltinId::LeastSquares)))
+            emitWarning("leastSquares::unevaluated",
+                "leastSquares could not determine a safe exact or numerical rank; the expression remains unevaluated");
         return result;
     }
     case BuiltinId::Eigenvalues: {
@@ -579,7 +955,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigenvalues)))
             emitWarning("eigenvalues::unevaluated",
-                "eigenvalues exact form is unavailable for this matrix; use N[...] for the numerical Schur backend");
+                "eigenvalues exact form is unavailable; N[...] uses the numerical Schur backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
         return result;
     }
     case BuiltinId::Eigenvectors: {
@@ -591,7 +967,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigenvectors)))
             emitWarning("eigenvectors::unevaluated",
-                "eigenvectors exact form is only emitted for natural exact cases; use N[...] for the numerical Schur backend");
+                "eigenvectors exact form is only emitted for natural exact cases; N[...] uses the numerical Schur backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
         return result;
     }
     case BuiltinId::Eigensystem: {
@@ -603,7 +979,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments, registry_, mathematics_, angleSemantics_);
         if (containsBuiltinCall(result, registry_.symbol(BuiltinId::Eigensystem)))
             emitWarning("eigensystem::unevaluated",
-                "eigensystem exact form is only emitted for natural exact cases; use N[...] for the numerical Schur backend");
+                "eigensystem exact form is only emitted for natural exact cases; N[...] uses the numerical Schur backend for exact matrices, while existing finite-precision matrix leaves remain conservative");
         return result;
     }
     case BuiltinId::NumericDerivative:
@@ -927,8 +1303,9 @@ expression::Expr Evaluator::dispatchBuiltin(
         mathematics::AssumptionSet assumptions;
         if (arguments.size() == 2)
             assumptions = mathematics::parseAssumptions(arguments[1], registry_, mathematics_);
-        const simplification::SimplificationContext context{
+        simplification::SimplificationContext context{
             registry_, mathematics_, angleSemantics_, std::move(assumptions)};
+        context.predefinedSymbols = &symbolRegistry_;
         if (definition.id == BuiltinId::FullSimplify)
             return simplification::fullSimplify(arguments.front(), context);
         return simplification::Simplifier{}.simplify(arguments.front(), context);
@@ -966,6 +1343,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             arguments[0], variables, registry_, mathematics_, angleSemantics_);
     }
     case BuiltinId::Solve: {
+        consumeEvaluationBudget(EvaluationResource::SolverBranch);
         if (arguments.size() < 2 || arguments.size() > 3)
             error::throwCalcError(
                 error::CalcErrorType::Type,
@@ -1029,6 +1407,7 @@ expression::Expr Evaluator::dispatchBuiltin(
                     && mathematics::isSubdomainOf(
                         *constraints.domain, mathematics::NumericDomain::Real);
                 if (realDomain) {
+                    consumeEvaluationBudget(EvaluationResource::SolverBranch, 3);
                     if (auto exponential = solver::solveRealExponentialRelation(
                             solveInput, variables.front(), registry_, mathematics_,
                             angleSemantics_, constraints.assumptions))
@@ -1044,6 +1423,7 @@ expression::Expr Evaluator::dispatchBuiltin(
                 }
                 solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
                     solveInput, variables.front(), registry_, mathematics_, angleSemantics_);
+                consumeSolverSolutionBranches(polynomial);
                 if (realDomain && (polynomial.kind() == solver::SolutionSetKind::Unresolved
                         || containsComplexAlgebraicRoot(polynomial, registry_))) {
                     if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
@@ -1073,6 +1453,7 @@ expression::Expr Evaluator::dispatchBuiltin(
 
                 solver::SolutionSet result = solver::solveUnivariatePolynomialRelation(
                     *first, variables.front(), registry_, mathematics_, angleSemantics_);
+                consumeSolverSolutionBranches(result);
                 for (auto iterator = equations.begin(); iterator != equations.end(); ++iterator) {
                     if (iterator == first)
                         continue;
@@ -1083,13 +1464,20 @@ expression::Expr Evaluator::dispatchBuiltin(
                     result = solver::applySolveConstraints(
                         std::move(result), relationConstraint,
                         registry_, mathematics_, angleSemantics_);
+                    consumeSolverSolutionBranches(result);
                 }
                 return result;
             }
 
+            if (auto polynomialSystem = solver::solvePolynomialSystem(
+                    equations, variables, registry_, mathematics_, angleSemantics_))
+                return *polynomialSystem;
+
             return solver::solveLinearPolynomialSystem(
                 equations, variables, registry_, mathematics_, angleSemantics_);
         }();
+
+        consumeSolverSolutionBranches(solutions);
 
         if (constraints.domain
             && *constraints.domain == mathematics::NumericDomain::Complex
@@ -1102,11 +1490,21 @@ expression::Expr Evaluator::dispatchBuiltin(
 
         solutions = solver::applySolveConstraints(
             std::move(solutions), constraints, registry_, mathematics_, angleSemantics_);
+        consumeSolverSolutionBranches(solutions);
         if (containsUnresolvedSolution(solutions))
             emitWarning("solve::unresolved",
                 "solve could not determine a complete solution set; unresolved cases remain");
         return expression::Expr::solutionSet(std::move(solutions));
     }
+    case BuiltinId::GroebnerBasis:
+        return builtins::evaluateGroebnerBasis(arguments, registry_);
+    case BuiltinId::PolynomialReduce:
+        return builtins::evaluatePolynomialReduce(arguments, registry_);
+    case BuiltinId::Cases:
+    case BuiltinId::CaseBranch:
+        error::throwCalcError(
+            error::CalcErrorType::Internal,
+            "cases must be handled by the evaluation machine");
     case BuiltinId::Set:
         return evaluateSet(arguments);
     case BuiltinId::SetDelayed:

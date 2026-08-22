@@ -634,6 +634,16 @@ bool BigUInt::testBit(std::size_t index) const noexcept {
     return ((limbs_[limbIndex] >> offset) & limb_type{1}) != 0;
 }
 
+BigUInt::limb_type BigUInt::moduloSmall(limb_type divisor) const {
+    if (divisor == 0)
+        throw std::domain_error("BigUInt modulo divisor must be nonzero");
+
+    std::uint64_t remainder = 0;
+    for (std::size_t index = limbs_.size(); index-- > 0;)
+        remainder = ((remainder << 32) + limbs_[index]) % divisor;
+    return static_cast<limb_type>(remainder);
+}
+
 std::size_t BigUInt::trailingZeroBits() const noexcept {
     if (isZero())
         return 0;

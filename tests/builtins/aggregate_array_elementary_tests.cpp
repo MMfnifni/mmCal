@@ -74,13 +74,16 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "table[table[i+j,{j,2}],{i,2}]"),
         std::string{"{{2, 3}, {3, 4}}"},
         "nested table scopes iterator variables independently");
+    tests.expectEqual(eval(session, "table[1/(i+j+1),{{i,4},{j,4}}]"),
+        std::string{"{{1/3, 1/4, 1/5, 1/6}, {1/4, 1/5, 1/6, 1/7}, {1/5, 1/6, 1/7, 1/8}, {1/6, 1/7, 1/8, 1/9}}"},
+        "table accepts a brace value of iterator specifications as nested iteration");
     static_cast<void>(eval(session, "i:=99"));
     tests.expectEqual(eval(session, "table[i,{i,3}]"), std::string{"{1, 2, 3}"},
         "table iterator scope shadows a global definition locally");
     tests.expectEqual(eval(session, "i"), std::string{"99"},
         "table restores the outer definition after iteration");
 
-    tests.expect(evalError(session, "table[1/0,{i,3}]").type() == error::CalcErrorType::Domain,
+    tests.expect(evalError(session, "table[log[0],{i,3}]").type() == error::CalcErrorType::Domain,
         "table propagates body errors without swallowing the original diagnostic");
     tests.expectEqual(eval(session, "i"), std::string{"99"},
         "table unwinds its local iterator scope when the body throws");
@@ -173,6 +176,18 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         "tanhc fills its removable singularity exactly");
     tests.expectEqual(eval(session, "expc[0]"), std::string{"1"},
         "expc fills its removable singularity exactly");
+    tests.expectEqual(eval(session, "sinc[N[0,5]]"), std::string{"1.0"},
+        "sinc certifies a finite-precision interval across its removable singularity");
+    tests.expectEqual(eval(session, "cosc[N[0,5]]"), std::string{"0.0"},
+        "cosc certifies a finite-precision interval across its removable singularity");
+    tests.expectEqual(eval(session, "tanc[N[0,5]]"), std::string{"1.0"},
+        "tanc certifies a finite-precision interval across its removable singularity");
+    tests.expectEqual(eval(session, "sinhc[N[0,5]]"), std::string{"1.0"},
+        "sinhc certifies a finite-precision interval across its removable singularity");
+    tests.expectEqual(eval(session, "tanhc[N[0,5]]"), std::string{"1.0"},
+        "tanhc certifies a finite-precision interval across its removable singularity");
+    tests.expectEqual(eval(session, "expc[N[0,5]]"), std::string{"1.0"},
+        "expc certifies a finite-precision interval across its removable singularity");
     tests.expectEqual(eval(session, "sinc[Pi/2]"), std::string{"2/Pi"},
         "sinc reduces exact special angles without approximation");
     tests.expectEqual(eval(session, "tanc[Pi/4]"), std::string{"4/Pi"},
@@ -191,11 +206,29 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[tanc[Pi/4],20]"),
         std::string{"1.2732395447351626862"},
         "tanc has certified pole-aware evaluation");
+    tests.expectEqual(eval(session, "D[sinc[x],x]"),
+        std::string{"cases[(x cos[x]-sin[x])/x^2 if x != 0; 0 if x == 0]"},
+        "sinc derivative preserves the removable singularity at zero");
+    tests.expectEqual(eval(session, "D[cosc[x],x]"),
+        std::string{"cases[(-1+x sin[x]+cos[x])/x^2 if x != 0; 1/2 if x == 0]"},
+        "cosc derivative uses its exact one-half limit at zero");
+    tests.expectEqual(eval(session, "D[tanc[x],x]"),
+        std::string{"cases[(x sec[x]^2-tan[x])/x^2 if x != 0; 0 if x == 0]"},
+        "tanc derivative preserves the removable singularity at zero");
+    tests.expectEqual(eval(session, "D[sinhc[x],x]"),
+        std::string{"cases[(x cosh[x]-sinh[x])/x^2 if x != 0; 0 if x == 0]"},
+        "sinhc derivative preserves the removable singularity at zero");
+    tests.expectEqual(eval(session, "D[tanhc[x],x]"),
+        std::string{"cases[(x sech[x]^2-tanh[x])/x^2 if x != 0; 0 if x == 0]"},
+        "tanhc derivative preserves the removable singularity at zero");
+    tests.expectEqual(eval(session, "D[expc[x],x]"),
+        std::string{"cases[(1+x exp[x]-exp[x])/x^2 if x != 0; 1/2 if x == 0]"},
+        "expc derivative uses its exact one-half limit at zero");
     tests.expectEqual(eval(session, "N[expm1[1/10^30],50]"),
-        std::string{"0.0000000000000000000000000000010000000000000000000000000000005"},
+        std::string{"0.00000000000000000000000000000100000000000000000000000000000050"},
         "expm1 survives severe cancellation by precision refinement");
     tests.expectEqual(eval(session, "N[log1p[1/10^30],50]"),
-        std::string{"0.0000000000000000000000000000009999999999999999999999999999995"},
+        std::string{"0.00000000000000000000000000000099999999999999999999999999999950"},
         "log1p survives severe cancellation by precision refinement");
     tests.expect(evalError(session, "log1p[-1]").type() == error::CalcErrorType::Domain,
         "log1p rejects its exact branch singularity");

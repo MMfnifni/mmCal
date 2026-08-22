@@ -2,6 +2,7 @@
 #include "approximation/approximation_context.hpp"
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
+#include "cli/repl_help.hpp"
 #include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <csignal>
 #include <cstddef>
 #include <iostream>
 #include <limits>
@@ -34,6 +36,66 @@ namespace {
 struct DisplaySettings final {
     std::optional<std::size_t> fixedDigits;
 };
+
+mmcal::evaluation::EvaluationCancellationToken consoleCancellation;
+
+#if defined(_WIN32)
+BOOL WINAPI consoleControlHandler(DWORD controlType) {
+    if (controlType != CTRL_C_EVENT && controlType != CTRL_BREAK_EVENT)
+        return FALSE;
+    consoleCancellation.requestCancellation();
+    return TRUE;
+}
+
+class ConsoleCancellationScope final {
+public:
+    ConsoleCancellationScope() {
+        consoleCancellation.reset();
+        installed_ = ::SetConsoleCtrlHandler(consoleControlHandler, TRUE) != FALSE;
+    }
+
+    ConsoleCancellationScope(const ConsoleCancellationScope&) = delete;
+    ConsoleCancellationScope& operator=(const ConsoleCancellationScope&) = delete;
+
+    ~ConsoleCancellationScope() {
+        if (installed_)
+            static_cast<void>(::SetConsoleCtrlHandler(consoleControlHandler, FALSE));
+    }
+
+private:
+    bool installed_ = false;
+};
+#else
+void consoleInterruptHandler(int) {
+    consoleCancellation.requestSignalCancellation();
+}
+
+class ConsoleCancellationScope final {
+public:
+    ConsoleCancellationScope() {
+        consoleCancellation.reset();
+        previous_ = std::signal(SIGINT, consoleInterruptHandler);
+    }
+
+    ConsoleCancellationScope(const ConsoleCancellationScope&) = delete;
+    ConsoleCancellationScope& operator=(const ConsoleCancellationScope&) = delete;
+
+    ~ConsoleCancellationScope() {
+        static_cast<void>(std::signal(SIGINT, previous_));
+    }
+
+private:
+    using SignalHandler = void (*)(int);
+    SignalHandler previous_ = SIG_DFL;
+};
+#endif
+
+[[nodiscard]] mmcal::expression::Expr evaluateWithConsoleCancellation(
+    mmcal::kernel::KernelSession& session,
+    std::string_view source) {
+    ConsoleCancellationScope cancellationScope;
+    return session.evaluate(source, consoleCancellation);
+}
 
 [[nodiscard]] std::string displayModeName(const DisplaySettings& settings) {
     if (!settings.fixedDigits)
@@ -193,6 +255,10 @@ void updateConsoleTitle(
         catch (const mmcal::approximation::PrecisionInsufficient&) {
             // 表示のための精度不足なので、ガード桁だけ増やして再試行する。
         }
+        catch (const mmcal::approximation::CertifiedBackendUnsupported&) {
+            // :fix/--fix は表示設定であり、未対応backendを新しいエラーへ変換しない。
+            return expression;
+        }
         catch (const std::domain_error&) {
             // :fix/--fix は表示設定であり、未評価式へ新しいDomain/InternalErrorを導入しない。
             return expression;
@@ -327,7 +393,8 @@ struct AutomatedLineResult final {
     std::ostream& diagnostics) {
     using namespace mmcal;
 
-    if (handleFixCommand(line, settings, session, output, false)
+    if (mmcal::cli::handleReplHelpCommand(line, session.builtinRegistry(), output)
+        || handleFixCommand(line, settings, session, output, false)
         || handleStatusCommand(line, session, settings, output))
         return {};
 
@@ -338,7 +405,7 @@ struct AutomatedLineResult final {
     }
 
     try {
-        const expression::Expr result = session.evaluate(line);
+        const expression::Expr result = evaluateWithConsoleCancellation(session, line);
         if (session.exitRequested())
             return {cli::ExitCode::Success, true};
         if (session.clearRequested()) {
@@ -437,7 +504,8 @@ int main(int argc, char* argv[]) {
         if (trim(line).empty())
             continue;
 
-        if (handleFixCommand(line, displaySettings, session, std::cout, true)
+        if (cli::handleReplHelpCommand(line, session.builtinRegistry(), std::cout)
+            || handleFixCommand(line, displaySettings, session, std::cout, true)
             || handleStatusCommand(line, session, displaySettings, std::cout))
             continue;
         const std::string_view commandLine = trim(line);
@@ -447,7 +515,7 @@ int main(int argc, char* argv[]) {
         }
 
         try {
-            const expression::Expr result = session.evaluate(line);
+            const expression::Expr result = evaluateWithConsoleCancellation(session, line);
             if (session.exitRequested())
                 break;
             if (session.clearRequested()) {

@@ -467,7 +467,13 @@ N[fft[data],16]
 128 points  exact ~327.6 ms  certified ~13.1 ms
 ```
 
-非2冪のcertified FFTではdirect DFTとBluesteinを比較し，65点ではdirectが約60 ms，127点ではBluesteinが約199 msでdirect約217 msを上回った。現在は96点未満をdirect，それ以上をBluesteinへ送る。これは数学定数ではなく現benchmark環境のpolicy値なので，MSVCでは再測定する。
+非2冪のcertified FFTは`--fft-threshold`でdirect DFTと強制Bluesteinを同じ入力・16桁・指定反復数で比較する。GCC Release再測定では319点がdirect 1533 ms / Bluestein 1609 ms，335点がdirect 1714 ms / Bluestein 1638 msで，crossoverはこの間だった。一方，MSVC `--full`では257点がdirect 1823 ms / Bluestein 5002 ms，509点がdirect 14007 ms / Bluestein 7896 msだった。primaryのMSVC環境へ保守的に寄せ，現在は384点未満をdirect，それ以上をBluesteinへ送る。これは数学定数ではなく環境依存のpolicy値である。
+
+専用sweepは65 / 95 / 127 / 191 / 255 / 257 / 319 / 335 / 351 / 367 / 383 / 384 / 385 / 447 / 509点を測る。旧policyを通る`evaluateApproximateFft`同士の比較ではなく，directとBluesteinを明示的に強制する。両結果は各実部・虚部の確定済み十進表示値をexact比較し，`-12`と`-12+0…I`のようなzero-component表現差だけを無視する。
+
+2026-08-22のGCC Release再監査では，383点がdirect 1990 ms / Bluestein 1437 ms，384点が1001 / 1434 ms，385点が2010 / 1414 msとなり，境界近傍の勝敗が単調ではなかった。certified direct側のargument reduction・refinement回数や長さの算術構造が定数項へ効くため，単一の局所crossoverだけに合わせて閾値を335等へ動かすことは過学習になる。primary MSVC実測も考慮し，policyは384を維持する。benchmarkには383/384/385を恒久的に含め，環境変更時に再監査する。
+
+同じ監査でcertified特殊函数も「数学的収束」と「実用的bounded work」を分離した。GCC Releaseでは`polylog[2,0.999]`，`2F1[...,0.98]`，`ellipticF[...,0.98]`が収束域内でも現exact-majorant seriesでは数秒から10秒超へ急増した。一方`polylog`は`|z|<=49/50`，`2F1`/ellipticは`<=9/10`，`1F1`は`|z|<=160`，`Ei/Si/Ci`は96までを保守的なbounded-work policyとした。固定backend範囲やplanner上限を超えた失敗は`CertifiedBackendUnsupported`とし，guard precisionだけを増やす無意味なretryを禁止する。
 
 採用理由:
 
@@ -513,9 +519,10 @@ exact Number行列ではpivot loopからExpr生成とSimplifier呼出しを外�
 Stage 3ではexact実数行列を行ごとの分母LCMで整数行列へliftし，`IntegerMatrixBuffer`上のBareiss eliminationを共通kernelとして追加した。整数行列はそのまま，Rational行列は各行を非零整数倍してから処理する。
 
 - `det`: Bareissのfraction-free forward eliminationで計算し，Rational入力では行scale積を最後に一度だけ戻す。
-- `rref`: Bareissでinteger echelon formまで進め，backward phaseだけRational正規化する。
+- `rref`: Bareissでinteger echelon formまで進める。full-column-rankならRREFが単位列で確定するためRational backward phaseを省略し，rank-deficient caseだけcanonical Rational RREFを構築する。
 - `matrixRank`: echelonのpivot数だけで決定し，RREF全体を構築しない。
-- `inverse`: `B=D A` として `[B|D]` をfraction-free eliminationし，左側をidentityへ戻した右側を `A^-1` とする。
+- `inverse`: `B=D A` として `[B|D]` をfraction-free forward eliminationし，最終pivotを共通分母とするBigInt back-substitutionで右側を直接解く。generic Rational Gauss-Jordanへ戻さない。
+- `solveLinear`: unique full-column-rank caseはinverseと同じBigInt back-substitutionを使い，最後にだけRationalを生成する。
 - exact complex: `Q(i)`等へ整数liftする専用環をまだ持たないため，従来`Number` Gaussian/Gauss-Jordanをfallbackとして保持する。
 
 pivotは数値安定性のためではなく中間BigInt growthを抑えるため，候補中でbit lengthが小さい非零値を優先する。Bareissの各除算は`BigInt::divmod`で余り0を検証し，fraction-free invariantが壊れた場合は黙ってtruncationしない。
@@ -530,9 +537,105 @@ pivotは数値安定性のためではなく中間BigInt growthを抑えるた�
 
 `N[det[...],p]` / `N[inverse[...],p]`等はこのexact Bareiss結果を先に作らず，Stage 2で導入したFFT共通のprecision-aware certified Matrix backendへ直接dispatchする。したがってBareiss採用はexact pathの改善であり，`N`の近似経路を後退させない。
 
-# 15.8. LU / Householder QR — 採用
+2026-08-25のperformance-cliff再監査では，inverseの重さはBareiss forward kernelより後段のRational RREFに集中していた。そこでfull-rank square/unique solveでは最終pivot `D` を共通分母とし，後退代入を
 
-分解処理は`linear_algebra/decomposition.*`へまとめ，`luDecomposition[A]`はrow-pivoted `P A = L U`，`qrDecomposition[A]`はHouseholder reflectorによる`A = Q R`を実装した。`N[...]`ではexact factorを先に構築せず，FFT/Matrixと共通の`ApproximationContext`からcertified `ComplexInterval` backendへ直接dispatchする。
+```text
+n_i = (b_i D - sum_{j>i} U_ij n_j) / U_ii
+```
+
+というexact BigInt divisionだけで行う経路へ変更した。`rref`もfull-column-rankならforward elimination終了時点で結果を直接構築する。rank-deficient `rref/nullSpace`は従来のcanonical Rational backward phaseを維持する。
+
+同じpublic-path benchmarkでは16-bit 32×32で`inverse`約103 ms，`rref`約5.2 ms，`matrixRank`約5.2 ms，nullity 1の32×33 `nullSpace`約5.8 ms。96-bit 32×32ではそれぞれ約0.70 s / 34.7 ms / 34.1 ms / 37.6 ms，256-bit 32×32では約3.46 s / 147 ms / 145 ms / 144 msだった。48×49・256-bitのrank-deficient `rref/rank/nullSpace`も約1.25 / 1.13 / 1.10 sで，この範囲では突然のalgorithmic cliffではなく係数bit growthに沿った増加である。inverseの高bit側は最終1024個の巨大canonical Rational生成自体が支配し始めるため，共通分母をpersistent Array storageで共有する等は将来のrepresentation課題として分離する。
+
+# 15.7.1. Modular / CRT exact Matrix — 採用
+
+post-v1.5.3では，大きいdense整数/Rational行列でBareiss中間BigIntのbit growthを避けるため，31-bit prime field上のmodular backendを追加した。31-bit primeを使うことで積は`uint64_t`へ安全に収め，MSVC固有の`__int128`へ依存しない。Rational入力は従来どおり行ごとの分母除去で整数workspaceへliftしてから処理する。
+
+- `det`: 各prime上でGaussian eliminationし，整数演算だけで得るHadamard上界を満たすまでincremental CRTを進め，centered representativeを一意復元する。
+- `solveLinear`: 有限体解をCRTし，rational reconstructionした候補を元の整数系`A X = B`でexact verificationする。rank drop等を起こすbad primeはskipし，保証域までに復元できなければBareissへfallbackする。
+- `inverse`: exact `det(A)`を共通分母として有限体`A^-1`から`adj(A)`像を作り，CRTした整数adjugateを`A adj(A)=det(A)I`でexact verificationする。backendは実装済みだが，現測定範囲ではBareissが速いためautomatic pathへは送らない。
+- `rref` / `matrixRank` / `nullSpace`: rank certificate設計を別問題として扱い，現段階ではBareissのままとする。
+
+automatic dispatcherは係数部density 25%以上を前提とし，GCC Release測定から次の保守的policyを採用した。heightはworkspace中の最大係数bit長である。
+
+| operation | modularを選ぶ条件 |
+| --- | --- |
+| `det` | order>=48，またはorder>=32 & height>=64，order>=24 & height>=192 |
+| `solveLinear` | variables>=24，またはvariables>=12 & height>=96，variables>=8 & height>=256，variables>=6 & height>=512 |
+| `inverse` | automaticでは選ばない |
+
+2026-08-20 GCC Release / LTO-off，3 iteration平均の代表値。単位はmsであり，絶対性能保証ではなくcrossover policyの資料である。
+
+| workload | Bareiss | modular |
+| --- | ---: | ---: |
+| `det` 32×32, 96-bit | 37.691 | 26.270 |
+| `det` 24×24, 256-bit | 41.221 | 29.889 |
+| `det` 32×32, 256-bit | 174.095 | 58.399 |
+| `det` 20×20, 512-bit | 55.836 | 56.766 |
+| `det` 24×24, 512-bit | 136.994 | 70.267 |
+| `det` 32×32, 512-bit | 497.769 | 143.100 |
+| `solveLinear` 12×12, 96-bit | 0.453 | 0.234 |
+| `solveLinear` 8×8, 256-bit | 0.297 | 0.179 |
+| `solveLinear` 24×24, 256-bit | 47.954 | 0.686 |
+| `solveLinear` 6×6, 512-bit | 0.285 | 0.113 |
+| `solveLinear` 24×24, 512-bit | 156.020 | 0.703 |
+| `solveLinear` 32×32, 512-bit | 528.836 | 1.586 |
+
+20×20・512-bit determinantはこの測定でBareissが僅かに優位だったため，自動dispatchはここでmodularへ切り替えない。24×24・512-bitではmodularが明確に優位であり，既存の24次/192-bit条件に包含される。
+
+`inverse`は2026-08-25に再測定してもcrossoverがなく，32×32で16-bit `15.2 / 84.5`，96-bit `74.2 / 657.6`，256-bit `357 / 3339` ms（Bareiss forward core / modular inverse）だった。したがってbackendの存在とautomatic採用を分離し続ける。なおpublic `inverse`全体では最終Rational materializationが別途支配し，256-bit 32×32で約3.46 sとなる。
+
+thresholdは数学的意味論ではなく性能policyである。compiler，BigInt実装，prime kernel，CPUが変われば`mmCal.Benchmarks --exact-linear-algebra 1`で再測定する。`N[det[...],p]` / `N[solveLinear[...],p]`等のcertified pathはexact reconstructionを経由せず，従来どおりprecision-aware interval backendへ直接dispatchする。
+
+# 15.8. LU / fraction-free exact QR / certified Householder QR — 採用
+
+分解処理は`linear_algebra/decomposition.*`へまとめ，`luDecomposition[A]`はrow-pivoted `P A = L U`を維持する。QRはexactとapproximateで算法を分離した。`N[qrDecomposition[A],p]`は従来どおりcertified Householderを直接使い，exact factorを先に展開しない。一方exact実数行列は2026-08-25にExpr-level Householderからfraction-free直交化へ置換した。
+
+## exact QR: 正規化を最後まで遅延 — 採用
+
+旧exact Householderでは，各stepで`norm -> sqrt -> reflector -> Expr arithmetic -> simplify`を繰り返した。このため最初のradicalが次列のnormへ入り，2×2約1.2 ms，3×3約59 msに対し4×4では約18秒，formatted output約677 KBまで膨張した。旧`maximumExactQrOrder = 3`はこの式爆発を防ぐpolicyだった。
+
+新経路では，Rational列をまずprimitive整数vectorへliftし，直交化中は平方根もRational除算も作らない。直交basis `p_i` とその整数norm `d_i=p_i^T p_i`を保持し，射影除去は
+
+```text
+p <- d_i v - (p_i^T v) p_i
+```
+
+をGCDで約分して進める。最終materializationでのみ
+
+```text
+Q[:,i] = p_i / sqrt(d_i)
+R[i,j] = (p_i^T a_j) / sqrt(d_i)
+```
+
+をExpr化する。平方根分解も列ごとに一度だけ行い，同じradical nodeをQ/R全要素で共有する。これにより旧`maximumExactQrOrder`は撤去した。上三角／上台形の`{I,A}` fast pathはそのまま残す。
+
+## Gram + symmetric Bareiss（fraction-free LDL^T相当） — 採用
+
+full-rank caseではprimitive列`C`からGram行列`G=C^T C`を作り，対称Bareiss消去でprincipal determinant列とlower係数を得る。これから平方根を作らず直交整数basisを復元する。この経路はdirect fraction-free Gram-Schmidtより代表8～64次で概ね3～5倍速かった。先頭principal minorが0になるcaseやrank-deficient caseではdirect fraction-free直交化へfallbackし，標準basisを同じkernelで直交補完する。
+
+通常のRational LDL^Tも比較したが，Rational正規化が支配しdirect fraction-freeより約6～35倍遅かったため不採用とした。`A^T A`を作ることによる数値条件数悪化はexact arithmeticでは問題にならず，ここでの判断基準はBigInt growthと実測時間である。
+
+一般巨大normについて平方因子試行を省略し，`1/sqrt(n)=sqrt(n)/n`の未簡約radicalをそのまま返す案も実測した。しかし32×32・256-bit等で有意な改善がなく，caseによっては僅かに退行し，canonical radicalも弱めるため棄却した。現在は列単位にradical decompositionを一度だけ行う。
+
+2026-08-25 GCC Release / LTO-off，`--exact-linear-algebra 1`のpublic exact path代表値。係数heightを含めて測っており，最後のRational/radical Expr materializationも時間に含む。
+
+| coefficient | size | exact QR |
+| ---: | ---: | ---: |
+| 16 bit | 8×8 | 2.22 ms |
+| 16 bit | 16×16 | 14.3 ms |
+| 16 bit | 24×24 | 54.0 ms |
+| 16 bit | 32×32 | 147 ms |
+| 96 bit | 16×16 | 96.4 ms |
+| 96 bit | 24×24 | 418 ms |
+| 96 bit | 32×32 | 1.30 s |
+| 256 bit | 16×16 | 415 ms |
+| 256 bit | 24×24 | 2.00 s |
+| 256 bit | 32×32 | 6.85 s |
+
+低～中bitでは旧4×4 expression cliffは消え，次数に対して滑らかに伸びる。高bit・高次では直交化kernelより最終的な巨大Rational/radical出力そのものが支配する。この領域はhard capへ戻さず，EvaluationBudgetと自然な出力costに任せる。将来さらに詰めるならshared-denominator / delayed-radicalの内部表現を別途設計すべきであり，exact semanticsを弱めるmachine近似へは逃がさない。
+
+## certified Householder — 維持
 
 Householderのapproximate kernelでは複数列を一度のrow-major走査で処理するcolumn-block版も試作した。block=1/8/16/32を複数回Release計測したが，8～24次で差は概ね数%以内かつ最速blockが安定せず，BigFloat/interval演算costが支配的だった。このため既定はblock=1相当とし，block kernelとbenchmarkのみ残した。
 
@@ -543,8 +646,6 @@ Householderのapproximate kernelでは複数列を一度のrow-major走査で処
 |    8 |   0.290 ms |   1.811 ms |   7.062 ms |
 |   12 |   1.315 ms |   5.355 ms |  21.218 ms |
 |   16 |   3.548 ms |  10.562 ms |  46.718 ms |
-
-一般exact Householder QRはradical式の膨張が速く，同benchmark系統で2×2が約1.2 ms，3×3が約59 ms，4×4では約18秒かつformatted outputが約677 KBまで増えた。したがって一般exact QRは3×3以下へpolicy制限し，上三角行列の`{I,A}` fast pathだけ任意次数を許す。4次以上の一般用途は`N[qrDecomposition[A],p]`を推奨する。
 
 # 15.9. reduced SVD — 採用
 

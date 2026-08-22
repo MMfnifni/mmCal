@@ -2,6 +2,7 @@
 #include "matrix.hpp"
 
 #include "expression/array_utils.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -13,6 +14,8 @@ MatrixView::MatrixView(const expression::ArrayExpr& array)
     : array_(&array) {
     if (!array.isMatrix())
         throw std::invalid_argument("MatrixView requires a rank-2 array");
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, array.size());
 }
 
 std::size_t MatrixView::rows() const noexcept {
@@ -42,11 +45,18 @@ MatrixBuffer::MatrixBuffer(
     expression::Expr initialValue)
     : rows_(rows), columns_(columns) {
     const std::size_t shape[] = {rows, columns};
-    elements_.assign(expression::arrayElementCount(shape), std::move(initialValue));
+    const std::size_t count = expression::arrayElementCount(shape);
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::TemporaryMatrixElement, count);
+    elements_.assign(count, std::move(initialValue));
 }
 
 MatrixBuffer::MatrixBuffer(const MatrixView& source)
-    : rows_(source.rows()), columns_(source.columns()), elements_(source.array().materialize()) {}
+    : rows_(source.rows()), columns_(source.columns()) {
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::TemporaryMatrixElement, source.size());
+    elements_ = source.array().materialize();
+}
 
 MatrixBuffer::MatrixBuffer(
     std::size_t rows,
@@ -56,6 +66,8 @@ MatrixBuffer::MatrixBuffer(
     const std::size_t shape[] = {rows, columns};
     if (expression::arrayElementCount(shape) != elements_.size())
         throw std::invalid_argument("MatrixBuffer shape does not match the element count");
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::TemporaryMatrixElement, elements_.size());
     for (const expression::Expr& element : elements_)
         if (element.isArray())
             throw std::invalid_argument("MatrixBuffer elements must be scalar expressions");

@@ -19,6 +19,9 @@ class CyclotomicFieldContext;
 
 namespace mmcal::builtins {
 
+// certified非2冪FFTの測定済みpolicy境界。数学的制限ではない。
+inline constexpr std::size_t approximateFftBluesteinThreshold = 384;
+
 // Evaluator単位で保持するexact FFT plan cache。
 // Symbol identityを含むExprのtwiddleをprocess-globalへ漏らさず、同一session内のtransform間だけ再利用する。
 class FourierTransformCache final {
@@ -78,6 +81,13 @@ private:
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context);
 [[nodiscard]] std::optional<expression::Expr> evaluateApproximateFft(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context);
+// direct/Bluestein crossoverを実測するbenchmark専用入口。source函数としては登録しない。
+[[nodiscard]] std::optional<expression::Expr> evaluateApproximateBluesteinFftForBenchmark(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,

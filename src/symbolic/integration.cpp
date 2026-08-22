@@ -14,6 +14,7 @@
 #include "simplification/full_simplifier.hpp"
 #include "simplification/simplification_context.hpp"
 #include "simplification/simplifier.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "symbolic/differentiation.hpp"
 #include "symbolic/limit.hpp"
 #include "symbolic/algebra_transforms.hpp"
@@ -89,6 +90,22 @@ constexpr std::size_t maximumSubstitutionCandidates = 32;
     BuiltinId id,
     std::vector<Expr> arguments) {
     return Expr::call(builtins.symbol(id), std::move(arguments));
+}
+
+[[nodiscard]] Expr caseBranch(
+    const evaluation::BuiltinRegistry& builtins,
+    Expr value,
+    std::optional<Expr> condition = std::nullopt) {
+    std::vector<Expr> arguments{std::move(value)};
+    if (condition)
+        arguments.push_back(std::move(*condition));
+    return call(builtins, BuiltinId::CaseBranch, std::move(arguments));
+}
+
+[[nodiscard]] Expr cases(
+    const evaluation::BuiltinRegistry& builtins,
+    std::vector<Expr> branches) {
+    return call(builtins, BuiltinId::Cases, std::move(branches));
 }
 
 [[nodiscard]] Expr simplify(
@@ -426,6 +443,42 @@ struct FactorSplit final {
     return definition ? Expr{definition->symbol} : integer(0);
 }
 
+[[nodiscard]] std::optional<Expr> integrateGenericSymbolicPowerRule(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Power)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto& arguments = expression.asCall().arguments;
+    if (containsVariable(arguments[1], variable)
+        || exactRealRational(arguments[1]))
+        return std::nullopt;
+
+    Expr baseDerivative = simplify(
+        differentiateExpression(arguments[0], variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    if (containsVariable(baseDerivative, variable)
+        || !provablyNonZero(baseDerivative, builtins, mathematics))
+        return std::nullopt;
+
+    // Generic parameter rule。明示的なexponent=-1は上のexact ruleでlogへ送る。
+    // 記号parameterが後に-1へ特殊化される点はこのgeneric代表式の例外であり，
+    // integrate[x^-1,x]自体は別規則を持つ。
+    Expr nextExponent = simplify(
+        add(builtins, mathematics, angles, {arguments[1], integer(1)}),
+        builtins, mathematics, angles);
+    Expr denominator = multiply(
+        builtins, mathematics, angles, {std::move(baseDerivative), nextExponent});
+    return divide(
+        builtins, mathematics, angles,
+        power(builtins, mathematics, angles, arguments[0], std::move(nextExponent)),
+        std::move(denominator));
+}
+
 [[nodiscard]] Expr inverseAngleScale(
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
@@ -479,6 +532,11 @@ struct FactorSplit final {
     candidates.push_back(unary(BuiltinId::SineIntegralSi));
     candidates.push_back(unary(BuiltinId::CosineIntegralCi));
     candidates.push_back(unary(BuiltinId::LogarithmicIntegralLi));
+    // D[Gamma]=Gamma Digamma, D[LogGamma]=Digamma, D[Digamma]=Trigamma。
+    // reverse-chain候補へ共有して積分側でも既存の微分知識を再利用する。
+    candidates.push_back(unary(BuiltinId::Gamma));
+    candidates.push_back(unary(BuiltinId::LogGamma));
+    candidates.push_back(unary(BuiltinId::Digamma));
     candidates.push_back(call(builtins, BuiltinId::Polylog, {integer(2), u}));
     // Li_2(-u) は log(1+u)/u 系の逆chainを一括で拾う。
     // 個別に log[1+x]/x, log[1+x^2]/x を表登録せず、Dで比例係数を決める。
@@ -572,6 +630,9 @@ struct FactorSplit final {
     candidates.push_back(power(builtins, mathematics, angles, unary(BuiltinId::Sinh), two));
     candidates.push_back(power(builtins, mathematics, angles, unary(BuiltinId::Cosh), two));
 
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate,
+        candidates.size());
     return candidates;
 }
 
@@ -588,8 +649,11 @@ struct FactorSplit final {
             continue;
 
         const auto duplicate = std::find(result.begin(), result.end(), current);
-        if (duplicate == result.end())
+        if (duplicate == result.end()) {
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::IntegrationCandidate);
             result.push_back(current);
+        }
 
         if (current.isCall()) {
             for (const Expr& argument : current.asCall().arguments)
@@ -648,12 +712,223 @@ struct FactorSplit final {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     for (const Expr& u : dependentSubexpressions(integrand, variable, builtins)) {
+        // まずsubexpression自身を原始函数候補としてDで検証する。
+        // Gamma*DigammaやBetaのlogarithmic derivativeなど，既にDが知る函数族を
+        // integrate側へ個別に二重登録せず再利用できる。
+        if (auto result = verifiedScaledPrimitive(
+                integrand, u, variable, builtins, mathematics, angles))
+            return result;
+
         for (Expr candidate : primitiveTemplates(u, builtins, mathematics, angles)) {
             if (auto result = verifiedScaledPrimitive(
                     integrand, std::move(candidate), variable,
                     builtins, mathematics, angles))
                 return result;
         }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> trySpecialFunctionShiftPrimitive(
+    const Expr& integrand,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    // 微分側に既にあるparameter-shift公式を逆向きに使う。
+    // candidateは必ずDで元のintegrandとの比例関係をexact検証してから採用する。
+    for (const Expr& node : dependentSubexpressions(integrand, variable, builtins)) {
+        if (!node.isCall())
+            continue;
+        const auto* definition = builtins.find(node.asCall().head);
+        if (!definition)
+            continue;
+        const auto& a = node.asCall().arguments;
+        std::optional<Expr> candidate;
+
+        switch (definition->id) {
+        case BuiltinId::Polylog:
+            if (a.size() == 2 && !containsVariable(a[0], variable)) {
+                Expr nextOrder = simplify(
+                    add(builtins, mathematics, angles, {a[0], integer(1)}),
+                    builtins, mathematics, angles);
+                Expr primitive = call(builtins, BuiltinId::Polylog, {
+                    std::move(nextOrder), a[1]});
+
+                // D側はz=0のremovable singularityをifで埋めるが，元integrandが
+                // Li_s(z) z'/z と明示している場合はそのpunctured-domain公式を直接照合する。
+                Expr dz = simplify(
+                    differentiateExpression(a[1], variable, builtins, mathematics, angles),
+                    builtins, mathematics, angles);
+                Expr kernel = multiply(builtins, mathematics, angles, {
+                    node, divide(builtins, mathematics, angles, std::move(dz), a[1])});
+                if (const auto ratio = proportionalFactor(
+                        integrand, kernel, variable, builtins, mathematics, angles))
+                    return multiply(builtins, mathematics, angles, {*ratio, std::move(primitive)});
+                candidate = std::move(primitive);
+            }
+            break;
+
+        case BuiltinId::Hypergeometric1F1:
+            if (a.size() == 3
+                && !containsVariable(a[0], variable)
+                && !containsVariable(a[1], variable)) {
+                Expr previousA = simplify(
+                    subtract(builtins, mathematics, angles, a[0], integer(1)),
+                    builtins, mathematics, angles);
+                Expr previousB = simplify(
+                    subtract(builtins, mathematics, angles, a[1], integer(1)),
+                    builtins, mathematics, angles);
+                // M(a-1,b-1,z)がparameter poleへ落ちる場合は使わない。
+                if (provablyNonZero(previousA, builtins, mathematics)
+                    && provablyNonZero(previousB, builtins, mathematics)) {
+                    candidate = call(builtins, BuiltinId::Hypergeometric1F1, {
+                        std::move(previousA), std::move(previousB), a[2]});
+                }
+            }
+            break;
+
+        case BuiltinId::Hypergeometric2F1:
+            if (a.size() == 4
+                && !containsVariable(a[0], variable)
+                && !containsVariable(a[1], variable)
+                && !containsVariable(a[2], variable)) {
+                Expr previousA = simplify(
+                    subtract(builtins, mathematics, angles, a[0], integer(1)),
+                    builtins, mathematics, angles);
+                Expr previousB = simplify(
+                    subtract(builtins, mathematics, angles, a[1], integer(1)),
+                    builtins, mathematics, angles);
+                Expr previousC = simplify(
+                    subtract(builtins, mathematics, angles, a[2], integer(1)),
+                    builtins, mathematics, angles);
+                if (provablyNonZero(previousA, builtins, mathematics)
+                    && provablyNonZero(previousB, builtins, mathematics)
+                    && provablyNonZero(previousC, builtins, mathematics)) {
+                    candidate = call(builtins, BuiltinId::Hypergeometric2F1, {
+                        std::move(previousA), std::move(previousB),
+                        std::move(previousC), a[3]});
+                }
+            }
+            break;
+
+        case BuiltinId::IncompleteBeta:
+            if (a.size() == 3
+                && !containsVariable(a[0], variable)
+                && !containsVariable(a[1], variable)) {
+                Expr parameterSum = simplify(
+                    add(builtins, mathematics, angles, {a[0], a[1]}),
+                    builtins, mathematics, angles);
+                if (provablyNonZero(parameterSum, builtins, mathematics)) {
+                    Expr shiftedA = simplify(
+                        add(builtins, mathematics, angles, {a[0], integer(1)}),
+                        builtins, mathematics, angles);
+                    Expr correction = multiply(builtins, mathematics, angles, {
+                        divide(builtins, mathematics, angles, a[0], parameterSum),
+                        call(builtins, BuiltinId::IncompleteBeta, {
+                            std::move(shiftedA), a[1], a[2]})});
+                    candidate = subtract(builtins, mathematics, angles,
+                        multiply(builtins, mathematics, angles, {a[2], node}),
+                        std::move(correction));
+                }
+            }
+            break;
+
+        case BuiltinId::LambertW:
+            if (a.size() == 1 || (a.size() == 2 && !containsVariable(a[0], variable))) {
+                // d(W+W^2/2) = W(z) z'/z。branch indexを含むW_kでも同じ。
+                candidate = add(builtins, mathematics, angles, {
+                    node,
+                    divide(builtins, mathematics, angles,
+                        power(builtins, mathematics, angles, node, integer(2)), integer(2))});
+            }
+            break;
+
+        default:
+            break;
+        }
+
+        if (candidate) {
+            if (auto result = verifiedScaledPrimitive(
+                    integrand, std::move(*candidate), variable,
+                    builtins, mathematics, angles))
+                return result;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> integrateIncompleteBetaAffine(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::IncompleteBeta)
+        || expression.asCall().arguments.size() != 3)
+        return std::nullopt;
+    const auto& a = expression.asCall().arguments;
+    if (containsVariable(a[0], variable) || containsVariable(a[1], variable))
+        return std::nullopt;
+
+    Expr du = simplify(
+        differentiateExpression(a[2], variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
+        return std::nullopt;
+
+    Expr parameterSum = simplify(
+        add(builtins, mathematics, angles, {a[0], a[1]}),
+        builtins, mathematics, angles);
+    if (!provablyNonZero(parameterSum, builtins, mathematics))
+        return std::nullopt;
+
+    // ∫ I_u(a,b) du = u I_u(a,b) - a/(a+b) I_u(a+1,b)。
+    // 現在のibetaはregularized incomplete betaなのでこの係数を使う。
+    Expr shiftedA = simplify(
+        add(builtins, mathematics, angles, {a[0], integer(1)}),
+        builtins, mathematics, angles);
+    Expr correction = multiply(builtins, mathematics, angles, {
+        divide(builtins, mathematics, angles, a[0], parameterSum),
+        call(builtins, BuiltinId::IncompleteBeta, {
+            std::move(shiftedA), a[1], a[2]})});
+    Expr primitive = subtract(builtins, mathematics, angles,
+        multiply(builtins, mathematics, angles, {a[2], expression}),
+        std::move(correction));
+    return divide(builtins, mathematics, angles, std::move(primitive), std::move(du));
+}
+
+[[nodiscard]] std::optional<Expr> integrateLambertWLogDerivative(
+    const Expr& integrand,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    for (const Expr& node : dependentSubexpressions(integrand, variable, builtins)) {
+        if (!isHead(node, builtins, BuiltinId::LambertW))
+            continue;
+        const auto& a = node.asCall().arguments;
+        if ((a.size() != 1 && a.size() != 2)
+            || (a.size() == 2 && containsVariable(a[0], variable)))
+            continue;
+        const Expr& z = a.back();
+        Expr dz = simplify(
+            differentiateExpression(z, variable, builtins, mathematics, angles),
+            builtins, mathematics, angles);
+        if (containsVariable(dz, variable) && isZero(dz))
+            continue;
+        Expr kernel = multiply(builtins, mathematics, angles, {
+            node, divide(builtins, mathematics, angles, dz, z)});
+        const auto ratio = proportionalFactor(
+            integrand, kernel, variable, builtins, mathematics, angles);
+        if (!ratio)
+            continue;
+
+        Expr primitive = add(builtins, mathematics, angles, {
+            node,
+            divide(builtins, mathematics, angles,
+                power(builtins, mathematics, angles, node, integer(2)), integer(2))});
+        return multiply(builtins, mathematics, angles, {*ratio, std::move(primitive)});
     }
     return std::nullopt;
 }
@@ -1608,6 +1883,48 @@ struct TrigArgument final {
 
 
 
+[[nodiscard]] std::optional<Expr> integrateSineCosineOverArgument(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto& quotient = expression.asCall().arguments;
+    if (!quotient[0].isCall() || quotient[0].asCall().arguments.size() != 1)
+        return std::nullopt;
+    const auto* definition = builtins.find(quotient[0].asCall().head);
+    if (!definition
+        || (definition->id != BuiltinId::Sin && definition->id != BuiltinId::Cos))
+        return std::nullopt;
+
+    // sin(u)/u と cos(u)/u の核は，角度単位をRadianへ正規化したSi/Ciで閉じる。
+    // u'が定数の場合だけ採用し，非線形uでは余分な1/u'を記号的に持ち込まない。
+    const TrigArgument info = trigArgument(
+        quotient[0].asCall().arguments[0], builtins, mathematics, angles);
+    if (quotient[1] != info.argument)
+        return std::nullopt;
+
+    Expr du = simplify(
+        differentiateExpression(info.argument, variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
+        return std::nullopt;
+
+    Expr radians = multiply(
+        builtins, mathematics, angles, {info.scale, info.argument});
+    Expr primitive = call(builtins,
+        definition->id == BuiltinId::Sin
+            ? BuiltinId::SineIntegralSi
+            : BuiltinId::CosineIntegralCi,
+        {std::move(radians)});
+    return divide(
+        builtins, mathematics, angles, std::move(primitive), std::move(du));
+}
+
 struct EllipticTrigKernel final {
     Expr parameter;
     Expr sourceArgument;
@@ -2413,6 +2730,26 @@ struct EllipticTrigKernel final {
         return std::nullopt;
 
     const Expr& u = expression.asCall().arguments[0];
+
+    // ∫log(log(u)) dx = (u log(log(u)) - li(u))/u' for constant nonzero u'.
+    // li' = 1/log(u) なので微分でexactに検証できる局所原始函数である。
+    if (definition->id == BuiltinId::Log
+        && isHead(u, builtins, BuiltinId::Log)
+        && u.asCall().arguments.size() == 1) {
+        const Expr& inner = u.asCall().arguments[0];
+        Expr innerDerivative = simplify(
+            differentiateExpression(inner, variable, builtins, mathematics, angles),
+            builtins, mathematics, angles);
+        if (!containsVariable(innerDerivative, variable)
+            && provablyNonZero(innerDerivative, builtins, mathematics)) {
+            Expr numerator = subtract(builtins, mathematics, angles,
+                multiply(builtins, mathematics, angles, {inner, expression}),
+                call(builtins, BuiltinId::LogarithmicIntegralLi, {inner}));
+            return divide(builtins, mathematics, angles,
+                std::move(numerator), std::move(innerDerivative));
+        }
+    }
+
     Expr du = differentiateExpression(u, variable, builtins, mathematics, angles);
     if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
         return std::nullopt;
@@ -2475,6 +2812,80 @@ struct EllipticTrigKernel final {
         return divideByDu(definition->id == BuiltinId::FresnelC
             ? subtract(builtins, mathematics, angles, std::move(main), std::move(correction))
             : add(builtins, mathematics, angles, {std::move(main), std::move(correction)}));
+    }
+
+    case BuiltinId::Sinc:
+    case BuiltinId::Cosc: {
+        // cardinal trigは内部でangle operandをRadianへ変換してから sin(y)/y 等を定義する。
+        // uに明示UnitAppliedがある場合は上のdu判定で未解決になるため，ここではsession既定単位だけ扱う。
+        const Expr angleScale = directTrigScale(
+            angles.defaultUnit(), builtins, mathematics, angles);
+        Expr radians = multiply(builtins, mathematics, angles, {angleScale, u});
+        Expr denominator = multiply(builtins, mathematics, angles, {angleScale, du});
+        if (definition->id == BuiltinId::Sinc)
+            return divide(builtins, mathematics, angles,
+                call(builtins, BuiltinId::SineIntegralSi, {std::move(radians)}),
+                std::move(denominator));
+        Expr logRadians = call(builtins, BuiltinId::Log, {radians});
+        Expr ciRadians = call(builtins, BuiltinId::CosineIntegralCi, {std::move(radians)});
+        Expr primitive = subtract(builtins, mathematics, angles,
+            std::move(logRadians), std::move(ciRadians));
+        return divide(builtins, mathematics, angles,
+            std::move(primitive), std::move(denominator));
+    }
+
+    case BuiltinId::Expc:
+        // expc(u)=(Exp(u)-1)/u。Ei(u)-Log(u)は0で個別に特異だが，局所原始函数としてDで一致する。
+        return divideByDu(subtract(builtins, mathematics, angles,
+            call(builtins, BuiltinId::ExponentialIntegralEi, {u}),
+            call(builtins, BuiltinId::Log, {u})));
+
+    case BuiltinId::ExponentialIntegralEi:
+        // ∫Ei(u)du = u Ei(u)-Exp(u)。
+        return divideByDu(subtract(builtins, mathematics, angles,
+            multiply(builtins, mathematics, angles, {u, expression}),
+            call(builtins, BuiltinId::Exp, {u})));
+
+    case BuiltinId::SineIntegralSi:
+    case BuiltinId::CosineIntegralCi: {
+        // Si/Ciの定義核はsession angle modeではなく常にRadian。
+        Expr radianU = call(builtins, BuiltinId::UnitApplied, {
+            u, Expr{std::string{"Rad"}}});
+        Expr correction = call(builtins,
+            definition->id == BuiltinId::SineIntegralSi ? BuiltinId::Cos : BuiltinId::Sin,
+            {std::move(radianU)});
+        Expr main = multiply(builtins, mathematics, angles, {u, expression});
+        return divideByDu(definition->id == BuiltinId::SineIntegralSi
+            ? add(builtins, mathematics, angles, {std::move(main), std::move(correction)})
+            : subtract(builtins, mathematics, angles, std::move(main), std::move(correction)));
+    }
+
+    case BuiltinId::LogarithmicIntegralLi: {
+        // principal li(u)=Ei(Log(u))に対するbranch-safeな局所原始函数。
+        // li(u^2)のようなglobal branch rewriteは使わない。
+        Expr doubledLog = multiply(builtins, mathematics, angles, {
+            integer(2), call(builtins, BuiltinId::Log, {u})});
+        return divideByDu(subtract(builtins, mathematics, angles,
+            multiply(builtins, mathematics, angles, {u, expression}),
+            call(builtins, BuiltinId::ExponentialIntegralEi, {std::move(doubledLog)})));
+    }
+
+    case BuiltinId::Digamma:
+        return divideByDu(call(builtins, BuiltinId::LogGamma, {u}));
+
+    case BuiltinId::Trigamma:
+        return divideByDu(call(builtins, BuiltinId::Digamma, {u}));
+
+    case BuiltinId::LambertW: {
+        // DLMF 4.13.12と同値だが z/W(z) を使わず，W=0で偽のholeを作らない形。
+        // ∫W(u)du = Exp(W(u)) (W(u)^2-W(u)+1)。
+        Expr w = expression;
+        Expr polynomial = add(builtins, mathematics, angles, {
+            power(builtins, mathematics, angles, w, integer(2)),
+            negate(builtins, mathematics, angles, w),
+            one});
+        return divideByDu(multiply(builtins, mathematics, angles, {
+            call(builtins, BuiltinId::Exp, {w}), std::move(polynomial)}));
     }
 
     case BuiltinId::Asin:
@@ -2809,6 +3220,24 @@ struct RationalFunctionForm final {
             }
         }
     }
+    // Q[x]上の有理函数は分母leading coefficientを1へ正規化する。
+    // これにより 216x/(216x^3-216) のような共通scalarもexactに消える。
+    if (!denominatorPolynomial.isZero()) {
+        const Rational scale = denominatorPolynomial.coefficient(denominatorPolynomial.degree());
+        if (!(scale == Rational{BigInt{1}})) {
+            std::vector<Rational> numeratorCoefficients(
+                numeratorPolynomial.coefficients().begin(), numeratorPolynomial.coefficients().end());
+            std::vector<Rational> denominatorCoefficients(
+                denominatorPolynomial.coefficients().begin(), denominatorPolynomial.coefficients().end());
+            for (Rational& coefficient : numeratorCoefficients)
+                coefficient /= scale;
+            for (Rational& coefficient : denominatorCoefficients)
+                coefficient /= scale;
+            numeratorPolynomial = RationalPolynomial{std::move(numeratorCoefficients)};
+            denominatorPolynomial = RationalPolynomial{std::move(denominatorCoefficients)};
+        }
+    }
+
     Expr numerator = polynomialToExpandedExpr(numeratorPolynomial, variable, builtins);
     Expr denominator = polynomialToExpandedExpr(denominatorPolynomial, variable, builtins);
     return simplify(
@@ -3086,6 +3515,8 @@ struct RationalFunctionForm final {
         return std::nullopt;
 
     for (std::size_t selected = 0; selected < factors.size(); ++selected) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::IntegrationCandidate);
         if (!containsVariable(factors[selected], variable))
             continue;
         if (!factors[selected].isCall())
@@ -3153,6 +3584,8 @@ struct RationalFunctionForm final {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
     std::size_t depth) {
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate);
     if (depth > maximumIntegrationDepth)
         return unresolved(original, variable, builtins);
 
@@ -3164,6 +3597,26 @@ struct RationalFunctionForm final {
         return divide(builtins, mathematics, angles,
             power(builtins, mathematics, angles, Expr{variable}, integer(2)), integer(2));
 
+    // principal li(x) = Ei(Log(x)) の標準原始函数。
+    // d/dx Ei(2 Log(x)) = Exp(2 Log(x))/(x Log(x)) = x/Log(x)
+    // はprincipal Logの定義域で成立するため、
+    // d/dx [x li(x) - Ei(2 Log(x))] = li(x)。
+    // li(x^2) と書くと principal branch 上で Log(x^2)=2 Log(x) が
+    // 大域的には成立しないため、branch-safeな Ei(2 Log(x)) 形を保持する。
+    if (isHead(expression, builtins, BuiltinId::LogarithmicIntegralLi)
+        && expression.asCall().arguments.size() == 1
+        && expression.asCall().arguments[0].isSymbol()
+        && expression.asCall().arguments[0].asSymbol().sameIdentity(variable)) {
+        Expr x{variable};
+        Expr logarithm = call(builtins, BuiltinId::Log, {x});
+        Expr doubledLog = multiply(
+            builtins, mathematics, angles, {integer(2), std::move(logarithm)});
+        return subtract(
+            builtins, mathematics, angles,
+            multiply(builtins, mathematics, angles, {x, expression}),
+            call(builtins, BuiltinId::ExponentialIntegralEi, {std::move(doubledLog)}));
+    }
+
     if (isHead(expression, builtins, BuiltinId::Power)) {
         if (auto result = integrateReciprocalTrigPower(
                 expression, variable, builtins, mathematics, angles))
@@ -3172,6 +3625,9 @@ struct RationalFunctionForm final {
                 expression, variable, builtins, mathematics, angles))
             return *result;
         if (auto result = integratePowerRule(
+                expression, variable, builtins, mathematics, angles))
+            return *result;
+        if (auto result = integrateGenericSymbolicPowerRule(
                 expression, variable, builtins, mathematics, angles))
             return *result;
         if (const auto rewritten = rewriteSquareIdentity(
@@ -3210,11 +3666,38 @@ struct RationalFunctionForm final {
             expression, variable, builtins, mathematics, angles))
         return *nestedRoot;
 
+    if (auto sineCosineIntegral = integrateSineCosineOverArgument(
+            expression, variable, builtins, mathematics, angles))
+        return *sineCosineIntegral;
+
     if (expression.isCall()) {
         const auto* definition = builtins.find(expression.asCall().head);
         const auto& a = expression.asCall().arguments;
         if (definition) {
             switch (definition->id) {
+            case BuiltinId::Cases: {
+                std::vector<Expr> branches;
+                branches.reserve(a.size());
+                for (const Expr& branchExpression : a) {
+                    if (!isHead(branchExpression, builtins, BuiltinId::CaseBranch)
+                        || branchExpression.asCall().arguments.empty()
+                        || branchExpression.asCall().arguments.size() > 2)
+                        return unresolved(expression, variable, builtins);
+                    const auto& branch = branchExpression.asCall().arguments;
+                    // 条件が積分変数へ依存しない場合だけ線形にbranchへ分配する。
+                    // x依存の境界を持つpiecewise積分では積分定数の整合や境界連続性が別問題になるため，
+                    // 現段階では元のcasesを未解決のまま保持する。
+                    if (branch.size() == 2 && containsVariable(branch[1], variable))
+                        return unresolved(expression, variable, builtins);
+                    Expr primitive = integrateCore(
+                        branch[0], variable, builtins, mathematics, angles, depth + 1);
+                    if (branch.size() == 2)
+                        branches.push_back(caseBranch(builtins, std::move(primitive), branch[1]));
+                    else
+                        branches.push_back(caseBranch(builtins, std::move(primitive)));
+                }
+                return cases(builtins, std::move(branches));
+            }
             case BuiltinId::Log:
                 if (a.size() == 2 && !containsVariable(a[0], variable)) {
                     Expr unaryLog = call(builtins, BuiltinId::Log, {a[1]});
@@ -3304,6 +3787,9 @@ struct RationalFunctionForm final {
                 if (auto result = integratePowerRule(
                         expression, variable, builtins, mathematics, angles))
                     return *result;
+                if (auto result = integrateGenericSymbolicPowerRule(
+                        expression, variable, builtins, mathematics, angles))
+                    return *result;
                 break;
             default:
                 break;
@@ -3342,6 +3828,18 @@ struct RationalFunctionForm final {
     if (auto standard = integrateStandardUnary(
             expression, variable, builtins, mathematics, angles))
         return *standard;
+
+    if (auto incompleteBeta = integrateIncompleteBetaAffine(
+            expression, variable, builtins, mathematics, angles))
+        return *incompleteBeta;
+
+    if (auto lambertLogDerivative = integrateLambertWLogDerivative(
+            expression, variable, builtins, mathematics, angles))
+        return *lambertLogDerivative;
+
+    if (auto shifted = trySpecialFunctionShiftPrimitive(
+            expression, variable, builtins, mathematics, angles))
+        return *shifted;
 
     if (auto reverse = tryReverseChainRule(
             expression, variable, builtins, mathematics, angles))
@@ -3447,6 +3945,8 @@ struct RationalFunctionForm final {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     try {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         constexpr std::size_t bits = 192;
         CertifiedEvaluator evaluator{builtins, mathematics, angles};
         const auto lowerValue = evaluator.enclose(lower, bits);
@@ -3459,6 +3959,11 @@ struct RationalFunctionForm final {
         const CertifiedBinding binding{variable, CertifiedValue{interval}};
         return evaluator.enclose(
             expression, bits, std::span<const CertifiedBinding>{&binding, 1}).has_value();
+    }
+    catch (const error::CalcError&) {
+        // Unified EvaluationBudgetの超過を「intervalで証明できなかった」へ
+        // 読み替えない。資源diagnosticはtop-levelまでそのまま伝播させる。
+        throw;
     }
     catch (...) {
         return false;
@@ -3598,6 +4103,37 @@ struct RationalFunctionForm final {
     return atLo.isZero() && !atHi.numerator().isNegative();
 }
 
+[[nodiscard]] bool nestedLogarithmEndpointClass(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const Expr& lower,
+    const Expr& upper,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    if (!isHead(expression, builtins, BuiltinId::Log)
+        || expression.asCall().arguments.size() != 1)
+        return false;
+    const Expr& innerLog = expression.asCall().arguments[0];
+    if (!isHead(innerLog, builtins, BuiltinId::Log)
+        || innerLog.asCall().arguments.size() != 1)
+        return false;
+    const Expr& inner = innerLog.asCall().arguments[0];
+    if (!inner.isSymbol() || !inner.asSymbol().sameIdentity(variable))
+        return false;
+
+    const auto lo = exactRealRational(lower);
+    if (!lo || *lo != Rational{BigInt{1}})
+        return false;
+    if (const auto hi = exactRealRational(upper))
+        return *hi > Rational{BigInt{1}};
+    if (!upper.isSymbol())
+        return false;
+    const auto* constant = mathematics.findConstant(upper.asSymbol());
+    return constant && (constant->id == mathematics::ConstantId::E
+        || constant->id == mathematics::ConstantId::Pi
+        || constant->id == mathematics::ConstantId::Phi);
+}
+
 [[nodiscard]] bool safeForImproperIntegral(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -3614,7 +4150,65 @@ struct RationalFunctionForm final {
     if (inverseSqrtEndpointClass(
             expression, variable, lower, upper, builtins, infinity))
         return true;
-    return logarithmEndpointClass(expression, variable, lower, upper, builtins);
+    if (logarithmEndpointClass(expression, variable, lower, upper, builtins))
+        return true;
+    return nestedLogarithmEndpointClass(
+        expression, variable, lower, upper, builtins, mathematics);
+}
+
+[[nodiscard]] bool isNestedLogOfVariable(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Log)
+        || expression.asCall().arguments.size() != 1)
+        return false;
+    const Expr& inner = expression.asCall().arguments[0];
+    return isHead(inner, builtins, BuiltinId::Log)
+        && inner.asCall().arguments.size() == 1
+        && inner.asCall().arguments[0].isSymbol()
+        && inner.asCall().arguments[0].asSymbol().sameIdentity(variable);
+}
+
+[[nodiscard]] bool isVariableTimesNestedLog(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Multiply)
+        || expression.asCall().arguments.size() != 2)
+        return false;
+    const auto& factors = expression.asCall().arguments;
+    return (factors[0].isSymbol() && factors[0].asSymbol().sameIdentity(variable)
+            && isNestedLogOfVariable(factors[1], variable, builtins))
+        || (factors[1].isSymbol() && factors[1].asSymbol().sameIdentity(variable)
+            && isNestedLogOfVariable(factors[0], variable, builtins));
+}
+
+[[nodiscard]] bool isLiOfVariable(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    return isHead(expression, builtins, BuiltinId::LogarithmicIntegralLi)
+        && expression.asCall().arguments.size() == 1
+        && expression.asCall().arguments[0].isSymbol()
+        && expression.asCall().arguments[0].asSymbol().sameIdentity(variable);
+}
+
+[[nodiscard]] bool isLogLogPrimitiveAtUnitEndpoint(
+    const Expr& primitive,
+    const expression::Symbol& variable,
+    const Expr& endpoint,
+    LimitDirection direction,
+    const evaluation::BuiltinRegistry& builtins) {
+    const auto point = exactRealRational(endpoint);
+    if (!point || *point != Rational{BigInt{1}} || direction != LimitDirection::Right)
+        return false;
+    if (!isHead(primitive, builtins, BuiltinId::Subtract)
+        || primitive.asCall().arguments.size() != 2)
+        return false;
+    const auto& terms = primitive.asCall().arguments;
+    return isVariableTimesNestedLog(terms[0], variable, builtins)
+        && isLiOfVariable(terms[1], variable, builtins);
 }
 
 [[nodiscard]] Expr endpointPrimitiveValue(
@@ -3627,6 +4221,11 @@ struct RationalFunctionForm final {
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinity,
     const mathematics::AssumptionSet& assumptions) {
+    // lim_{x->1+}(x log(log(x)) - li(x)) = -EulerGamma = digamma(1).
+    // 各項は個別に発散するため、通常の項別endpoint評価より先に組として処理する。
+    if (isLogLogPrimitiveAtUnitEndpoint(primitive, variable, endpoint, direction, builtins))
+        return call(builtins, BuiltinId::Digamma, {integer(1)});
+
     if (isInfinityExpr(endpoint, infinity) || isNegativeInfinityExpr(endpoint, builtins, infinity))
         return limitExpression(
             primitive, variable, endpoint, LimitDirection::TwoSided,
@@ -3746,6 +4345,15 @@ namespace {
 }
 
 } // namespace
+
+std::optional<Expr> normalizeRationalExpression(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    return normalizeRationalFunction(expression, variable, builtins, mathematics, angles);
+}
 
 IntegrationResult integrateExpressionDetailed(
     const Expr& expression,

@@ -16,7 +16,8 @@ namespace mmcal::approximation {
 [[nodiscard]] std::optional<ComplexInterval> encloseComplexExpression(
     const expression::Expr& expression,
     std::size_t precisionBits,
-    const CertifiedEvaluator& certified);
+    const CertifiedEvaluator& certified,
+    CertifiedEvaluator::EnclosureKind enclosureKind = CertifiedEvaluator::EnclosureKind::Certified);
 
 // certified区間を要求有効桁へ一意に丸められる場合だけExpr化する。
 // exact pointはN[exact,p]と同じ最小表記を維持する。
@@ -26,6 +27,21 @@ namespace mmcal::approximation {
 [[nodiscard]] std::optional<expression::Expr> decimalExpression(
     const ComplexInterval& value,
     std::size_t significantDigits);
+
+// CertifiedEnclosure / InformationEnclosureをNと同じ有効桁規則で近似値へ落とす。
+// held構文内の明示Nなど，通常Evaluatorを通らないcertified consumerからも同じ
+// precision provenance / whole-complex gateを再利用する。
+[[nodiscard]] std::optional<expression::Expr> finalizeCertifiedApproximation(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t significantDigits);
+
+// diff/nintegrate等，pを小数部桁数として定義している既存API向け。
+// InformationEnclosureは保持するが，Nの有効桁表示規則へは変更しない。
+[[nodiscard]] std::optional<expression::Expr> finalizeCertifiedApproximationFixed(
+    const CertifiedValue& certified,
+    const CertifiedValue& information,
+    std::size_t fractionalDigits);
 
 // 既存Approximationを含む入力から、最も低い要求桁をbackend精度として推定する。
 [[nodiscard]] std::optional<ApproximationContext> inferredApproximationContext(

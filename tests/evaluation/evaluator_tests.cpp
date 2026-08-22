@@ -134,7 +134,7 @@ void runEvaluatorTests(TestRunner& tests) {
             call(add, {Expr{Symbol{"a"}}, integer(2)}),
             integer(3)
         }))),
-        "5+Pi",
+        "Pi+5",
         "Evaluator: flattens nested addition and combines numbers");
 
     Environment simplificationEnvironment;
@@ -173,9 +173,10 @@ void runEvaluatorTests(TestRunner& tests) {
         formatExpr(evaluator.evaluate(call(divide, {integer(7), integer(2)}))),
         "7/2",
         "Evaluator: keeps division exact");
-    tests.expectThrows<error::CalcError>([&] {
-        static_cast<void>(evaluator.evaluate(call(divide, {integer(1), integer(0)})));
-    }, "Evaluator: rejects division by zero");
+    tests.expectEqual(
+        formatExpr(evaluator.evaluate(call(divide, {integer(1), integer(0)}))),
+        "ComplexInfinity",
+        "Evaluator: maps a nonzero exact value divided by zero to ComplexInfinity");
 
     tests.expectEqual(formatExpr(evaluator.evaluate(call(power, {integer(2), integer(100)}))),
         "1267650600228229401496703205376", "Evaluator: exact positive integer power");
@@ -187,12 +188,14 @@ void runEvaluatorTests(TestRunner& tests) {
         Expr{Number::complex(numeric::RealNumber{}, numeric::RealNumber{BigInt{1}})},
         integer(4)
     }))), "1", "Evaluator: exact imaginary-unit power");
-    tests.expectThrows<error::CalcError>([&] {
-        static_cast<void>(evaluator.evaluate(call(power, {integer(0), integer(0)})));
-    }, "Evaluator: treats zero power zero as indeterminate");
-    tests.expectThrows<error::CalcError>([&] {
-        static_cast<void>(evaluator.evaluate(call(power, {integer(0), integer(-1)})));
-    }, "Evaluator: rejects negative powers of zero");
+    tests.expectEqual(
+        formatExpr(evaluator.evaluate(call(power, {integer(0), integer(0)}))),
+        "Indeterminate",
+        "Evaluator: treats zero power zero as Indeterminate");
+    tests.expectEqual(
+        formatExpr(evaluator.evaluate(call(power, {integer(0), integer(-1)}))),
+        "ComplexInfinity",
+        "Evaluator: maps a negative power of zero to ComplexInfinity");
     tests.expectEqual(formatExpr(evaluator.evaluate(call(power, {integer(2), rational(1, 2)}))),
         "sqrt[2]", "Evaluator: half power uses principal square root semantics");
     tests.expectEqual(formatExpr(evaluator.evaluate(call(power, {integer(-2), rational(1, 2)}))),
@@ -236,19 +239,19 @@ void runEvaluatorTests(TestRunner& tests) {
         static_cast<void>(evaluator.evaluate(Expr{Symbol{"cycleA"}}));
     }, "Evaluator: detects cyclic symbol definitions");
 
-    const error::CalcError divisionError = evaluateTextError("1 + 8 / (3 - 3)", environment);
-    tests.expect(divisionError.type() == error::CalcErrorType::Domain,
-        "Evaluator: division error keeps domain type");
-    tests.expect(divisionError.span().has_value(),
-        "Evaluator: division error has source span");
-    if (divisionError.span()) {
-        tests.expectEqual(divisionError.span()->begin.column, std::size_t{10},
-            "Evaluator: division error points to denominator");
-        tests.expectEqual(divisionError.span()->end.column, std::size_t{15},
-            "Evaluator: division error covers denominator expression");
+    const error::CalcError domainError = evaluateTextError("1 + log[3 - 3]", environment);
+    tests.expect(domainError.type() == error::CalcErrorType::Domain,
+        "Evaluator: function-domain error keeps domain type");
+    tests.expect(domainError.span().has_value(),
+        "Evaluator: function-domain error has source span");
+    if (domainError.span()) {
+        tests.expectEqual(domainError.span()->begin.column, std::size_t{5},
+            "Evaluator: function-domain error points to the failing call");
+        tests.expectEqual(domainError.span()->end.column, std::size_t{15},
+            "Evaluator: function-domain error covers the failing call");
     }
 
-    tests.expectEqual(evaluateText("2+missing", environment), "2+missing",
+    tests.expectEqual(evaluateText("2+missing", environment), "missing+2",
         "Evaluator: unbound symbols are temporarily preserved as free symbols");
 
     tests.expectEqual(formatExpr(call("f", {integer(2)})), "f[2]", "Formatter: uses brackets for function calls");

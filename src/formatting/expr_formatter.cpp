@@ -3,11 +3,15 @@
 
 #include "builtins/names.hpp"
 #include "expression/array_utils.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "solver/solution_set.hpp"
 #include "mathematics/predicate.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -197,7 +201,7 @@ void appendConditions(
     const mathematics::AssumptionSet& conditions,
     unsigned radix) {
     for (std::size_t i = 0; i < conditions.size(); ++i) {
-        if (i != 0) output += "&&";
+        if (i != 0) output += " && ";
         appendPredicate(output, conditions.predicates()[i], radix);
     }
 }
@@ -462,6 +466,92 @@ struct SignedTerm final {
     Expr magnitude;
 };
 
+struct DisplayMonomial final {
+    std::optional<symbols::SymbolId> variable;
+    std::uint64_t degree = 0;
+};
+
+[[nodiscard]] std::optional<DisplayMonomial> displayMonomial(const Expr& expression) {
+    if (expression.isNumber())
+        return DisplayMonomial{};
+
+    if (expression.isSymbol())
+        return DisplayMonomial{expression.asSymbol().id(), 1};
+
+    if (!expression.isCall())
+        return std::nullopt;
+
+    const auto& call = expression.asCall();
+    const std::string_view head = call.head.view();
+    if (head == builtins::names::power && call.arguments.size() == 2
+        && call.arguments[0].isSymbol() && call.arguments[1].isNumber()) {
+        const auto& exponent = call.arguments[1].asNumber();
+        if (!exponent.isReal() || !exponent.asReal().isInteger()
+            || exponent.asReal().isNegative())
+            return std::nullopt;
+        const auto degree = numeric::tryToUint64(exponent.asReal().asInteger());
+        if (!degree)
+            return std::nullopt;
+        return DisplayMonomial{call.arguments[0].asSymbol().id(), *degree};
+    }
+
+    if (head != builtins::names::multiply || call.arguments.empty())
+        return std::nullopt;
+
+    DisplayMonomial result;
+    for (const Expr& factor : call.arguments) {
+        if (factor.isNumber())
+            continue;
+        const auto monomial = displayMonomial(factor);
+        if (!monomial || !monomial->variable)
+            return std::nullopt;
+        if (result.variable && *result.variable != *monomial->variable)
+            return std::nullopt;
+        result.variable = monomial->variable;
+        if (result.degree > std::numeric_limits<std::uint64_t>::max() - monomial->degree)
+            return std::nullopt;
+        result.degree += monomial->degree;
+    }
+    return result;
+}
+
+void orderUnivariatePolynomialTermsForDisplay(std::vector<SignedTerm>& terms) {
+    if (terms.size() < 2)
+        return;
+
+    std::vector<std::uint64_t> degrees;
+    degrees.reserve(terms.size());
+    std::optional<symbols::SymbolId> variable;
+    bool hasVariableTerm = false;
+    for (const SignedTerm& term : terms) {
+        const auto monomial = displayMonomial(term.magnitude);
+        if (!monomial)
+            return;
+        if (monomial->variable) {
+            if (variable && *variable != *monomial->variable)
+                return;
+            variable = monomial->variable;
+            hasVariableTerm = true;
+        }
+        degrees.push_back(monomial->degree);
+    }
+    if (!hasVariableTerm)
+        return;
+
+    std::vector<std::size_t> order(terms.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t lhs, std::size_t rhs) {
+        return degrees[lhs] > degrees[rhs];
+    });
+
+    std::vector<SignedTerm> sorted;
+    sorted.reserve(terms.size());
+    for (const std::size_t index : order)
+        sorted.push_back(std::move(terms[index]));
+    terms = std::move(sorted);
+}
+
 void collectSignedTerms(
     const Expr& expression,
     bool negative,
@@ -529,6 +619,7 @@ void appendAddCall(
     terms.reserve(call.arguments.size());
     for (const Expr& argument : call.arguments)
         collectSignedTerms(argument, false, terms);
+    orderUnivariatePolynomialTermsForDisplay(terms);
     appendSignedTerms(output, terms, radix, parentPrecedence);
 }
 
@@ -555,7 +646,11 @@ void appendMultiplyCall(
             const bool currentDigit = std::isdigit(currentFirst) != 0;
             const bool exponentMarkerCollision = previousDigit && currentIdentifier
                 && (currentText.front() == 'e' || currentText.front() == 'E');
-            const bool radixPrefixCollision = previousText.back() == '0' && currentIdentifier
+            const bool standaloneZeroSuffix = previousText.back() == '0'
+                && (previousText.size() == 1
+                    || (!std::isdigit(static_cast<unsigned char>(previousText[previousText.size() - 2]))
+                        && previousText[previousText.size() - 2] != '.'));
+            const bool radixPrefixCollision = standaloneZeroSuffix && currentIdentifier
                 && (currentText.front() == 'b' || currentText.front() == 'B'
                     || currentText.front() == 'o' || currentText.front() == 'O'
                     || currentText.front() == 'x' || currentText.front() == 'X');
@@ -580,6 +675,29 @@ void appendMultiplyCall(
 
     if (parenthesize)
         output.push_back(')');
+}
+
+void appendCasesCall(std::string& output, const CallExpr& call, unsigned radix) {
+    output += "cases[";
+    for (std::size_t i = 0; i < call.arguments.size(); ++i) {
+        if (i != 0)
+            output += "; ";
+        const Expr& branchExpression = call.arguments[i];
+        if (!branchExpression.isCall()
+            || branchExpression.asCall().head.view() != builtins::names::caseBranch
+            || branchExpression.asCall().arguments.empty()
+            || branchExpression.asCall().arguments.size() > 2) {
+            appendExpr(output, branchExpression, radix, precedenceLowest);
+            continue;
+        }
+        const CallExpr& branch = branchExpression.asCall();
+        appendExpr(output, branch.arguments[0], radix, precedenceLowest);
+        if (branch.arguments.size() == 2) {
+            output += " if ";
+            appendExpr(output, branch.arguments[1], radix, precedenceLowest);
+        }
+    }
+    output += "]";
 }
 
 void appendGenericCall(std::string& output, const CallExpr& call, unsigned radix) {
@@ -647,6 +765,10 @@ void appendCall(
         terms.reserve(2);
         collectSignedTerms(call.arguments[0], false, terms);
         collectSignedTerms(call.arguments[1], true, terms);
+        // a-(-b) は表示上は加法になる。ここだけAddと同じ多項式順を適用して、
+        // formatter -> parser -> formatter の固定点を保つ。通常の 1-x はそのまま残す。
+        if (positiveMagnitudeOfNegative(call.arguments[1]))
+            orderUnivariatePolynomialTermsForDisplay(terms);
         appendSignedTerms(output, terms, radix, parentPrecedence);
         return;
     }
@@ -729,6 +851,17 @@ void appendCall(
             radix,
             parentPrecedence,
             true);
+        return;
+    }
+
+    if (head == builtins::names::cases) {
+        appendCasesCall(output, call, radix);
+        return;
+    }
+
+    if (head == builtins::names::caseBranch) {
+        // 内部headが単独で表面化した場合だけgeneric表示する。
+        appendGenericCall(output, call, radix);
         return;
     }
 

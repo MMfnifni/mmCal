@@ -35,6 +35,22 @@ void runNumericalCalculusTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "diff[asin[x],x,0,20]"),
         std::string{"1.0"},
         "Numerical calculus: inverse trig derivative is radian-scaled by default");
+    tests.expectEqual(eval(session, "precision[diff[x^2,x,N[1,5],20]]"),
+        std::string{"4"},
+        "Numerical calculus: diff preserves finite point InformationEnclosure instead of inventing requested digits");
+    tests.expectEqual(eval(session, "precision[diff[N[1,5]*x,x,2,20]]"),
+        std::string{"4"},
+        "Numerical calculus: held explicit N coefficients keep their precision provenance inside diff");
+    tests.expectEqual(eval(session, "diff[N[Pi,5]*x,x,2,20]"),
+        std::string{"3.1416"},
+        "Numerical calculus: finite non-point certified coefficients cap display precision instead of retrying hidden guard digits");
+    tests.expectEqual(eval(session, "diff[N[fract[Pi],5]*x,x,2,20]"),
+        std::string{"0.14159"},
+        "Numerical calculus: held N materialization reuses pure primitive rewrites such as fract");
+    const auto ambiguousDerivative = evalError(
+        session, "diff[log[x]^2,x,-2+I*N[0,5],20]");
+    tests.expect(ambiguousDerivative.type() == error::CalcErrorType::Evaluation,
+        "Numerical calculus: diff rejects branch-side ambiguity from finite input information");
     tests.expectEqual(eval(session, "nintegrate[x^2,{x,0,1},12]"),
         std::string{"0.333333333333"},
         "Numerical calculus: polynomial integral is certified");
@@ -50,6 +66,22 @@ void runNumericalCalculusTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "nintegrate[exp[x],{x,0,1},12]"),
         std::string{"1.718281828459"},
         "Numerical calculus: transcendental integral is certified");
+    tests.expectEqual(eval(session, "precision[nintegrate[1,{x,N[1,5],2},20]]"),
+        std::string{"4"},
+        "Numerical calculus: nintegrate preserves finite bound InformationEnclosure");
+    tests.expectEqual(eval(session, "precision[nintegrate[N[1,5],{x,0,1},20]]"),
+        std::string{"4"},
+        "Numerical calculus: held explicit N integrands keep their precision provenance");
+    tests.expectEqual(eval(session, "nintegrate[N[Pi,5],{x,0,1},20]"),
+        std::string{"3.1416"},
+        "Numerical calculus: finite non-point integrands do not chase unrefinable requested decimal places");
+    tests.expectEqual(eval(session, "nintegrate[N[fract[Pi],5],{x,0,1},20]"),
+        std::string{"0.14159"},
+        "Numerical calculus: held N primitive rewrites are shared by nintegrate");
+    const auto ambiguousIntegral = evalError(
+        session, "nintegrate[log[-2+I*N[0,5]],{x,0,1},10]");
+    tests.expect(ambiguousIntegral.type() == error::CalcErrorType::Evaluation,
+        "Numerical calculus: nintegrate rejects branch-side ambiguity from finite input information");
     tests.expectEqual(eval(session, "nintegrate[x^2,{x,1,0},12]"),
         std::string{"-0.333333333333"},
         "Numerical calculus: reversed limits negate the result");

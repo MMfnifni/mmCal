@@ -2,6 +2,7 @@
 #include "fraction_free_elimination.hpp"
 
 #include "expression/array_utils.hpp"
+#include "evaluation/evaluation_budget.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -99,6 +100,7 @@ BareissEchelonResult bareissEchelon(
     for (std::size_t column = 0;
          column < pivotColumnLimit && pivotRow < matrix.rows();
          ++column) {
+        evaluation::checkEvaluationCancellation();
         const std::size_t selected = selectPivot(matrix, pivotRow, column);
         if (selected == matrix.rows())
             continue;
@@ -109,6 +111,7 @@ BareissEchelonResult bareissEchelon(
 
         const BigInt pivot = matrix(pivotRow, column);
         for (std::size_t row = pivotRow + 1; row < matrix.rows(); ++row) {
+            evaluation::checkEvaluationCancellation();
             const BigInt factor = matrix(row, column);
             for (std::size_t c = column + 1; c < matrix.columns(); ++c) {
                 BigInt numerator = pivot * matrix(row, c);

@@ -35,7 +35,17 @@ void runNumberTests(TestRunner& tests) {
     tests.expectEqual((lhs + rhs).toString(), "4-2I", "Number: complex addition");
     tests.expectEqual((lhs - rhs).toString(), "-2+6I", "Number: complex subtraction");
     tests.expectEqual((lhs * rhs).toString(), "11+2I", "Number: complex multiplication");
-    tests.expectEqual((lhs / rhs).toString(), "-1/5+2/5I", "Number: complex division");
+    tests.expectEqual((lhs / rhs).toString(), "-1/5+2I/5", "Number: complex division");
+
+    auto cancelImaginary = Number::complex(RealNumber{BigInt{2}}, RealNumber{BigInt{3}});
+    cancelImaginary += Number::complex(RealNumber{}, RealNumber{BigInt{-3}});
+    tests.expect(cancelImaginary.isReal() && cancelImaginary == Number{BigInt{2}},
+        "Number: arithmetic normalizes a zero imaginary component back to real storage");
+
+    auto scaledImaginary = Number::complex(RealNumber{BigInt{4}}, RealNumber{});
+    scaledImaginary *= Number{BigInt{2}};
+    tests.expect(scaledImaginary.isReal() && scaledImaginary == Number{BigInt{8}},
+        "Number: real scaling preserves the zero-imaginary normalization invariant");
 
     auto selfMultiply = lhs;
     selfMultiply *= selfMultiply;
@@ -56,7 +66,7 @@ void runNumberTests(TestRunner& tests) {
     const Number exact = Number::complex(
         RealNumber{Rational{BigInt{1}, BigInt{3}}},
         RealNumber{Rational{BigInt{2}, BigInt{5}}});
-    tests.expectEqual(exact.toString(), "1/3+2/5I", "Number: complex number with exact rational parts");
+    tests.expectEqual(exact.toString(), "1/3+2I/5", "Number: complex number with exact rational parts");
 
     tests.expect(
         Number{BigInt{2}} == Number{Rational{BigInt{4}, BigInt{2}}},

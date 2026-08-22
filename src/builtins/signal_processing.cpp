@@ -9,6 +9,7 @@
 #include "builtins/exact_operations.hpp"
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
@@ -880,9 +881,10 @@ root-of-unity恒等式をSimplifierへ何度も再証明させ，ifft[fft[...]]�
 
     // ごく小さい非2冪は直接DFTの方が定数項が小さい。それ以上はBluesteinで
     // O(N^2) fallbackを避け、次の2冪長のconvolutionへ還元する。
-    // 現benchmarkでは60点級までは直接DFTの方が軽く、127点ではBluesteinが逆転した。
-    // 境界近傍の余裕を見て96未満をdirectとし、MSVCではBenchmarksで再測定可能にする。
-    if (input.size() < 96)
+    // GCC Releaseの強制比較では319点でdirect、335点でBluesteinが僅差で逆転した。
+    // MSVC実測では257点でdirect、509点でBluesteinが優位だったため、primary環境へ
+    // 保守的に寄せた384点をpolicy境界とする。--fft-thresholdで再測定可能。
+    if (input.size() < approximateFftBluesteinThreshold)
         return approximateDirectTransform(input, inverse, precisionBits);
     return approximateBluesteinTransform(input, inverse, precisionBits);
 }
@@ -900,24 +902,40 @@ template <class Transform>
     const std::vector<Expr> inputExpressions = vectorArgument(arguments.front(), name);
     approximation::CertifiedEvaluator certified{registry, mathematics, angles};
 
-    for (;;) {
+    constexpr std::size_t maximumRefinements = 12;
+    for (std::size_t refinement = 0; refinement < maximumRefinements; ++refinement) {
+        evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::CertifiedRefinement);
         const std::size_t bits = context.workingBinaryBits();
         try {
             std::vector<approximation::ComplexInterval> input;
+            std::vector<approximation::ComplexInterval> informationInput;
             input.reserve(inputExpressions.size());
+            informationInput.reserve(inputExpressions.size());
             for (const Expr& expression : inputExpressions) {
-                const auto value = approximation::encloseComplexExpression(expression, bits, certified);
-                if (!value)
+                const auto information = approximation::encloseComplexExpression(
+                    expression, bits, certified,
+                    approximation::CertifiedEvaluator::EnclosureKind::Information);
+                const auto value = approximation::encloseComplexExpression(
+                    expression, bits, certified,
+                    approximation::CertifiedEvaluator::EnclosureKind::Certified);
+                if (!value || !information)
                     return std::nullopt;
                 input.push_back(*value);
+                informationInput.push_back(*information);
             }
 
             const auto transformed = transform(input, bits);
+            const auto informationTransformed = transform(informationInput, bits);
+            if (transformed.size() != informationTransformed.size())
+                return std::nullopt;
             std::vector<Expr> output;
             output.reserve(transformed.size());
             bool rounded = true;
-            for (const auto& value : transformed) {
-                const auto decimal = approximation::decimalExpression(value, context.decimalDigits());
+            for (std::size_t i = 0; i < transformed.size(); ++i) {
+                const auto decimal = approximation::finalizeCertifiedApproximation(
+                    approximation::CertifiedValue{transformed[i]},
+                    approximation::CertifiedValue{informationTransformed[i]},
+                    context.decimalDigits());
                 if (!decimal) {
                     rounded = false;
                     break;
@@ -930,9 +948,13 @@ template <class Transform>
         catch (const approximation::PrecisionInsufficient&) {
             // 現作業精度では象限や丸めを証明できない。guardを増やして同じ式を再評価する。
         }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
+        }
 
         context.setGuardDigits(approximation::nextGuardDigits(context.guardDigits()));
     }
+    return std::nullopt;
 }
 
 [[nodiscard]] Expr vectorExpr(std::vector<Expr> elements) {
@@ -1044,6 +1066,18 @@ std::optional<Expr> evaluateApproximateFft(
     return approximateTransform(arguments, names::fft, registry, mathematics, angles,
         std::move(context), [](const auto& input, std::size_t bits) {
             return approximateFastTransform(input, false, bits);
+        });
+}
+
+std::optional<Expr> evaluateApproximateBluesteinFftForBenchmark(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context) {
+    return approximateTransform(arguments, names::fft, registry, mathematics, angles,
+        std::move(context), [](const auto& input, std::size_t bits) {
+            return approximateBluesteinTransform(input, false, bits);
         });
 }
 

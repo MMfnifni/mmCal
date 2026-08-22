@@ -1,41 +1,19 @@
 // exp・log系函数
 #include "transcendental.hpp"
+#include "builtin_helpers.hpp"
 
 #include "error/error_message.hpp"
 
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace mmcal::builtins {
-namespace {
-
-void requireUnary(
-    std::span<const expression::Expr> arguments,
-    std::string_view name) {
-    if (arguments.size() != 1)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects 1 argument(s)");
-}
-
-[[nodiscard]] expression::Expr holdUnary(
-    std::span<const expression::Expr> arguments,
-    std::string_view name,
-    evaluation::BuiltinId id,
-    const evaluation::BuiltinRegistry& registry) {
-    requireUnary(arguments, name);
-    return expression::Expr::call(registry.symbol(id), {arguments.front()});
-}
-
-} // namespace
 
 expression::Expr evaluateArg(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "arg", evaluation::BuiltinId::Arg, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Arg, "arg");
 }
 
 expression::Expr evaluateLog(
@@ -57,7 +35,7 @@ expression::Expr evaluateExp(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "exp", evaluation::BuiltinId::Exp, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Exp, "exp");
 }
 
 } // namespace mmcal::builtins

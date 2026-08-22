@@ -112,6 +112,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile>
+      <StackReserveSize Condition="'$(Configuration)|$(Platform)'=='Release|x64'">16777216</StackReserveSize>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

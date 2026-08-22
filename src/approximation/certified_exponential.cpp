@@ -1,6 +1,8 @@
 // 指数函数の保証付き評価
 #include "certified_exponential.hpp"
+#include "certified_precision.hpp"
 
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/rational.hpp"
 
@@ -20,14 +22,6 @@ using numeric::Rational;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] std::size_t checkedAdd(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
 [[nodiscard]] RealInterval exactIntegerInterval(
     std::int64_t value,
@@ -114,11 +108,13 @@ struct IntervalSeriesSplit final {
     //   R_N <= 2*t_(N+1) <= 2 / (2^(r(N+1)) (N+1)!)
     // と抑えられる。factorialのbit長だけでこの上界を保証し、
     // 項数決定のために浮動小数点logや経験的停止条件を使わない。
-    const std::size_t targetBits = checkedAdd(
+    const std::size_t targetBits = checkedPrecisionAdd(
         precisionBits, 28, "Certified exp precision is too large");
 
     BigInt factorial{1};
     for (std::uint64_t m = 1;; ++m) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         factorial *= BigInt::fromUnsigned(m);
         const std::size_t factorialBits = factorial.bitLength();
         const std::uint64_t n = m - 1;
@@ -139,63 +135,6 @@ struct IntervalSeriesSplit final {
     }
 }
 
-/*
-旧実装（逐次RealInterval Taylor）。
-高精度では各項の巨大除算・外向き丸めが支配的になったため、
-binary splittingへ置き換えた。比較・検証用に旧コードをそのまま残す。
-
-[[nodiscard]] PointExpResult encloseExpSmallNonNegative(
-    const Rational& x,
-    std::size_t precisionBits) {
-    if (x < rational(0) || x > rational(1, 2))
-        throw std::invalid_argument("Reduced exponential argument must be in [0, 1/2]");
-
-    const RealInterval one = exactIntegerInterval(1, precisionBits);
-    if (x.isZero())
-        return PointExpResult{one, 1, 0};
-
-    const RealInterval xInterval = RealInterval::fromRational(x, precisionBits);
-    RealInterval term = one;
-    RealInterval sum = one;
-    std::size_t termsUsed = 1;
-
-    const Rational threshold = binaryThreshold(checkedAdd(
-        precisionBits, 24, "Certified exp precision is too large"));
-
-    for (std::uint64_t n = 1;; ++n) {
-        // 級数indexは通常ごく小さいが、BigIntの小整数constructorはint64_t。
-        // 極端なprecision指定でも符号付きcastをwrapさせず、明示的に停止する。
-        if (n > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max() - 2))
-            throw std::overflow_error("Certified exp series index exceeds BigInt small-integer range");
-        const RealInterval divisor = RealInterval::fromRational(
-            Rational{BigInt{static_cast<std::int64_t>(n)}}, precisionBits);
-        term = divide(multiply(term, xInterval, precisionBits), divisor, precisionBits);
-        sum = add(sum, term, precisionBits);
-        ++termsUsed;
-
-        const std::uint64_t nextIndex = n + 1;
-        const RealInterval nextDivisor = RealInterval::fromRational(
-            Rational{BigInt{static_cast<std::int64_t>(nextIndex)}}, precisionBits);
-        const RealInterval nextTerm = divide(
-            multiply(term, xInterval, precisionBits), nextDivisor, precisionBits);
-
-        // tail <= nextTerm / (1 - x/(n+2))。
-        // nextTerm.upper() は外向き丸め済みなので、そこから作るtailBoundも真の剰余を必ず上から押さえる。
-        const Rational ratio = x / Rational{BigInt{static_cast<std::int64_t>(n + 2)}};
-        const Rational geometricFactor = rational(1) / (rational(1) - ratio);
-        const Rational tailBound = nextTerm.upper().toRational() * geometricFactor;
-
-        if (tailBound <= threshold) {
-            const RealInterval tail = RealInterval::fromRationalBounds(
-                rational(0), tailBound, precisionBits);
-            return PointExpResult{add(sum, tail, precisionBits), termsUsed, 0};
-        }
-
-        if (n == std::numeric_limits<std::uint64_t>::max())
-            throw std::overflow_error("Certified exp series iteration overflow");
-    }
-}
-*/
 
 // 0 <= x <= 1/2 の一点をbinary-splitting Taylor級数で囲う。
 [[nodiscard]] PointExpResult encloseExpSmallNonNegative(
@@ -286,6 +225,8 @@ binary splittingへ置き換えた。比較・検証用に旧コードをその�
 
     std::size_t squarings = 0;
     while (x > reductionTarget) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         x /= rational(2);
         ++squarings;
     }
@@ -293,8 +234,11 @@ binary splittingへ置き換えた。比較・検証用に旧コードをその�
     PointExpResult result = encloseExpSmallNonNegative(
         x, precisionBits, reductionBits);
     result.squarings = squarings;
-    for (std::size_t i = 0; i < squarings; ++i)
+    for (std::size_t i = 0; i < squarings; ++i) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         result.interval = multiply(result.interval, result.interval, precisionBits);
+    }
 
     if (!negative)
         return result;

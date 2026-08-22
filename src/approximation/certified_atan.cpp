@@ -1,6 +1,8 @@
 #include "certified_atan.hpp"
+#include "certified_precision.hpp"
 
 #include "certified_constants.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/rational.hpp"
 
@@ -19,20 +21,7 @@ using numeric::Rational;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] Rational binaryThreshold(std::size_t bits) {
-    BigInt denominator{1};
-    denominator <<= bits;
-    return Rational{BigInt{1}, std::move(denominator)};
-}
 
-[[nodiscard]] std::size_t checkedAdd(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
 struct PointAtanResult final {
     Rational lower;
@@ -72,7 +61,7 @@ struct PointAtanResult final {
     if (x.isZero())
         return PointAtanResult{rational(0), rational(0), 1};
 
-    const Rational threshold = binaryThreshold(checkedAdd(
+    const Rational threshold = binaryPrecisionThreshold(checkedPrecisionAdd(
         precisionBits, 16, "Certified atan precision is too large"));
     const Rational xSquared = x * x;
 
@@ -83,6 +72,8 @@ struct PointAtanResult final {
     std::size_t termsUsed = 1;
 
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         if (odd > std::numeric_limits<std::uint64_t>::max() - 2)
             throw std::overflow_error("Certified atan series index overflow");
         odd += 2;
@@ -121,7 +112,7 @@ struct PointAtanResult final {
     // machine constantを一切持ち込まない。
     if (x > rational(1)) {
         const auto reciprocal = encloseAtanPointPositive(rational(1) / x, precisionBits);
-        const CertifiedConstantResult pi = enclosePi(checkedAdd(
+        const CertifiedConstantResult pi = enclosePi(checkedPrecisionAdd(
             precisionBits, 16, "Certified atan Pi precision is too large"));
         const Rational piLowerHalf = pi.interval.lower().toRational() / rational(2);
         const Rational piUpperHalf = pi.interval.upper().toRational() / rational(2);

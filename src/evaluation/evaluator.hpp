@@ -5,6 +5,7 @@
 #include "builtins/signal_processing.hpp"
 #include "environment.hpp"
 #include "evaluation_context.hpp"
+#include "evaluation_budget.hpp"
 #include "expression/origin_map.hpp"
 #include "user_function_registry.hpp"
 #include "symbols/symbol_registry.hpp"
@@ -42,6 +43,8 @@ public:
 
     void setDepthLimit(std::size_t limit);
     [[nodiscard]] std::size_t depthLimit() const noexcept;
+    void setEvaluationLimits(EvaluationLimits limits);
+    [[nodiscard]] const EvaluationLimits& evaluationLimits() const noexcept;
     void reseedRandomFromEntropy();
 
 private:
@@ -68,7 +71,7 @@ private:
     builtins::FourierTransformCache fourierTransformCache_;
     const expression::OriginMap* origins_ = nullptr;
     const EvaluationContext* context_ = nullptr;
-    std::size_t depthLimit_ = 1024;
+    EvaluationLimits limits_{};
     std::vector<expression::Symbol> resolvingSymbols_;
     std::vector<ActiveUserFunctionFrame> activeUserFunctions_;
     // N[...] の評価中だけ有効な要求精度スタック。

@@ -4,6 +4,7 @@
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
+#include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 #include "numeric/rational.hpp"
 #include "simplification/simplification_context.hpp"
@@ -82,6 +83,22 @@ using numeric::Rational;
     Expr base,
     Expr exponent) {
     return call(builtins, BuiltinId::Power, {std::move(base), std::move(exponent)});
+}
+
+[[nodiscard]] Expr caseBranch(
+    const evaluation::BuiltinRegistry& builtins,
+    Expr value,
+    std::optional<Expr> condition = std::nullopt) {
+    std::vector<Expr> arguments{std::move(value)};
+    if (condition)
+        arguments.push_back(std::move(*condition));
+    return call(builtins, BuiltinId::CaseBranch, std::move(arguments));
+}
+
+[[nodiscard]] Expr cases(
+    const evaluation::BuiltinRegistry& builtins,
+    std::vector<Expr> branches) {
+    return call(builtins, BuiltinId::Cases, std::move(branches));
 }
 
 [[nodiscard]] Expr pi(const mathematics::MathRegistry& mathematics) {
@@ -203,6 +220,40 @@ using numeric::Rational;
             multiply(builtins, {pi(mathematics), std::move(denominator)}));
     }
     return divide(builtins, std::move(numerator), std::move(denominator));
+}
+
+
+[[nodiscard]] std::optional<std::uint64_t> boundedNonnegativeIntegerOrder(
+    const Expr& expression,
+    std::uint64_t maximum = 128) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const BigInt& value = expression.asNumber().asReal().asInteger();
+    if (value.isNegative())
+        return std::nullopt;
+    const auto order = numeric::tryToUint64(value);
+    if (!order || *order > maximum)
+        return std::nullopt;
+    return order;
+}
+
+[[nodiscard]] Expr finiteFactorialProductForDerivative(
+    const Expr& x,
+    std::uint64_t order,
+    bool rising,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (order == 0)
+        return integer(1);
+    std::vector<Expr> factors;
+    factors.reserve(static_cast<std::size_t>(order));
+    for (std::uint64_t k = 0; k < order; ++k) {
+        Expr offset = integer(static_cast<std::int64_t>(k));
+        factors.push_back(rising
+            ? add(builtins, {x, std::move(offset)})
+            : subtract(builtins, x, std::move(offset)));
+    }
+    return multiply(builtins, std::move(factors));
 }
 
 [[nodiscard]] Expr derivativeCore(
@@ -580,6 +631,101 @@ using numeric::Rational;
                 multiply(builtins, {a[0], call(builtins, BuiltinId::Log, {base})}));
         }
         break;
+    case BuiltinId::Sinc:
+    case BuiltinId::Cosc:
+    case BuiltinId::Tanc:
+        if (a.size() == 1) {
+            // Cardinal三角函数は0のremovable singularityを埋めた函数である。
+            // 商微分だけでは0に偽のholeを作るため，各点極限をscalar ifで明示する。
+            const Expr scale = directTrigScale(a[0], builtins, mathematics, angles);
+            const Expr& differentialArgument = explicitAngleUnit(a[0], builtins)
+                ? a[0].asCall().arguments[0]
+                : a[0];
+            Expr radians = multiply(builtins, {scale, differentialArgument});
+
+            Expr trigArgument = angles.defaultUnit() == mathematics::AngleUnit::Radian
+                    && !explicitAngleUnit(a[0], builtins)
+                ? radians
+                : call(builtins, BuiltinId::UnitApplied, {
+                    radians, Expr{std::string{"Rad"}}});
+            Expr sine = call(builtins, BuiltinId::Sin, {trigArgument});
+            Expr cosine = call(builtins, BuiltinId::Cos, {trigArgument});
+
+            Expr numerator = integer(0);
+            Expr zeroDerivative = integer(0);
+            if (definition->id == BuiltinId::Sinc) {
+                numerator = subtract(builtins,
+                    multiply(builtins, {radians, std::move(cosine)}),
+                    std::move(sine));
+                zeroDerivative = integer(0);
+            } else if (definition->id == BuiltinId::Cosc) {
+                numerator = add(builtins, {
+                    multiply(builtins, {radians, std::move(sine)}),
+                    std::move(cosine), integer(-1)});
+                zeroDerivative = divide(builtins, scale, integer(2));
+            } else {
+                Expr secSquared = power(builtins,
+                    call(builtins, BuiltinId::Sec, {std::move(trigArgument)}), integer(2));
+                numerator = subtract(builtins,
+                    multiply(builtins, {radians, std::move(secSquared)}),
+                    call(builtins, BuiltinId::Tan, {angles.defaultUnit() == mathematics::AngleUnit::Radian
+                            && !explicitAngleUnit(a[0], builtins)
+                        ? radians
+                        : call(builtins, BuiltinId::UnitApplied, {radians, Expr{std::string{"Rad"}}})}));
+                zeroDerivative = integer(0);
+            }
+
+            Expr ordinary = divide(builtins,
+                std::move(numerator), power(builtins, radians, integer(2)));
+            const Expr innerDerivative = derivativeCore(
+                differentialArgument, variable, builtins, mathematics, angles);
+            ordinary = multiply(builtins, {scale, innerDerivative, std::move(ordinary)});
+            zeroDerivative = multiply(builtins, {innerDerivative, std::move(zeroDerivative)});
+            Expr nonzero = call(builtins, BuiltinId::NotEqual, {radians, integer(0)});
+            Expr zeroCondition = call(builtins, BuiltinId::Equal, {radians, integer(0)});
+            return cases(builtins, {
+                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                caseBranch(builtins, std::move(zeroDerivative), std::move(zeroCondition))});
+        }
+        break;
+    case BuiltinId::Sinhc:
+    case BuiltinId::Tanhc:
+    case BuiltinId::Expc:
+        if (a.size() == 1) {
+            // 非三角Cardinal函数も0での導函数を極限値として明示する。
+            const Expr& u = a[0];
+            Expr numerator = integer(0);
+            Expr atZero = integer(0);
+            if (definition->id == BuiltinId::Sinhc) {
+                numerator = subtract(builtins,
+                    multiply(builtins, {u, call(builtins, BuiltinId::Cosh, {u})}),
+                    call(builtins, BuiltinId::Sinh, {u}));
+                atZero = integer(0);
+            } else if (definition->id == BuiltinId::Tanhc) {
+                numerator = subtract(builtins,
+                    multiply(builtins, {u, power(builtins, call(builtins, BuiltinId::Sech, {u}), integer(2))}),
+                    call(builtins, BuiltinId::Tanh, {u}));
+                atZero = integer(0);
+            } else {
+                Expr exponential = call(builtins, BuiltinId::Exp, {u});
+                numerator = add(builtins, {
+                    multiply(builtins, {u, exponential}),
+                    negate(builtins, std::move(exponential)), integer(1)});
+                atZero = divide(builtins, integer(1), integer(2));
+            }
+            const Expr innerDerivative = derivativeCore(
+                u, variable, builtins, mathematics, angles);
+            Expr ordinary = multiply(builtins, {
+                innerDerivative,
+                divide(builtins, std::move(numerator), power(builtins, u, integer(2)))});
+            atZero = multiply(builtins, {innerDerivative, std::move(atZero)});
+            Expr nonzero = call(builtins, BuiltinId::NotEqual, {u, integer(0)});
+            Expr zeroCondition = call(builtins, BuiltinId::Equal, {u, integer(0)});
+            return cases(builtins, {
+                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                caseBranch(builtins, std::move(atZero), std::move(zeroCondition))});
+        }
+        break;
     case BuiltinId::Erf:
     case BuiltinId::Erfc:
         if (a.size() == 1) {
@@ -689,13 +835,22 @@ using numeric::Rational;
     case BuiltinId::SineIntegralSi:
     case BuiltinId::CosineIntegralCi:
         if (a.size() == 1) {
-            // Si/Ciの定義核はsession angle modeではなく常にRadian。
+            // Si/Ciの定義核は常にRadian。sincはsession angle modeを持つためRadを明示し，
+            // Ciのcosだけは既定がRadianなら不要なUnitAppliedを省く。
+            if (definition->id == BuiltinId::SineIntegralSi) {
+                Expr radian = call(builtins, BuiltinId::UnitApplied, {
+                    a[0], Expr{std::string{"Rad"}}});
+                // sincがremovable singularityを埋めるので Si'(0)=1 も保持できる。
+                return chain(call(builtins, BuiltinId::Sinc, {std::move(radian)}),
+                    a[0], variable, builtins, mathematics, angles);
+            }
             Expr radian = angles.defaultUnit() == mathematics::AngleUnit::Radian
+                    && !explicitAngleUnit(a[0], builtins)
                 ? a[0]
-                : call(builtins, BuiltinId::UnitApplied, {a[0], Expr{std::string{"Rad"}}});
-            const BuiltinId trig = definition->id == BuiltinId::SineIntegralSi
-                ? BuiltinId::Sin : BuiltinId::Cos;
-            Expr kernel = divide(builtins, call(builtins, trig, {std::move(radian)}), a[0]);
+                : call(builtins, BuiltinId::UnitApplied, {
+                    a[0], Expr{std::string{"Rad"}}});
+            Expr kernel = divide(builtins,
+                call(builtins, BuiltinId::Cos, {std::move(radian)}), a[0]);
             return chain(std::move(kernel), a[0], variable, builtins, mathematics, angles);
         }
         break;
@@ -719,7 +874,14 @@ using numeric::Rational;
                 numerator = call(builtins, BuiltinId::Polylog, {std::move(lowerOrder), a[1]});
             }
             Expr kernel = divide(builtins, std::move(numerator), a[1]);
-            return chain(std::move(kernel), a[1], variable, builtins, mathematics, angles);
+            const Expr innerDerivative = derivativeCore(
+                a[1], variable, builtins, mathematics, angles);
+            Expr ordinary = multiply(builtins, {innerDerivative, std::move(kernel)});
+            Expr nonzero = call(builtins, BuiltinId::NotEqual, {a[1], integer(0)});
+            Expr zeroCondition = call(builtins, BuiltinId::Equal, {a[1], integer(0)});
+            return cases(builtins, {
+                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                caseBranch(builtins, innerDerivative, std::move(zeroCondition))});
         }
         break;
 
@@ -731,7 +893,21 @@ using numeric::Rational;
             // dW_k(z)/dz = W_k(z) / (z (1 + W_k(z)))。branch indexは定数として扱う。
             Expr kernel = divide(builtins, w, multiply(builtins, {
                 z, add(builtins, {integer(1), w})}));
-            return chain(std::move(kernel), z, variable, builtins, mathematics, angles);
+            const Expr innerDerivative = derivativeCore(
+                z, variable, builtins, mathematics, angles);
+            Expr ordinary = multiply(builtins, {innerDerivative, std::move(kernel)});
+
+            bool principalBranch = a.size() == 1;
+            if (a.size() == 2 && a[0].isNumber() && a[0].asNumber().isReal())
+                principalBranch = a[0].asNumber().asReal().toRational().isZero();
+            if (!principalBranch)
+                return ordinary;
+
+            Expr nonzero = call(builtins, BuiltinId::NotEqual, {z, integer(0)});
+            Expr zeroCondition = call(builtins, BuiltinId::Equal, {z, integer(0)});
+            return cases(builtins, {
+                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                caseBranch(builtins, innerDerivative, std::move(zeroCondition))});
         }
         break;
 
@@ -765,6 +941,42 @@ using numeric::Rational;
                 multiply(builtins, {std::move(xPower), std::move(oneMinusXPower)}),
                 call(builtins, BuiltinId::Beta, {a[0], a[1]}));
             return chain(std::move(kernel), a[2], variable, builtins, mathematics, angles);
+        }
+        break;
+
+    case BuiltinId::Beta:
+    case BuiltinId::BetaLog:
+        if (a.size() == 2) {
+            // d log B(a,b) = da (psi(a)-psi(a+b)) + db (psi(b)-psi(a+b)).
+            // Beta自体はこれへB(a,b)を掛ける。現在のBetaの正実数domainでも，
+            // symbolic analytic continuation上でも同じ局所微分式を使える。
+            Expr da = derivativeCore(a[0], variable, builtins, mathematics, angles);
+            Expr db = derivativeCore(a[1], variable, builtins, mathematics, angles);
+            Expr sum = add(builtins, {a[0], a[1]});
+            Expr psiSum = call(builtins, BuiltinId::Digamma, {sum});
+            Expr termA = multiply(builtins, {
+                std::move(da),
+                subtract(builtins,
+                    call(builtins, BuiltinId::Digamma, {a[0]}), psiSum)});
+            Expr termB = multiply(builtins, {
+                std::move(db),
+                subtract(builtins,
+                    call(builtins, BuiltinId::Digamma, {a[1]}), std::move(psiSum))});
+            Expr logarithmicDerivative = add(
+                builtins, {std::move(termA), std::move(termB)});
+            if (definition->id == BuiltinId::BetaLog)
+                return logarithmicDerivative;
+            return multiply(builtins, {
+                expression, std::move(logarithmicDerivative)});
+        }
+        break;
+
+    case BuiltinId::Fma:
+        if (a.size() == 3) {
+            // symbolic fma[a,b,c]は数学的にはa*b+c。数値評価時の単一丸め契約を
+            // 微分ASTへ持ち込まず，exact algebraとして微分する。
+            Expr expanded = add(builtins, {multiply(builtins, {a[0], a[1]}), a[2]});
+            return derivativeCore(expanded, variable, builtins, mathematics, angles);
         }
         break;
 
@@ -825,13 +1037,26 @@ using numeric::Rational;
     case BuiltinId::Im:
     case BuiltinId::Conj:
     case BuiltinId::Arg:
-    case BuiltinId::Zeta:
-    case BuiltinId::Trigamma:
-    case BuiltinId::Beta:
-    case BuiltinId::BetaLog:
     case BuiltinId::GeneralizedBinomial:
     case BuiltinId::FallingFactorial:
     case BuiltinId::RisingFactorial:
+        if (a.size() == 2) {
+            const auto order = boundedNonnegativeIntegerOrder(a[1]);
+            if (order) {
+                Expr expanded = finiteFactorialProductForDerivative(
+                    a[0], *order, definition->id == BuiltinId::RisingFactorial, builtins);
+                if (definition->id == BuiltinId::GeneralizedBinomial)
+                    expanded = divide(builtins, std::move(expanded),
+                        Expr{Number{numeric::factorial(*order)}});
+                return derivativeCore(
+                    simplify(std::move(expanded), builtins, mathematics, angles),
+                    variable, builtins, mathematics, angles);
+            }
+        }
+        break;
+
+    case BuiltinId::Zeta:
+    case BuiltinId::Trigamma:
     case BuiltinId::RandSeed:
     case BuiltinId::Rand:
     case BuiltinId::RandInt:
@@ -853,7 +1078,6 @@ using numeric::Rational;
     case BuiltinId::BitLength:
     case BuiltinId::BitCount:
     case BuiltinId::BitGet:
-    case BuiltinId::Fma:
     case BuiltinId::Clamp:
     case BuiltinId::Proj:
     case BuiltinId::Gcd:
@@ -874,13 +1098,6 @@ using numeric::Rational;
     case BuiltinId::InverseFourierTransform:
     case BuiltinId::Convolution:
     case BuiltinId::NextPow2:
-    // Cardinal函数の通常の商微分はx=0に偽のholeを導入するため、piecewise/limit表現を持つまでは未評価Dとして保持する。
-    case BuiltinId::Sinc:
-    case BuiltinId::Cosc:
-    case BuiltinId::Tanc:
-    case BuiltinId::Sinhc:
-    case BuiltinId::Tanhc:
-    case BuiltinId::Expc:
     case BuiltinId::Sum:
     case BuiltinId::Product:
     case BuiltinId::Min:
@@ -950,6 +1167,9 @@ using numeric::Rational;
     case BuiltinId::LuDecomposition:
     case BuiltinId::QrDecomposition:
     case BuiltinId::SingularValueDecomposition:
+    case BuiltinId::ConditionNumber:
+    case BuiltinId::LeastSquares:
+    case BuiltinId::PseudoInverse:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -971,7 +1191,35 @@ using numeric::Rational;
     case BuiltinId::Expand:
     case BuiltinId::Factor:
     case BuiltinId::Collect:
+    case BuiltinId::Cases:
+        {
+            std::vector<Expr> branches;
+            branches.reserve(a.size());
+            for (const Expr& branchExpression : a) {
+                if (!isHead(branchExpression, builtins, BuiltinId::CaseBranch)
+                    || branchExpression.asCall().arguments.empty()
+                    || branchExpression.asCall().arguments.size() > 2)
+                    break;
+                const auto& branch = branchExpression.asCall().arguments;
+                // 条件自体が微分変数へ依存するpiecewise式は境界で微分可能とは限らない。
+                // branch内部だけを機械的に微分すると境界情報を捨てるため，未解決のDとして保持する。
+                if (branch.size() == 2 && containsVariable(branch[1], variable))
+                    break;
+                std::vector<Expr> branchArguments{
+                    derivativeCore(branch[0], variable, builtins, mathematics, angles)};
+                if (branch.size() == 2)
+                    branchArguments.push_back(branch[1]);
+                branches.push_back(call(
+                    builtins, BuiltinId::CaseBranch, std::move(branchArguments)));
+            }
+            if (branches.size() == a.size())
+                return cases(builtins, std::move(branches));
+        }
+        break;
+    case BuiltinId::CaseBranch:
     case BuiltinId::Solve:
+    case BuiltinId::GroebnerBasis:
+    case BuiltinId::PolynomialReduce:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
     case BuiltinId::Less:

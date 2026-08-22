@@ -79,6 +79,13 @@ bool BigInt::testBit(std::size_t index) const {
     return !mask.testBit(index);
 }
 
+std::uint32_t BigInt::modulo(std::uint32_t divisor) const {
+    const std::uint32_t remainder = magnitude_.moduloSmall(divisor);
+    if (!negative_ || remainder == 0)
+        return remainder;
+    return divisor - remainder;
+}
+
 BigInt BigInt::abs() const {
     return BigInt{magnitude_, false};
 }

@@ -1973,7 +1973,7 @@ std::nullopt
 一方，exact Rationalの有限小数はもともと必要以上に0埋めしない。
 
 ```text
-N[1/2,10] → 0.5
+N[1/2,10] → 0.50
 ```
 
 これは表示policyであり，exact/approximate semanticsをdecimal literalへ逆輸入しない。mmCalでは`0.5`を再入力すればexact `1/2`であり，表示文字列だけを完全なapproximate round-trip syntaxとはみなしていない。

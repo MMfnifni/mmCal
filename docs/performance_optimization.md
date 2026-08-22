@@ -321,7 +321,13 @@ Representative benchmark in the same GCC Release environment, measured under the
 128 points  exact ~327.6 ms  certified ~13.1 ms
 ```
 
-For non-power-of-two certified transforms, direct DFT and Bluestein were measured against each other. Around 65 points direct evaluation remains about 60 ms, while at 127 points Bluestein is about 199 ms versus about 217 ms direct. The current policy therefore keeps direct evaluation below 96 points and uses Bluestein above it. This is a measured implementation threshold, not a mathematical constant, and should be remeasured on MSVC.
+For non-power-of-two certified transforms, `--fft-threshold` compares direct DFT with forced Bluestein on the same 16-digit input. A GCC Release rerun measured 319 points at 1533 ms direct versus 1609 ms Bluestein, and 335 points at 1714 ms direct versus 1638 ms Bluestein, placing that environment's crossover between them. The supplied MSVC `--full` run instead measured 257 points at 1823/5002 ms and 509 points at 14007/7896 ms. The current policy conservatively favors the primary MSVC environment: direct below 384 points and Bluestein from 384 upward. This is an environment-dependent implementation threshold, not a mathematical constant.
+
+The dedicated sweep covers 65 / 95 / 127 / 191 / 255 / 257 / 319 / 335 / 351 / 367 / 383 / 384 / 385 / 447 / 509 points. It forces each algorithm instead of comparing two calls routed through the existing policy. Results must have exactly equal finalized decimal real/imaginary component values; this ignores only representation differences such as `-12` versus `-12+0...I`.
+
+A 2026-08-22 GCC Release re-audit measured 383 points at about 1990/1437 ms direct/Bluestein, 384 at 1001/1434 ms, and 385 at 2010/1414 ms. The winner is therefore not monotone around the boundary. Certified direct evaluation can change refinement and argument-reduction cost with the arithmetic structure of the transform length, so retuning the global threshold to one local crossover such as 335 would overfit this compiler run. The policy remains 384, while 383/384/385 are now permanent sweep points for future environment-specific audits.
+
+The same audit separates mathematical convergence from practical bounded work for certified special functions. On this GCC Release build, `polylog[2,0.999]`, `2F1[...,0.98]`, and `ellipticF[...,0.98]` are mathematically inside their series convergence regions but become multi-second or worse with the current exact-majorant implementations. Conservative work boundaries are therefore `|z|<=49/50` for positive-order polylog, `<=9/10` for the 2F1/elliptic series, `|z|<=160` for 1F1, and 96 for the real Ei/Si/Ci series. Failures caused by a fixed backend range, term cap, or planner cap are classified as `CertifiedBackendUnsupported`, preventing meaningless guard-precision retries.
 
 Why selected:
 
@@ -367,9 +373,10 @@ This stage intentionally retained ordinary Gaussian/Gauss-Jordan exact eliminati
 Stage 3 lifts exact real matrices to integers by clearing denominators independently per row, then runs a shared Bareiss kernel on `IntegerMatrixBuffer`. Integer inputs require no lift; Rational inputs are scaled only for the elimination workspace.
 
 - `det` uses Bareiss forward elimination and restores the product of row denominator scales once at the end.
-- `rref` remains fraction-free through the forward phase and introduces Rational values only during backward normalization.
+- `rref` remains fraction-free through the forward phase. Full-column-rank results are materialized directly as identity columns, while only rank-deficient cases enter canonical Rational backward normalization.
 - `matrixRank` uses the number of Bareiss pivots without materializing a full RREF.
-- `inverse` writes `B=D A` and fraction-free eliminates the augmented matrix `[B|D]`, whose reduced right half is `A^-1`.
+- `inverse` writes `B=D A`, performs fraction-free forward elimination on `[B|D]`, then uses the final pivot as a common denominator for BigInt-only back substitution instead of generic Rational Gauss-Jordan.
+- `solveLinear` shares the same BigInt back-substitution path for unique full-column-rank systems and constructs Rational values only at the end.
 - Exact complex matrices retain the previous `Number` Gaussian/Gauss-Jordan fallback until a dedicated exact complex integer-domain representation is justified.
 
 Pivot selection prefers the nonzero candidate with the smallest bit length to limit intermediate BigInt growth. Every Bareiss division is checked with `BigInt::divmod`; a nonzero remainder is treated as an invariant failure rather than silently truncating.
@@ -384,21 +391,115 @@ Release / LTO-off measurements on 2026-08-13 using the same benchmark matrices:
 
 `N[det[...],p]`, `N[inverse[...],p]`, and related operations do not build these exact Bareiss results first. They continue to dispatch directly to the precision-aware certified Matrix backend shared with the FFT approximation infrastructure.
 
-# 15.8. LU / Householder QR — selected
+A 2026-08-25 performance-cliff audit showed that exact inverse cost was concentrated after Bareiss forward elimination in the generic Rational RREF phase. Full-rank square inverse and unique solve now use the final pivot `D` as a common denominator and perform exact BigInt back substitution
 
-Decomposition code is grouped in `linear_algebra/decomposition.*`. `luDecomposition[A]` provides row-pivoted `P A = L U`, while `qrDecomposition[A]` uses Householder reflectors for `A = Q R`. Under `N[...]`, factors are not built exactly first; the active `ApproximationContext` dispatches directly to a certified `ComplexInterval` backend shared with the precision-aware Matrix/FFT infrastructure.
+```text
+n_i = (b_i D - sum_{j>i} U_ij n_j) / U_ii.
+```
 
-A column-block Householder application kernel was also tested, processing several columns in one row-major sweep. Repeated Release measurements with block sizes 1/8/16/32 on orders 8 through 24 produced only a few percent difference with no stable winning block; BigFloat/interval arithmetic dominated cache effects. The default therefore remains block=1-equivalent, while the block kernel and benchmark are retained for future backend changes.
+Full-column-rank `rref` similarly stops after the forward phase and materializes the known identity-column result directly. Rank-deficient `rref/nullSpace` retains the canonical Rational backward phase.
 
-Representative Release / LTO-off measurements from 2026-08-13:
+On the same public-path benchmark, 16-bit 32x32 measured about 103 ms for `inverse`, 5.2 ms for `rref`, 5.2 ms for `matrixRank`, and 5.8 ms for a nullity-one 32x33 `nullSpace`. At 96 bits, the 32x32 figures were about 0.70 s / 34.7 ms / 34.1 ms / 37.6 ms; at 256 bits, about 3.46 s / 147 ms / 145 ms / 144 ms. Rank-deficient 48x49 / 256-bit `rref/rank/nullSpace` measured about 1.25 / 1.13 / 1.10 s. No abrupt algorithmic cliff was observed in these structural paths; growth tracks coefficient height. High-bit inverse is increasingly dominated by canonicalizing the final 1024 huge Rational elements, so shared-denominator persistent storage is a future representation problem rather than a reason to select the slower modular inverse backend.
+
+# 15.7.1. Modular / CRT exact Matrix — selected
+
+Post-v1.5.3 adds a modular backend for larger dense integer/Rational matrices so that Bareiss intermediate BigInts do not dominate bit complexity. The finite-field kernel uses 31-bit primes, keeping products safely inside `uint64_t` and avoiding an MSVC-specific `__int128` dependency. Rational inputs continue to clear denominators per row before entering the integer workspace.
+
+- `det`: performs Gaussian elimination over several prime fields, incrementally combines images with CRT, and stops once an integer-only Hadamard bound guarantees a unique centered reconstruction.
+- `solveLinear`: combines finite-field solutions by CRT, applies rational reconstruction, and accepts a candidate only after exact verification of `A X = B` in the original integer system. Bad primes are skipped; unsuccessful reconstruction falls back to Bareiss.
+- `inverse`: uses exact `det(A)` as the common denominator, reconstructs integer `adj(A)` from modular inverse images, and verifies `A adj(A)=det(A)I` exactly. The backend exists, but automatic dispatch does not use it because Bareiss remains faster throughout the measured range.
+- `rref`, `matrixRank`, and `nullSpace` remain on Bareiss pending a separate modular-certificate design.
+
+The automatic dispatcher requires coefficient density of at least 25% and uses the following conservative GCC Release crossover policy. `height` is the maximum coefficient bit length in the integer workspace.
+
+| operation | modular condition |
+| --- | --- |
+| `det` | order>=48, or order>=32 & height>=64, order>=24 & height>=192 |
+| `solveLinear` | variables>=24, or variables>=12 & height>=96, variables>=8 & height>=256, variables>=6 & height>=512 |
+| `inverse` | never selected automatically |
+
+Representative GCC Release / LTO-off timings from 2026-08-20, averaged over three iterations, in milliseconds:
+
+| workload | Bareiss | modular |
+| --- | ---: | ---: |
+| `det` 32x32, 96-bit | 37.691 | 26.270 |
+| `det` 24x24, 256-bit | 41.221 | 29.889 |
+| `det` 32x32, 256-bit | 174.095 | 58.399 |
+| `det` 20x20, 512-bit | 55.836 | 56.766 |
+| `det` 24x24, 512-bit | 136.994 | 70.267 |
+| `det` 32x32, 512-bit | 497.769 | 143.100 |
+| `solveLinear` 12x12, 96-bit | 0.453 | 0.234 |
+| `solveLinear` 8x8, 256-bit | 0.297 | 0.179 |
+| `solveLinear` 24x24, 256-bit | 47.954 | 0.686 |
+| `solveLinear` 6x6, 512-bit | 0.285 | 0.113 |
+| `solveLinear` 24x24, 512-bit | 156.020 | 0.703 |
+| `solveLinear` 32x32, 512-bit | 528.836 | 1.586 |
+
+At 20x20 with 512-bit coefficients Bareiss remained marginally faster in this sweep, so automatic dispatch deliberately stays on Bareiss there. The 24x24 512-bit case clearly favors modular and is already covered by the 24+/192-bit rule.
+
+A 2026-08-25 remeasurement still found no inverse crossover: at 32x32 the 16-bit case measured `15.2 / 84.5`, 96-bit `74.2 / 657.6`, and 256-bit `357 / 3339` ms (Bareiss forward core / modular inverse). Automatic modular inverse therefore remains disabled. The public exact `inverse` path has an additional output-materialization cost; 32x32 / 256-bit is about 3.46 s because the final 1024 canonical Rational values are themselves large.
+
+These thresholds are performance policy, not mathematical semantics. Compiler, BigInt, prime-kernel, or CPU changes should be remeasured with `mmCal.Benchmarks --exact-linear-algebra 1`. Certified `N[det[...],p]` / `N[solveLinear[...],p]` paths still dispatch directly to precision-aware interval kernels without first performing exact reconstruction.
+
+# 15.8. LU / fraction-free exact QR / certified Householder QR — selected
+
+Decomposition code is centralized in `linear_algebra/decomposition.*`. `luDecomposition[A]` keeps row-pivoted `P A = L U`. QR deliberately uses different exact and approximate algorithms. `N[qrDecomposition[A],p]` continues to dispatch directly to certified Householder without first constructing exact factors, while exact real matrices were moved from Expr-level Householder expansion to fraction-free orthogonalization on 2026-08-25.
+
+## Exact QR: delay normalization until materialization — selected
+
+The old exact Householder path repeatedly performed `norm -> sqrt -> reflector -> Expr arithmetic -> simplify`. Once the first radical entered later column norms, expression growth became extreme: roughly 1.2 ms at 2x2, 59 ms at 3x3, but about 18 s and roughly 677 KB of formatted output at 4x4. The former `maximumExactQrOrder = 3` was a policy guard against this blow-up.
+
+The replacement first lifts Rational columns to primitive integer vectors and creates neither square roots nor Rational divisions during orthogonalization. With integer orthogonal vector `p_i` and `d_i=p_i^T p_i`, projection removal uses
+
+```text
+p <- d_i v - (p_i^T v) p_i
+```
+
+with GCD content reduction. Only final materialization builds
+
+```text
+Q[:,i] = p_i / sqrt(d_i)
+R[i,j] = (p_i^T a_j) / sqrt(d_i).
+```
+
+Radical decomposition is performed once per column and the same radical node is shared by all Q/R elements. This removes the old `maximumExactQrOrder` hard cap. The upper-triangular/trapezoidal `{I,A}` fast path remains.
+
+## Gram + symmetric Bareiss (fraction-free LDL^T-equivalent) — selected
+
+For full-rank input, primitive columns `C` form `G=C^T C`; symmetric Bareiss elimination yields the principal-determinant sequence and lower coefficients from which an orthogonal integer basis is recovered without square roots. This measured roughly 3–5x faster than direct fraction-free Gram-Schmidt over representative orders 8–64. If a leading principal minor vanishes or the matrix is rank deficient, direct fraction-free orthogonalization is used instead and standard-basis directions are completed by the same kernel.
+
+A conventional Rational LDL^T implementation was measured and rejected: Rational normalization made it roughly 6–35x slower than the direct fraction-free path. Forming `A^T A` does not introduce numerical-conditioning problems in exact arithmetic; the relevant costs here are BigInt growth and measured runtime.
+
+A second experiment skipped square-factor extraction for large norms and emitted the exact but less canonical identity `1/sqrt(n)=sqrt(n)/n`. It gave no material improvement at workloads such as 32x32 / 256-bit and sometimes regressed slightly, while weakening canonical radical form, so it is rejected. The current implementation keeps one canonical radical decomposition per column.
+
+Representative GCC Release / LTO-off public-path timings from `--exact-linear-algebra 1` on 2026-08-25, including final Rational/radical Expr materialization:
+
+| coefficient | size | exact QR |
+|---:|---:|---:|
+| 16 bit | 8x8 | 2.22 ms |
+| 16 bit | 16x16 | 14.3 ms |
+| 16 bit | 24x24 | 54.0 ms |
+| 16 bit | 32x32 | 147 ms |
+| 96 bit | 16x16 | 96.4 ms |
+| 96 bit | 24x24 | 418 ms |
+| 96 bit | 32x32 | 1.30 s |
+| 256 bit | 16x16 | 415 ms |
+| 256 bit | 24x24 | 2.00 s |
+| 256 bit | 32x32 | 6.85 s |
+
+The old 4x4 expression cliff is gone at low and medium coefficient heights. High-order/high-bit workloads are now dominated by the final huge Rational/radical output rather than by the orthogonalization kernel. The implementation therefore does not restore an order hard cap; EvaluationBudget and natural output cost remain the boundary. A future improvement would require a shared-denominator or delayed-radical internal representation rather than silently switching exact work to machine approximation.
+
+## Certified Householder — retained
+
+The approximate Householder kernel also has a column-block experiment that processes multiple columns in one row-major scan. Release measurements of block sizes 1/8/16/32 over orders 8–24 stayed within a few percent and no block size won consistently because BigFloat/interval arithmetic dominates. The default therefore remains effectively block=1, while the block kernel and benchmark are retained.
+
+Representative 2026-08-13 Release / LTO-off timings:
 
 | size | exact `LU` | `N[LU,16]` | `N[QR,16]` |
 |---:|---:|---:|---:|
 | 8 | 0.290 ms | 1.811 ms | 7.062 ms |
 | 12 | 1.315 ms | 5.355 ms | 21.218 ms |
 | 16 | 3.548 ms | 10.562 ms | 46.718 ms |
-
-General exact Householder QR grows radical expressions rapidly: the same benchmark family measured about 1.2 ms at 2x2 and 59 ms at 3x3, while a 4x4 case took about 18 seconds and formatted to roughly 677 KB. General exact QR is therefore policy-limited to 3x3; only the upper-triangular `{I,A}` fast path remains exact at arbitrary order. General order 4+ use should go through `N[qrDecomposition[A],p]`.
 
 # 15.9. Reduced SVD — selected
 

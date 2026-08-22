@@ -1,0 +1,238 @@
+# mmCal V1.5 consolidated black-box regression
+# Each # @session block runs in a fresh mmCal process.
+
+# ============================================================================
+# Former file: test13_exact_approximation.txt
+# ============================================================================
+# @session
+# Exact/certified approximation boundary regression.
+# N creates an approximation object; source exactness must remain separate.
+
+N[1/3,1]==>0.3
+N[1/3,2]==>0.33
+N[1/3,20]==>0.33333333333333333333
+N[1/2,20]==>0.50
+N[0.1,20]==>0.10
+N[sqrt[2],1]==>1.0
+N[sqrt[2],2]==>1.4
+N[sqrt[2],20]==>1.4142135623730950488
+N[Pi,1]==>3.0
+N[Pi,2]==>3.1
+N[Pi,20]==>3.1415926535897932385
+N[E,20]==>2.7182818284590452354
+N[Phi,20]==>1.6180339887498948482
+N[arg[-1],20]==>"3.1415926535897932385 Rad"
+
+accuracy[1/3]==>Infinity
+precision[1/3]==>Infinity
+accuracy[Pi]==>Infinity
+precision[Pi]==>Infinity
+accuracy[N[1/3,20]]==>20
+precision[N[1/3,20]]==>19
+accuracy[N[0,20]]==>20
+precision[N[0,20]]==>0
+rationalize[N[1/3,20]]==>1/3
+rationalize[N[1001/999,2]]==>1
+rationalize[N[Pi,20],1/1000]==>201/64
+rationalize[N[1/3,20],0]==>33333333333333333333/100000000000000000000
+rationalize[0.1]==>1/10
+
+# N is recursive over arrays and exact finite decimals are not zero-padded.
+N[{1/3,1/2,2},5]==>{0.33333,0.50,2.0}
+N[{sqrt[2],Pi},10]==>{1.414213562,3.141592654}
+
+# N propagates precision into FFT; approximate operands select the same certified backend.
+N[fft[{1,2,3}],12]==>{6.0,-1.50+0.866025403784I,-1.50-0.866025403784I}
+fft[N[{1,2,3,4},12]]==>{10.0,-2.0+2.0I,-2.0,-2.0-2.0I}
+
+# Certified approximations remain numerical values after N. Exact Number operands mix as point intervals,
+# and output digits may decrease when enclosure propagation reduces the available absolute accuracy.
+N[N[Pi,20],100]==>3.1415926535897932385
+N[Pi,20]+1/3==>3.4749259869231265718
+N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000]==>0.00000000000000000346944695195361418882384896278381347656250
+accuracy[N[Pi,20]*10000000000]==>9
+accuracy[N[Pi,100]*10^50]==>49
+accuracy[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>998
+precision[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]==>981
+N[Pi+I,20]*N[E-I,20]==>9.5397342226735670655-0.42331082513074800310I
+1/N[0,20]==>1/0.0
+
+# N precision is scale-relative significant decimal precision; :fix owns fixed fractional presentation.
+N[Pi*10^20,20]==>314159265358979323850.0
+precision[N[Pi*10^20,20]]==>19
+accuracy[N[Pi/10^20,20]]==>39
+precision[N[Pi/10^100,50]]==>49
+
+# Approximation values are first-class certified scalar inputs. Near zero, absolute Accuracy may remain even when relative Precision is zero.
+sin[N[Pi,20]]==>0.0
+accuracy[sin[N[Pi,20]]]==>19
+precision[sin[N[Pi,20]]]==>0
+exp[N[1,20]]==>2.7182818284590452354
+log10[N[2,20]]==>0.30102999566398119521
+fract[N[Pi,20]]==>0.1415926535897932385
+exp[N[1+I,20]]==>1.468693939915885157+2.287355287178842391I
+sqrt[N[-2,20]]==>1.4142135623730950488I
+log[N[-2,20]]==>0.69314718055994530942+3.1415926535897932385I
+
+# Undefined operations on infinite values produce Indeterminate.
+Infinity-Infinity==>Indeterminate
+Infinity/Infinity==>Indeterminate
+0*Infinity==>Indeterminate
+
+# Discrete decisions use InformationEnclosure only; hidden guard digits cannot leak through booleans/min/max.
+N[Pi,20]>3==>True
+N[Pi,2]>3.1==>3.1 > 31/10
+min[N[Pi,20],3]==>3
+max[N[Pi,20],3]==>3.1415926535897932385
+min[N[Pi,2],3.1]==>min[3.1,31/10]
+N[Pi,20]==3==>False
+N[Pi,2]==3.1==>3.1 == 31/10
+N[Pi,2]!=3.1==>3.1 != 31/10
+
+# ============================================================================
+# Former file: test18_explain.txt
+# ============================================================================
+# @session
+# explain: lightweight evaluated-value introspection
+explain[1/3]==>{{"Kind", "Number"}, {"Domain", "Rational"}, {"Exactness", "Exact"}, {"Zero", False}, {"Sign", "Positive"}, {"NumeratorBitLength", 1}, {"DenominatorBitLength", 2}}
+explain[{{1,2},{3,4}}]==>{{"Kind", "Array"}, {"Domain", "Integer"}, {"Exactness", "Exact"}, {"ArrayRank", 2}, {"Dimensions", {2, 2}}, {"ElementCount", 4}, {"Rectangular", True}, {"Empty", False}, {"Matrix", True}, {"Square", True}, {"Order", 2}}
+explain[{1,2,3}]==>{{"Kind", "Array"}, {"Domain", "Integer"}, {"Exactness", "Exact"}, {"ArrayRank", 1}, {"Dimensions", {3}}, {"ElementCount", 3}, {"Rectangular", True}, {"Empty", False}, {"Vector", True}}
+explain[{{1,2},{3}}]==>{{"Kind", "List"}, {"Domain", "Expression"}, {"Exactness", "Unknown"}, {"ElementCount", 2}, {"Rectangular", False}}
+explain[N[1/3,10]]==>{{"Kind", "DecimalApproximation"}, {"Domain", "Real"}, {"Exactness", "CertifiedApproximation"}, {"RequestedPrecisionDigits", 10}, {"DisplayedFractionalDigits", 10}, {"PrecisionDigits", 9}, {"AccuracyDigits", 10}, {"Rounded", True}, {"CertifiedEnclosure", {1/3, 1/3}}, {"InformationEnclosure", {1333333333/4000000000, 6666666667/20000000000}}}
+explain[x^2+1]==>{{"Kind", "Call"}, {"Domain", "Unknown"}, {"Exactness", "Unknown"}, {"Head", "Add"}, {"ArgumentCount", 2}}
+explain[{{1,2,3},{4,5,6}},"internal"]==>{{"Kind", "Array"}, {"Domain", "Integer"}, {"Exactness", "Exact"}, {"ArrayRank", 2}, {"Dimensions", {2, 3}}, {"ElementCount", 6}, {"Rectangular", True}, {"Empty", False}, {"Matrix", True}, {"Square", False}, {"Representation", "ArrayExpr"}, {"Storage", "Integer"}, {"Contiguous", True}, {"StoredExpressions", False}}
+explain[Pi]==>{{"Kind", "Constant"}, {"Domain", "Real"}, {"Exactness", "Exact"}, {"Name", "Pi"}, {"Real", True}, {"Positive", True}, {"Irrational", True}, {"ArithmeticClass", "Transcendental"}}
+explain[E]==>{{"Kind", "Constant"}, {"Domain", "Real"}, {"Exactness", "Exact"}, {"Name", "E"}, {"Real", True}, {"Positive", True}, {"Irrational", True}, {"ArithmeticClass", "Transcendental"}}
+explain[Phi]==>{{"Kind", "Constant"}, {"Domain", "Real"}, {"Exactness", "Exact"}, {"Name", "Phi"}, {"Real", True}, {"Positive", True}, {"Irrational", True}, {"ArithmeticClass", "Algebraic"}}
+explain[Infinity]==>{{"Kind", "Constant"}, {"Domain", "ExtendedReal"}, {"Exactness", "Exact"}, {"Name", "Infinity"}, {"Infinite", True}, {"Finite", False}, {"Sign", "Positive"}}
+explain[ComplexInfinity]==>{{"Kind", "Constant"}, {"Domain", "ExtendedComplex"}, {"Exactness", "Exact"}, {"Name", "ComplexInfinity"}, {"Infinite", True}, {"Finite", False}, {"Direction", "Undetermined"}}
+explain[Indeterminate]==>{{"Kind", "Indeterminate"}, {"Domain", "Undefined"}, {"Exactness", "Indeterminate"}, {"Name", "Indeterminate"}, {"Numeric", False}, {"Defined", False}}
+explain[1,"full"]=>DomainError: Unknown explain mode: full
+explain[sin]==>{{"Kind", "BuiltinFunction"}, {"Domain", "Function"}, {"Exactness", "Exact"}, {"Name", "sin"}, {"Arity", 1}, {"ArgumentEvaluation", "All"}, {"FunctionDomain", "ComplexToComplexRealPreserving"}, {"Parity", "Odd"}, {"Branch", "SingleValued"}, {"PeriodTurns", 1}, {"PrincipalInverse", "asin"}, {"RealGloballyInjective", False}, {"RealRange", "ClosedMinusOneToOne"}}
+explain[table]==>{{"Kind", "BuiltinFunction"}, {"Domain", "Function"}, {"Exactness", "Exact"}, {"Name", "table"}, {"Arity", 2}, {"ArgumentEvaluation", "HoldFirstAndTableIteratorSpec"}}
+
+# ============================================================================
+# Former file: test30_n_precision_audit.txt
+# ============================================================================
+# @session
+# Certified N precision provenance and complex whole-value precision.
+N[N[Pi,20],100]==>3.1415926535897932385
+accuracy[N[N[Pi,20],100]]==>19
+N[N[Pi,20],10]==>3.141592654
+precision[N[N[Pi,20],10]]==>9
+precision[N[I,20]]==>19
+accuracy[N[I,20]]==>19
+precision[N[Pi I,20]]==>19
+accuracy[N[Pi I,20]]==>19
+precision[N[1+I,20]]==>19
+accuracy[N[1+I,20]]==>19
+precision[N[1+I/10^100,20]]==>19
+accuracy[N[1+I/10^100,20]]==>19
+precision[sin[N[Pi,20]]]==>0
+accuracy[sin[N[Pi,20]]]==>19
+# Exact identity operations and sign changes must not consume information precision.
+precision[-N[Pi,20]]==>19
+precision[N[Pi,20]+0]==>19
+precision[N[Pi,20]-0]==>19
+precision[N[Pi,20]*1]==>19
+precision[N[Pi,20]/1]==>19
+precision[N[I/10^100,20]]==>19
+accuracy[N[I/10^100,20]]==>119
+precision[-N[I/10^100,20]]==>19
+precision[N[I/10^100,20]+0]==>19
+precision[N[I/10^100,20]*1]==>19
+accuracy[N[I/10^100,20]*1]==>119
+precision[N[N[I/10^100,20],100]]==>19
+accuracy[N[N[I/10^100,20],100]]==>119
+precision[N[N[I/10^100,20],10]]==>9
+accuracy[N[N[I/10^100,20],10]]==>109
+# Information propagation must not lose one digit merely by requantizing the output.
+precision[N[Pi,20]*10]==>19
+accuracy[N[Pi,20]*10]==>18
+accuracy[I*sin[N[Pi,20]]]==>19
+accuracy[sin[N[Pi,20]]*10]==>18
+accuracy[sin[N[Pi,20]]/10]==>20
+precision[N[1,20]+I*sin[N[Pi,20]]]==>18
+
+# ============================================================================
+# Former file: test31_n_refinement_audit.txt
+# ============================================================================
+# @session
+# Bounded certified-N refinement and unsupported/domain taxonomy.
+N[sqrt[-1+I*sin[N[Pi,5]]],20]==>sqrt[-1.0+0.0I]
+N[log[-1+I*sin[N[Pi,5]]],20]==>log[-1.0+0.0I]
+N[Ei[-1+I*sin[N[Pi,5]]],20]==>Ei[-1.0+0.0I]
+N[Ci[-1+I*sin[N[Pi,5]]],20]==>Ci[-1.0+0.0I]
+N[hypergeometric1F1[1,2,160+sin[N[Pi,5]]],20]==>hypergeometric1F1[1, 2, 160.0]
+N[hypergeometric2F1[1,1,2,9/10+sin[N[Pi,5]]],20]==>hypergeometric2F1[1, 1, 2, 0.90]
+N[polylog[2,49/50+I*sin[N[Pi,5]]],20]==>polylog[2, 0.980+0.0I]
+N[hypergeometric2F1[1,2,N[0,5],2],20]==>hypergeometric2F1[1, 2, 0.0, 2]
+N[hypergeometric1F1[1,N[0,5],2],20]==>hypergeometric1F1[1, 0.0, 2]
+round[lambertw[2,1]]==>round[lambertw[2,1]]
+diff[lambertw[2,x],x,1,20]==>EvaluationError
+nintegrate[lambertw[2,x],{x,1,2},20]==>EvaluationError
+# Exact branch-side information must remain refinable/certifiable.
+N[log[-1+I/10^1000],20]=>3.1415926535897932385I
+
+# ============================================================================
+# Former file: test32_real_complex_backend_audit.txt
+# ============================================================================
+# @session
+# Approximation display compaction and real/complex certified-backend coherence.
+# Zero-centered values keep their Accuracy in metadata instead of printing dozens of zeroes.
+N[log[-1+I/10^1000],20]==>0.0+3.1415926535897932385I
+sin[N[Pi,20]]==>0.0
+accuracy[sin[N[Pi,20]]]==>19
+# N-generated terminating approximations retain one provenance zero; nonterminating values keep significant-digit output.
+N[1/2,20]==>0.50
+N[lambertw[1],20]==>0.5671432904097838730
+# All-real finite-precision inputs should not expose a spurious zero imaginary component.
+N[hypergeometric1F1[1,2,N[1/2,5]],20]==>1.2974
+N[hypergeometric2F1[1,1,2,N[1/2,5]],20]==>1.3863
+N[polylog[2,N[1/2,5]],20]==>0.58224
+# Elliptic real series accepts RealInterval inputs and preserves the input information floor.
+N[ellipticF[N[1/2,5],1/3],20]==>0.50685
+N[ellipticE[N[1/2,5],1/3],20]==>0.49332
+N[ellipticPi[1/4,N[1/2,5],1/3],20]==>0.51737
+# Work-boundary ambiguity is precision insufficiency; a provably outside interval is unsupported.
+N[ellipticF[1/2,N[9/10,5]],20]==>ellipticF[1/2, 0.90]
+N[ellipticF[1/2,N[91/100,5]],20]==>ellipticF[1/2, 0.910]
+N[ellipticPi[N[9/10,5],1/2,1/3],20]==>ellipticPi[0.90, 1/2, 1/3]
+N[ellipticPi[N[91/100,5],1/2,1/3],20]==>ellipticPi[0.910, 1/2, 1/3]
+N[polylog[2,N[49/50,5]],20]==>polylog[2, 0.980]
+N[polylog[2,N[99/100,5]],20]==>polylog[2, 0.990]
+N[hypergeometric2F1[1,1,2,N[9/10,5]],20]==>hypergeometric2F1[1, 1, 2, 0.90]
+N[hypergeometric2F1[1,1,2,N[91/100,5]],20]==>hypergeometric2F1[1, 1, 2, 0.910]
+# 2F1 near denominator-parameter poles remains certified without exact-Rational term blow-up.
+N[hypergeometric2F1[1/2,1/3,1/10^20,9/10],20]==>131575556603428593630.0
+N[hypergeometric2F1[1/2,1/3,-1+1/10^20,9/10],20]==>-1060297781389105452800.0
+N[hypergeometric2F1[1/2,1/3,1/10^20,1/2+I/4],20]==>10157290331004504305.0+13137475151258192356.0I
+
+# ============================================================================
+# Additional certification/provenance regressions (2026-08 audit)
+# ============================================================================
+# @session
+# Approximation leaves remain visibly approximate even for terminating values.
+N[0,5]==>0.0
+N[2,20]==>2.0
+N[N[0,5],20]==>0.0
+
+# Whole-complex certification must not accept independently zero-rounded components.
+N[Ci[120+I],20]=>0.0074445393237725791671+0.0079585143427773070995I
+
+# Finite-precision negative-real inputs use the valid complex recurrence/principal branch.
+N[digamma[N[-1/2,5]],20]=>0.0365
+N[trigamma[N[-1/2,5]],20]=>8.9348
+N[Ci[N[-1/2,5]],20]=>-0.17778+3.1416I
+
+# li is connected to the principal complex Ei(Log[z]) backend.
+N[li[-2],20]=>0.035532275913560467787+3.7351504825512546398I
+N[li[-2+I],20]=>0.35983768206786498306+3.8175912081992291774I
+
+# Numerical-calculus consumers may not invent precision beyond closed finite inputs.
+precision[diff[N[1,5]*x,x,2,20]]==>4
+precision[nintegrate[N[1,5],{x,0,1},20]]==>4
+
+# Away from a branch cut, derivative-bounded mean-value tightening should retain input-scale precision.
+N[asin[2+I*N[1/100,5]],20]=>1.5650+1.3170I
+precision[N[asin[2+I*N[1/100,5]],20]]==>4

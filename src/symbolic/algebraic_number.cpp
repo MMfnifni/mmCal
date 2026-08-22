@@ -1,11 +1,13 @@
 // 実代数数のSturm分離
 #include "algebraic_number.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "number_field.hpp"
 #include "rational_linear_basis.hpp"
 
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/big_float.hpp"
+#include "numeric/rational_rounding.hpp"
 #include "approximation/certified_constants.hpp"
 #include "approximation/certified_trigonometry.hpp"
 #include "approximation/real_interval.hpp"
@@ -685,6 +687,8 @@ struct PendingInterval final {
         }
         if (++splits > maximumIsolationSplits)
             return std::nullopt;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::AlgebraicRefinement);
 
         const Rational split = nonRootSplit(polynomial, current.lower, current.upper);
         const std::size_t leftCount = rootsBetween(sturm, current.lower, split);
@@ -810,6 +814,7 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::create(
     Polynomial normalizedPolynomial = normalized(polynomial);
     if (normalizedPolynomial.size() <= 1)
         return std::nullopt;
+    evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
     if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
@@ -829,6 +834,8 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::createFromMinimalPolynom
         return std::nullopt;
 
     Polynomial normalizedPolynomial = normalized(polynomial);
+    if (normalizedPolynomial.size() > 1)
+        evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
     if (normalizedPolynomial.size() <= 1
         || normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
         return std::nullopt;
@@ -897,6 +904,8 @@ const RationalRootInterval& RealAlgebraicNumber::isolatingInterval() const noexc
 }
 
 RationalRootInterval RealAlgebraicNumber::refined(std::size_t precisionBits) const {
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::AlgebraicRefinement);
     RationalRootInterval result = interval_;
     if (result.isPoint())
         return result;
@@ -911,6 +920,8 @@ RationalRootInterval RealAlgebraicNumber::refined(std::size_t precisionBits) con
         : precisionBits * 4 + 4096;
 
     while (!narrowEnough(result, precisionBits)) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::AlgebraicRefinement);
         if (++iterations > maximumIterations)
             throw std::runtime_error("Algebraic root refinement did not converge");
 
@@ -1217,9 +1228,15 @@ struct RationalIntervalPair final { Rational lower; Rational upper; };
     const std::size_t degree = polynomial.size() - 1;
 
     for (std::size_t bits = std::max<std::size_t>(128, minimumBits); bits <= 4096; bits *= 2) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::AlgebraicRefinement);
         std::vector<ApproxComplex> candidates;
         try {
             candidates = durandKernerCandidates(polynomial, bits);
+        }
+        catch (const error::CalcError&) {
+            // 共通budget超過は数値候補生成の失敗ではない。
+            throw;
         }
         catch (const std::exception&) {
             continue;
@@ -1363,6 +1380,7 @@ std::optional<ComplexAlgebraicNumber> ComplexAlgebraicNumber::create(
     Polynomial normalizedPolynomial = normalized(polynomial);
     if (normalizedPolynomial.size() <= 1)
         return std::nullopt;
+    evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
     if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
@@ -1380,6 +1398,7 @@ std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::isola
     Polynomial normalizedPolynomial = normalized(polynomial);
     if (normalizedPolynomial.size() <= 1)
         return std::vector<ComplexAlgebraicNumber>{};
+    evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
     if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
@@ -1399,6 +1418,8 @@ std::size_t ComplexAlgebraicNumber::rootIndex() const noexcept { return rootInde
 const RationalComplexDisk& ComplexAlgebraicNumber::isolatingDisk() const noexcept { return disk_; }
 
 RationalComplexDisk ComplexAlgebraicNumber::refined(std::size_t precisionBits) const {
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::AlgebraicRefinement);
     if (complexDiskNarrowEnough(disk_, precisionBits))
         return disk_;
     const auto disks = isolateComplexDisks(polynomial_, std::min<std::size_t>(4096, precisionBits + 64));
@@ -2162,21 +2183,13 @@ private:
 }
 
 
-[[nodiscard]] BigInt floorRational(const Rational& value) {
-    BigInt quotient = value.numerator() / value.denominator();
-    if (value.numerator().isNegative()
-        && !(value.numerator() % value.denominator()).isZero())
-        quotient -= BigInt{1};
-    return quotient;
-}
-
 [[nodiscard]] Rational simplestPositive(const Rational& lower, const Rational& upper) {
     if (!(Rational{} < lower) || upper < lower)
         throw std::logic_error("Invalid positive rational interval");
     if (lower.isInteger())
         return lower;
-    const BigInt lowerFloor = floorRational(lower);
-    const BigInt upperFloor = floorRational(upper);
+    const BigInt lowerFloor = numeric::floorToInteger(lower);
+    const BigInt upperFloor = numeric::floorToInteger(upper);
     if (lowerFloor != upperFloor)
         return Rational{lowerFloor + BigInt{1}};
     const Rational integerPart{lowerFloor};

@@ -107,6 +107,8 @@ v1.5.3は，v1.5.2までのexact-first CAS基盤を保ったまま，**代数数
 - `solve[equation,Real]`等のdomain短縮形，solve-safe normalization，Lambert Wによる証明付き指数方程式解法，`N[solve[...]]`を追加
 - certified近似値をfirst-class数値として扱い，CertifiedEnclosure / InformationEnclosureを分離。`N[x+Pi,p]`のようなstructural partial numericalizationにも対応
 - `zeta` / `digamma` / `trigamma` / `ibeta`を追加し，Gamma/Beta高精度backendを大幅に高速化
+- first-class `cases[...]`，general `Q[x1,...,xn]` Gröbner basis（Lex / GrLex / GrevLex），`polynomialReduce`，zero-dimensional polynomial Solve統合を追加
+- `digamma` / `trigamma`のcertified `N`をcomplex入力まで拡張
 - exact非2冪FFTへCyclotomic quotient backendを追加し，5/7/10/12点等のround-tripを巨大なroot-of-unity式なしでexactに閉じる
 - `Expr::Node` typed-node化とimmutable paged packed Array + stride viewにより，大規模Array/Matrixのmemory固定費とtranspose costを削減
 - `isprime` / `factorint`等の軽量数論，bit utility，`range` / `table` / `map` / `explain`を追加
@@ -135,17 +137,19 @@ mmCal --batch < expressions.txt
 - `--angle rad`: ラジアン。既定値
 - `--angle grad`: グラード
 - `--eval expr`: 1式だけ評価し，値だけを標準出力へ出す
-- `--batch`: 標準入力を1行1式として同一sessionで順に評価する。
-- `--help`, `-h`: 起動オプションを表示する
+- `--batch`（互換alias: `--bach`）: 標準入力を1行1式として同一sessionで順に評価する。
+- `--help`, `-h`: 短い起動usageを表示する。函数の詳細は起動後に`:help sin`等で確認する
 
-`--eval` / `--batch`は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。`--batch`はerror後も次行を処理し，発生した最大の終了codeを返す。
+`--eval` / `--batch`（`--bach`）は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。batch modeはerror後も次行を処理し，発生した最大の終了codeを返す。
 
 Linux等ではCMake 3.20以上とGCCまたはClangを用いてソースからビルドできる。
 
 ```text
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build --parallel
 ```
+
+CMake生成のMSVC buildでは`MMCAL_PARALLEL_COMPILE=ON`が既定であり，compilerへ`/MP`を付与する。無効化する場合はconfigure時に`-DMMCAL_PARALLEL_COMPILE=OFF`を指定する。GCC / Clangではcompiler固有の並列optionを埋め込まず，`cmake --build ... --parallel`でNinja / Make等のbuild toolへ並列性を委ねる。Unity buildは巨大translation unitのmemory消費とincremental rebuild粒度を悪化させるため既定では使用しない。
 
 ## 2. 「正確な値」と「小数表示」は別物
 
@@ -172,7 +176,7 @@ In [4]> N[Pi,30]
 Out[4]> 3.14159265358979323846264338328
 ```
 
-`N[式,p]`は式そのものを`p`有効桁のcertified近似値へ評価する。値のscaleが変わっても相対Precisionを基準にする。
+`N[式,p]`は式そのものを`p`有効桁のcertified近似値へ評価する。値のscaleが変わっても相対Precisionを基準にする。branch cutやbackend境界を区間幅だけが跨ぐ場合はguard precisionを増やして再判定するが，top-level `N`は局所16回で必ず停止する。既存の有限precision入力enclosureが原因で要求桁を確定できない場合は`N::precision`，数学値は存在するが現certified backend未対応なら`N::unsupported`として式を保持し，真のDomainErrorとは区別する。
 一方，`:fix`は**画面上の小数点以下表示桁数だけ**を変更し，保存されるexact値や`N`のPrecision意味論は変更しない。
 
 ```text
@@ -216,7 +220,7 @@ In [10]> accuracy[1/3]
 Out[10]> Infinity
 ```
 
-`precision`や`accuracy`は，`N[...,n]`の`n`をそのまま返す函数ではない。
+`precision`や`accuracy`は，`N[...,n]`の`n`をそのまま返す函数ではない。 純虚数ではexact-zero成分を誤差源として数えず，`+0` / `*1`等のexact identityや単項符号反転もInformationEnclosureを再量子化しない。zero-centered値はrelative Precisionではなくabsolute Accuracyで情報量を追跡する。
 保証可能な誤差境界から保守的に求めるため，値によっては要求桁数より小さくなる。
 exactな値やexactな記号式は，この意味では`Infinity`を返す。
 
@@ -431,7 +435,7 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
-v1.5.3ではさらに，`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`を追加し，代表exact値・微分関係・対応領域のcertified `N`へ接続した。
+v1.5.3ではさらに，`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`を追加し，代表exact値・微分関係・当初対応していた実領域のcertified `N`へ接続した。現Unreleased treeでは`digamma` / `trigamma`のcertified評価をcomplex入力まで拡張している。
 また軽量数論として`isprime` / `nextprime` / `prevprime` / `factorint` / `totient`を`uint64`範囲で決定的に評価する。
 証明backendを超えるBigIntをprobable-primeとして確定しない。
 
@@ -594,7 +598,7 @@ normalize[{3,4}]
 `A*B`を行列積にはせず，同shape Arrayの`+` / `-`とscalar×Arrayのみを通常算術へ統合する。行列積・内積は`dot[A,B]`で明示する。
 
 整数・Rational行列は不用意にBigFloatへ変換せずexactに処理する。
-`det` / `rref` / `matrixRank` / `nullSpace` / `inverse` / `solveLinear`は行ごとの分母除去とBareiss fraction-free eliminationを共有し，中間Rationalの増殖を抑える。
+`det` / `rref` / `matrixRank` / `nullSpace` / `inverse` / `solveLinear`は行ごとの分母除去で整数workspaceへliftする。`rref` / `matrixRank` / `nullSpace`と小規模・疎な`det` / `solveLinear`はBareiss fraction-free eliminationを使い，大きいdense exact整数/Rationalの`det`は31-bit prime + CRT，`solveLinear`はCRT + rational reconstructionへ自動dispatchする。modular solveの候補は元の整数系でexact verificationした場合だけ採用し，bad primeや復元失敗時はBareissへfallbackする。modular inverse backendも実装しているが，現GCC benchmarkではautomatic pathはBareissのままとする。
 exact complex行列は`Number` Gaussian backendへfallbackする。
 `solveLinear[A,b]`は一意解だけを返し，整合した過剰決定系もfull column rankなら扱う。
 不整合系や自由変数が残る系はDomain errorとし，parametric solutionを捏造しない。
@@ -689,14 +693,21 @@ WARN: integrate could not fully prove the symbolic antiderivative or definite in
 これは「計算結果がその式」という意味ではなく，**現在の実装では安全に計算し切れなかった**という通知である。
 未解決領域は今後も拡充予定。がんばります。
 
-## 11. CLI表示設定
+## 11. CLI help / 表示設定
 
 ```text
+:help
+:help sin
+:help functions
+:help constants
 :fix 16
 :fix off
 :status
 ```
 
+`:help 函数名`はBuiltinRegistryの函数名・alias・引数個数を正本とし，全callable builtinに個別の説明，明示的な入力規則，一つ以上の例を表示する。`integrate` / `root` / `qrDecomposition` / `svd` / `solve`等の複数形式を持つ函数では，各形式と追加note・複数例も示す。`:help Pi`と`:help constants`は保護された定数，domain，角度単位symbolを扱う。未知名が明確な近傍topicを持つ場合は，`sdv` -> `svd`，`qr` -> `qrDecomposition`のように候補を提示する。
+`:help functions`は利用可能なcanonical名とcallable aliasを一覧する。
+`:help` / `:fix` / `:status`は評価式ではないため`In[n]`を進めず，履歴にも入らない。
 `:fix n`は小数点以下最大`n`桁へ丸めて**表示するだけ**で，保存されている値や`precision` / `accuracy`の意味は変更しない。
 `:status`では現在の角度，表示形式，定義数，履歴数などを確認できる。
 コンソールタイトルにも角度と表示形式を補助表示する。
@@ -725,6 +736,8 @@ D N In Out Exit Clear Defs UnDef
 - `docs/grammar.ebnf` — 文法の機械可読な概要
 - `docs/multiprecision_implementation.ja.md` — 多倍長整数・任意精度・保証付き評価の実装詳細
 - `docs/performance_optimization.ja.md` — v1.5.1–v1.5.3で採用・棄却した高速化と実測根拠
+- `docs/evaluation_budget.ja.md` — 評価資源上限，cancellation，telemetry，diagnostic契約
+- `docs/roadmap.md` — 意図的未実装，探索上限，次の優先候補
 - `CHANGELOG.ja.md` — releaseごとの主要変更
 
 ## 14. ライセンスと商標

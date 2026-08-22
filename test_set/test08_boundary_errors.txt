@@ -1,11 +1,21 @@
+# mmCal V1.5 consolidated black-box regression
+# Each # @session block runs in a fresh mmCal process.
+
+# ============================================================================
+# Former file: test15_boundary_errors_detailed.txt
+# ============================================================================
+# @session
 # Detailed boundary/error contract tests.
 # Unlike older ErrorType-only cases, these pin both category and first-line message.
 
-# Arithmetic domain boundaries.
-1/0==>DomainError: Division by zero
-0/0==>DomainError: Division by zero
-0^0==>DomainError: Zero to the zero power is indeterminate
-0^-1==>DomainError: Zero cannot be raised to a negative power
+# Arithmetic exceptional values and domain boundaries.
+1/0==>ComplexInfinity
+0/0==>Indeterminate
+0^0==>Indeterminate
+0^-1==>ComplexInfinity
+Infinity/Infinity==>Indeterminate
+Infinity-Infinity==>Indeterminate
+0*Infinity==>Indeterminate
 log[0]==>DomainError: Log is undefined at zero
 log[1,10]==>DomainError: Logarithm base cannot be one
 log[2,0]==>DomainError: Log is undefined at zero
@@ -97,3 +107,9 @@ solve[x==1,x,foo]==>TypeError: solve constraint symbol must be Integer, Rational
 nintegrate[x,{x,0},8]==>TypeError: nintegrate iterator must be {variable, lower, upper}
 diff[x^2,x]==>TypeError: diff expects between 3 and 4 arguments
 diff[x^2,x,0,0]==>TypeError: diff precision must be a positive integer
+
+# Finite-precision pole ambiguity must not be promoted to an exact pole or enter expensive recurrence planning.
+N[gamma[N[-1,5]],50]==>gamma[-1.0]
+N[lgamma[N[-1,5]],50]==>lgamma[-1.0]
+N[digamma[N[-1,5]],50]==>digamma[-1.0]
+N[trigamma[N[-1,5]],50]==>trigamma[-1.0]

@@ -25,9 +25,13 @@ SymbolRegistry SymbolRegistry::defaults(SymbolTable& symbolTable) {
     registry.add("Rational", PredefinedSymbolId::RationalDomain, PredefinedSymbolKind::MathematicalDomain);
     registry.add("Real", PredefinedSymbolId::RealDomain, PredefinedSymbolKind::MathematicalDomain);
     registry.add("Complex", PredefinedSymbolId::ComplexDomain, PredefinedSymbolKind::MathematicalDomain);
-    // ではprecision/accuracyのexact値を表すsentinelとして導入する。
-    // 拡張実数算術そのものはまだ自動簡約しない。
+    // precision/accuracyのexact値と，方向未定の無限大，不定値を表す
+    // protected sentinel。有限Numberへ混ぜず，評価器が明示規則で扱う。
     registry.add("Infinity", PredefinedSymbolId::Infinity, PredefinedSymbolKind::SymbolicConstant);
+    registry.add("ComplexInfinity", PredefinedSymbolId::ComplexInfinity,
+        PredefinedSymbolKind::SymbolicConstant);
+    registry.add("Indeterminate", PredefinedSymbolId::Indeterminate,
+        PredefinedSymbolKind::ExceptionalValue);
 
     // session設定と角度単位指定で共有する列挙値。数学定数としては扱わない。
     registry.add("Deg", PredefinedSymbolId::DegreeUnit, PredefinedSymbolKind::EnumeratedValue);
@@ -60,6 +64,15 @@ const PredefinedSymbolDefinition* SymbolRegistry::find(
 const PredefinedSymbolDefinition* SymbolRegistry::find(std::string_view name) const noexcept {
     const expression::Symbol symbol = symbolTable_.find(name);
     return symbol.valid() ? find(symbol) : nullptr;
+}
+
+const PredefinedSymbolDefinition* SymbolRegistry::find(PredefinedSymbolId id) const noexcept {
+    for (const auto& [symbolId, definition] : definitions_) {
+        static_cast<void>(symbolId);
+        if (definition.id == id)
+            return &definition;
+    }
+    return nullptr;
 }
 
 bool SymbolRegistry::contains(const expression::Symbol& symbol) const noexcept {

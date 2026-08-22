@@ -19,6 +19,7 @@ using evaluation::BuiltinId;
 using expression::Expr;
 using numeric::BigInt;
 using numeric::Number;
+using numeric::Rational;
 
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
@@ -86,6 +87,30 @@ private:
     }
 
     void requireNonZero(Expr expression) {
+        // product/powerの非零条件は，可能なら因子・底へexactに分解する。
+        // x(x+1)!=0 や u^2!=0 をそのまま保持するより，x!=0 && x+1!=0，u!=0
+        // の方がKnowledgeContextで再利用しやすく，数学的にも同値である。
+        if (expression.isCall()) {
+            const auto* builtin = builtins_.find(expression.asCall().head);
+            const auto& arguments = expression.asCall().arguments;
+            if (builtin && builtin->id == BuiltinId::Multiply) {
+                for (const Expr& factor : arguments)
+                    requireNonZero(factor);
+                return;
+            }
+            if (builtin && builtin->id == BuiltinId::Negate && arguments.size() == 1) {
+                requireNonZero(arguments[0]);
+                return;
+            }
+            if (builtin && builtin->id == BuiltinId::Power && arguments.size() == 2
+                && arguments[1].isNumber() && arguments[1].asNumber().isReal()
+                && arguments[1].asNumber().asReal().isInteger()
+                && !arguments[1].asNumber().asReal().asInteger().isZero()) {
+                requireNonZero(arguments[0]);
+                return;
+            }
+        }
+
         Predicate predicate = relation(RelationKind::NotEqual, std::move(expression), integer(0));
         if (knowledge_.prove(predicate) != TruthValue::True)
             conditions_.add(std::move(predicate));
@@ -187,15 +212,25 @@ private:
             return true;
 
         case FunctionDefinednessRule::GammaPoles:
-            // {0,-1,-2,...} の補集合は現Predicate（有限個のrelation/domain）では
-            // 正確に表せない。Solverへ弱い条件を返すより未解決を選ぶ。
-            return false;
+            // {0,-1,-2,...} の補集合は一般symbolic Predicateでは有限個に表せない。
+            // ただしexact numeric引数ならpoleか否かを完全に判定できるので，
+            // 定数項の相殺まで不必要に阻害しない。
+            if (arguments.size() != 1 || !arguments[0].isNumber())
+                return false;
+            if (!arguments[0].asNumber().isReal())
+                return true;
+            if (!arguments[0].asNumber().asReal().isInteger())
+                return true;
+            return arguments[0].asNumber().asReal().asInteger().isPositive();
 
-        case FunctionDefinednessRule::ZetaPole:
-            // zeta(s)はs=1に単純poleを持つ。一般symbolic条件は現Predicateでも
-            // s!=1と書けるが、将来の複素branch/continuation知識と混同しないよう
-            // 現段階では保守的に未解決とする。
-            return false;
+        case FunctionDefinednessRule::ZetaPole: {
+            // Riemann zetaの有限平面上の唯一のpoleはs=1。branch cutを持たないため，
+            // symbolicでもs!=1をexactなdefinedness条件として共有できる。
+            Predicate predicate = relation(RelationKind::NotEqual, arguments[0], integer(1));
+            if (knowledge_.prove(predicate) != TruthValue::True)
+                conditions_.add(std::move(predicate));
+            return true;
+        }
 
         case FunctionDefinednessRule::IncompleteBetaPrincipal:
             // 第一版ibetaはa,b>0かつ0<=x<=1のregularized real branchだけを実装する。
@@ -232,11 +267,13 @@ private:
     [[nodiscard]] bool collectPrincipalPower(std::span<const Expr> arguments) {
         if (arguments.size() != 2 || !collectExpression(arguments[0]))
             return false;
-        if (!arguments[1].isNumber() || !arguments[1].asNumber().isReal()
-            || !arguments[1].asNumber().asReal().isInteger())
+        if (!arguments[1].isNumber() || !arguments[1].asNumber().isReal())
             return false;
 
-        if (arguments[1].asNumber().asReal().asInteger().isNegative())
+        // exact real exponentはRationalとして扱える。principal powerでは0^qはq>0なら
+        // 定義され，q<=0ならbase!=0を要する。一般複素指数はここでは証明しない。
+        const Rational exponent = arguments[1].asNumber().asReal().toRational();
+        if (exponent.isZero() || exponent.numerator().isNegative())
             requireNonZero(arguments[0]);
         return true;
     }

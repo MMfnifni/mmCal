@@ -164,6 +164,13 @@ void runApproximationTests(TestRunner& tests) {
             builtins.symbol(evaluation::BuiltinId::Sin), {std::move(deep)});
     tests.expect(!evaluator.enclose(deep, 80),
         "CertifiedEvaluator: rejects pathological AST depth before recursive enclosure");
+
+    expression::Expr recursionBounded{numeric::Number{BigInt{1}}};
+    for (std::size_t i = 0; i < 64; ++i)
+        recursionBounded = expression::Expr::call(
+            builtins.symbol(evaluation::BuiltinId::Sin), {std::move(recursionBounded)});
+    tests.expect(!evaluator.enclose(recursionBounded, 80),
+        "CertifiedEvaluator: bounds actual recursive enclosure depth below the AST hard limit");
 }
 
 } // namespace mmcal::tests

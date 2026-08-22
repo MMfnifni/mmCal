@@ -1,7 +1,9 @@
 // 実平方根の保証付き評価
 #include "certified_sqrt.hpp"
+#include "certified_precision.hpp"
 
 #include "approximation_context.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/detail/binary_scale.hpp"
 #include "numeric/integer_algorithms.hpp"
 
@@ -22,18 +24,10 @@ using numeric::Rational;
 using numeric::RealNumber;
 using numeric::RoundingMode;
 
-[[nodiscard]] std::size_t checkedAddSize(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
 [[nodiscard]] std::size_t nextGuardDigits(std::size_t guardDigits) {
     const std::size_t growth = std::max<std::size_t>(8, guardDigits / 2);
-    return checkedAddSize(guardDigits, growth, "Certified sqrt precision is too large");
+    return checkedPrecisionAdd(guardDigits, growth, "Certified sqrt precision is too large");
 }
 
 [[nodiscard]] std::optional<DecimalApproximation> tryCertifiedDecimal(
@@ -131,7 +125,7 @@ CertifiedSqrtEnclosure encloseSqrt(
     //
     // precisionBitsより数bit余分にmを作り、最後にBigFloatのdirected roundingで下端/上端へ丸める。
     // 正しさはこの余分bit数そのものには依存せず、最終的なdecimal丸め一致までapproximateSqrt側が作業精度を増やす。
-    const std::size_t fixedFractionBits = checkedAddSize(
+    const std::size_t fixedFractionBits = checkedPrecisionAdd(
         precisionBits, 4, "Certified sqrt precision is too large");
     if (fixedFractionBits > std::numeric_limits<std::size_t>::max() / 2)
         throw std::overflow_error("Certified sqrt precision is too large");
@@ -200,6 +194,8 @@ DecimalApproximation approximateSqrt(
     ApproximationContext context{fractionalDigits};
     const Rational exact = value.toRational();
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const CertifiedSqrtEnclosure enclosure = encloseSqrt(
             exact, context.workingBinaryBits());
         if (const auto decimal = tryCertifiedDecimal(enclosure.interval, fractionalDigits))

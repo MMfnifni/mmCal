@@ -2,6 +2,7 @@
 #include "iteration.hpp"
 
 #include "error/error_message.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "expression/array_utils.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -82,6 +83,8 @@ std::vector<Expr> exactRangeValues(
 
     const BigInt countBig = floorNonNegative(quotient) + BigInt{1};
     const std::size_t count = checkedCount(countBig, caller);
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, count);
 
     std::vector<Expr> result;
     result.reserve(count);

@@ -2,6 +2,7 @@
 #include "explain.hpp"
 
 #include "error/error_message.hpp"
+#include "numeric/approximation_quality.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
 #include "numeric/number.hpp"
@@ -104,6 +105,10 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
     case PredefinedSymbolKind::SymbolicConstant:
     case PredefinedSymbolKind::ImaginaryUnit:
         return "Constant";
+    case PredefinedSymbolKind::ExceptionalValue:
+        return definition->id == PredefinedSymbolId::Indeterminate
+            ? "Indeterminate"
+            : "ExceptionalValue";
     case PredefinedSymbolKind::MathematicalDomain:
         return "MathematicalDomain";
     case PredefinedSymbolKind::EnumeratedValue:
@@ -307,6 +312,21 @@ void explainPredefinedSymbol(
         add(properties, "Finite", Expr{false});
         add(properties, "Sign", text("Positive"));
         break;
+    case PredefinedSymbolId::ComplexInfinity:
+        add(properties, "Domain", text("ExtendedComplex"));
+        add(properties, "Exactness", text("Exact"));
+        add(properties, "Name", text(definition.symbol.view()));
+        add(properties, "Infinite", Expr{true});
+        add(properties, "Finite", Expr{false});
+        add(properties, "Direction", text("Undetermined"));
+        break;
+    case PredefinedSymbolId::Indeterminate:
+        add(properties, "Domain", text("Undefined"));
+        add(properties, "Exactness", text("Indeterminate"));
+        add(properties, "Name", text(definition.symbol.view()));
+        add(properties, "Numeric", Expr{false});
+        add(properties, "Defined", Expr{false});
+        break;
     case PredefinedSymbolId::IntegerDomain:
     case PredefinedSymbolId::RationalDomain:
     case PredefinedSymbolId::RealDomain:
@@ -409,8 +429,14 @@ void explainPredefinedSymbol(
 
 [[nodiscard]] Expr informationEnclosure(const ComplexDecimalApproximation& value) {
     return brace({
-        pair("Real", informationEnclosure(value.real())),
-        pair("Imaginary", informationEnclosure(value.imaginary()))
+        pair("Real", brace({
+            Expr{Number{value.realInformationLower()}},
+            Expr{Number{value.realInformationUpper()}}
+        })),
+        pair("Imaginary", brace({
+            Expr{Number{value.imaginaryInformationLower()}},
+            Expr{Number{value.imaginaryInformationUpper()}}
+        }))
     });
 }
 
@@ -445,6 +471,8 @@ void explainDecimal(
     else
         add(properties, "RequestedFractionalDigits", integer(value.requestedFractionalDigits()));
     add(properties, "DisplayedFractionalDigits", integer(value.fractionalDigits()));
+    add(properties, "PrecisionDigits", integer(numeric::precisionDigits(value)));
+    add(properties, "AccuracyDigits", integer(numeric::accuracyDigits(value)));
     add(properties, "Rounded", Expr{value.isRounded()});
     add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
     add(properties, "InformationEnclosure", informationEnclosure(value));
@@ -457,6 +485,8 @@ void explainDecimal(
                 : "CertifiedInterval"));
         add(properties, "CertifiedEnclosureIsPoint", Expr{value.certifiedEnclosureIsPoint()});
         add(properties, "InformationEnclosureIsPoint", Expr{value.informationEnclosureIsPoint()});
+        add(properties, "CertifiedExactlyZero", Expr{value.certifiedExactlyZero()});
+        add(properties, "InformationExactlyZero", Expr{value.informationExactlyZero()});
     }
 }
 
@@ -475,13 +505,17 @@ void explainComplexDecimal(
         add(properties, "RequestedFractionalDigits", integer(std::min(
             value.real().requestedFractionalDigits(),
             value.imaginary().requestedFractionalDigits())));
+    add(properties, "PrecisionDigits", integer(numeric::precisionDigits(value)));
+    add(properties, "AccuracyDigits", integer(numeric::accuracyDigits(value)));
     add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
     add(properties, "InformationEnclosure", informationEnclosure(value));
 
     if (internal) {
         add(properties, "Representation", text("ComplexDecimalApproximation"));
-        add(properties, "RealExactlyZero", Expr{value.realExactlyZero()});
-        add(properties, "ImaginaryExactlyZero", Expr{value.imaginaryExactlyZero()});
+        add(properties, "RealCertifiedExactlyZero", Expr{value.realCertifiedExactlyZero()});
+        add(properties, "ImaginaryCertifiedExactlyZero", Expr{value.imaginaryCertifiedExactlyZero()});
+        add(properties, "RealInformationExactlyZero", Expr{value.realInformationExactlyZero()});
+        add(properties, "ImaginaryInformationExactlyZero", Expr{value.imaginaryInformationExactlyZero()});
     }
 }
 

@@ -169,6 +169,33 @@ void runSimplifierTests(TestRunner& tests) {
         std::string{"1"},
         "Simplifier: x/x -> 1 only when x != 0 is proven");
 
+    const Expr reciprocalX = call(builtins, BuiltinId::Divide, {integer(1), x});
+    const Expr reciprocalCancellation = call(builtins, BuiltinId::Subtract, {
+        reciprocalX, reciprocalX});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            reciprocalCancellation, context(builtins, math))),
+        std::string{"1/x-1/x"},
+        "Simplifier: F-F retains an unresolved domain hole");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            reciprocalCancellation, context(builtins, math, nonzero))),
+        std::string{"0"},
+        "Simplifier: F-F cancels when the domain hole is excluded by assumptions");
+
+    const Expr zeroTimesReciprocal = call(builtins, BuiltinId::Multiply, {
+        integer(0), reciprocalX});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            zeroTimesReciprocal, context(builtins, math))),
+        std::string{"0*1/x"},
+        "Simplifier: 0*F retains an unresolved domain hole");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            zeroTimesReciprocal, context(builtins, math, nonzero))),
+        std::string{"0"},
+        "Simplifier: 0*F collapses when F is provably defined");
+
     const Expr expX = call(builtins, BuiltinId::Exp, {x});
     tests.expectEqual(
         formatting::formatExpr(simplifier.simplify(
@@ -176,6 +203,33 @@ void runSimplifierTests(TestRunner& tests) {
             context(builtins, math))),
         std::string{"1"},
         "Simplifier: zero-free MathKnowledge permits exp[x]/exp[x] cancellation");
+
+    const Expr expReciprocal = call(builtins, BuiltinId::Exp, {reciprocalX});
+    const Expr expReciprocalQuotient = call(builtins, BuiltinId::Divide, {
+        expReciprocal, expReciprocal});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            expReciprocalQuotient, context(builtins, math))),
+        std::string{"exp[1/x]/exp[1/x]"},
+        "Simplifier: zero-free function knowledge does not erase an undefined argument");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            expReciprocalQuotient, context(builtins, math, nonzero))),
+        std::string{"1"},
+        "Simplifier: zero-free function cancellation is enabled once its argument is defined");
+
+    const Expr expReciprocalZeroPower = call(builtins, BuiltinId::Power, {
+        expReciprocal, integer(0)});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            expReciprocalZeroPower, context(builtins, math))),
+        std::string{"exp[1/x]^0"},
+        "Simplifier: F^0 retains an unresolved domain hole in F");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            expReciprocalZeroPower, context(builtins, math, nonzero))),
+        std::string{"1"},
+        "Simplifier: F^0 collapses when F is provably defined and nonzero");
 
     const Expr gammaX = call(builtins, BuiltinId::Gamma, {x});
     tests.expectEqual(
@@ -289,6 +343,24 @@ void runSimplifierTests(TestRunner& tests) {
         std::string{"1"},
         "Simplifier: Pythagorean identity does not require a numeric angle");
 
+
+    const Expr reciprocalSinSquare = call(builtins, BuiltinId::Power, {
+        call(builtins, BuiltinId::Sin, {reciprocalX}), integer(2)});
+    const Expr reciprocalCosSquare = call(builtins, BuiltinId::Power, {
+        call(builtins, BuiltinId::Cos, {reciprocalX}), integer(2)});
+    const Expr reciprocalPythagorean = call(builtins, BuiltinId::Add, {
+        reciprocalSinSquare, reciprocalCosSquare});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            reciprocalPythagorean, context(builtins, math))),
+        std::string{"cos[1/x]^2+sin[1/x]^2"},
+        "Simplifier: Pythagorean identity retains an unresolved argument domain hole");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            reciprocalPythagorean, context(builtins, math, nonzero))),
+        std::string{"1"},
+        "Simplifier: Pythagorean identity collapses when its argument is provably defined");
+
     tests.expectEqual(
         formatting::formatExpr(simplifier.simplify(
             call(builtins, BuiltinId::Add, {
@@ -307,6 +379,39 @@ void runSimplifierTests(TestRunner& tests) {
     tests.expect(
         cost.nodes == 5 && cost.leaves == 3 && cost.depth == 3,
         "Simplifier: expression cost is independent infrastructure for FullSimplify");
+    const Expr threeHalves{Number{numeric::Rational{BigInt{3}, BigInt{2}}}};
+    const Expr minusThreeHalves{Number{numeric::Rational{BigInt{-3}, BigInt{2}}}};
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Multiply, {
+                integer(0), call(builtins, BuiltinId::Power, {x, threeHalves})}),
+            context(builtins, math))),
+        std::string{"0"},
+        "Simplifier: positive rational powers are known defined for 0*F cancellation");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Multiply, {
+                integer(0), call(builtins, BuiltinId::Power, {x, minusThreeHalves})}),
+            context(builtins, math))),
+        std::string{"0*x^(-3/2)"},
+        "Simplifier: negative rational powers retain the zero-base hole");
+
+    mathematics::AssumptionSet zetaDomain;
+    zetaDomain.add(mathematics::relation(
+        mathematics::RelationKind::NotEqual, x, integer(1)));
+    const Expr zetaX = call(builtins, BuiltinId::Zeta, {x});
+    const Expr zetaCancellation = call(builtins, BuiltinId::Subtract, {zetaX, zetaX});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            zetaCancellation, context(builtins, math))),
+        std::string{"zeta[x]-zeta[x]"},
+        "Simplifier: zeta cancellation retains the pole at one without assumptions");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            zetaCancellation, context(builtins, math, zetaDomain))),
+        std::string{"0"},
+        "Simplifier: zeta cancellation is enabled once s != 1 is known");
+
 }
 
 } // namespace mmcal::tests

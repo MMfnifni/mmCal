@@ -1,34 +1,17 @@
 // 複素数函数
 #include "complex_functions.hpp"
+#include "builtin_helpers.hpp"
 
-#include "error/error_message.hpp"
 
-#include <string>
-#include <string_view>
 
 namespace mmcal::builtins {
-namespace {
-
-[[nodiscard]] expression::Expr holdUnary(
-    std::span<const expression::Expr> arguments,
-    std::string_view name,
-    evaluation::BuiltinId id,
-    const evaluation::BuiltinRegistry& registry) {
-    if (arguments.size() != 1)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects 1 argument(s)");
-    return expression::Expr::call(registry.symbol(id), {arguments.front()});
-}
-
-} // namespace
 
 expression::Expr evaluateAbs(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "abs", evaluation::BuiltinId::Abs, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Abs, "abs");
 }
 
 expression::Expr evaluateSign(
@@ -36,7 +19,7 @@ expression::Expr evaluateSign(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "sign", evaluation::BuiltinId::Sign, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Sign, "sign");
 }
 
 expression::Expr evaluateRe(
@@ -44,7 +27,7 @@ expression::Expr evaluateRe(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "re", evaluation::BuiltinId::Re, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Re, "re");
 }
 
 expression::Expr evaluateIm(
@@ -52,7 +35,7 @@ expression::Expr evaluateIm(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "im", evaluation::BuiltinId::Im, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Im, "im");
 }
 
 expression::Expr evaluateConj(
@@ -60,7 +43,7 @@ expression::Expr evaluateConj(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics) {
     static_cast<void>(mathematics);
-    return holdUnary(arguments, "conj", evaluation::BuiltinId::Conj, registry);
+    return holdUnaryBuiltin(arguments, registry, evaluation::BuiltinId::Conj, "conj");
 }
 
 } // namespace mmcal::builtins

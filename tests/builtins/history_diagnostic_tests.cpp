@@ -65,7 +65,7 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expectEqual(eval(history, "@"), std::string{"100"},
         "at shorthand re-evaluates the immediately previous input");
 
-    static_cast<void>(evalError(history, "1/0"));
+    static_cast<void>(evalError(history, "log[0]"));
     const std::size_t failedIndex = history.inputCount();
     tests.expect(history.inputHistory(failedIndex) != nullptr,
         "lowered input remains available after evaluation failure");
@@ -118,6 +118,52 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expect(hasWarning(warnings, "N::unsupported"),
         "N distinguishes an existing value with an unavailable certified backend from a domain error");
 
+    kernel::KernelSession boundedPrecision;
+    auto boundedLimits = boundedPrecision.evaluationLimits();
+    boundedLimits.maxCertifiedRefinements = 5'000;
+    boundedPrecision.setEvaluationLimits(boundedLimits);
+    static_cast<void>(boundedPrecision.evaluate(
+        "N[sqrt[-1+I*sin[N[Pi,5]]],20]"));
+    tests.expect(hasWarning(boundedPrecision, "N::precision")
+            && !hasWarning(boundedPrecision, "N::unsupported")
+            && boundedPrecision.lastEvaluationUsage().certifiedRefinements < 5'000,
+        "N stops persistent branch ambiguity locally instead of exhausting the global refinement budget");
+
+    kernel::KernelSession refinableBranch;
+    const auto refinableValue = refinableBranch.evaluate(
+        "N[log[-1+I*sin[Pi+1/10^100]],20]");
+    tests.expect(refinableValue.isComplexDecimalApproximation()
+            && !hasWarning(refinableBranch, "N::precision"),
+        "N bounded refinement still resolves an exact branch side that needs extra guard precision");
+
+    kernel::KernelSession approximateParameterPole;
+    static_cast<void>(approximateParameterPole.evaluate(
+        "N[hypergeometric2F1[1,2,N[0,5],2],20]"));
+    tests.expect(hasWarning(approximateParameterPole, "N::precision")
+            && !hasWarning(approximateParameterPole, "N::unsupported"),
+        "N keeps finite 2F1 denominator-pole ambiguity as PrecisionInsufficient");
+
+    kernel::KernelSession approximate1F1Pole;
+    static_cast<void>(approximate1F1Pole.evaluate(
+        "N[hypergeometric1F1[1,N[0,5],2],20]"));
+    tests.expect(hasWarning(approximate1F1Pole, "N::precision")
+            && !hasWarning(approximate1F1Pole, "N::unsupported"),
+        "N keeps finite 1F1 denominator-pole ambiguity as PrecisionInsufficient");
+
+    kernel::KernelSession unsupportedConsumers;
+    tests.expectEqual(eval(unsupportedConsumers, "round[lambertw[2,1]]"),
+        std::string{"round[lambertw[2, 1]]"},
+        "certified-backend unsupported does not leak through rounding as DomainError");
+    tests.expect(evalError(
+            unsupportedConsumers,
+            "diff[lambertw[2,x],x,1,20]").type() == error::CalcErrorType::Evaluation,
+        "numeric differentiation reports certified-backend unsupported as EvaluationError");
+    tests.expect(evalError(
+            unsupportedConsumers,
+            "nintegrate[lambertw[2,x],{x,1,2},20]").type()
+            == error::CalcErrorType::Evaluation,
+        "numeric integration reports certified-backend unsupported as EvaluationError");
+
     kernel::KernelSession nestedWarnings;
     static_cast<void>(nestedWarnings.evaluate("N[D[abs[x],x],20]"));
     tests.expect(warningCount(nestedWarnings, "D::unevaluated") == 1
@@ -125,13 +171,15 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         "outer N does not duplicate a more specific warning emitted by the inner operation");
     static_cast<void>(nestedWarnings.evaluate("N[True,20]"));
     static_cast<void>(nestedWarnings.evaluate("N[Infinity,20]"));
+    static_cast<void>(nestedWarnings.evaluate("N[ComplexInfinity,20]"));
+    static_cast<void>(nestedWarnings.evaluate("N[Indeterminate,20]"));
     tests.expect(warningCount(nestedWarnings, "N::unevaluated") == 0,
-        "N treats inert Boolean and extended-real atoms as intentional symbolic values without warning");
+        "N treats inert Boolean and exceptional numeric atoms as intentional exact values without warning");
 
     kernel::KernelSession closedUnsupported;
     static_cast<void>(closedUnsupported.evaluate("N[0*Infinity,20]"));
-    tests.expect(warningCount(closedUnsupported, "N::unevaluated") == 1,
-        "N still warns for a closed unsupported expression after structural child approximation");
+    tests.expect(warningCount(closedUnsupported, "N::unevaluated") == 0,
+        "N preserves a canonical Indeterminate result without a generic warning");
 
     const auto exactApprox = warnings.evaluate("N[1/3,20]");
     tests.expect(exactApprox.isDecimalApproximation(),
@@ -169,6 +217,12 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expectEqual(eval(warnings, "explain[Infinity]"),
         std::string{"{{\"Kind\", \"Constant\"}, {\"Domain\", \"ExtendedReal\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"Infinity\"}, {\"Infinite\", True}, {\"Finite\", False}, {\"Sign\", \"Positive\"}}"},
         "explain uses predefined-symbol metadata for Infinity");
+    tests.expectEqual(eval(warnings, "explain[ComplexInfinity]"),
+        std::string{"{{\"Kind\", \"Constant\"}, {\"Domain\", \"ExtendedComplex\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"ComplexInfinity\"}, {\"Infinite\", True}, {\"Finite\", False}, {\"Direction\", \"Undetermined\"}}"},
+        "explain distinguishes directionless infinity from positive Infinity");
+    tests.expectEqual(eval(warnings, "explain[Indeterminate]"),
+        std::string{"{{\"Kind\", \"Indeterminate\"}, {\"Domain\", \"Undefined\"}, {\"Exactness\", \"Indeterminate\"}, {\"Name\", \"Indeterminate\"}, {\"Numeric\", False}, {\"Defined\", False}}"},
+        "explain reports Indeterminate as a protected nonnumeric exceptional value");
 
     tests.expectEqual(eval(warnings, "explain[sin]"),
         std::string{"{{\"Kind\", \"BuiltinFunction\"}, {\"Domain\", \"Function\"}, {\"Exactness\", \"Exact\"}, {\"Name\", \"sin\"}, {\"Arity\", 1}, {\"ArgumentEvaluation\", \"All\"}, {\"FunctionDomain\", \"ComplexToComplexRealPreserving\"}, {\"Parity\", \"Odd\"}, {\"Branch\", \"SingleValued\"}, {\"PeriodTurns\", 1}, {\"PrincipalInverse\", \"asin\"}, {\"RealGloballyInjective\", False}, {\"RealRange\", \"ClosedMinusOneToOne\"}}"},

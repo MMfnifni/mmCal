@@ -7,6 +7,8 @@
 #include "mathematics/assumption_set.hpp"
 #include "mathematics/math_registry.hpp"
 
+#include <optional>
+
 namespace mmcal::symbolic {
 
 
@@ -37,6 +39,15 @@ struct IntegrationResult final {
 // 不定積分の原始函数代表元を返す。積分定数は表示しない。
 // assumptionsは積分前の安全な簡約・definedness証明に利用する。
 // 未対応の場合は integrate[expression, variable] をそのまま返す。
+// 1変数の有理函数として認識できる式を通分・多項式GCDでexact正規化する。
+// Dの後処理等でも共有し，数値近似による同値判定は行わない。
+[[nodiscard]] std::optional<expression::Expr> normalizeRationalExpression(
+    const expression::Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
 [[nodiscard]] expression::Expr integrateExpression(
     const expression::Expr& expression,
     const expression::Symbol& variable,

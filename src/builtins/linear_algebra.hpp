@@ -74,6 +74,21 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateConditionNumber(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateLeastSquares(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluatePseudoInverse(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateEigenvalues(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
@@ -154,6 +169,24 @@ namespace mmcal::builtins {
     const mathematics::AngleSemantics& angles,
     approximation::ApproximationContext context);
 [[nodiscard]] std::optional<expression::Expr> evaluateApproximateSingularValueDecomposition(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context);
+[[nodiscard]] std::optional<expression::Expr> evaluateApproximateConditionNumber(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context);
+[[nodiscard]] std::optional<expression::Expr> evaluateApproximateLeastSquares(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    approximation::ApproximationContext context);
+[[nodiscard]] std::optional<expression::Expr> evaluateApproximatePseudoInverse(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,

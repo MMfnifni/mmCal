@@ -68,8 +68,8 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     variadic(builtins::names::derivative, BuiltinId::Derivative, 2, ArgumentEvaluation::HoldAll, true),
     range(builtins::names::symbolicIntegral, BuiltinId::SymbolicIntegral, 2, 3,
         ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
-    range(builtins::names::limit, BuiltinId::Limit, 3, 4,
-        ArgumentEvaluation::HoldFirstTwo, true),
+    range(builtins::names::limit, BuiltinId::Limit, 2, 4,
+        ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
     fixed(builtins::names::floor, BuiltinId::Floor, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::ceil, BuiltinId::Ceil, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::trunc, BuiltinId::Trunc, 1, ArgumentEvaluation::All, true),
@@ -118,6 +118,9 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::luDecomposition, BuiltinId::LuDecomposition, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::qrDecomposition, BuiltinId::QrDecomposition, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::singularValueDecomposition, BuiltinId::SingularValueDecomposition, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::conditionNumber, BuiltinId::ConditionNumber, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::leastSquares, BuiltinId::LeastSquares, 2, ArgumentEvaluation::All, true),
+    fixed(builtins::names::pseudoInverse, BuiltinId::PseudoInverse, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::eigenvalues, BuiltinId::Eigenvalues, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::eigenvectors, BuiltinId::Eigenvectors, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::eigensystem, BuiltinId::Eigensystem, 1, ArgumentEvaluation::All, true),
@@ -300,6 +303,12 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::factor, BuiltinId::Factor, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::collect, BuiltinId::Collect, 2, ArgumentEvaluation::All, true),
     range(builtins::names::solve, BuiltinId::Solve, 2, 3, ArgumentEvaluation::HoldAll, true),
+    range(builtins::names::groebnerBasis, BuiltinId::GroebnerBasis, 2, 3, ArgumentEvaluation::HoldAll, true),
+    range(builtins::names::polynomialReduce, BuiltinId::PolynomialReduce, 3, 4, ArgumentEvaluation::HoldAll, true),
+
+    // 数学的な場合分け。CaseBranchはparser/lowerer専用の内部head。
+    variadic(builtins::names::cases, BuiltinId::Cases, 1, ArgumentEvaluation::HoldAll, true),
+    range(builtins::names::caseBranch, BuiltinId::CaseBranch, 1, 2, ArgumentEvaluation::HoldAll),
 
     // 言語・比較用head。
     fixed(builtins::names::set, BuiltinId::Set, 2, ArgumentEvaluation::HoldFirst),

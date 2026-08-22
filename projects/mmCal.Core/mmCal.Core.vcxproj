@@ -112,9 +112,11 @@
     <ClInclude Include="..\..\src\numeric\big_int.hpp" />
     <ClInclude Include="..\..\src\numeric\integer_algorithms.hpp" />
     <ClInclude Include="..\..\src\numeric\rational.hpp" />
+    <ClInclude Include="..\..\src\numeric\rational_rounding.hpp" />
     <ClInclude Include="..\..\src\numeric\real_number.hpp" />
     <ClInclude Include="..\..\src\numeric\decimal_approximation.hpp" />
     <ClInclude Include="..\..\src\numeric\complex_decimal_approximation.hpp" />
+    <ClInclude Include="..\..\src\numeric\approximation_quality.hpp" />
     <ClInclude Include="..\..\src\numeric\number.hpp" />
     <ClInclude Include="..\..\src\expression\symbol.hpp" />
     <ClInclude Include="..\..\src\expression\expr.hpp" />
@@ -132,6 +134,7 @@
     <ClInclude Include="..\..\src\evaluation\iterator_spec.hpp" />
     <ClInclude Include="..\..\src\evaluation\user_function_registry.hpp" />
     <ClInclude Include="..\..\src\evaluation\evaluation_context.hpp" />
+    <ClInclude Include="..\..\src\evaluation\evaluation_budget.hpp" />
     <ClInclude Include="..\..\src\evaluation\evaluator.hpp" />
     <ClInclude Include="..\..\src\evaluation\diagnostic.hpp" />
     <ClInclude Include="..\..\src\source\source_span.hpp" />
@@ -154,6 +157,10 @@
     <ClInclude Include="..\..\src\approximation\real_interval.hpp" />
     <ClInclude Include="..\..\src\approximation\complex_interval.hpp" />
     <ClInclude Include="..\..\src\approximation\certified_evaluator.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_value.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_domain.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_value_math.hpp" />
+    <ClInclude Include="..\..\src\approximation\certified_precision.hpp" />
     <ClInclude Include="..\..\src\mathematics\angle.hpp" />
     <ClInclude Include="..\..\src\mathematics\math_registry.hpp" />
     <ClInclude Include="..\..\src\mathematics\definedness.hpp" />
@@ -200,6 +207,7 @@
     <ClInclude Include="..\..\src\symbolic\number_field.hpp" />
     <ClInclude Include="..\..\src\symbolic\rational_linear_basis.hpp" />
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp" />
+    <ClInclude Include="..\..\src\symbolic\groebner.hpp" />
     <ClInclude Include="..\..\src\symbolic\algebra_transforms.hpp" />
     <ClInclude Include="..\..\src\solver\polynomial_solver.hpp" />
     <ClInclude Include="..\..\src\solver\solve_constraints.hpp" />
@@ -222,17 +230,20 @@
     <ClInclude Include="..\..\src\builtins\array_vector.hpp" />
     <ClInclude Include="..\..\src\builtins\stable_elementary.hpp" />
     <ClInclude Include="..\..\src\builtins\special_functions.hpp" />
+    <ClInclude Include="..\..\src\builtins\polynomial_ideal.hpp" />
     <ClInclude Include="..\..\src\builtins\random_functions.hpp" />
     <ClInclude Include="..\..\src\builtins\approximation_utilities.hpp" />
     <ClInclude Include="..\..\src\builtins\explain.hpp" />
     <ClInclude Include="..\..\src\random\random_engine.hpp" />
     <ClInclude Include="..\..\src\builtins\exact_operations.hpp" />
     <ClInclude Include="..\..\src\builtins\array_helpers.hpp" />
+    <ClInclude Include="..\..\src\builtins\builtin_helpers.hpp" />
     <ClInclude Include="..\..\src\expression\array_utils.hpp" />
     <ClInclude Include="..\..\src\approximation\expression_interval.hpp" />
     <ClInclude Include="..\..\src\builtins\array.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\matrix.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\exact_matrix.hpp" />
+    <ClInclude Include="..\..\src\linear_algebra\modular_linear_algebra.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\decomposition.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\complex_point.hpp" />
     <ClInclude Include="..\..\src\linear_algebra\eigen.hpp" />
@@ -245,9 +256,11 @@
     <ClCompile Include="..\..\src\numeric\big_int.cpp" />
     <ClCompile Include="..\..\src\numeric\integer_algorithms.cpp" />
     <ClCompile Include="..\..\src\numeric\rational.cpp" />
+    <ClCompile Include="..\..\src\numeric\rational_rounding.cpp" />
     <ClCompile Include="..\..\src\numeric\real_number.cpp" />
     <ClCompile Include="..\..\src\numeric\decimal_approximation.cpp" />
     <ClCompile Include="..\..\src\numeric\complex_decimal_approximation.cpp" />
+    <ClCompile Include="..\..\src\numeric\approximation_quality.cpp" />
     <ClCompile Include="..\..\src\numeric\number.cpp" />
     <ClCompile Include="..\..\src\expression\symbol.cpp" />
     <ClCompile Include="..\..\src\expression\expr.cpp" />
@@ -280,6 +293,9 @@
     <ClCompile Include="..\..\src\approximation\real_interval.cpp" />
     <ClCompile Include="..\..\src\approximation\complex_interval.cpp" />
     <ClCompile Include="..\..\src\approximation\certified_evaluator.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_value.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_domain.cpp" />
+    <ClCompile Include="..\..\src\approximation\certified_value_math.cpp" />
     <ClCompile Include="..\..\src\mathematics\angle.cpp" />
     <ClCompile Include="..\..\src\mathematics\math_registry.cpp" />
     <ClCompile Include="..\..\src\mathematics\definedness.cpp" />
@@ -316,6 +332,7 @@
     <ClCompile Include="..\..\src\symbolic\cyclotomic_field.cpp" />
     <ClCompile Include="..\..\src\symbolic\number_field.cpp" />
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp" />
+    <ClCompile Include="..\..\src\symbolic\groebner.cpp" />
     <ClCompile Include="..\..\src\symbolic\algebra_transforms.cpp" />
     <ClCompile Include="..\..\src\solver\polynomial_solver.cpp" />
     <ClCompile Include="..\..\src\solver\transcendental_solver.cpp" />
@@ -338,6 +355,7 @@
     <ClCompile Include="..\..\src\builtins\array_vector.cpp" />
     <ClCompile Include="..\..\src\builtins\stable_elementary.cpp" />
     <ClCompile Include="..\..\src\builtins\special_functions.cpp" />
+    <ClCompile Include="..\..\src\builtins\polynomial_ideal.cpp" />
     <ClCompile Include="..\..\src\builtins\random_functions.cpp" />
     <ClCompile Include="..\..\src\builtins\approximation_utilities.cpp" />
     <ClCompile Include="..\..\src\builtins\explain.cpp" />
@@ -347,6 +365,7 @@
     <ClCompile Include="..\..\src\builtins\array.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\matrix.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\exact_matrix.cpp" />
+    <ClCompile Include="..\..\src\linear_algebra\modular_linear_algebra.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\decomposition.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\complex_point.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\eigen.cpp" />
@@ -354,6 +373,7 @@
     <ClCompile Include="..\..\src\linear_algebra\svd_complex.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\fraction_free_elimination.cpp" />
     <ClCompile Include="..\..\src\linear_algebra\approximate_matrix.cpp" />
+    <ClCompile Include="..\..\src\cli\repl_help.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

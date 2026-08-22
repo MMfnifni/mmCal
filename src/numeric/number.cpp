@@ -7,13 +7,22 @@
 namespace mmcal::numeric {
 namespace {
 
-[[nodiscard]] std::string formatImaginaryCoefficient(
+[[nodiscard]] std::string formatImaginaryTerm(
     const RealNumber& magnitude,
     unsigned radix) {
-    if (magnitude == RealNumber{BigInt{1}})
-        return {};
+    if (magnitude.isInteger()) {
+        if (magnitude == RealNumber{BigInt{1}})
+            return "I";
+        return magnitude.toString(radix) + "I";
+    }
 
-    return magnitude.toString(radix);
+    // a/b I は a/(b I) とも読めるため，複素有理数は aI/b と表示する。
+    // parser上も (a*I)/b となり，元のexact値へ再parseできる。
+    const Rational& value = magnitude.asRational();
+    std::string numerator = value.numerator() == BigInt{1}
+        ? std::string{"I"}
+        : value.numerator().toString(radix) + "I";
+    return numerator + "/" + value.denominator().toString(radix);
 }
 
 } // namespace
@@ -95,8 +104,7 @@ std::string Number::toString(unsigned radix) const {
     const bool hasReal = !value.real.isZero();
     const bool negativeImaginary = value.imaginary.isNegative();
     const RealNumber magnitude = value.imaginary.abs();
-    const std::string coefficient = formatImaginaryCoefficient(magnitude, radix);
-    const std::string imaginary = coefficient + "I";
+    const std::string imaginary = formatImaginaryTerm(magnitude, radix);
 
     if (!hasReal)
         return negativeImaginary ? "-" + imaginary : imaginary;
@@ -122,6 +130,7 @@ Number& Number::operator+=(const Number& rhs) {
     if (auto* lhs = std::get_if<ComplexNumber>(&value_)) {
         if (rhs.isReal()) {
             lhs->real += rhs.asReal();
+            normalize();
             return *this;
         }
         const auto& other = rhs.asComplex();
@@ -134,6 +143,7 @@ Number& Number::operator+=(const Number& rhs) {
     const RealNumber lhsReal = asReal();
     const auto& other = rhs.asComplex();
     value_ = ComplexNumber{lhsReal + other.real, other.imaginary};
+    normalize();
     return *this;
 }
 
@@ -146,6 +156,7 @@ Number& Number::operator-=(const Number& rhs) {
     if (auto* lhs = std::get_if<ComplexNumber>(&value_)) {
         if (rhs.isReal()) {
             lhs->real -= rhs.asReal();
+            normalize();
             return *this;
         }
         const auto& other = rhs.asComplex();
@@ -158,6 +169,7 @@ Number& Number::operator-=(const Number& rhs) {
     const RealNumber lhsReal = asReal();
     const auto& other = rhs.asComplex();
     value_ = ComplexNumber{lhsReal - other.real, -other.imaginary};
+    normalize();
     return *this;
 }
 
@@ -171,6 +183,7 @@ Number& Number::operator*=(const Number& rhs) {
         if (rhs.isReal()) {
             lhs->real *= rhs.asReal();
             lhs->imaginary *= rhs.asReal();
+            normalize();
             return *this;
         }
 
@@ -205,6 +218,7 @@ Number& Number::operator/=(const Number& rhs) {
     if (auto* lhs = std::get_if<ComplexNumber>(&value_); lhs && rhs.isReal()) {
         lhs->real /= rhs.asReal();
         lhs->imaginary /= rhs.asReal();
+        normalize();
         return *this;
     }
 

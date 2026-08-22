@@ -46,6 +46,53 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "inverse-trigonometric infinity limit respects Radian semantics");
     tests.expectEqual(eval(session, "limit[exp[-x],x,Infinity]"), std::string{"0"},
         "affine exponential asymptotics are known");
+    tests.expectEqual(eval(session, "limit[sin[1/x],x,0]"), std::string{"Indeterminate"},
+        "two-sided essential oscillation is reported as a proved non-existent limit");
+    tests.expectEqual(eval(session, "limit[sin[1/x],x,0,1]"), std::string{"Indeterminate"},
+        "right-sided essential oscillation is reported as Indeterminate");
+    tests.expectEqual(eval(session, "limit[sin[1/x],x,0,-1]"), std::string{"Indeterminate"},
+        "left-sided essential oscillation is reported as Indeterminate");
+    tests.expectEqual(eval(session, "limit[cos[x],x,Infinity]"), std::string{"Indeterminate"},
+        "periodic cosine has no single real limit at positive infinity");
+    tests.expectEqual(eval(session, "limit[tan[x],x,Infinity]"), std::string{"Indeterminate"},
+        "periodic tangent has no single real limit at positive infinity");
+    tests.expectEqual(eval(session, "limit[x sin[1/x],x,0]"), std::string{"0"},
+        "squeeze theorem closes a vanishing factor times bounded sine");
+    tests.expectEqual(eval(session, "limit[Ei[x],x,0,-1]"), std::string{"-Infinity"},
+        "Ei approaches negative infinity from the real left at zero");
+    tests.expectEqual(eval(session, "limit[Ei[x],x,0,1]"), std::string{"-Infinity"},
+        "Ei approaches negative infinity from the real right at zero");
+    tests.expectEqual(eval(session, "limit[Ei[x],x,0]"), std::string{"-Infinity"},
+        "Ei has the same two-sided real directed limit at zero");
+    tests.expectEqual(eval(session, "limit[Ei[x],x,Infinity]"), std::string{"Infinity"},
+        "Ei grows exponentially on the positive real axis");
+    tests.expectEqual(eval(session, "limit[Ei[x],x,-Infinity]"), std::string{"0"},
+        "Ei tends to zero along the negative real axis");
+    tests.expectEqual(eval(session, "limit[Ci[x],x,0,-1]"), std::string{"-Infinity"},
+        "principal Ci has negative-real directed infinity at zero from the left");
+    tests.expectEqual(eval(session, "limit[Ci[x],x,0,1]"), std::string{"-Infinity"},
+        "Ci approaches negative infinity at zero from the positive real side");
+    tests.expectEqual(eval(session, "limit[Ci[x],x,0]"), std::string{"-Infinity"},
+        "Ci has the same two-sided real directed infinity at zero");
+    tests.expectEqual(eval(session, "limit[Ci[x],x,Infinity]"), std::string{"0"},
+        "Ci tends to zero along the positive real axis");
+    tests.expectEqual(eval(session, "limit[Ci[x],x,-Infinity]"), std::string{"I Pi"},
+        "principal Ci retains its branch-cut offset I Pi at negative infinity");
+    tests.expectEqual(eval(session, "limit[li[x],x,0]"), std::string{"0"},
+        "principal li tends to zero at its origin branch point");
+    tests.expectEqual(eval(session, "limit[li[x],x,1,-1]"), std::string{"-Infinity"},
+        "li approaches negative infinity from the left at its logarithmic singularity");
+    tests.expectEqual(eval(session, "limit[li[x],x,1,1]"), std::string{"-Infinity"},
+        "li approaches negative infinity from the right at its logarithmic singularity");
+    tests.expectEqual(eval(session, "limit[li[x],x,1]"), std::string{"-Infinity"},
+        "li has the same two-sided real limit at one");
+    tests.expectEqual(eval(session, "limit[li[x],{x,1,1}]"), std::string{"-Infinity"},
+        "limit accepts the compact {variable, point, direction} form");
+    tests.expectEqual(eval(session, "limit[li[x],x,Infinity]"), std::string{"Infinity"},
+        "li grows without bound on the positive real axis");
+    tests.expectEqual(eval(session, "limit[li[x],x,-Infinity]"),
+        std::string{"ComplexInfinity"},
+        "principal li has unbounded complex magnitude along the negative real axis");
 
     tests.expectEqual(eval(session, "limit[1/x,x,0]"), std::string{"limit[1/x, x, 0]"},
         "non-existent two-sided pole is not collapsed to a principal value");
@@ -111,7 +158,7 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[tanh[x]==2,x,Real]"), std::string{"{}"},
         "Solve rejects values outside Tanh's real range");
     tests.expectEqual(eval(session, "solve[exp[x]==a,x,Real]"),
-        std::string{"{x == log[a] if a in Real&&a > 0}"},
+        std::string{"{x == log[a] if a in Real && a > 0}"},
         "symbolic inverse solution retains the real range condition");
 
     tests.expectEqual(eval(session, "solve[x^2==4,Real]"), std::string{"{x == 2, x == -2}"},
@@ -153,17 +200,17 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "lambertw[-1,-1/E]"), std::string{"-1"},
         "Lambert W lower branch shares the exact real branch point");
     tests.expectEqual(eval(session, "N[lambertw[1],20]"),
-        std::string{"0.567143290409783873"},
+        std::string{"0.5671432904097838730"},
         "Lambert W principal real branch has certified numerical evaluation");
     tests.expectEqual(eval(session, "N[lambertw[-1,-1/10],20]"),
         std::string{"-3.5771520639572972184"},
         "Lambert W lower real branch has certified numerical evaluation");
     tests.expectEqual(eval(session, "N[solve[1.1^x==x^2,x,Real],20]"),
-        std::string{"{x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.71683016840522274}"},
+        std::string{"{x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.716830168405222740}"},
         "N approximates numerically closed SolutionSet binding values while preserving variables");
     tests.expectEqual(eval(session, "D[lambertw[x],x]"),
-        std::string{"lambertw[x]/(x*(1+lambertw[x]))"},
-        "Lambert W exposes its exact symbolic derivative");
+        std::string{"cases[lambertw[x]/(x*(1+lambertw[x])) if x != 0; 1 if x == 0]"},
+        "Lambert W principal derivative preserves its removable value at zero");
 
     tests.expectEqual(eval(session, "solve[ellipticF[x,0]==2,x]"), std::string{"{x == 2}"},
         "Solve consumes exact ellipticF degeneration before polynomial solving");
@@ -226,7 +273,7 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         std::string{"1.41421356237309504880168872421"},
         "root has certified arbitrary-precision numerical refinement");
     tests.expectEqual(eval(session, "N[root[{0,-2,0,1},2],30]"),
-        std::string{"0"},
+        std::string{"0.0"},
         "root refinement recognizes an exact zero root without relative-precision stalling");
     tests.expectEqual(eval(session, "solve[x^5-x+1==0,x,Real]"),
         std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1]}"},
@@ -244,7 +291,7 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1, Complex], x == root[{1, -1, 0, 0, 0, 1}, 2, Complex], x == root[{1, -1, 0, 0, 0, 1}, 3, Complex], x == root[{1, -1, 0, 0, 0, 1}, 4, Complex], x == root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
         "Complex Solve falls back to certified complex Root isolation for unresolved rational polynomials");
     tests.expectEqual(eval(session, "N[root[{1,0,1},2,Complex],30]"),
-        std::string{"I"},
+        std::string{"1.0I"},
         "complex Root refinement certifies an exact imaginary algebraic root");
     tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
         std::string{"2"},
@@ -352,7 +399,7 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         std::string{"{x == 180k where k in Integer}"},
         "periodic Solve respects Degree session semantics");
     tests.expectEqual(eval(degreePeriodic, "solve[tan[x]==1,x,Real]"),
-        std::string{"{x == 45+180k where k in Integer}"},
+        std::string{"{x == 180k+45 where k in Integer}"},
         "tangent periodic families respect Degree semantics");
 }
 

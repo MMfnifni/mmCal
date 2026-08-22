@@ -71,6 +71,15 @@ struct CallSyntax final {
     std::vector<SyntaxNodePtr> arguments;
 };
 
+struct CasesBranchSyntax final {
+    SyntaxNodePtr value;
+    SyntaxNodePtr condition; // nullならdefault branch。
+};
+
+struct CasesSyntax final {
+    std::vector<CasesBranchSyntax> branches;
+};
+
 struct GroupSyntax final {
     SyntaxNodePtr expression;
 };
@@ -118,6 +127,7 @@ using SyntaxNodeData = std::variant<
     HistoryReferenceSyntax,
     ArrayLiteralSyntax,
     CallSyntax,
+    CasesSyntax,
     GroupSyntax,
     UnarySyntax,
     BinarySyntax,

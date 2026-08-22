@@ -31,6 +31,7 @@ enum class TokenKind {
     LBrace,
     RBrace,
     Comma,
+    Semicolon,
     Percent,
     At
 };

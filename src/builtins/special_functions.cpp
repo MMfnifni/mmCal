@@ -1,9 +1,11 @@
 // Gamma・erf・Betaなどの特殊函数
 #include "special_functions.hpp"
+#include "builtin_helpers.hpp"
 
 #include "builtins/exact_operations.hpp"
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
+#include "mathematics/definedness.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 
@@ -27,13 +29,6 @@ using numeric::Number;
 using numeric::Rational;
 using numeric::RealNumber;
 
-void requireArity(std::span<const Expr> arguments, std::size_t expected, std::string_view name) {
-    if (arguments.size() != expected)
-        error::throwCalcError(
-            error::CalcErrorType::Type,
-            std::string{name} + " expects " + std::to_string(expected) + " argument(s)");
-}
-
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
 }
@@ -51,6 +46,15 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry) {
     return Expr::call(registry.symbol(id), {arguments.begin(), arguments.end()});
+}
+
+[[nodiscard]] bool unconditionallyDefined(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
+    const auto conditions = mathematics::expressionDomainConditions(
+        expression, registry, mathematics);
+    return conditions && conditions->empty();
 }
 
 [[nodiscard]] const Rational* exactRealRational(const Expr& expression, Rational& storage) {
@@ -76,6 +80,37 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     if (!pi)
         error::throwCalcError(error::CalcErrorType::Internal, "Pi is not registered");
     return Expr{pi->symbol};
+}
+
+[[nodiscard]] Expr imaginaryUnit() {
+    return Expr{Number::complex(RealNumber{}, RealNumber{BigInt{1}})};
+}
+
+[[nodiscard]] std::optional<std::uint64_t> positiveShiftCount(
+    const Rational& value,
+    std::uint64_t maximum = 4096) {
+    if (value >= Rational{BigInt{0}} || value.isInteger())
+        return std::nullopt;
+    const BigInt magnitude = -value.numerator();
+    const BigInt shiftsBig = magnitude / value.denominator() + BigInt{1};
+    const auto shifts = numeric::tryToUint64(shiftsBig);
+    if (!shifts || *shifts > maximum)
+        return std::nullopt;
+    return shifts;
+}
+
+[[nodiscard]] std::optional<std::uint64_t> positiveComplexIntegerRealShiftCount(
+    const Number& value,
+    std::uint64_t maximum = 4096) {
+    if (!value.isComplex())
+        return std::nullopt;
+    const RealNumber real = value.realPart();
+    if (!real.isInteger() || !real.asInteger().isPositive())
+        return std::nullopt;
+    const auto integer = numeric::tryToUint64(real.asInteger());
+    if (!integer || *integer <= 1 || *integer - 1 > maximum)
+        return std::nullopt;
+    return *integer - 1;
 }
 
 [[nodiscard]] Expr gammaHalfInteger(
@@ -285,10 +320,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 
     Rational a;
     Rational b;
-    Rational z;
     if (!exactRealRational(arguments[0], a)
-        || !exactRealRational(arguments[1], b)
-        || !exactRealRational(arguments[2], z))
+        || !exactRealRational(arguments[1], b))
         return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
 
     // b=0,-1,-2,... は通常parameter pole。ただし a=-m で級数がpole到達前に
@@ -308,27 +341,36 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
     }
 
-    if (z.isZero())
+    if (arguments[2].isNumber() && arguments[2].asNumber().isZero())
         return integer(1);
 
     // M(a,a,z)=exp(z)。parameter poleを跨がない場合のみdefinednessを保って簡約する。
+    // zのreal/complex/symbolic性には依存しない恒等式なので，zをreal Rationalへ限定しない。
     if (a == b && !isNonPositiveInteger(b))
         return exact::call(BuiltinId::Exp, {arguments[2]}, registry, mathematics, angles);
 
-    // a=-m は有限級数なので、exact Rational入力なら完全にexact評価する。
-    if (terminatingOrder) {
-        Rational term{BigInt{1}};
-        Rational sum{BigInt{1}};
+    // a=0なら級数はn=0で停止するが，消えるz自身が未定義ならdomain holeを捨てない。
+    if (terminatingOrder && *terminatingOrder == 0
+        && unconditionallyDefined(arguments[2], registry, mathematics))
+        return integer(1);
+
+    // a=-m は有限級数。exact Numberなら実数・複素数を区別せず完全にexact評価する。
+    if (terminatingOrder && arguments[2].isNumber()) {
+        const Number z = arguments[2].asNumber();
+        Number term{BigInt{1}};
+        Number sum{BigInt{1}};
         for (std::uint64_t k = 0; k < *terminatingOrder; ++k) {
-            const Rational numeratorFactor = a + Rational{BigInt::fromUnsigned(k)};
-            const Rational denominatorFactor = b + Rational{BigInt::fromUnsigned(k)};
+            const Rational ka{BigInt::fromUnsigned(k)};
+            const Rational denominatorFactor = b + ka;
             if (denominatorFactor.isZero())
                 return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
-            term *= numeratorFactor * z;
-            term /= denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)};
+            const Rational coefficient = (a + ka)
+                / (denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)});
+            term *= Number{coefficient};
+            term *= z;
             sum += term;
         }
-        return rationalExpr(std::move(sum));
+        return Expr{std::move(sum)};
     }
 
     return hold(BuiltinId::Hypergeometric1F1, arguments, registry);
@@ -356,11 +398,9 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     Rational a;
     Rational b;
     Rational c;
-    Rational z;
     if (!exactRealRational(arguments[0], a)
         || !exactRealRational(arguments[1], b)
-        || !exactRealRational(arguments[2], c)
-        || !exactRealRational(arguments[3], z))
+        || !exactRealRational(arguments[2], c))
         return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
 
     const auto orderA = terminatingHypergeometricOrder(a);
@@ -383,26 +423,37 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
     }
 
-    if (z.isZero())
+    if (arguments[3].isNumber() && arguments[3].asNumber().isZero())
         return integer(1);
 
-    if (terminatingOrder) {
-        Rational term{BigInt{1}};
-        Rational sum{BigInt{1}};
+    // 上側parameterが0でも，値から消えるz自身が未定義ならdomain holeを捨てない。
+    if (terminatingOrder && *terminatingOrder == 0
+        && unconditionallyDefined(arguments[3], registry, mathematics))
+        return integer(1);
+
+    // terminating 2F1は多項式なので，exact Number zなら実数・複素数を同じ経路で評価する。
+    // continuation backendへ送る必要はなく，branch cutも存在しない。
+    if (terminatingOrder && arguments[3].isNumber()) {
+        const Number z = arguments[3].asNumber();
+        Number term{BigInt{1}};
+        Number sum{BigInt{1}};
         for (std::uint64_t k = 0; k < *terminatingOrder; ++k) {
             const Rational ka{BigInt::fromUnsigned(k)};
             const Rational denominatorFactor = c + ka;
             if (denominatorFactor.isZero())
                 return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
-            term *= (a + ka) * (b + ka) * z;
-            term /= denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)};
+            const Rational coefficient = (a + ka) * (b + ka)
+                / (denominatorFactor * Rational{BigInt::fromUnsigned(k + 1)});
+            term *= Number{coefficient};
+            term *= z;
             sum += term;
         }
-        return rationalExpr(std::move(sum));
+        return Expr{std::move(sum)};
     }
 
     return hold(BuiltinId::Hypergeometric2F1, arguments, registry);
 }
+
 
 [[nodiscard]] bool exactZero(const Expr& expression) {
     return expression.isNumber() && expression.asNumber().isZero();
@@ -414,7 +465,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 2, names::ellipticF);
-    if (exactZero(arguments[0]))
+    if (exactZero(arguments[0])
+        && unconditionallyDefined(arguments[1], registry, mathematics))
         return integer(0);
     // F(phi|0)=phi。phiがsymbolicでも成立するためSolverにも安全に還元できる。
     if (exactZero(arguments[1]))
@@ -434,7 +486,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 2, names::ellipticE);
-    if (exactZero(arguments[0]))
+    if (exactZero(arguments[0])
+        && unconditionallyDefined(arguments[1], registry, mathematics))
         return integer(0);
     if (exactZero(arguments[1]))
         return arguments[0];
@@ -453,7 +506,9 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 3, names::ellipticPi);
-    if (exactZero(arguments[1]))
+    if (exactZero(arguments[1])
+        && unconditionallyDefined(arguments[0], registry, mathematics)
+        && unconditionallyDefined(arguments[2], registry, mathematics))
         return integer(0);
     // Pi(0;phi|m)=F(phi|m)。特殊値を既存函数へ落とすことでD/N/Solveの知識も共有する。
     if (exactZero(arguments[0])) {
@@ -495,10 +550,14 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         && value.isZero())
         error::throwCalcError(error::CalcErrorType::Domain,
             std::string{name} + " is undefined at zero");
-    if (id == BuiltinId::LogarithmicIntegralLi && value == Rational{BigInt{1}})
-        error::throwCalcError(error::CalcErrorType::Domain, "li is undefined at one");
+    if (id == BuiltinId::LogarithmicIntegralLi) {
+        if (value.isZero())
+            return integer(0);
+        if (value == Rational{BigInt{1}})
+            error::throwCalcError(error::CalcErrorType::Domain, "li is undefined at one");
+    }
 
-    // Siはentireな奇函数。Ei/Ci/liはprincipal branchを持つため、同じ反射を一般化しない。
+    // Siはentireな奇函数。Ciはprincipal Logと同じ負実軸側のoffsetを持つ。
     if (id == BuiltinId::SineIntegralSi) {
         if (value.isZero())
             return integer(0);
@@ -506,6 +565,13 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
             return exact::negate(
                 Expr::call(registry.symbol(id), {rationalExpr(-value)}),
                 registry, mathematics, angles);
+    }
+    if (id == BuiltinId::CosineIntegralCi && value.numerator().isNegative()) {
+        Expr positive = Expr::call(registry.symbol(id), {rationalExpr(-value)});
+        Expr branchOffset = exact::multiply(
+            {imaginaryUnit(), piExpr(mathematics)}, registry, mathematics, angles);
+        return exact::add(
+            {std::move(positive), std::move(branchOffset)}, registry, mathematics, angles);
     }
     return hold(id, arguments, registry);
 }
@@ -517,7 +583,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 2, names::polylog);
 
-    if (exactZero(arguments[1]))
+    if (exactZero(arguments[1])
+        && unconditionallyDefined(arguments[0], registry, mathematics))
         return integer(0);
 
     Rational order;
@@ -646,6 +713,31 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         if ((magnitude % BigInt{2}).isZero())
             return integer(0);
     }
+    if (value < Rational{BigInt{0}} && !value.isInteger()) {
+        // Riemann functional equation。負の非整数有理数を1-s>1へexactに移し、
+        // 既存のpositive certified zeta backendを再利用する。sinの引数はRadian固定。
+        const Rational oneMinusS = Rational{BigInt{1}} - value;
+        Expr twoPower = exact::call(BuiltinId::Power,
+            {integer(2), rationalExpr(value)}, registry, mathematics, angles);
+        Expr piPower = exact::call(BuiltinId::Power,
+            {piExpr(mathematics), rationalExpr(value - Rational{BigInt{1}})},
+            registry, mathematics, angles);
+        Expr phase = exact::multiply(
+            {piExpr(mathematics), rationalExpr(value / Rational{BigInt{2}})},
+            registry, mathematics, angles);
+        Expr radianPhase = Expr::call(registry.symbol(BuiltinId::UnitApplied), {
+            std::move(phase), Expr{std::string{"Rad"}}});
+        Expr sine = exact::call(BuiltinId::Sin,
+            {std::move(radianPhase)}, registry, mathematics, angles);
+        Expr gamma = Expr::call(registry.symbol(BuiltinId::Gamma), {
+            rationalExpr(oneMinusS)});
+        Expr reflectedZeta = Expr::call(registry.symbol(BuiltinId::Zeta), {
+            rationalExpr(oneMinusS)});
+        return exact::multiply({
+            std::move(twoPower), std::move(piPower), std::move(sine),
+            std::move(gamma), std::move(reflectedZeta)},
+            registry, mathematics, angles);
+    }
     if (value == Rational{BigInt{2}}) {
         Expr piSquared = exact::call(
             BuiltinId::Power, {piExpr(mathematics), integer(2)}, registry, mathematics, angles);
@@ -661,13 +753,46 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
 
 [[nodiscard]] Expr evaluateDigamma(
     std::span<const Expr> arguments,
-    const evaluation::BuiltinRegistry& registry) {
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::digamma);
+    if (arguments.front().isNumber()) {
+        const Number& exact = arguments.front().asNumber();
+        if (const auto shifts = positiveComplexIntegerRealShiftCount(exact)) {
+            Number shifted = exact;
+            Number correction{BigInt{0}};
+            const Number one{BigInt{1}};
+            for (std::uint64_t i = 0; i < *shifts; ++i) {
+                shifted -= one;
+                correction += one / shifted;
+            }
+            // psi(z+1)=psi(z)+1/z。exact complexでも右側の整数実部を安全に1まで戻す。
+            return exact::add({
+                Expr::call(registry.symbol(BuiltinId::Digamma), {Expr{std::move(shifted)}}),
+                Expr{std::move(correction)}}, registry, mathematics, angles);
+        }
+    }
+
     Rational value;
-    if (exactRealRational(arguments.front(), value)
-        && value.isInteger() && !value.numerator().isPositive())
+    if (!exactRealRational(arguments.front(), value))
+        return hold(BuiltinId::Digamma, arguments, registry);
+    if (value.isInteger() && !value.numerator().isPositive())
         error::throwCalcError(error::CalcErrorType::Domain,
             "digamma is undefined at non-positive integers");
+
+    if (const auto shifts = positiveShiftCount(value)) {
+        Rational shifted = value;
+        Rational correction{BigInt{0}};
+        for (std::uint64_t i = 0; i < *shifts; ++i) {
+            correction += Rational{BigInt{1}} / shifted;
+            shifted += Rational{BigInt{1}};
+        }
+        // psi(z+1)=psi(z)+1/z なので psi(z)=psi(z+n)-sum 1/(z+k)。
+        return exact::subtract(
+            Expr::call(registry.symbol(BuiltinId::Digamma), {rationalExpr(shifted)}),
+            rationalExpr(correction), registry, mathematics, angles);
+    }
     return hold(BuiltinId::Digamma, arguments, registry);
 }
 
@@ -677,12 +802,43 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::trigamma);
+    if (arguments.front().isNumber()) {
+        const Number& exact = arguments.front().asNumber();
+        if (const auto shifts = positiveComplexIntegerRealShiftCount(exact)) {
+            Number shifted = exact;
+            Number correction{BigInt{0}};
+            const Number one{BigInt{1}};
+            for (std::uint64_t i = 0; i < *shifts; ++i) {
+                shifted -= one;
+                const Number inverse = one / shifted;
+                correction += inverse * inverse;
+            }
+            // psi1(z+1)=psi1(z)-1/z^2。exact complexでも同じrecurrenceをexactに適用する。
+            return exact::subtract(
+                Expr::call(registry.symbol(BuiltinId::Trigamma), {Expr{std::move(shifted)}}),
+                Expr{std::move(correction)}, registry, mathematics, angles);
+        }
+    }
+
     Rational value;
     if (!exactRealRational(arguments.front(), value))
         return hold(BuiltinId::Trigamma, arguments, registry);
     if (value.isInteger() && !value.numerator().isPositive())
         error::throwCalcError(error::CalcErrorType::Domain,
             "trigamma is undefined at non-positive integers");
+
+    if (const auto shifts = positiveShiftCount(value)) {
+        Rational shifted = value;
+        Rational correction{BigInt{0}};
+        for (std::uint64_t i = 0; i < *shifts; ++i) {
+            correction += Rational{BigInt{1}} / (shifted * shifted);
+            shifted += Rational{BigInt{1}};
+        }
+        // psi1(z+1)=psi1(z)-1/z^2。
+        return exact::add({
+            Expr::call(registry.symbol(BuiltinId::Trigamma), {rationalExpr(shifted)}),
+            rationalExpr(correction)}, registry, mathematics, angles);
+    }
 
     if (value.isInteger() && value.numerator().isPositive()) {
         const auto n = numeric::tryToUint64(value.numerator());
@@ -814,6 +970,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         error::throwCalcError(error::CalcErrorType::Type,
             std::string{name} + " requires an integer order");
     }
+    if (*n == 0 && !unconditionallyDefined(arguments[0], registry, mathematics))
+        return hold(id, arguments, registry);
     return finiteFactorialProduct(
         arguments[0], *n, id == BuiltinId::RisingFactorial,
         registry, mathematics, angles);
@@ -829,6 +987,9 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         return hold(BuiltinId::GeneralizedBinomial, arguments, registry);
     const auto n = nonnegativeIntegerCount(arguments[1]);
     if (!n)
+        return hold(BuiltinId::GeneralizedBinomial, arguments, registry);
+
+    if (*n == 0 && !unconditionallyDefined(arguments[0], registry, mathematics))
         return hold(BuiltinId::GeneralizedBinomial, arguments, registry);
 
     Expr numerator = finiteFactorialProduct(
@@ -890,7 +1051,7 @@ Expr evaluateSpecialFunction(
     case BuiltinId::Zeta:
         return evaluateZeta(arguments, registry, mathematics, angles);
     case BuiltinId::Digamma:
-        return evaluateDigamma(arguments, registry);
+        return evaluateDigamma(arguments, registry, mathematics, angles);
     case BuiltinId::Trigamma:
         return evaluateTrigamma(arguments, registry, mathematics, angles);
     case BuiltinId::IncompleteBeta:

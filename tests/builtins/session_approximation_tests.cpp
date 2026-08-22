@@ -114,20 +114,20 @@ void runSessionApproximationTests(TestRunner& tests) {
     tests.expectEqual(eval(approximation, "accuracy[N[N[Pi,20],100]]"), std::string{"19"},
         "outer N cannot narrow an existing information enclosure beyond its declared quality");
     tests.expectEqual(eval(approximation, "N[Pi,20]+1/3"),
-        std::string{"3.474925986923126572"},
+        std::string{"3.4749259869231265718"},
         "certified approximations can add exact Rational operands");
     tests.expectEqual(eval(approximation,
         "N[226375608064910089/72057594037927936,1000]-"
         "N[905502432259640355/288230376151711744,1000]"),
-        std::string{"0.0000000000000000034694469519536141888238489627838134765625"},
+        std::string{"0.00000000000000000346944695195361418882384896278381347656250"},
         "certified approximations participate directly in subtraction");
     tests.expectEqual(eval(approximation,
         "accuracy[N[Pi,20]*10000000000]"),
-        std::string{"8"},
+        std::string{"9"},
         "approximation arithmetic reduces reported accuracy when scale amplifies uncertainty");
     tests.expectEqual(eval(approximation,
         "accuracy[N[Pi,100]*10^50]"),
-        std::string{"48"},
+        std::string{"49"},
         "approximation arithmetic never recovers hidden guard digits beyond the input guarantee");
     tests.expectEqual(eval(approximation,
         "accuracy[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]"),
@@ -135,13 +135,47 @@ void runSessionApproximationTests(TestRunner& tests) {
         "near cancellation preserves high absolute accuracy through the information enclosure");
     tests.expectEqual(eval(approximation,
         "precision[(N[226375608064910089/72057594037927936,1000]-N[905502432259640355/288230376151711744,1000])]"),
-        std::string{"980"},
+        std::string{"981"},
         "near cancellation loses relative precision while retaining absolute accuracy");
     tests.expectEqual(eval(approximation, "N[Pi+I,20]*N[E-I,20]"),
-        std::string{"9.53973422267356707-0.423310825130748003I"},
+        std::string{"9.5397342226735670655-0.42331082513074800310I"},
         "complex certified approximations participate in arithmetic");
-    tests.expect(evalError(approximation, "1/N[0,20]").type() == error::CalcErrorType::Domain,
-        "division detects an approximation whose certified enclosure is exactly zero");
+    tests.expectEqual(eval(approximation, "precision[N[I,20]]"), std::string{"19"},
+        "pure imaginary approximations retain relative precision despite an exact-zero real component");
+    tests.expectEqual(eval(approximation, "precision[N[Pi I,20]]"), std::string{"19"},
+        "complex precision is computed from the whole information rectangle rather than component minima");
+    tests.expectEqual(eval(approximation, "accuracy[N[1+I,20]]"), std::string{"19"},
+        "complex accuracy uses a Euclidean information-error bound");
+    tests.expectEqual(eval(approximation, "precision[N[1+I/10^100,20]]"), std::string{"19"},
+        "a tiny complex component does not collapse whole-value relative precision");
+    tests.expectEqual(eval(approximation, "precision[N[I/10^100,20]]"), std::string{"19"},
+        "a tiny pure-imaginary value ignores its proven exact-zero real component");
+    tests.expectEqual(eval(approximation, "accuracy[N[I/10^100,20]]"), std::string{"119"},
+        "tiny pure-imaginary values retain scale-dependent absolute accuracy");
+    tests.expectEqual(eval(approximation, "precision[-N[Pi,20]]"), std::string{"19"},
+        "sign reversal preserves approximation precision without requantization");
+    tests.expectEqual(eval(approximation, "precision[N[Pi,20]+0]"), std::string{"19"},
+        "addition by exact zero preserves approximation precision");
+    tests.expectEqual(eval(approximation, "precision[N[Pi,20]*1]"), std::string{"19"},
+        "multiplication by exact one preserves approximation precision");
+    tests.expectEqual(eval(approximation, "precision[N[I/10^100,20]*1]"), std::string{"19"},
+        "complex identity arithmetic preserves tiny-value relative precision");
+    tests.expectEqual(eval(approximation, "accuracy[N[I/10^100,20]*1]"), std::string{"119"},
+        "complex identity arithmetic preserves tiny-value absolute accuracy");
+    tests.expectEqual(eval(approximation, "precision[N[Pi,20]*10]"), std::string{"19"},
+        "exact decimal scaling preserves relative precision");
+    tests.expectEqual(eval(approximation, "accuracy[N[Pi,20]*10]"), std::string{"18"},
+        "exact decimal scaling shifts absolute accuracy by the scale exponent only");
+    tests.expectEqual(eval(approximation, "accuracy[I*sin[N[Pi,20]]]"), std::string{"19"},
+        "exact complex rotation preserves zero-centered absolute accuracy");
+    tests.expectEqual(eval(approximation, "accuracy[sin[N[Pi,20]]*10]"), std::string{"18"},
+        "zero-centered scaling loses only the mathematically required accuracy digit");
+    tests.expectEqual(eval(approximation, "accuracy[sin[N[Pi,20]]/10]"), std::string{"20"},
+        "zero-centered down-scaling increases absolute accuracy by one digit");
+    tests.expectEqual(eval(approximation, "precision[N[1,20]+I*sin[N[Pi,20]]]"), std::string{"18"},
+        "whole-complex precision is not the minimum of component precisions");
+    tests.expectEqual(eval(approximation, "1/N[0,20]"), std::string{"1/0.0"},
+        "finite-precision zero does not expose its hidden certified point to division");
 
     tests.expectEqual(eval(approximation, "rationalize[N[1/3,20],0]"),
         std::string{"33333333333333333333/100000000000000000000"},
@@ -162,9 +196,15 @@ void runSessionApproximationTests(TestRunner& tests) {
         "N leaves Boolean atoms unchanged");
     tests.expectEqual(eval(approximation, "N[Infinity,20]"), std::string{"Infinity"},
         "N leaves an exact Infinity atom unchanged when no finite certified enclosure is appropriate");
+    tests.expectEqual(eval(approximation, "N[ComplexInfinity,20]"),
+        std::string{"ComplexInfinity"},
+        "N leaves directionless infinity exact");
+    tests.expectEqual(eval(approximation, "N[Indeterminate,20]"),
+        std::string{"Indeterminate"},
+        "N preserves an explicit indeterminate result");
 
     tests.expectEqual(eval(approximation, "N[Pi*10^20,20]"),
-        std::string{"314159265358979323850"},
+        std::string{"314159265358979323850.0"},
         "N interprets precision as significant digits at large scale");
     tests.expectEqual(eval(approximation, "precision[N[Pi*10^20,20]]"), std::string{"19"},
         "significant-digit N preserves relative precision at large scale");
@@ -176,37 +216,81 @@ void runSessionApproximationTests(TestRunner& tests) {
         "tiny significant-digit approximations retain their scale-dependent absolute accuracy");
 
     tests.expectEqual(eval(approximation, "sin[N[Pi,20]]"),
-        std::string{"0.000000000000000000"},
+        std::string{"0.0"},
         "approximation-valued transcendental calls can return a zero-centered certified result");
-    tests.expectEqual(eval(approximation, "accuracy[sin[N[Pi,20]]]"), std::string{"18"},
+    tests.expectEqual(eval(approximation, "accuracy[sin[N[Pi,20]]]"), std::string{"19"},
         "zero-centered approximation preserves absolute accuracy");
     tests.expectEqual(eval(approximation, "precision[sin[N[Pi,20]]]"), std::string{"0"},
         "zero-centered approximation correctly reports no relative precision");
     tests.expectEqual(eval(approximation, "exp[N[1,20]]"),
-        std::string{"2.718281828459045235"},
+        std::string{"2.7182818284590452354"},
         "DecimalApproximation is a first-class input to certified transcendental functions");
     tests.expectEqual(eval(approximation, "log10[N[2,20]]"),
-        std::string{"0.3010299956639811952"},
+        std::string{"0.30102999566398119521"},
         "approximation input survives primitive rewrite before certified evaluation");
     tests.expectEqual(eval(approximation, "fract[N[Pi,20]]"),
-        std::string{"0.141592653589793238"},
+        std::string{"0.1415926535897932385"},
         "fractional-part rewrite preserves certified approximation arithmetic");
     tests.expectEqual(eval(approximation, "exp[N[1+I,20]]"),
-        std::string{"1.46869393991588516+2.28735528717884239I"},
+        std::string{"1.468693939915885157+2.287355287178842391I"},
         "ComplexDecimalApproximation is a first-class input to certified transcendental functions");
     tests.expectEqual(eval(approximation, "sqrt[N[-2,20]]"),
-        std::string{"1.414213562373095049I"},
+        std::string{"1.4142135623730950488I"},
         "approximate real input may promote to a certified complex function result");
     tests.expectEqual(eval(approximation, "log[N[-2,20]]"),
-        std::string{"0.6931471805599453094+3.141592653589793238I"},
+        std::string{"0.69314718055994530942+3.1415926535897932385I"},
         "principal-branch certified functions accept approximate negative real input");
 
-    tests.expectEqual(eval(approximation, "Infinity-Infinity"), std::string{"Infinity-Infinity"},
-        "Infinity does not use finite-symbol self-cancellation");
-    tests.expectEqual(eval(approximation, "0*Infinity"), std::string{"0*Infinity"},
-        "zero times Infinity remains conservatively unevaluated");
-    tests.expectEqual(eval(approximation, "Infinity/Infinity"), std::string{"Infinity/Infinity"},
-        "indeterminate Infinity division remains conservatively unevaluated");
+    tests.expectEqual(eval(approximation, "0/0"), std::string{"Indeterminate"},
+        "zero divided by zero is explicitly indeterminate");
+    tests.expectEqual(eval(approximation, "1/0"), std::string{"ComplexInfinity"},
+        "a provably nonzero value divided by zero has infinite magnitude with unknown direction");
+    tests.expectEqual(eval(approximation, "Infinity-Infinity"),
+        std::string{"Indeterminate"},
+        "equal directed infinities subtract to Indeterminate");
+    tests.expectEqual(eval(approximation, "Infinity+(-Infinity)"),
+        std::string{"Indeterminate"},
+        "oppositely directed infinities add to Indeterminate");
+    tests.expectEqual(eval(approximation, "0*Infinity"), std::string{"Indeterminate"},
+        "zero times Infinity is explicitly indeterminate");
+    tests.expectEqual(eval(approximation, "Infinity/Infinity"),
+        std::string{"Indeterminate"},
+        "Infinity divided by Infinity is explicitly indeterminate");
+    tests.expectEqual(eval(approximation, "0^0"), std::string{"Indeterminate"},
+        "zero to the zero power is explicitly indeterminate");
+    tests.expectEqual(eval(approximation, "1^Infinity"), std::string{"Indeterminate"},
+        "one to Infinity is an indeterminate limiting form");
+    tests.expectEqual(eval(approximation, "Infinity^0"), std::string{"Indeterminate"},
+        "Infinity to zero is an indeterminate limiting form");
+    tests.expectEqual(eval(approximation, "(-1)^Infinity"),
+        std::string{"Indeterminate"},
+        "minus one to Infinity is oscillatory and indeterminate");
+    tests.expectEqual(eval(approximation, "0^I"), std::string{"Indeterminate"},
+        "zero to a purely imaginary exponent is indeterminate");
+    tests.expectEqual(eval(approximation, "(3/5+4I/5)^Infinity"),
+        std::string{"Indeterminate"},
+        "an exact complex unit-magnitude base to Infinity is indeterminate");
+    tests.expectEqual(eval(approximation, "x^(1/0)"), std::string{"Indeterminate"},
+        "a directionless infinite exponent makes Power indeterminate for every base");
+    tests.expectEqual(eval(approximation, "simplify[z^Infinity,abs[z]==1]"),
+        std::string{"Indeterminate"},
+        "an explicit unit-magnitude assumption proves symbolic z to Infinity indeterminate");
+    tests.expectEqual(eval(approximation, "z^Infinity"), std::string{"z^Infinity"},
+        "unit magnitude is not guessed for an unconstrained symbolic base");
+    tests.expectEqual(eval(approximation, "sin[Indeterminate]"),
+        std::string{"Indeterminate"},
+        "registered scalar mathematical functions propagate Indeterminate");
+    tests.expectEqual(eval(approximation, "Indeterminate==Indeterminate"),
+        std::string{"False"},
+        "Indeterminate is not numerically equal to itself");
+
+    tests.expectEqual(eval(approximation, "N[Pi+I*N[0,5],20]"),
+        std::string{"3.14159"},
+        "complex finite-input uncertainty caps display digits even when the certified value projects to real");
+    tests.expectEqual(eval(approximation, "N[0,5]^0"), std::string{"0.0^0"},
+        "finite-precision zero does not prove the base state required to resolve Power exponent zero");
+    tests.expectEqual(eval(approximation, "1/N[0,5]"), std::string{"1/0.0"},
+        "finite-precision zero does not prove an exact division-by-zero singularity");
 
     tests.expectEqual(eval(approximation, "N[Pi,20]>3"), std::string{"True"},
         "ordered comparison can use an InformationEnclosure when the result is provable");

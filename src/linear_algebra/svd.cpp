@@ -8,6 +8,7 @@
 #include "approximation/interval_math.hpp"
 #include "approximation/precision.hpp"
 #include "expression/array_utils.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_float.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -680,12 +681,17 @@ std::optional<Expr> approximateSingularValueDecomposition(
         return std::nullopt;
     approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         try {
             if (const auto result = approximateAtPrecision(
                 matrix, context.workingBinaryBits(), context.decimalDigits(), certified))
                 return result;
         }
         catch (const approximation::PrecisionInsufficient&) {
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return std::nullopt;
         }
         context.setGuardDigits(approximation::nextGuardDigits(context.guardDigits()));
     }

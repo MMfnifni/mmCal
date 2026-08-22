@@ -2,187 +2,218 @@
 
 ## Unreleased
 
-- Add post-v1.5.3 changes here.
+### Semantic hardening and build
+
+- Normalized exact complex arithmetic back to real `Number` storage whenever the imaginary component becomes zero. Also supplied the missing certified finite-precision elliptic-integral and complex `li` definitions, restoring successful CMake/GCC linking for all targets.
+- Added a certification-boundary fuzzer to `mmCal.Benchmarks`. It generates 46 families covering branch cuts, exact poles, finite-precision boundary crossings, real/complex backend boundaries, and work limits; classifies `Value`, `DomainError`, `N::precision`, `N::unsupported`, unevaluated, and resource failures separately; and is reproducible through `--seed --case`. Timeout/cancellation failures are kept distinct from mathematical failures, and the Visual Studio/CMake source sets are synchronized.
+- Made `simplify` / `fullSimplify` definedness-aware. Reductions such as `F-F -> 0`, `F/F -> 1`, `F^0 -> 1`, and special-function degeneracies are applied only when the required domain conditions are provable. This includes the `0^0` convention, negative Rational powers, `zeta[1]`, and Gamma-family poles.
+- Changed integration derivative-back regression checks to prove identities only on the common domain. The Random Expression Fuzzer now also covers `limit`, `cases`, nested `N`, AlgebraicNumber, Gröbner reduction, Array reshape, domain-hole preservation, and removable singularities.
+- Standardized the MSVC stack reserve at 16 MiB for the CLI, tests, and benchmarks. Shared builtin arity/unevaluated-call handling and Rational rounding helpers were consolidated. Exact complex `digamma` / `trigamma` also gain an exact recurrence path for positive-integer real parts to avoid unnecessary interval cancellation.
+
+### Certified `N` and precision provenance
+
+- Avoided duplicate certified-function work for exact `N` inputs, where CertifiedEnclosure and InformationEnclosure are identical. Internal guard precision is also no longer compounded unnecessarily across complex `li` (`Log -> Ei`) and the principal `2F1` `1/z` connection, preserving the same principal values and interval guarantees while substantially reducing representative 20-digit runtimes.
+- Fixed `leastSquares` losing an extra output digit because its intermediate pseudoinverse was rounded to the requested display precision before the final product. The intermediate now retains working precision and only the final result is rounded. Finite-precision `nullSpace` regressions now also require both pivot existence and free-column status to be certified from InformationEnclosure rather than recovering hidden exact-zero truth.
+- Fixed an `acosh` performance cliff immediately above and below the interior branch cut `-1<x<1`, where tiny imaginary components could trigger excessive refinement and frontend timeouts. A stable path is used only after the half-plane is certified, so cases as small as `N[acosh[1/2+I/10^160],100]` retain the principal branch without pathological refinement.
+- Fixed cancellation in `expm1` / `log1p` near zero by deriving extra working precision from the binary scale of the input instead of subtracting at the requested precision. Exact real `2F1` inputs with `z>1` now use the defined principal-cut continuation value, while finite-precision inputs spanning both sides still return `N::precision`. Complex Fresnel series evaluation now has a bounded-work limit of `|z|<8`.
+- Preserved the historical `diff[...,digits]` / `nintegrate[...,digits]` contract in which `digits` counts fractional decimal places. Finite-input `InformationEnclosure` limits still cap claimed precision, but the display mode is no longer accidentally changed to the significant-digit rule used by `N`.
+- Separated singularity, branch-cut, and algorithm-boundary decisions between `CertifiedEnclosure` and `InformationEnclosure`. Exact poles yield DomainError; ambiguity caused by finite-precision input information yields `N::precision`; mathematically valid values outside the implemented certified algorithms yield `N::unsupported`. The same rule now covers the Gamma family, `Ei` / `Ci` / `li`, `zeta`, `1F1` / `2F1`, `ibeta`, `log` / `sqrt` / noninteger powers, inverse trigonometric and hyperbolic functions, `Arg` / `atan2`, `polylog`, and elliptic integrals.
+- Refactored the certified numerical layer into value representation, zero/pole/branch-cut classification, Real/Complex arithmetic, and precision helpers. This is an internal separation of responsibilities with no intended mathematical semantic change.
+- Clarified the contract between `CertifiedEnclosure` and `InformationEnclosure` in `DecimalApproximation` / `ComplexDecimalApproximation`. Proven exact zero is no longer automatically treated as reusable exact input information. `precision`, `accuracy`, `explain`, comparisons, and certified arithmetic now share the same information-quality model; `explain` adds `PrecisionDigits` / `AccuracyDigits`.
+- Audited hidden-guard reuse across finite-precision values. Zero/nonzero decisions such as `N[0,p]^0` and `1/N[0,p]`, display capping after complex-to-real projection, removable cardinal singularities, FFT cancellation, and matrix pivot/rank decisions now respect the InformationEnclosure. Continuous quantities propagate Certified/Information enclosures in parallel. `lu/qr/svd/conditionNumber/pseudoInverse/leastSquares/eigen*` remain conservative for matrices that already contain finite-precision leaves until their input-perturbation certificates are complete, rather than recovering results from hidden certified points.
+- Bounded top-level certified refinement in `N` to 16 local attempts. Finite-precision inputs that continue to straddle a branch cut, pole, or algorithm boundary return `N::precision` instead of consuming unbounded guard digits, while exact inputs may still refine when additional precision can prove the correct side.
+- Extended InformationEnclosure branch gating to inverse trigonometric/hyperbolic functions, `Arg` / `atan2`, `polylog`, and elliptic `F/E/Pi`. Complex inverse functions use a derivative-bound enclosure away from branch points to reduce dependency blow-up without inventing precision.
+- Simplified CLI rendering of certified approximations while keeping precision metadata internal. Near-zero non-point values render compactly as `0.0`; trailing zeros are shortened; and `N`-produced terminating values retain a provenance zero, e.g. `N[1/2,20] -> 0.50`, `N[2,20] -> 2.0`, `N[I,20] -> 1.0I`, and `N[log[-1+I/10^1000],20] -> 0.0+3.1415926535897932385I`. Neutral exact operations preserve metadata, and zero-centered formatting uses absolute accuracy rather than relative precision.
+- Aligned real/complex certified paths, including safe real projection for all-real `1F1` / `2F1` / `polylog`, `RealInterval` elliptic evaluation, and bounded interval evaluation for `2F1` near denominator-parameter poles. Numerical `2F1` with exact Rational parameters now accumulates the Gauss series in outward-rounded intervals instead of growing huge exact Rational numerators and denominators. `diff` / `nintegrate` propagate `CertifiedEnclosure` and `InformationEnclosure` in parallel, including held `N[...]` subexpressions, so they cannot manufacture output precision beyond the input information. Persistent singularity or branch-side ambiguity from finite input information fails locally instead of triggering pointless refinement. Dedicated N black-box/property regressions were added.
+
+### Black-box validation
+
+- Added public-CLI-only audits for `D`, `integrate`, `limit`, `N`, `cases`, Gröbner expressions, and exact algebraic Solve, plus property suites for derivative-back identities, Gröbner invariants, solution counts, precision provenance, recurrences, and independently generated high-precision references.
+- Fixed calculus across `cases[...]`: `D`, `integrate`, and `limit` distribute branch-wise only when conditions are independent of the calculus variable. Variable-dependent or singular branches remain unevaluated or are handled by the correct limit rather than producing spurious DomainErrors.
+- Allowed safe composition of `groebnerBasis[...]` inside held polynomial builtins, and updated pre-`cases` black-box expectations/reference examples to the current scalar-case representation.
+
+### Scalar cases, polynomial ideals, and complex polygamma
+
+- Added first-class scalar `cases[value if condition; ...]`, distinct from control-flow `if[...]` and `SolutionSet`. Unknown conditions are retained, false branches are not evaluated, and the construct is integrated with `simplify`, `N`, `D`, `integrate`, and `limit`.
+- Added a general multivariate polynomial core over `Q[x1,...,xn]` with Lex / GrLex / GrevLex orderings, division/normal forms, S-polynomials, and Buchberger reduction. Exact Rational Gröbner bases are exposed through `groebnerBasis[...]` / `polynomialReduce[...]` under existing evaluation budgets.
+- Connected nonlinear polynomial `solve[{...},{...}]` to Lex Gröbner elimination. Contradictory ideals return the empty set; supported zero-dimensional systems use exact univariate roots and back-substitution with exact verification; positive-dimensional cases remain `UnresolvedSolutionSet` rather than inventing parametrizations.
+- Added certified complex `N` for `digamma` / `trigamma` using recurrence and Bernoulli/Stirling asymptotics. General `polygamma[n,x]` remains future work. The Visual Studio project was synchronized with the new polynomial sources.
+
+### Symbolic and formatting fixes
+
+- Improved conditional-solution `&&` spacing, nested-iterator `table`, and exact Complex Rational-imaginary formatting (`2I/29`).
+- Added exact perfect-power recognition to univariate polynomial `factor`, and fixed HoldAll `D` so `%` / `Out[n]` resolves the stored output before differentiation without changing `In[n]` re-evaluation semantics.
+- Added the general symbolic power rule for `integrate[x^n,x]`, `integrate[log[log[x]],x]`, and a branch-safe primitive for `integrate[li[x],x]`. The convergent improper integral `integrate[log[log[x]],{x,1,E}]` is now handled exactly.
+- Fixed Formatter radix-prefix collision handling at lexical boundaries, avoiding unnecessary `*` in forms such as `380x^9`. Univariate polynomials are displayed in descending degree without changing internal Expr ordering.
+- Added `limit[expr,{x,a,direction}]`, expanded known principal-branch limits for `Ei` / `Ci` / `li`, and simplified `li[0] -> 0`. Periodic oscillation of real `sin` / `cos` / `tan` now returns `Indeterminate` when no single limit exists, while a bounded squeeze rule closes cases such as `limit[x sin[1/x],x,0] -> 0` exactly.
+
+### `D`, integration, and certified complex `N` audit
+
+- Audited derivative formulas, primitives, special-function identities, principal branches, and removable singularities. Rules were added or strengthened for Beta-family functions, finite combinatorial functions, `Ei/Si/Ci/li/digamma/trigamma/LambertW`, `polylog`, `1F1/2F1`, `ibeta`, and `sinc/cosc/expc` families.
+- Derivatives of `sinc/cosc/tanc/sinhc/tanhc/expc` now retain continuous-extension values at zero through `cases[...]`; `Si'`, principal `LambertW`, and `polylog` likewise preserve finite zero-point derivatives where appropriate.
+- Extended certified complex `N` on `ComplexInterval` to `erf/erfc`, `Ei/Si/Ci`, Fresnel functions, `1F1`, `2F1`, `polylog`, `zeta`, and `gamma` using convergent series, Euler-Maclaurin, Stirling, and explicit remainder bounds. `2F1` uses the principal `1/z` connection formula only when its safety conditions are provable.
+- Negative noninteger Rational `digamma/trigamma` and negative Rational `zeta` are routed through exact recurrence/functional equations. `lgamma` remains real-axis `log|Gamma|`. Derivative-back auditing avoids promoting local principal-branch identities into unsafe global identities.
+
+### Certified backend and algorithm thresholds
+
+- Clarified `PrecisionInsufficient` versus `CertifiedBackendUnsupported`: fixed series ranges, term limits, and planning limits that cannot be resolved by extra precision now return `N::unsupported`; interval-width ambiguity at branch/work boundaries may still refine.
+- Retuned special-function series boundaries and cancellation planning. Real `Ei/Si/Ci` remain bounded at 96, complex `Ei` at `|z|<=512`, and complex `Ci` at `|z|<=128`; `Si/Ci` and complex `Ei/Ci` now add argument-dependent working precision for cancellation. The existing `1F1: |z|<=160`, `2F1: |z|<=9/10`, elliptic `F/E: |m|<=9/10` (plus `|n|<=9/10` for `Pi`), and positive-order `polylog: |z|<=49/50` limits remain.
+- Corrected `zeta` classification so only `s=1` is a DomainError; regions unsupported by the present Euler-Maclaurin backend are no longer mislabeled as mathematically undefined.
+- Bounded certified FFT precision retries to 12 and kept the direct-DFT/Bluestein policy boundary at 384 points. Regression tests now explicitly cross exact-linear-algebra and BigUInt Karatsuba / Toom-3 / Burnikel-Ziegler / decimal-conversion thresholds.
+
+### Exact linear algebra and cancellation
+
+- Added `conditionNumber`, `pseudoInverse`, and `leastSquares`. Exact matrices use exact rank decisions; the pseudoinverse uses rank factorization to construct the Moore-Penrose inverse exactly, including rank-deficient Rational and complex matrices. The outer-`N` path for exact input uses certified SVD. Matrices that already contain finite-precision leaves are currently kept conservative rather than recovering rank or singular subspaces from hidden guard digits. Zero-sized matrix shapes are preserved.
+- Added a 31-bit prime-field + CRT modular path for exact Integer/Rational matrices. `det` reconstructs to a Hadamard-bound certificate; `solveLinear` uses rational reconstruction followed by exact `A X = B` verification; `inverse` verifies the reconstructed adjugate and falls back to Bareiss when needed.
+- Added measured Bareiss/modular dispatch for `det` / `solveLinear`. `inverse`, `rref`, `matrixRank`, and `nullSpace` remain on Bareiss for now. Modular-prime telemetry and `--exact-linear-algebra` / `--budget-telemetry` benchmarks were added.
+- Connected `EvaluationCancellationToken` to top-level CLI evaluation. Ctrl-C / Ctrl-Break on Windows and SIGINT on POSIX request cooperative cancellation, reported as `ResourceLimitError`; noninteractive exit code `3` is preserved.
+
+### Evaluation resource policy
+
+- Added per-top-level-evaluation `EvaluationBudget` / `EvaluationLimits` / `EvaluationUsage`, covering evaluation steps/depth, generated Expr nodes, Simplifier/Solve/integration candidates, certified refinements, Array/Matrix elements, BigInt size, requested precision, and algebraic construction work.
+- Added `KernelSession::setEvaluationLimits`, `evaluationLimits`, and `lastEvaluationUsage`; legacy `setEvaluationDepthLimit` maps into the common limits. Resource exhaustion is reported as `ResourceLimitError` with the resource name and limit, separate from DomainError and ordinary unevaluated results.
+- Large integer powers/factorials, Arrays, Matrix workspaces, `N[expr,p]`, and source text are checked as early as practical before expensive allocation or computation. Core remains free of wall-clock deadlines; deterministic operation budgets are separate from frontend cancellation/timeout policy.
+
+### Fuzzing and validation
+
+- Extended the Random Expression Fuzzer with derivative-back, Solve, `A inverse[A] == I`, `ifft[fft[v]] == v`, DomainError classification, and principal-`sqrt` boundary checks. Polynomial identities use structural residuals plus independent substitutions, and Solve compares `SolutionSet` bindings as sets.
+- Exact FFT round-trips first use structural equality; remaining root-of-unity cancellation forms are passed directly to `CertifiedEvaluator` as a second oracle. Deep cases stop under a recursion-depth budget, and indeterminate cases are counted separately as `inconclusive` rather than mathematical failures.
+- Failure output now includes seed/case/reduced expression and budget telemetry; regression coverage was added for limit crossings, reset behavior, and success/failure telemetry.
+
+### CLI and compatibility
+
+- Added `--batch` for line-oriented automation.
+- Kept startup `--help` concise while expanding REPL `:help` into a complete callable catalog with descriptions, input rules, and examples. Added `:help Pi` / `:help constants` and deterministic nearby-name suggestions; help remains frontend-only and does not consume evaluation/history slots.
+- Added `mmCal.Benchmarks --fft-threshold [iterations]` to compare direct DFT and forced Bluestein from 65–509 points. GCC/MSVC measurements retuned the certified non-power-of-two FFT policy boundary to 384 points, retained by forced-comparison tests.
 
 ## v1.5.3 — 2026-08-16
 
-v1.5.3 builds on the symbolic-calculus, certified-`N`, Array, and linear-algebra foundation of v1.5.2 and connects **exact algebraic number fields, Solver semantic normalization, high-precision special functions, exact Cyclotomic FFT, and representation-level optimization** into one release. The exact-first, proof-only policy remains unchanged: unsupported or unproven cases are not promoted to guessed results. Release validation: internal `2335 / 2335 PASS`, black-box `1715 / 1715 PASS`, Random Expression Fuzzer `100000 / 100000 PASS` with 8 threads.
+v1.5.3 connects **exact algebraic number fields, Solver semantic unification, high-precision special functions, exact Cyclotomic FFT, and representation optimizations** on top of the symbolic calculus, certified `N`, and Array/linear-algebra foundation from v1.5.2. The exact-first, proof-only policy remains: unproved or unsupported cases are not promoted to guessed results.
 
 ### Algebraic numbers and number fields
 
-- Unified Real/Complex `root[...]` under `AlgebraicNumber`, with bounded minimal-polynomial reduction, primitive-element reduction, resultant fallback, and certified root re-identification.
-- Added immutable `NumberFieldContext` / `AlgebraicElement` storage that keeps the chosen embedding and exact Rational power-basis coordinates across arithmetic. Same-field `+ - * /`, small integer powers, and exact inversion stay inside the field.
-- Added bounded weak interning for identical embedded generators, compositum/embedding reuse, reciprocal LRU reuse, minimal-polynomial LRU reuse, and incremental exact Krylov elimination for minimal-polynomial derivation.
-- Added exact algebraic equality and Real ordering. Deterministic Complex Root enumeration remains separate from mathematical ordering.
-- Added `symbolic::exactAlgebraicValue` to bridge canonical `root[...]`, exact Rational/complex Rational, `sqrt` / `cbrt`, `Phi`, and bounded exact arithmetic without forcing a new display form. Comparison, domain reasoning, and direct Solve bindings share this view.
-- Consolidated Root coefficient/index parsing and canonical Root Expr construction in the `algebraic_expression` boundary, removing duplicate Evaluator/Solver helpers.
+- Unified Real/Complex `root[...]` under `AlgebraicNumber` with bounded minimal-polynomial reduction, primitive elements, resultants, and certified root re-identification.
+- Added immutable `NumberFieldContext` / `AlgebraicElement` with selected embeddings and Rational power-basis coordinates. Same-field arithmetic, small integer powers, and exact inverse stay inside the field.
+- Added reuse caches for fields, reciprocals, and minimal polynomials; minimal polynomials use exact Krylov elimination. Exact algebraic equality and Real ordering are supported.
+- Connected `root[...]`, exact Rational/complex Rational, `sqrt` / `cbrt`, `Phi`, and bounded exact arithmetic through a shared algebraic-value layer used by comparison, domain reasoning, and Solve. User-visible representation remains based on `root[minpoly,k]`.
 
 ### Solver and semantic coherence
 
-- Added `solve[equation,Integer|Rational|Real|Complex]`, inferring the unknown only when exactly one user symbol is eligible and rejecting protected symbols as solve variables.
-- Added solve-safe normalization so representation differences such as `E^x` / `exp[x]`, `ln` / `log`, and `log2` / `log10` do not create Solver capability differences. Proven positive constant-base exponentials are inverted through logarithms.
-- Added exact symbolic `lambertw[z]` / `lambertw[k,z]` and certified Real `N` for branches `k=0/-1`. The supported `a^x==x^2` Real family is closed through Lambert W only when branch conditions are proven.
-- Added negative domain facts `provablyNonInteger` / `provablyNonRational` and propagated them into membership and Solve constraints.
-- `N[SolutionSet]` preserves solution structure while certifiedly approximating only numeric-closed binding right-hand sides.
-- Formatter output now places one space around comparison operators `== != < <= > >=` while retaining compact arithmetic formatting.
+- Added `solve[equation,Integer|Rational|Real|Complex]`, with safe variable inference only when a single unknown user symbol exists; protected symbols are rejected as solve variables.
+- Normalized equivalent forms such as `E^x` / `exp[x]` and `ln` / `log`, and added proof-safe logarithmic inversion for positive constant-base exponentials. Added exact symbolic `lambertw` plus certified real branches `k=0/-1`.
+- Propagated provable noninteger/non-Rational facts through `ValueFacts`. `N[SolutionSet]` preserves solution-set structure while approximating only numerically closed right-hand sides; comparison formatting was also cleaned up.
 
 ### Certified numerical evaluation and special functions
 
-- Promoted `DecimalApproximation` / `ComplexDecimalApproximation` to first-class certified numeric leaves with separate `CertifiedEnclosure` and `InformationEnclosure` propagation.
-- Standardized `N[expr,p]` as significant decimal digits. If whole-expression certification does not close, numeric subtrees may be approximated structurally without violating Hold attributes; duplicate outer `N` warnings are suppressed when an inner diagnostic already explains the failure.
-- Added `zeta`, `digamma`, `trigamma`, and regularized `ibeta`, connected to exact reductions, derivatives, and certified `N` on supported real domains.
-- Optimized Gamma/Beta evaluation through exact-Rational argument retention, balanced rising products, a static exact Bernoulli table, high-precision BigInt remainder planning, and point/shared-normalization `ibeta` paths.
-- Added `CertifiedBackendUnsupported` to distinguish missing certified backends from true mathematical DomainErrors.
+- Promoted `DecimalApproximation` / `ComplexDecimalApproximation` to first-class certified numeric leaves carrying both `CertifiedEnclosure` and `InformationEnclosure`.
+- Standardized `N[expr,p]` on significant decimal digits. If whole-expression certification cannot close, numeric subtrees can still be approximated without violating Hold semantics, and duplicate diagnostics are suppressed.
+- Added `zeta`, `digamma`, `trigamma`, and regularized `ibeta`, plus high-precision Gamma/Beta optimizations. Existing-but-unsupported certified values use `CertifiedBackendUnsupported` rather than DomainError.
 
 ### Exact FFT and Array representation
 
-- Stabilized the exact Cyclotomic FFT backend. Supported non-power-of-two exact inputs are transformed in Rational power-basis coordinates over `Q[t]/Phi_n(t)`, allowing exact 5/7/10/12-point round trips without large `cis[...]` expression growth. Budget or membership failures fall back to the previous generic exact DFT.
-- Replaced the large inline `Expr::Node` variant with kind-specific typed nodes while preserving the public `Expr` API and structural semantics.
-- Reworked dense `ArrayExpr` storage to immutable paged packed backing plus shape/offset/strides views. Transpose is a zero-copy stride view, and rectangular numeric braces lower directly through `ArrayBuilder`.
+- Formalized the exact Cyclotomic FFT for supported non-power-of-two exact inputs using Rational coordinates in `Q[t]/Phi_n(t)`. Round-trips such as lengths 5/7/10/12 close exactly without huge `cis[...]` expressions; unsupported/budget-exceeded cases fall back to the generic exact DFT.
+- Replaced the large inline `Expr::Node` variant with kind-specific typed nodes while preserving the public `Expr` API.
+- Reworked dense `ArrayExpr` into immutable paged packed storage with shape/offset/strides views. Transpose is a zero-copy view, and rectangular numeric braces build directly through `ArrayBuilder`.
 
 ### Functions, utilities, and diagnostics
 
-- Added deterministic exact `isprime`, `nextprime`, `prevprime`, `factorint`, and `totient` over the `uint64` range. Larger BigInts are not promoted from probable-prime evidence to exact truth.
-- Added BigInt bit utilities, `round[x,n]`, `fma`, `clamp`, and `proj`.
-- Added `range`, `table`, `map`, `explain`, and parameterized Real periodic solution families.
-- Syntax failures before evaluation no longer consume `In[n]`. Indeterminate Infinity forms such as `Infinity-Infinity` and `0*Infinity` remain conservatively unevaluated instead of simplifying incorrectly.
-- Removed the unused Machine/double shim from Core, keeping Exact, BigFloat, and certified backends explicitly separated.
+- Added deterministic exact `isprime` / `nextprime` / `prevprime` / `factorint` / `totient` across `uint64`; unsupported BigInt primality is not promoted from probable-prime evidence to `True`.
+- Added bit operations, `round[x,n]`, `fma`, `clamp`, `proj`, `range` / `table` / `map`, `explain`, and parameterized periodic Real solution families.
+- Parse/lower failures no longer consume `In[n]`; indeterminate forms such as `Infinity-Infinity` and `0*Infinity` are not incorrectly simplified. Unused Machine/double shims were removed.
 
 ### Performance and validation
 
-- Added the persistent `mmCal.Benchmarks --random-expressions` semantic fuzzer with seed+case reproducibility independent of thread count and session reset support for long-running burn-in.
-- Added `test_set/tester.py --timings` and dedicated algebraic-field, special-function, and exact-cyclotomic FFT benchmarks. Adoption and rejection rationale is recorded in `docs/performance_optimization.*`.
-- Persistent multiplication-matrix caching, eager generation of larger Bernoulli tables, and unconditional high-precision Stirling-K expansion were rejected after measurement showed insufficient benefit or regressions.
-- Release preparation consolidated Root-expression helpers and removed constructor shadowing; Visual Studio project XML validation and GCC shadow-warning checks are part of the release checklist.
+- Added a seed+case reproducible parallel semantic fuzzer to `mmCal.Benchmarks --random-expressions`, with independent-evaluation reset support for long runs.
+- Added algebraic-field, special-function, and exact-Cyclotomic-FFT benchmarks and recorded measured optimization decisions in `docs/performance_optimization.*`. Caches/expansions that did not show a reliable gain remain disabled.
 
 ### Documentation and compatibility
 
-- Synchronized README, Reference, Architecture, Roadmap, and performance documentation with the v1.5.3 implementation state. Intentional omissions and search budgets are tracked separately in `docs/roadmap.*` and the v1.5.3 intentional-limits memorandum.
-- User-visible algebraic canonical output remains `root[minpoly,k]`; internal primitive elements and cache representations are not exposed by the Formatter.
+- Synchronized README, Reference, Architecture, Roadmap, and performance documentation with v1.5.3; intentional limitations and exploration budgets are kept in the roadmap and intentional-limits memorandum.
+- Internal primitive elements and cache representation remain hidden from Formatter output; the canonical algebraic display stays `root[minpoly,k]`.
 
 ## v1.5.2 — 2026-08-13
 
-v1.5.2 preserves the exact-first numerical foundation of v1.5.1 while substantially expanding symbolic calculus, special functions, precision-aware evaluation, Arrays, and linear algebra. Release state: internal `2027 / 2027 PASS`, black-box `1504 / 1504 PASS`; fixed-seed BigInt, special-function, Matrix, and FFT invariants in `mmCal.Benchmarks --random-only` also pass.
-
 ### Syntax and REPL (including breaking changes)
 
-- Function calls are now exclusively `name[...]`; `name(...)` is removed and `()` is grouping only.
-- Ordinary identifier adjacency such as `x(x+1)` remains implicit multiplication and formats canonically as `x*(x+1)`.
-- Parser/AST/Lowerer call-delimiter branching was removed; legacy `sin(x)` on a known function is a SyntaxError.
-- History access is standardized on `In[n]` / `Out[n]`: positive indices are absolute, negative indices are relative, and zero is invalid.
-- `@` / `@@` / ... map to `In[-1]` / `In[-2]` / ...; `%` / `%%` / ... map to `Out[-1]` / `Out[-2]` / .... Relative `In` counts input slots, while relative `Out` counts successful outputs.
+- Standardized function calls on `name[...]`; `name(...)` was removed and `()` is grouping-only. Using the old syntax for a known function is a SyntaxError.
+- Ordinary `x(x+1)` is accepted as implicit multiplication and normalizes to `x*(x+1)`.
+- Standardized history on `In[n]` / `Out[n]`: positive indices are absolute, negative indices relative, zero invalid; `@` forms abbreviate `In[-n]` and `%` forms abbreviate `Out[-n]`.
 
-### Symbolic calculus and integration Knowledge
+### Symbolic calculus and integration knowledge
 
-- Added shared finite-Fourier reduction for nonnegative integer powers of `sin[u]^m cos[u]^n`, avoiding per-power rules.
-- Added reciprocal-trigonometric recurrence handling for negative integer sine/cosine powers, including results such as `integrate[sin[2x]^(-2),x] -> -cot[2x]/2`.
-- Added integer-power reduction for `tan/cot/sec/csc` and cross-frequency trigonometric product-to-sum rules.
-- Added bounded Weierstrass substitution `t=tan[x/2]` for rational expressions in a common `sin/cos` argument, feeding the transformed expression into the exact rational integrator.
-- Strengthened structural inverse-chain/substitution matching and concrete quadratic-radical families.
-- Retained derivative-back auditing while explicitly allowing `ResolutionOnly` cases so proof-engine limitations do not remove useful primitives.
-- Integration diagnostics now distinguish `unsupported`, `partial`, `conditionsRequired`, and `noKnownClosedForm`, avoiding the false implication that an unimplemented method proves mathematical impossibility.
-- The broad `docs/memorandum/integralCatalog.md` catalog was used to audit trigonometric, rational, special-function, and branch-sensitive families.
+- Added shared finite-Fourier reduction for nonnegative integer powers of `sin[u]^m cos[u]^n`, reciprocal-trigonometric recurrence for negative powers, integer-power reductions for `tan/cot/sec/csc`, and cross-frequency product-to-sum rules.
+- Added bounded Weierstrass substitution `t=tan[x/2]` for rational expressions in a common `sin/cos` argument, feeding the transformed result to the exact rational integrator.
+- Strengthened inverse-chain/substitution matching and concrete quadratic-radical families, covering patterns such as `2x(1+x^2)^5` and `x/(1+x^4)`.
+- Kept derivative-back auditing while introducing `ResolutionOnly` so proof-engine limitations do not discard correct primitives. Integration failures are classified as `unsupported`, `partial`, `conditionsRequired`, or `noKnownClosedForm`.
+- Used `docs/memorandum/integralCatalog.md` to audit trigonometric, rational, special-function, and branch-sensitive integration families.
 
 ### Special functions
 
-- Added `fresnelc` / `fresnels` with exact special values, odd symmetry, differentiation, certified real `N`, and quadratic-phase integration support.
-- Added `hypergeometric1F1[a,b,z]` with terminating/safe exact reductions, differentiation, certified real `N`, and branch-safer `integrate[exp[x^n],x]` representations.
-- Added `hypergeometric2F1[a,b,c,z]` with terminating exact series, differentiation, certified real `N`, and binomial-power integration families.
-- Added incomplete `ellipticF` / `ellipticE` / `ellipticPi` with principal-branch semantics, amplitude derivatives, certified real `N`, and standard-kernel integration.
-- Added `Ei` / `Si` / `Ci` / `li` / `polylog`, including representative exact reductions, derivatives, certified real `N`, and integration Knowledge.
-- General inverse special functions are not invented for `solve`; only safe exact degeneracies fall through to existing solvers.
+- Added `fresnelc` / `fresnels`, `hypergeometric1F1` / `hypergeometric2F1`, and incomplete `ellipticF` / `ellipticE` / `ellipticPi`, with exact reductions, differentiation, certified real `N`, and corresponding integration support.
+- Added `Ei` / `Si` / `Ci` / `li` / `polylog` with representative exact values, derivatives, certified real `N`, and integration rules.
+- `integrate[exp[x^n],x]` and related cases prefer branch-safer 1F1 representations where appropriate.
+- Solver does not invent nonexistent general inverse special functions; only safe exact degeneracies fall through to existing solving paths.
 
 ### Precision-aware `N` and FFT
 
-- Added the Stage 7-7 exact Cyclotomic FFT backend. Exact Rational inputs of non-power-of-two length 5 or greater are transformed in Rational power-basis coordinates of the quotient `Q[t]/Phi_n(t)` instead of repeatedly simplifying generic `cis[...]` expressions; Gaussian Rational inputs are embedded exactly in `Q(zeta_lcm(n,4))` when needed. Exact 5/7/10/12-point `ifft[fft[v]]` now closes back to `v` without leaving large root-of-unity expressions. The internal generator does not require root isolation and is materialized using the existing single `cis[-2 Pi/n Rad]` vocabulary. Inputs exceeding the degree-64 budget or symbolic inputs that cannot be certified into the quotient field retain the pre-Stage-7-7 generic exact-DFT fallback. The previous dispatch is preserved next to the replacement as a commented reference with the reason for the change. Added `--exact-cyclotomic-fft`; GCC Release/LTO-off warm round trips measured about 0.49/1.74/1.33/1.27 ms for lengths 5/7/10/12.
-- Extended `N[expr,p]` into a precision-aware evaluation entry point for opted-in builtins rather than always materializing a complete exact result first.
-- `N[fft[data],p]` dispatches directly to certified BigFloat/`ComplexInterval` radix-2 transforms instead of constructing huge exact Fourier expressions.
-- Certified non-power-of-two FFT uses direct DFT for smaller cases and Bluestein for larger ones; the current measured policy crossover is around 96 points and remains environment-dependent.
-- FFT and Matrix paths share expression-to-interval conversion, decimalization, and guard-digit refinement helpers.
-- Certified fixed-digit display compresses redundant trailing-zero runs while preserving precision/enclosure metadata (`1.000... -> 1.0`, `1.500... -> 1.50`); exact finite decimals remain compact (`N[1/2,10] -> 0.5`).
+- Added exact Cyclotomic FFT for supported non-power-of-two exact Rational inputs of length at least 5, operating in `Q[t]/Phi_n(t)`. Exact round-trips avoid huge root-of-unity expressions; cases outside the degree/field proof budget fall back to the generic exact DFT.
+- Extended `N[expr,p]` into a precision-aware evaluation entry point that propagates `ApproximationContext`. `N[fft[data],p]` dispatches directly to certified BigFloat/`ComplexInterval` FFT instead of first constructing a huge exact transform.
+- Certified non-power-of-two FFT uses direct DFT for smaller sizes and Bluestein for larger ones. FFT and Matrix paths share interval conversion, decimalization, and guard-digit refinement infrastructure.
+- Certified approximate display compresses redundant trailing zeros while preserving enclosure metadata; terminating values produced by `N` retain at least one provenance zero to remain visually distinct from exact numbers.
 
 ### Arrays and linear algebra
 
-- `{...}` is now a general finite brace container. Rectangular children are automatically optimized into dense row-major `ArrayExpr`; differently shaped factors such as `{Q,R}` / `{U,S,V}` remain general brace values.
-- Zero-length dimensions are preserved; empty shapes that cannot round-trip through braces alone format via `reshape[{}, {...}]`.
-- Added/regularized `dimensions`, `arrayRank`, `length`, prefix-aware `at`, and `reshape`, using zero-based indexing.
-- Added `MatrixView` / `MatrixBuffer` so row-major Arrays are not unnecessarily copied into nested vectors.
-- Canonicalized core APIs around `dot`, `matrixRank`, `norm`, and `normalize`, retaining legacy aliases.
-- Added Bareiss fraction-free elimination for Integer/Rational matrices. Per-row denominator clearing lifts to integer buffers shared by `det`, `rref`, `matrixRank`, `inverse`, `solveLinear`, and `nullSpace`.
-- Added `solveLinear[A,b]` for unique solutions, including consistent overdetermined full-column-rank systems; inconsistent or underdetermined systems produce Domain errors rather than invented parameterizations.
-- Added `nullSpace[A]` with a deterministic free-column basis while preserving `{0,n}` shape for full-column-rank empty bases.
-- Added `luDecomposition[A]` with exact row-pivoted `P A = L U` and direct certified interval partial pivoting under `N[...]`.
-- Added rectangular reduced Householder `qrDecomposition[A]`. General exact QR is policy-limited to 3x3 after measured radical-expression explosion, with triangular/trapezoidal fast paths retained.
-- A column-block Householder kernel was benchmarked at block sizes 1/8/16/32; no stable winner emerged, so automatic blocking is not enabled.
-- Added real/complex reduced `svd` / `singularValueDecomposition`, deliberately avoiding `A^H A`; the numerical backend uses Householder bidiagonalization plus one-sided Jacobi and interval-audits reconstruction/orthogonality.
-- Added `conjugateTranspose` for shared Hermitian relations.
-- Added `eigenvalues` / `eigenvectors` / `eigensystem`: exact triangular/diagonal and distinct-root exact Number 2x2 cases remain exact, while general `N[...]` uses Complex BigFloat Hessenberg reduction, implicit shifted QR, and Schur relations.
-- Symbolic `det` / `inverse` use triangular fast paths and a shared expansion budget to avoid factorial expression growth.
-- Discontinuous rank/null-space decisions use exact pivots or interval-certified structure; no arbitrary epsilon threshold is introduced.
+- Generalized `{...}` into a finite brace container; rectangular children are optimized into dense row-major `ArrayExpr`. Zero-length dimensions and empty-array shapes are preserved.
+- Regularized `dimensions`, `arrayRank`, `length`, `at`, and `reshape`; added `MatrixView` / `MatrixBuffer` to reduce copying. Canonical APIs are `dot`, `matrixRank`, `norm`, and `normalize`, with legacy aliases retained.
+- Added Bareiss fraction-free elimination for Integer/Rational matrices, shared by `det`, `rref`, `matrixRank`, `inverse`, `solveLinear`, and `nullSpace`. `solveLinear` returns unique solutions only; `nullSpace` has deterministic bases and preserves empty shape.
+- Added `luDecomposition[A]`: exact row-pivoted `P A = L U`, with certified interval partial pivoting under `N[...]`.
+- Added rectangular reduced Householder `qrDecomposition[A]`. General exact QR is limited to 3x3 after measured expression growth; triangular/trapezoidal fast paths remain. Automatic blocking was benchmarked but not enabled because no block size won consistently.
+- Replaced the general exact `qrDecomposition[A]` path from Expr-level Householder expansion with fraction-free orthogonalization. Orthogonalization creates neither square roots nor divisions, keeps primitive integer vectors with GCD content reduction, and uses a symmetric Bareiss Gram factorization (fraction-free LDLᵀ-equivalent) as the full-rank fast path. The former 3x3 hard cap is removed; rank-deficient inputs fall back to direct fraction-free orthogonalization.
+- Re-audited exact Matrix performance cliffs and replaced the post-Bareiss generic Rational RREF used by `inverse` / unique `solveLinear` with common-denominator BigInt back substitution. Full-column-rank `rref` also skips the Rational backward phase. Modular inverse was remeasured through 32x32 / 256-bit and remains slower than Bareiss, so automatic dispatch stays disabled.
+- Added real/complex reduced `svd` without forming `A^H A`, using Householder bidiagonalization plus one-sided Jacobi; added `conjugateTranspose`.
+- Added `eigenvalues` / `eigenvectors` / `eigensystem`: simple exact matrices stay exact, while general `N[...]` uses Complex BigFloat Hessenberg reduction, shifted QR, and Schur processing.
+- Symbolic `det` / `inverse` use triangular fast paths and expansion budgets. Discontinuous rank/null-space decisions require exact pivots or interval certification rather than arbitrary epsilon thresholds.
 
 ### Performance, stability, and development infrastructure
 
-- Bareiss measured about 5.4–11.4x faster for order-8–16 determinants and 7.7–15.5x faster for RREF than the Stage-2 Gaussian/Gauss-Jordan path.
-- Added `mmCal.Benchmarks --matrix-large` for order-32/64 Matrix timings and order-1024 storage/parse stress measurements.
-- Directly constructing a 1024x1024 ten-decimal Rational Expr matrix reached about 0.69 GB maximum RSS; parsing generator-style text and evaluating only `dimensions` took about 10.9 s and 1.99 GB, showing that representation cost precedes algorithmic cost at this scale.
-- Recorded next-version performance ToDos: typed `Expr::Node` storage instead of the large variant fixed cost, BigUInt/BigInt SBO, packed numeric Array/approximate Matrix storage, and fewer temporary allocations while parsing huge braces.
-- Fixed evaluation-order-sensitive `RealInterval::point` construction that could reverse negative point intervals under MSVC and fail SVD/Eigen audits; added a direct negative-point regression.
-- Added an explicit `<stdexcept>` include where `std::overflow_error` is used instead of relying on transitive declarations.
-- Expanded fixed-seed Matrix invariants through Bareiss, inverse, solve, nullSpace, LU, QR, real/complex SVD, and Eigen, alongside FFT round-trip checks.
+- Bareiss measured about 5.4–11.4x faster for order-8–16 determinants and 7.7–15.5x for RREF. Added `--matrix-large` for order-32/64 timings and order-1024 storage/parse stress.
+- Large 1024x1024 Rational matrices showed Expr/Rational representation as the main memory/parse bottleneck, motivating typed `Expr::Node`, BigUInt/BigInt SBO, and packed Array work for later versions.
+- Fixed MSVC-sensitive negative `RealInterval::point` construction and a transitive-include dependency on `<stdexcept>`, and expanded fixed-seed Matrix/FFT invariants.
 
 ### Documentation and licensing
 
-- Synchronized README, Reference, Architecture, Roadmap, and performance documentation with the v1.5.2 release state.
-- Aligned the BSD 3-Clause copyright notice with project metadata and explicitly separated trademark/brand policy into `TRADEMARKS.md` / `TRADEMARKS.ja.md` without changing the copyright permissions granted by BSD-3-Clause.
+- Synchronized README, Reference, Architecture, Roadmap, and performance documentation with v1.5.2.
+- Aligned BSD 3-Clause copyright metadata and documented trademark/brand use separately in `TRADEMARKS.md` / `TRADEMARKS.ja.md`.
 
 ## v1.5.1 — 2026-08-12
 
-v1.5.1 preserves the exact-first CAS foundation of v1.5.0 while concentrating on canonicalization, verification, large-integer arithmetic, high-precision numerical evaluation, and reproducible benchmarking.
+v1.5.1 retains the exact-first CAS foundation from v1.5.0 while focusing on canonicalization, validation, large integers, high-precision numerical evaluation, and benchmark infrastructure.
 
 ### Symbolic / CAS
 
-- Added deterministic strict total ordering over the AST for canonical `Add` ordering
-- Added definedness-preserving product/division normal forms
-- Strengthened MathKnowledge nonzero facts and reversed-relation inference
-- Added generated formatter/parser round-trip tests and fixed radix-prefix, Array-adjacency, and negative-Rational formatting failures
-- Added a derivative-back harness across integration rule families
-- Added automatic Reference ↔ builtin-registry consistency checks
-- Expanded extreme-value approximation tests
-- Added FFT plan/twiddle caching across transforms
+- Added deterministic total ordering for `Add`, definedness-preserving product/division normal forms, and stronger `MathKnowledge` nonzero/reversed-relation inference.
+- Added/expanded formatter-parser round-trip tests, integration derivative-back checks, Reference-to-builtin consistency checks, and extreme-value approximation tests.
+- Fixed radix-prefix, Array-adjacency, and negative-Rational formatting issues, and added FFT plan/twiddle caching across transforms.
 
 ### Multiprecision / high precision
 
-- Adaptive schoolbook / Karatsuba / Toom-3 BigUInt multiplication
-- Dedicated squaring path
-- Retained balanced-product-tree factorial with faster leaf construction and one-limb paths
-- Added Burnikel–Ziegler division and power-of-two division fast paths
-- Added `10^9` chunked and divide-and-conquer decimal conversion
-- Added early oversized-value rejection in `tryToUint64`
-- Added a directed-rounding-safe fast path for extreme BigFloat exponent gaps
-- Switched `Pi` to binary-splitting Chudnovsky
-- Switched `exp/E` and `log` to binary-splitting based certified evaluation with range reduction
-- Added certified argument reduction for huge-radian `sin/cos/tan`
+- Added adaptive schoolbook / Karatsuba / Toom-3 BigUInt multiplication, dedicated squaring, Burnikel-Ziegler division, power-of-two division fast paths, and divide-and-conquer decimal conversion.
+- Improved balanced-product-tree factorial, oversized `tryToUint64` rejection, and BigFloat addition/subtraction for extreme exponent gaps.
+- Switched `Pi` to binary-splitting Chudnovsky, `exp/E` and `log` to binary-splitting certified evaluation with range reduction, and added certified argument reduction for huge-radian `sin/cos/tan`.
 
 ### Benchmark / test
 
-- Added `mmCal.Benchmarks` as a separate Visual Studio project
-- Added fixed-seed randomized invariants, threshold sweeps, factorial/decimal-I/O benchmarks, and high-precision `Pi/exp/log` benchmarks
-- v1.5.1 release state: internal 1691 / 1691, black-box 1337 / 1337
+- Added `mmCal.Benchmarks` to the Visual Studio solution with fixed-seed random invariants, algorithm-threshold sweeps, factorial/decimal-I/O benchmarks, and high-precision `Pi/exp/log` benchmarks.
+- v1.5.1 release state: internal 1691 / 1691, black-box 1337 / 1337.
 
 ### Benchmarked but not selected
 
-- Prime-Swing factorial
-- binary GCD
-- Karatsuba vector-pool workspace
-- Karatsuba recursion-depth scratch workspace
-- dedicated Toom-3 squaring
-- low Toom-3 thresholds
-- machine-`fmod` huge-trig reduction
+- Prime-Swing factorial, binary GCD, Karatsuba workspace variants, dedicated/low-threshold Toom-3 squaring, and machine-`fmod` huge-trig reduction were not adopted because measurements did not show sufficient benefit.
 
-See `docs/performance_optimization.md` for the measured rationale behind each decision.
+See `docs/performance_optimization.*` for the measurement details behind these decisions.
 
 ---
 
 ## v1.5.0
 
-A near-complete reconstruction of the old calculator: numerical model, Lexer/Parser/AST/Evaluator, Simplifier, Solver, CertifiedEvaluator, CLI, formatter, tests, and documentation were reorganized around an exact-first CLI calculator / compact CAS architecture.
+Rebuilt most of the numerical model, Lexer/Parser/AST/Evaluator, Simplifier, Solver, CertifiedEvaluator, CLI, Formatter, tests, and documentation, redefining mmCal as an exact-first CLI calculator / compact CAS.

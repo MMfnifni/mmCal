@@ -116,6 +116,17 @@ void testDecimalConversion(TestRunner& tests) {
         BigUInt::parse(divideAndConquer).toString(),
         divideAndConquer,
         "divide-and-conquer decimal conversion round trip");
+
+    bool decimalThresholdCasesPass = true;
+    for (const std::size_t limbs : {127U, 128U, 129U}) {
+        BigUInt value = (BigUInt{1} << (limbs * 32 - 1))
+            + (BigUInt{1} << (limbs * 13)) + BigUInt{0x12345678};
+        const std::string text = value.toString();
+        decimalThresholdCasesPass = decimalThresholdCasesPass
+            && BigUInt::parse(text) == value;
+    }
+    tests.expect(decimalThresholdCasesPass,
+        "decimal conversion 127/128/129-limb threshold preserves round trips");
 }
 
 void testRadixConversion(TestRunner& tests) {
@@ -279,6 +290,21 @@ void testMultiplication(TestRunner& tests) {
     tests.expect(
         x * (y + z) == x * y + x * z,
         "multiplication distributes over addition");
+
+    bool multiplicationThresholdCasesPass = true;
+    for (const std::size_t limbs : {47U, 48U, 49U, 1279U, 1280U, 1281U}) {
+        const BigUInt lhs = (BigUInt{1} << (limbs * 32 - 1))
+            + (BigUInt{1} << (limbs * 9)) + BigUInt{0x13579BDF};
+        const BigUInt rhs = (BigUInt{1} << (limbs * 32 - 2))
+            + (BigUInt{1} << (limbs * 7)) + BigUInt{0x2468ACE};
+        const BigUInt product = lhs * rhs;
+        const auto quotientRemainder = divmod(product, lhs);
+        multiplicationThresholdCasesPass = multiplicationThresholdCasesPass
+            && quotientRemainder.quotient == rhs
+            && quotientRemainder.remainder.isZero();
+    }
+    tests.expect(multiplicationThresholdCasesPass,
+        "schoolbook/Karatsuba/Toom-3 47/48/49 and 1279/1280/1281-limb boundaries preserve exact products");
 }
 
 void testBitShifts(TestRunner& tests) {
@@ -523,6 +549,33 @@ void testDivision(TestRunner& tests) {
         "Burnikel-Ziegler division returns the exact large quotient");
     tests.expect(bz.remainder == bzRemainder,
         "Burnikel-Ziegler division returns the exact large remainder");
+
+    // Burnikel-Ziegler dispatcherのdivisor/quotient境界を31/32/33 limbsで直接跨ぐ。
+    // algorithm選択そのものではなく，境界前後でdivmodのexact invariantが不変であることを固定する。
+    bool bzBoundaryCasesPass = true;
+    for (const std::size_t divisorLimbs : {31U, 32U, 33U}) {
+        for (const std::size_t quotientLimbs : {31U, 32U, 33U}) {
+            const BigUInt boundaryDivisor =
+                (BigUInt{1} << (divisorLimbs * 32 - 1))
+                + (BigUInt{1} << (divisorLimbs * 16))
+                + BigUInt{0xA5A5A5A5};
+            const BigUInt boundaryQuotient =
+                (BigUInt{1} << (quotientLimbs * 32 - 1))
+                + (BigUInt{1} << (quotientLimbs * 11))
+                + BigUInt{0x13579BDF};
+            const BigUInt boundaryRemainder =
+                (BigUInt{1} << ((divisorLimbs - 1) * 16)) + BigUInt{0x2468ACE};
+            const BigUInt boundaryDividend = boundaryDivisor * boundaryQuotient + boundaryRemainder;
+            const auto actual = divmod(boundaryDividend, boundaryDivisor);
+            bzBoundaryCasesPass = bzBoundaryCasesPass
+                && actual.quotient == boundaryQuotient
+                && actual.remainder == boundaryRemainder
+                && actual.quotient * boundaryDivisor + actual.remainder == boundaryDividend
+                && actual.remainder < boundaryDivisor;
+        }
+    }
+    tests.expect(bzBoundaryCasesPass,
+        "Burnikel-Ziegler 31/32/33-limb dispatcher boundaries preserve exact divmod invariants");
 }
 
 void testErrors(TestRunner& tests) {

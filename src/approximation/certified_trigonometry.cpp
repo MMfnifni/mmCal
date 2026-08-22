@@ -1,13 +1,16 @@
 // 三角函数の保証付き評価
 #include "certified_trigonometry.hpp"
+#include "certified_precision.hpp"
 
 #include "approximation_context.hpp"
 #include "certification_error.hpp"
 #include "certified_constants.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "mathematics/math_ids.hpp"
 #include "mathematics/trigonometric_reduction.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/detail/binary_scale.hpp"
+#include "numeric/rational_rounding.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -30,26 +33,13 @@ using numeric::RealNumber;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] std::size_t checkedAddSize(
-    std::size_t lhs,
-    std::size_t rhs,
-    const char* message) {
-    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
-        throw std::overflow_error(message);
-    return lhs + rhs;
-}
 
-[[nodiscard]] Rational binaryThreshold(std::size_t bits) {
-    BigInt denominator{1};
-    denominator <<= bits;
-    return Rational{BigInt{1}, std::move(denominator)};
-}
 
 [[nodiscard]] std::size_t nextGuardDigits(std::size_t guardDigits) {
     // guard桁数そのものを正しさの根拠にはしない。
     // 最終の10進丸めが区間両端で一致しなければ、作業precisionを増やして再試行する。
     const std::size_t growth = std::max<std::size_t>(8, guardDigits / 2);
-    return checkedAddSize(guardDigits, growth, "Certified trigonometric precision is too large");
+    return checkedPrecisionAdd(guardDigits, growth, "Certified trigonometric precision is too large");
 }
 
 [[nodiscard]] BigFloat absoluteValue(const BigFloat& value) {
@@ -109,9 +99,9 @@ using numeric::RealNumber;
     // は、BigFloat丸め誤差とTaylor打切り誤差の両方を含んだcertified enclosureになる。
     //
     // 「nextTermが表示上0になった」「前回値から変わらない」といったmachine-float的な停止条件は一切使わない。
-    const std::size_t workBits = checkedAddSize(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 32, "Trigonometric working precision is too large");
-    const std::size_t thresholdBits = checkedAddSize(
+    const std::size_t thresholdBits = checkedPrecisionAdd(
         precisionBits, 16, "Trigonometric precision is too large");
 
     // xはRationalだが、RealInterval::fromRationalが外向きに囲うので、dyadicでなくても入力の真値は失われない。
@@ -119,7 +109,7 @@ using numeric::RealNumber;
     const RealInterval xInterval = RealInterval::fromRational(x, workBits);
     const RealInterval xSquared = multiply(xInterval, xInterval, workBits);
     const BigFloat threshold = RealInterval::fromRational(
-        binaryThreshold(thresholdBits), workBits).upper();
+        binaryPrecisionThreshold(thresholdBits), workBits).upper();
 
     RealInterval term = function == FunctionId::Sin
         ? xInterval
@@ -131,6 +121,8 @@ using numeric::RealNumber;
     std::size_t termsUsed = 1;
 
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const Rational denominatorValue{firstFactor * secondFactor};
         const RealInterval denominator = RealInterval::fromRational(
             denominatorValue, workBits);
@@ -183,7 +175,7 @@ using numeric::RealNumber;
     const Rational center = (lower + upper) / rational(2);
     const Rational radius = (upper - lower) / rational(2);
 
-    const std::size_t innerBits = checkedAddSize(
+    const std::size_t innerBits = checkedPrecisionAdd(
         precisionBits, 16, "Trigonometric interval precision is too large");
     CertifiedTrigEnclosure point = encloseTaylorPoint(function, center, innerBits);
     const RealInterval radiusInterval = RealInterval::fromRational(radius, innerBits);
@@ -203,7 +195,7 @@ using numeric::RealNumber;
 [[nodiscard]] CertifiedTrigEnclosure tangentQuotient(
     const RealInterval& radians,
     std::size_t precisionBits) {
-    const std::size_t workBits = checkedAddSize(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 24, "Tangent working precision is too large");
     const CertifiedTrigEnclosure sine = encloseFunctionAtRadianInterval(
         FunctionId::Sin, radians, workBits);
@@ -217,17 +209,10 @@ using numeric::RealNumber;
     return CertifiedTrigEnclosure{
         approximation::divide(sine.interval, cosine.interval, workBits)
             .roundedOutward(precisionBits),
-        checkedAddSize(
+        checkedPrecisionAdd(
             sine.termsUsed, cosine.termsUsed, "Tangent Taylor term count overflow"),
         precisionBits
     };
-}
-
-[[nodiscard]] BigInt floorRational(const Rational& value) {
-    const auto qr = numeric::divmod(value.numerator(), value.denominator());
-    if (value.numerator().isNegative() && !qr.remainder.isZero())
-        return qr.quotient - BigInt{1};
-    return qr.quotient;
 }
 
 [[nodiscard]] unsigned quadrantModuloFour(const BigInt& value) {
@@ -263,12 +248,14 @@ struct ReducedRadianInterval final {
     const std::size_t magnitudeBits = binaryExponent > 0
         ? static_cast<std::size_t>(binaryExponent)
         : 0;
-    std::size_t reductionBits = checkedAddSize(
+    std::size_t reductionBits = checkedPrecisionAdd(
         precisionBits, 40, "Trigonometric reduction precision is too large");
-    reductionBits = checkedAddSize(
+    reductionBits = checkedPrecisionAdd(
         reductionBits, magnitudeBits, "Trigonometric reduction precision is too large");
 
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         const CertifiedConstantResult pi = enclosePi(reductionBits);
         const Rational piLower = pi.interval.lower().toRational();
         const Rational piUpper = pi.interval.upper().toRational();
@@ -286,11 +273,11 @@ struct ReducedRadianInterval final {
         }
 
         const Rational half = rational(1, 2);
-        const BigInt lowerNearest = floorRational(quotientLower + half);
-        const BigInt upperNearest = floorRational(quotientUpper + half);
+        const BigInt lowerNearest = numeric::floorToInteger(quotientLower + half);
+        const BigInt upperNearest = numeric::floorToInteger(quotientUpper + half);
         if (lowerNearest != upperNearest) {
             const std::size_t growth = std::max<std::size_t>(32, reductionBits / 2);
-            reductionBits = checkedAddSize(
+            reductionBits = checkedPrecisionAdd(
                 reductionBits, growth, "Trigonometric reduction precision is too large");
             continue;
         }
@@ -328,9 +315,9 @@ struct ReducedRadianInterval final {
     const std::size_t magnitudeBits = std::max(
         rationalMagnitudeBits(lower), rationalMagnitudeBits(upper));
 
-    std::size_t reductionBits = checkedAddSize(
+    std::size_t reductionBits = checkedPrecisionAdd(
         precisionBits, 40, "Trigonometric reduction precision is too large");
-    reductionBits = checkedAddSize(
+    reductionBits = checkedPrecisionAdd(
         reductionBits, magnitudeBits, "Trigonometric reduction precision is too large");
 
     const CertifiedConstantResult pi = enclosePi(reductionBits);
@@ -348,8 +335,8 @@ struct ReducedRadianInterval final {
         : twiceUpper / piLower;
 
     const Rational half = rational(1, 2);
-    const BigInt lowerNearest = floorRational(quotientLower + half);
-    const BigInt upperNearest = floorRational(quotientUpper + half);
+    const BigInt lowerNearest = numeric::floorToInteger(quotientLower + half);
+    const BigInt upperNearest = numeric::floorToInteger(quotientUpper + half);
     if (lowerNearest != upperNearest) {
         // 入力区間自体がPi/4境界を跨ぐ可能性がある。ここで勝手に象限を選ばず、
         // callerにworking precisionを上げて元式の区間を狭めてもらう。
@@ -398,7 +385,7 @@ struct ReducedRadianInterval final {
 
     CertifiedTrigEnclosure result = encloseFunctionAtRadianInterval(
         baseFunction, reduced.remainder, precisionBits);
-    result.termsUsed = checkedAddSize(
+    result.termsUsed = checkedPrecisionAdd(
         result.termsUsed,
         reduced.piTermsUsed,
         "Trigonometric term count overflow");
@@ -421,7 +408,7 @@ struct ReducedRadianInterval final {
     if (function == FunctionId::Sin || function == FunctionId::Cos)
         return mapReducedSinCos(function, reduced, precisionBits);
 
-    const std::size_t workBits = checkedAddSize(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 24, "Tangent working precision is too large");
     const CertifiedTrigEnclosure sine = mapReducedSinCos(
         FunctionId::Sin, reduced, workBits);
@@ -433,7 +420,7 @@ struct ReducedRadianInterval final {
     return CertifiedTrigEnclosure{
         approximation::divide(sine.interval, cosine.interval, workBits)
             .roundedOutward(precisionBits),
-        checkedAddSize(
+        checkedPrecisionAdd(
             sine.termsUsed, cosine.termsUsed,
             "Tangent Taylor term count overflow"),
         precisionBits};
@@ -488,6 +475,8 @@ template <class Encloser>
 
     ApproximationContext context{fractionalDigits};
     for (;;) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::CertifiedRefinement);
         try {
             const CertifiedTrigEnclosure enclosure = encloser(context.workingBinaryBits());
             if (const auto decimal = tryCertifiedDecimal(enclosure.interval, fractionalDigits))
@@ -585,7 +574,7 @@ CertifiedTrigEnclosure encloseTanRadianInterval(
         return tangentQuotient(argument, precisionBits);
 
     const ReducedRadianInterval reduced = reduceRadianInterval(argument, precisionBits);
-    const std::size_t workBits = checkedAddSize(
+    const std::size_t workBits = checkedPrecisionAdd(
         precisionBits, 24, "Tangent working precision is too large");
     const CertifiedTrigEnclosure sine = mapReducedSinCos(
         FunctionId::Sin, reduced, workBits);
@@ -596,7 +585,7 @@ CertifiedTrigEnclosure encloseTanRadianInterval(
     return CertifiedTrigEnclosure{
         approximation::divide(sine.interval, cosine.interval, workBits)
             .roundedOutward(precisionBits),
-        checkedAddSize(sine.termsUsed, cosine.termsUsed, "Tangent Taylor term count overflow"),
+        checkedPrecisionAdd(sine.termsUsed, cosine.termsUsed, "Tangent Taylor term count overflow"),
         precisionBits};
 }
 

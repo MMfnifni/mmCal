@@ -421,6 +421,9 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
     if (!check(TokenKind::LBracket))
         return makeNode(identifier.span, IdentifierSyntax{name});
 
+    if (name == "cases")
+        return parseCasesCall(identifier);
+
     consume(TokenKind::LBracket, "Expected '['");
     std::vector<SyntaxNodePtr> arguments;
 
@@ -440,6 +443,70 @@ SyntaxNodePtr Parser::parseIdentifierOrCall() {
         CallSyntax{name, std::move(arguments)});
 }
 
+SyntaxNodePtr Parser::parseCasesCall(const Token& identifier) {
+    const auto depthGuard = budget_->enter(current().span);
+    consume(TokenKind::LBracket, "Expected '[' after cases");
+    std::vector<CasesBranchSyntax> branches;
+    bool defaultSeen = false;
+
+    if (check(TokenKind::RBracket))
+        error::throwCalcError(
+            error::CalcErrorType::Syntax,
+            "cases requires at least one conditional branch",
+            current().span);
+
+    while (true) {
+        const bool previousDelimiter = casesIfDelimiter_;
+        casesIfDelimiter_ = true;
+        SyntaxNodePtr value = parseAssignment();
+        casesIfDelimiter_ = previousDelimiter;
+
+        SyntaxNodePtr condition;
+        if (check(TokenKind::Identifier) && tokenText(current()) == "if") {
+            if (defaultSeen)
+                error::throwCalcError(
+                    error::CalcErrorType::Syntax,
+                    "cases default branch must be last",
+                    current().span);
+            ++index_;
+            condition = parseAssignment();
+        }
+        else {
+            defaultSeen = true;
+        }
+
+        branches.push_back(CasesBranchSyntax{std::move(value), std::move(condition)});
+        budget_->checkCallArguments(branches.size(), branches.back().value->span);
+
+        if (!match(TokenKind::Semicolon))
+            break;
+        if (defaultSeen)
+            error::throwCalcError(
+                error::CalcErrorType::Syntax,
+                "cases default branch must be last",
+                previous().span);
+        if (check(TokenKind::RBracket))
+            error::throwCalcError(
+                error::CalcErrorType::Syntax,
+                "Expected cases branch after ';'",
+                current().span);
+    }
+
+    const Token closing = consume(TokenKind::RBracket, "Expected ']' after cases branches");
+    bool hasConditional = false;
+    for (const CasesBranchSyntax& branch : branches)
+        hasConditional = hasConditional || static_cast<bool>(branch.condition);
+    if (!hasConditional)
+        error::throwCalcError(
+            error::CalcErrorType::Syntax,
+            "cases requires at least one 'value if condition' branch",
+            source::SourceSpan{identifier.span.begin, closing.span.end});
+
+    return makeNode(
+        source::SourceSpan{identifier.span.begin, closing.span.end},
+        CasesSyntax{std::move(branches)});
+}
+
 SyntaxNodePtr Parser::parseGroup() {
     const auto depthGuard = budget_->enter(current().span);
     const Token opening = consume(TokenKind::LParen, "Expected '('");
@@ -452,6 +519,9 @@ SyntaxNodePtr Parser::parseGroup() {
 }
 
 bool Parser::canStartImplicitFactor() const noexcept {
+    if (casesIfDelimiter_ && check(TokenKind::Identifier) && tokenText(current()) == "if")
+        return false;
+
     switch (current().kind) {
     case TokenKind::Number:
     case TokenKind::Identifier:

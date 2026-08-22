@@ -1,6 +1,7 @@
 // 定義・履歴・角度・診断を持つセッションの回帰テスト
 #include "kernel_session_tests.hpp"
 
+#include "cli/repl_help.hpp"
 #include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
@@ -9,9 +10,11 @@
 
 #include <array>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace mmcal::tests {
 namespace {
@@ -71,6 +74,83 @@ void runKernelSessionTests(TestRunner& tests) {
             && static_cast<int>(cli::ExitCode::Internal) == 5,
         "CLI: automation exit-code contract is stable");
 
+    {
+        kernel::KernelSession helpSession;
+        const std::size_t historyBefore = helpSession.historySize();
+        std::ostringstream output;
+        tests.expect(
+            cli::handleReplHelpCommand(":help sin", helpSession.builtinRegistry(), output)
+                && output.str().find("Usage:\n  sin[x]") != std::string::npos
+                && output.str().find("Inputs:\n  x: A real or complex angle.")
+                    != std::string::npos
+                && output.str().find("Examples:\n  sin[Pi/6]  ->  1/2")
+                    != std::string::npos,
+            "CLI: :help sin provides description, input rules, and examples");
+        tests.expectEqual(helpSession.historySize(), historyBefore,
+            "CLI: :help does not consume an input-history slot");
+
+        std::ostringstream aliasOutput;
+        tests.expect(
+            cli::handleReplHelpCommand(":help ln", helpSession.builtinRegistry(), aliasOutput)
+                && aliasOutput.str().find("log (alias: ln)") != std::string::npos,
+            "CLI: :help resolves source aliases to their canonical builtin");
+
+        bool everyFunctionHasDetailedHelp = true;
+        for (const std::string& name : helpSession.builtinRegistry().sourceFunctionNames()) {
+            std::ostringstream functionOutput;
+            everyFunctionHasDetailedHelp = everyFunctionHasDetailedHelp
+                && cli::handleReplHelpCommand(
+                    std::string{":help "} + name,
+                    helpSession.builtinRegistry(),
+                    functionOutput)
+                && functionOutput.str().find("Usage:\n  ") != std::string::npos
+                && functionOutput.str().find("Inputs:\n  ") != std::string::npos
+                && functionOutput.str().find("Examples:\n  ") != std::string::npos
+                && functionOutput.str().find("Detailed help is not yet available")
+                    == std::string::npos;
+        }
+        tests.expect(everyFunctionHasDetailedHelp,
+            "CLI: every source-callable builtin has curated detailed help");
+
+        std::ostringstream constantOutput;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help Pi", helpSession.builtinRegistry(), constantOutput)
+                && constantOutput.str().find("The exact circle constant") != std::string::npos
+                && constantOutput.str().find("N[Pi, 20]") != std::string::npos,
+            "CLI: :help covers predefined constants such as Pi");
+
+        std::ostringstream indeterminateOutput;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help Indeterminate", helpSession.builtinRegistry(), indeterminateOutput)
+                && indeterminateOutput.str().find("not unambiguously defined")
+                    != std::string::npos
+                && indeterminateOutput.str().find("0/0  ->  Indeterminate")
+                    != std::string::npos,
+            "CLI: :help explains exceptional predefined values with examples");
+
+        std::ostringstream typoOutput;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help sdv", helpSession.builtinRegistry(), typoOutput)
+                && typoOutput.str().find("Did you mean 'svd'?") != std::string::npos,
+            "CLI: :help suggests a transposed function-name typo");
+        std::ostringstream shorthandOutput;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help qr", helpSession.builtinRegistry(), shorthandOutput)
+                && shorthandOutput.str().find("Did you mean 'qrDecomposition'?")
+                    != std::string::npos,
+            "CLI: :help suggests a canonical decomposition name");
+        tests.expectEqual(helpSession.historySize(), historyBefore,
+            "CLI: constant and unknown help lookups do not consume history");
+        std::ostringstream notHelp;
+        tests.expect(!cli::handleReplHelpCommand(
+            ":helper", helpSession.builtinRegistry(), notHelp),
+            "CLI: :help command matching requires a token boundary");
+    }
+
     kernel::KernelSession session;
 
     tests.expectEqual(evaluateAndFormat(session, "1 + 2 * 3"), std::string{"7"},
@@ -116,7 +196,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: removed NA is no longer predefined and currently passes as a free symbol");
     tests.expectEqual(evaluateAndFormat(session, "ESP"), std::string{"ESP"},
         "KernelSession: removed ESP is no longer predefined and currently passes as a free symbol");
-    tests.expectEqual(evaluateAndFormat(session, "x + 1"), std::string{"1+x"},
+    tests.expectEqual(evaluateAndFormat(session, "x + 1"), std::string{"x+1"},
         "KernelSession: an unbound symbol is temporarily preserved for symbolic work");
     tests.expectEqual(evaluateAndFormat(session, "simplify[sin[1]^2 + cos[1]^2]"), std::string{"1"},
         "KernelSession: Simplify knows the Pythagorean trigonometric identity");
@@ -125,7 +205,7 @@ void runKernelSessionTests(TestRunner& tests) {
     kernel::KernelSession nestedPowerSession;
     tests.expectEqual(evaluateAndFormat(
         nestedPowerSession, "simplify[(((((x+5))^3)^4)^3)^4]"),
-        std::string{"(5+x)^144"},
+        std::string{"(x+5)^144"},
         "KernelSession: simplify flattens nested positive exact integer powers");
     tests.expectEqual(evaluateAndFormat(
         nestedPowerSession,
@@ -155,7 +235,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(elementarySession, "sign[0]"), std::string{"0"},
         "KernelSession: sign of zero is exact zero");
     tests.expectEqual(evaluateAndFormat(elementarySession, "sign[3 + 4I]"),
-        std::string{"3/5+4/5I"},
+        std::string{"3/5+4I/5"},
         "KernelSession: complex sign is z divided by its magnitude");
     tests.expectEqual(evaluateAndFormat(elementarySession, "re[3 + 4I]"), std::string{"3"},
         "KernelSession: re extracts exact real part");
@@ -231,44 +311,44 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: solver never leaves a reducible sqrt[32] root opaque");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 < 4, x]"),
-        std::string{"{x in Real if x > -2&&x < 2}"},
+        std::string{"{x in Real if x > -2 && x < 2}"},
         "KernelSession: strict quadratic inequality returns an exact real interval branch");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 <= 4, x]"),
-        std::string{"{x in Real if x >= -2&&x <= 2}"},
+        std::string{"{x in Real if x >= -2 && x <= 2}"},
         "KernelSession: non-strict quadratic inequality includes exact endpoints");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 > 4, x]"),
         std::string{"{x in Real if x < -2, x in Real if x > 2}"},
         "KernelSession: quadratic inequality can return a union of real branches");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 - 8 < 0, x]"),
-        std::string{"{x in Real if x > -2sqrt[2]&&x < 2sqrt[2]}"},
+        std::string{"{x in Real if x > -2sqrt[2] && x < 2sqrt[2]}"},
         "KernelSession: inequality endpoints use canonical exact radicals");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^3 - x > 0, x]"),
-        std::string{"{x in Real if x > -1&&x < 0, x in Real if x > 1}"},
+        std::string{"{x in Real if x > -1 && x < 0, x in Real if x > 1}"},
         "KernelSession: higher-degree fully split polynomials use an exact sign chart");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x^2-1)*(x^2-4) >= 0, x]"),
-        std::string{"{x in Real if x <= -2, x in Real if x >= -1&&x <= 1, x in Real if x >= 2}"},
+        std::string{"{x in Real if x <= -2, x in Real if x >= -1 && x <= 1, x in Real if x >= 2}"},
         "KernelSession: high-degree non-strict sign charts merge roots into adjacent intervals");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 < 4, x, Integer]"),
-        std::string{"{x in Integer if x > -2&&x < 2}"},
+        std::string{"{x in Integer if x > -2 && x < 2}"},
         "KernelSession: inequality solution regions can be restricted to an ordered subdomain");
     const error::CalcError complexInequality = evaluateError(session, "solve[x^2 < 4, x, Complex]");
     tests.expect(complexInequality.type() == error::CalcErrorType::Domain,
         "KernelSession: ordered inequalities reject an explicit Complex search domain");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 != 1, x]"),
-        std::string{"{x in Complex if x != 1&&x != -1}"},
+        std::string{"{x in Complex if x != 1 && x != -1}"},
         "KernelSession: not-equal polynomial relations return an exact complement branch");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 + 1 != 0, x, Real]"),
         std::string{"All"},
         "KernelSession: Real-domain knowledge removes exclusions that are provably non-real");
     tests.expectEqual(evaluateAndFormat(session, "solve[{x > 0, x < 2}, x]"),
-        std::string{"{x in Real if x > 0&&x < 2}"},
+        std::string{"{x in Real if x > 0 && x < 2}"},
         "KernelSession: one-variable relation arrays are treated as conjunctions");
     tests.expectEqual(evaluateAndFormat(session, "solve[{x^2 == 1, x > 0}, x]"),
         std::string{"{x == 1}"},
         "KernelSession: equation candidates are filtered by inequality constraints exactly");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)*(x^2-2) > 0, x]"),
-        std::string{"{x in Real if x > -sqrt[2]&&x < 1, x in Real if x > sqrt[2]}"},
+        std::string{"{x in Real if x > -sqrt[2] && x < 1, x in Real if x > sqrt[2]}"},
         "KernelSession: higher-degree sign charts retain an irrational quadratic residual");
     tests.expectEqual(evaluateAndFormat(session, "solve[(x-1)/(x+1) > 0, x]"),
         std::string{"{x in Real if x < -1, x in Real if x > 1}"},
@@ -301,6 +381,16 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(session, "factor[2*x^3 - 3*x^2 - 8*x + 12]"),
         std::string{"(x-2)(x+2)(2x-3)"},
         "KernelSession: factor uses primitive rational-root linear factors without recursion cycles");
+    tests.expectEqual(evaluateAndFormat(session,
+        "factor[x^12+6x^11+87x^10+380*x^9+2895x^8+9366x^7+47881x^6+112392x^5+416880*x^4+656640*x^3+1804032x^2+1492992x+2985984]"),
+        std::string{"(x^2+x+12)^6"},
+        "KernelSession: factor reconstructs an exact univariate perfect polynomial power");
+    tests.expectEqual(evaluateAndFormat(session, "(12+x+x^2)^6"),
+        std::string{"(x^2+x+12)^6"},
+        "KernelSession: formatter displays univariate polynomial sums in descending degree order");
+    tests.expectEqual(evaluateAndFormat(session, "simplify[expand[(12+x+x^2)^6]]"),
+        std::string{"x^12+6x^11+87x^10+380x^9+2895x^8+9366x^7+47881x^6+112392x^5+416880x^4+656640x^3+1804032x^2+1492992x+2985984"},
+        "KernelSession: polynomial formatting does not confuse coefficients ending in zero with radix prefixes");
     tests.expectEqual(evaluateAndFormat(session, "collect[x*y + x*z + y, x]"),
         std::string{"(y+z)x+y"},
         "KernelSession: collect permits polynomial coefficients containing other variables");
@@ -324,15 +414,22 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: multivariable collect recursively preserves expression-valued coefficients");
     tests.expectEqual(
         evaluateAndFormat(session, "factor[sin[y]*x^2 + 2*sin[y]*x + sin[y]]"),
-        std::string{"(1+x)^2sin[y]"},
+        std::string{"(x+1)^2sin[y]"},
         "KernelSession: factor extracts a structural function coefficient before polynomial factoring");
     tests.expectEqual(
         evaluateAndFormat(session, "factor[(a+b)*x^2 + 2*(a+b)*x + (a+b)]"),
-        std::string{"(a+b)(1+x)^2"},
+        std::string{"(a+b)(x+1)^2"},
         "KernelSession: factor recovers an expression coefficient even after evaluation distributed it");
+    kernel::KernelSession derivativeHistorySession;
+    static_cast<void>(evaluateAndFormat(
+        derivativeHistorySession, "integrate[x/(x^3-1),x]"));
+    tests.expectEqual(evaluateAndFormat(derivativeHistorySession, "D[%,x]"),
+        std::string{"x/(x^3-1)"},
+        "KernelSession: held D resolves output-history snapshots before differentiation");
+
     tests.expectEqual(
         evaluateAndFormat(session, "solve[a*x + b == 0, x]"),
-        std::string{"cases[{x == -b/a} if a != 0; All if a == 0&&b == 0; {} if a == 0&&b != 0]"},
+        std::string{"cases[{x == -b/a} if a != 0; All if a == 0 && b == 0; {} if a == 0 && b != 0]"},
         "KernelSession: symbolic linear solve preserves all degenerate coefficient cases");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[x^2 + b*x + c == 0, x]"),
@@ -340,7 +437,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: symbolic quadratic solve distinguishes distinct and repeated roots exactly");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[a*x^2 + b*x + c == 0, x]"),
-        std::string{"cases[{x == (-b+sqrt[b^2-4a c])/(2a), x == (-b-sqrt[b^2-4a c])/(2a)} if a != 0&&b^2-4a c != 0; {x == -b/(2a) (multiplicity 2)} if a != 0&&b^2-4a c == 0; {x == -c/b} if a == 0&&b != 0; All if a == 0&&b == 0&&c == 0; {} if a == 0&&b == 0&&c != 0]"},
+        std::string{"cases[{x == (-b+sqrt[b^2-4a c])/(2a), x == (-b-sqrt[b^2-4a c])/(2a)} if a != 0 && b^2-4a c != 0; {x == -b/(2a) (multiplicity 2)} if a != 0 && b^2-4a c == 0; {x == -c/b} if a == 0 && b != 0; All if a == 0 && b == 0 && c == 0; {} if a == 0 && b == 0 && c != 0]"},
         "KernelSession: symbolic quadratic solve also preserves linear and constant degeneracies");
 
     tests.expectEqual(
@@ -416,7 +513,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: coefficient domain conditions include the principal logarithm domain");
     tests.expectEqual(
         evaluateAndFormat(session, "solve[log[b,y]*x + 1 == 0, x]"),
-        std::string{"cases[{x == -1/log[b, y]} if log[b, y] != 0; {} if log[b, y] == 0] if b != 0&&b != 1&&y != 0"},
+        std::string{"cases[{x == -1/log[b, y]} if log[b, y] != 0; {} if log[b, y] == 0] if b != 0 && b != 1 && y != 0"},
         "KernelSession: arbitrary-base logarithm propagates base/value definedness into Solver");
 
     tests.expectEqual(evaluateAndFormat(session, "solve[x == 1, x]"),
@@ -429,6 +526,10 @@ void runKernelSessionTests(TestRunner& tests) {
     const error::CalcError protectedBoolean = evaluateError(session, "True := 0");
     tests.expect(protectedBoolean.type() == error::CalcErrorType::Syntax,
         "KernelSession: predefined literal names are protected from assignment");
+    const error::CalcError protectedIndeterminate = evaluateError(
+        session, "Indeterminate := 0");
+    tests.expect(protectedIndeterminate.type() == error::CalcErrorType::Syntax,
+        "KernelSession: exceptional predefined values are protected from assignment");
     const error::CalcError protectedBuiltin = evaluateError(session, "sqrt := 3");
     tests.expect(protectedBuiltin.type() == error::CalcErrorType::Syntax,
         "KernelSession: source-callable builtin names are protected from assignment");
@@ -500,8 +601,23 @@ void runKernelSessionTests(TestRunner& tests) {
 
     kernel::KernelSession numericalSession;
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[1/2]"),
-        std::string{"0.5"},
-        "KernelSession: N preserves terminating decimal length");
+        std::string{"0.50"},
+        "KernelSession: N marks terminating decimals as approximate values");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[0,5]"),
+        std::string{"0.0"},
+        "KernelSession: N distinguishes approximate zero from exact zero in display");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[2,20]"),
+        std::string{"2.0"},
+        "KernelSession: N distinguishes approximate integers from exact integers in display");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[617/500,20]"),
+        std::string{"1.2340"},
+        "KernelSession: terminating approximate decimals retain one provenance zero");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[I,20]"),
+        std::string{"1.0I"},
+        "KernelSession: approximate pure imaginary values retain an approximate coefficient");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[N[1/2,5],20]"),
+        std::string{"0.50"},
+        "KernelSession: outer N never turns a terminating approximation back into exact-looking text");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[1/3]"),
         std::string{"0.3333333333333333"},
         "KernelSession: N defaults to sixteen significant digits");
@@ -518,7 +634,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"2.71828182845904523536028747135"},
         "KernelSession: E is certified from Exp[1], not stored machine precision");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[exp[1/3], 30]"),
-        std::string{"1.3956124250860895286281253196"},
+        std::string{"1.39561242508608952862812531960"},
         "KernelSession: real Exp uses arbitrary-precision certified evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[log[2], 30]"),
         std::string{"0.693147180559945309417232121458"},
@@ -530,16 +646,16 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"0.982793723247329067985710611015"},
         "KernelSession: certified atan2 evaluates a general principal Arg");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[log[1 + I], 30]"),
-        std::string{"0.346573590279972654708616060729+0.78539816339744830961566084582I"},
+        std::string{"0.346573590279972654708616060729+0.785398163397448309615660845820I"},
         "KernelSession: N evaluates the principal complex logarithm");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[exp[1 + I], 30]"),
-        std::string{"1.46869393991588515713896759733+2.2873552871788423912081719067I"},
+        std::string{"1.46869393991588515713896759733+2.28735528717884239120817190670I"},
         "KernelSession: N evaluates general complex Exp without machine floating point");
     tests.expectEqual(evaluateAndFormat(numericalSession, "(-8)^(1/3)"),
         std::string{"(-8)^(1/3)"},
         "KernelSession: exact principal Power remains symbolic when no simple exact form is implemented");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[(-8)^(1/3), 30]"),
-        std::string{"1+1.73205080756887729352744634151I"},
+        std::string{"1.0+1.73205080756887729352744634151I"},
         "KernelSession: non-integer Power uses Exp[w principal Log[z]]");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sqrt[2]]"),
         std::string{"1.414213562373095"},
@@ -656,7 +772,7 @@ void runKernelSessionTests(TestRunner& tests) {
 
     // 既定はRadian。明示Deg/GradだけがPiを介した角度変換を行う。
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sin[30 Deg], 100]"),
-        std::string{"0.5"},
+        std::string{"0.50"},
         "KernelSession: N sees exact special-angle simplification before approximation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[sin[1], 100]"),
         std::string{"0.8414709848078965066525023216302989996225630607983710656727517099919104043912396689486397435430526959"},
@@ -723,7 +839,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expect(evaluateError(numericalSession, "atan2[I,1]").type() == error::CalcErrorType::Domain,
         "KernelSession: atan2 rejects exact complex coordinates without waiting for N");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[asin[1/3], 20]"),
-        std::string{"0.3398369094541219371"},
+        std::string{"0.33983690945412193710"},
         "KernelSession: asin arbitrary precision output uses radians by default");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atan2[2,3], 20]"),
         std::string{"0.58800260354756755125"},
@@ -770,7 +886,7 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"1.1752011936438014569"},
         "KernelSession: sinh uses certified arbitrary precision evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atanh[1/2], 20]"),
-        std::string{"0.5493061443340548457"},
+        std::string{"0.54930614433405484570"},
         "KernelSession: atanh uses certified arbitrary precision evaluation");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[csch[1], 20]"),
         std::string{"0.85091812823932154513"},
@@ -779,8 +895,11 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[acosh[-2], 20]"),
         std::string{"1.3169578969248167086+3.1415926535897932385I"},
         "KernelSession: complex acosh uses the Arg-compatible upper cut value");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[acosh[1/2+I/10^24], 20]"),
+        std::string{"0.0+1.0471975511965977462I"},
+        "KernelSession: acosh near the interior cut avoids pathological refinement");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[atanh[2], 20]"),
-        std::string{"0.5493061443340548457-1.5707963267948966192I"},
+        std::string{"0.54930614433405484570-1.5707963267948966192I"},
         "KernelSession: complex atanh uses the principal Log boundary convention");
 
     // parity metadata is consumed by the Simplifier instead of being duplicated per function.
@@ -888,7 +1007,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: recursive function evaluates through local scopes");
 
     kernel::KernelSession provenanceSession;
-    static_cast<void>(provenanceSession.evaluate("inner[x] := 1 / (x - x)"));
+    static_cast<void>(provenanceSession.evaluate("inner[x] := log[x - x]"));
     static_cast<void>(provenanceSession.evaluate("outer[y] := inner[y]"));
     const error::CalcError provenanceError = evaluateError(provenanceSession, "outer[4]");
     tests.expect(provenanceError.document()
@@ -943,8 +1062,8 @@ void runKernelSessionTests(TestRunner& tests) {
     static_cast<void>(functionSession.evaluate("grow[x] := grow[x + 1]"));
     functionSession.setEvaluationDepthLimit(8);
     const error::CalcError depthError = evaluateError(functionSession, "grow[1]");
-    tests.expect(depthError.type() == error::CalcErrorType::Evaluation,
-        "KernelSession: changing non-terminating recursion is stopped by the evaluation depth limit");
+    tests.expect(depthError.type() == error::CalcErrorType::ResourceLimit,
+        "KernelSession: changing non-terminating recursion reports the unified evaluation resource limit");
     functionSession.setEvaluationDepthLimit(1024);
 
     // 明示的評価スタックなら、深いユーザー再帰でもC++のcall stackを消費しない。
@@ -1013,7 +1132,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(discreteSession, "fma[2,3,4]"), std::string{"10"},
         "KernelSession: fma keeps exact arithmetic exact");
     tests.expectEqual(evaluateAndFormat(discreteSession, "clamp[N[Pi,20],3,4]"),
-        std::string{"3.141592653589793238"},
+        std::string{"3.1415926535897932385"},
         "KernelSession: clamp resolves approximate ordering from InformationEnclosure");
     tests.expectEqual(evaluateAndFormat(discreteSession, "proj[3+4I]"), std::string{"3+4I"},
         "KernelSession: proj is identity on finite exact complex values");
@@ -1037,7 +1156,7 @@ void runKernelSessionTests(TestRunner& tests) {
     kernel::KernelSession fullSimplifySession;
     tests.expectEqual(
         evaluateAndFormat(fullSimplifySession, "fullSimplify[x^2+2*x+1]"),
-        std::string{"(1+x)^2"},
+        std::string{"(x+1)^2"},
         "KernelSession: FullSimplify searches a factored equivalent with lower cost");
     tests.expectEqual(
         evaluateAndFormat(fullSimplifySession, "fullSimplify[(x^2-1)/(x-1)]"),
@@ -1045,7 +1164,7 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: FullSimplify does not cancel a possibly zero factor");
     tests.expectEqual(
         evaluateAndFormat(fullSimplifySession, "fullSimplify[(x^2-1)/(x-1),x!=1]"),
-        std::string{"1+x"},
+        std::string{"x+1"},
         "KernelSession: FullSimplify uses assumptions to justify candidate cancellation");
 
     kernel::KernelSession compatibilitySession;
@@ -1064,7 +1183,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(compatibilitySession, "mag[3+4I]"), std::string{"5"},
         "KernelSession: mag aliases abs");
     tests.expectEqual(evaluateAndFormat(compatibilitySession, "unit[3+4I]"),
-        std::string{"3/5+4/5I"},
+        std::string{"3/5+4I/5"},
         "KernelSession: unit aliases complex sign without a duplicate implementation");
 
     kernel::KernelSession utilitySession;
@@ -1143,6 +1262,273 @@ void runKernelSessionTests(TestRunner& tests) {
     session.setEvaluationDepthLimit(2048);
     tests.expectEqual(session.evaluationDepthLimit(), std::size_t{2048},
         "KernelSession: forwards evaluation depth limit");
+
+    // Unified EvaluationBudgetは要求ごとにfreshであり，DomainErrorや未解決結果とは
+    // 異なるResourceLimitErrorとして各subsystemを同じ分類へ収束させる。
+    kernel::KernelSession repeatedBudgetSession;
+    evaluation::EvaluationLimits repeatedLimits = repeatedBudgetSession.evaluationLimits();
+    repeatedLimits.maxEvaluationSteps = 1;
+    repeatedBudgetSession.setEvaluationLimits(repeatedLimits);
+    tests.expectEqual(evaluateAndFormat(repeatedBudgetSession, "1"), std::string{"1"},
+        "EvaluationBudget: one-step request succeeds at its boundary");
+    tests.expectEqual(evaluateAndFormat(repeatedBudgetSession, "2"), std::string{"2"},
+        "EvaluationBudget: counters reset for every top-level request");
+    tests.expectEqual(repeatedBudgetSession.lastEvaluationUsage().evaluationSteps, std::size_t{1},
+        "EvaluationBudget: successful request exposes deterministic usage telemetry");
+
+    const auto expectResourceLimit = [&](evaluation::EvaluationLimits limits,
+                                         std::string_view input,
+                                         std::string_view expectedMessage,
+                                         std::string_view name) {
+        kernel::KernelSession budgetSession;
+        budgetSession.setEvaluationLimits(std::move(limits));
+        const error::CalcError exception = evaluateError(budgetSession, input);
+        tests.expect(exception.type() == error::CalcErrorType::ResourceLimit,
+            std::string{"EvaluationBudget: "} + std::string{name} + " uses ResourceLimitError");
+        tests.expect(std::string{exception.what()}.find(expectedMessage) != std::string::npos,
+            std::string{"EvaluationBudget: "} + std::string{name} + " names the exhausted resource");
+    };
+
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxInputBytes = 2;
+        expectResourceLimit(limits, "1+2", "Frontend input byte budget", "frontend input bytes");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxEvaluationSteps = 1;
+        expectResourceLimit(limits, "1+2", "Evaluation step budget", "evaluation steps");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxGeneratedNodes = 0;
+        expectResourceLimit(limits, "1+2", "Generated expression node budget", "generated nodes");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxSimplificationCandidates = 0;
+        expectResourceLimit(limits, "simplify[x+0]", "Simplification candidate budget", "simplification candidates");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxSolverBranches = 0;
+        expectResourceLimit(limits, "solve[x^2==1,x]", "Solver branch budget", "solver branches");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxIntegrationCandidates = 0;
+        expectResourceLimit(limits, "integrate[x,x]", "Integration candidate budget", "integration candidates");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxCertifiedRefinements = 0;
+        expectResourceLimit(limits, "N[Pi,20]", "Certified refinement budget", "certified refinements");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxCertifiedRefinements = 1;
+        expectResourceLimit(limits, "N[E,20]",
+            "Certified refinement budget", "certified exponential series work");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxCertifiedRefinements = 0;
+        expectResourceLimit(limits, "integrate[log[x+2],{x,0,1}]",
+            "Certified refinement budget", "resource propagation through integration certification");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxDenseArrayElements = 1;
+        expectResourceLimit(limits, "{1,2}", "Dense array element budget", "dense array elements");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxDenseArrayElements = 4;
+        expectResourceLimit(limits, "range[1,5]", "Dense array element budget", "range allocation preflight");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxDenseArrayElements = 4;
+        expectResourceLimit(limits, "zeros[2,3]", "Dense array element budget", "zeros allocation preflight");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxDenseArrayElements = 8;
+        expectResourceLimit(limits, "dot[{{1},{2},{3}},{{1,2,3}}]",
+            "Dense array element budget", "dot output allocation preflight");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxTemporaryMatrixElements = 0;
+        expectResourceLimit(limits, "inverse[{{1,2},{3,4}}]", "Temporary matrix element budget", "matrix temporaries");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxBigIntegerBits = 16;
+        expectResourceLimit(limits, "2^100", "BigInt bit-length budget", "BigInt growth");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxBigIntegerBits = 16;
+        expectResourceLimit(limits, "65536", "BigInt bit-length budget", "exact input literal size");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxBigIntegerBits = 16;
+        expectResourceLimit(limits, "fact[100]", "BigInt bit-length budget", "factorial preflight");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxBigIntegerBits = 1;
+        expectResourceLimit(limits, "1+2", "BigInt bit-length budget", "arithmetic result growth");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxRequestedPrecisionDigits = 10;
+        expectResourceLimit(limits, "N[Pi,20]", "Requested precision budget", "requested precision");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxAlgebraicDegree = 1;
+        expectResourceLimit(limits, "root[{-2,0,1},1]", "Algebraic construction degree budget", "algebraic degree");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxAlgebraicRefinements = 0;
+        expectResourceLimit(limits, "root[{-2,0,1},1]", "Algebraic refinement budget", "algebraic refinements");
+    }
+
+    kernel::KernelSession symbolicCoreSession;
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "cases[1/x if x!=0; 0 if x==0]"),
+        std::string{"cases[1/x if x != 0; 0 if x == 0]"},
+        "KernelSession: scalar cases preserves unresolved mathematical branches");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "cases[1/0 if False; 2 if True]"),
+        std::string{"2"},
+        "KernelSession: cases does not evaluate a proven-false branch");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "simplify[cases[1/x if x!=0; 0 if x==0],x!=0]"),
+        std::string{"1/x"},
+        "KernelSession: cases consumes exact simplification assumptions");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "N[cases[Pi if x!=0; E if x==0],20]"),
+        std::string{"cases[3.1415926535897932385 if x != 0; 2.7182818284590452354 if x == 0]"},
+        "KernelSession: N approximates cases values without numericalizing branch predicates");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "D[cases[x^2 if a>0;sin[x] if a<=0],x]"),
+        std::string{"cases[2x if a > 0; cos[x] if a <= 0]"},
+        "KernelSession: D distributes over cases only when predicates are independent of the derivative variable");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "D[cases[x^2 if x>0;sin[x] if x<=0],x]"),
+        std::string{"D[cases[x^2 if x > 0; sin[x] if x <= 0], x]"},
+        "KernelSession: D preserves cases with derivative-variable-dependent boundaries");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "integrate[cases[x if a>0;x^2 if a<=0],x]"),
+        std::string{"cases[x^2/2 if a > 0; x^3/3 if a <= 0]"},
+        "KernelSession: integrate distributes over cases with variable-independent predicates");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "integrate[cases[x if x>0;x^2 if x<=0],x]"),
+        std::string{"integrate[cases[x if x > 0; x^2 if x <= 0], x]"},
+        "KernelSession: integrate preserves cases whose boundaries depend on the integration variable");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "limit[cases[sin[x]/x if a>0;(1-cos[x])/x^2 if a<=0],x,0]"),
+        std::string{"cases[1 if a > 0; 1/2 if a <= 0]"},
+        "KernelSession: limit distributes over cases with variable-independent predicates");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "limit[cases[sin[x]/x if x>0;(1-cos[x])/x^2 if x<=0],x,0]"),
+        std::string{"limit[cases[sin[x]/x if x > 0; (1-cos[x])/x^2 if x <= 0], x, 0]"},
+        "KernelSession: limit keeps variable-dependent cases unresolved instead of evaluating singular branches at the point");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "groebnerBasis[{x y-1,y^2-x},{x,y},Lex]"),
+        std::string{"{x-y^2, y^3-1}"},
+        "KernelSession: Groebner basis supports exact Lex elimination over Q[x,y]");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "groebnerBasis[{x y-1,y^2-x},{x,y},GrevLex]"),
+        std::string{"{-y+x^2, -1+x y, -x+y^2}"},
+        "KernelSession: Groebner basis supports GrevLex independently of Lex");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "polynomialReduce[x^2+y^2,{x-y,y^2-1},{x,y},Lex]"),
+        std::string{"{{x+y, 2}, 2}"},
+        "KernelSession: multivariate polynomialReduce returns exact quotients and remainder");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "polynomialReduce[x y-1,groebnerBasis[{x y-1,y^2-x},{x,y},Lex],{x,y},Lex]"),
+        std::string{"{{y, 1}, 0}"},
+        "KernelSession: polynomialReduce composes directly with a held Groebner basis call");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "groebnerBasis[groebnerBasis[{x y-1,y^2-x},{x,y},Lex],{x,y},Lex]"),
+        std::string{"{x-y^2, y^3-1}"},
+        "KernelSession: reduced Groebner basis is idempotent through direct call composition");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "groebnerBasis[{x-y,y-z,z^2-1},{x,y,z},Lex]"),
+        std::string{"{x-z, y-z, z^2-1}"},
+        "KernelSession: Groebner basis is general beyond two variables");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{x+y==3,x y==2},{x,y}]"),
+        std::string{"{{x == 1, y == 2}, {x == 2, y == 1}}"},
+        "KernelSession: nonlinear polynomial Solve uses exact Groebner elimination");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{x-y^2==0,y^3-1==0},{x,y}]"),
+        std::string{"{{x == 1, y == 1}, {x == (-1/2+I sqrt[3]/2)^2, y == -1/2+I sqrt[3]/2}, {x == (-1/2-I sqrt[3]/2)^2, y == -1/2-I sqrt[3]/2}}"},
+        "KernelSession: polynomial Solve carries algebraic roots through a shape-position basis");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{x-y==0,y-z==0,z^2==1},{x,y,z}]"),
+        std::string{"{{x == 1, y == 1, z == 1}, {x == -1, y == -1, z == -1}}"},
+        "KernelSession: polynomial Solve handles a three-variable zero-dimensional shape basis");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x y==0},{x,y}]"),
+        std::string{"UnresolvedSolutionSet[x, y]"},
+        "KernelSession: positive-dimensional polynomial systems remain explicitly unresolved");
+
+    kernel::KernelSession failedUsageSession;
+    evaluation::EvaluationLimits failedUsageLimits = failedUsageSession.evaluationLimits();
+    failedUsageLimits.maxEvaluationSteps = 1;
+    failedUsageSession.setEvaluationLimits(failedUsageLimits);
+    static_cast<void>(evaluateError(failedUsageSession, "1+2"));
+    tests.expectEqual(failedUsageSession.lastEvaluationUsage().evaluationSteps, std::size_t{1},
+        "EvaluationBudget: failed request preserves usage telemetry up to the rejected operation");
+
+    kernel::KernelSession cancelledSession;
+    evaluation::EvaluationCancellationToken cancellation;
+    cancellation.requestCancellation();
+    error::CalcError cancellationError = [&] {
+        try {
+            static_cast<void>(cancelledSession.evaluate("1+2", cancellation));
+        }
+        catch (const error::CalcError& exception) {
+            return exception;
+        }
+        throw std::logic_error("Expected cancellation did not stop evaluation");
+    }();
+    tests.expect(cancellationError.type() == error::CalcErrorType::ResourceLimit
+        && std::string{cancellationError.what()}.find("cancelled by frontend") != std::string::npos,
+        "EvaluationBudget: frontend cancellation uses the non-domain resource diagnostic path");
+
+    kernel::KernelSession usageSession;
+    tests.expectEqual(evaluateAndFormat(usageSession, "2+3"), std::string{"5"},
+        "EvaluationBudget: telemetry probe evaluates normally");
+    const evaluation::EvaluationUsage& usage = usageSession.lastEvaluationUsage();
+    tests.expect(usage.evaluationSteps != 0
+        && usage.generatedNodes != 0
+        && usage.maximumBigIntegerBits != 0,
+        "EvaluationBudget: telemetry records steps, generated nodes, and exact-number size");
 
     kernel::KernelSession parserBudgetSession;
     std::string hostileUnary(50'000, '-');

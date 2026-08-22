@@ -88,7 +88,7 @@ struct StartupOptions final {
             continue;
         }
 
-        if (argument == "--batch") {
+        if (argument == "--batch" || argument == "--bach") {
             selectInputMode(InputMode::Batch, argument);
             continue;
         }
@@ -111,7 +111,8 @@ inline void printUsage(std::ostream& output) {
     output
         << "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>]\n"
         << "       mmCal [options] --eval <expression>\n"
-        << "       mmCal [options] --batch    (alias: --bach)\n";
+        << "       mmCal [options] --batch    (alias: --bach)\n"
+        << "Interactive help: :help [function]\n";
 }
 
 } // namespace mmcal::cli

@@ -26,6 +26,7 @@ public:
     [[nodiscard]] std::size_t trailingZeroBits() const noexcept;
     [[nodiscard]] std::size_t populationCount() const noexcept;
     [[nodiscard]] bool testBit(std::size_t index) const noexcept;
+    [[nodiscard]] limb_type moduloSmall(limb_type divisor) const;
 
     [[nodiscard]] static BigUInt parse(std::string_view text, unsigned radix = 10);
     [[nodiscard]] std::string toString(unsigned radix = 10) const;

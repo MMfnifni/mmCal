@@ -96,17 +96,47 @@ def find_executable(explicit=None):
     )
 
 
-def parse_test_text(path, text):
+def parse_test_sessions(path, text):
+    """Parse one physical test file into isolated mmCal sessions.
+
+    ``# @session [ARGS...]`` starts a fresh mmCal process.  This allows related
+    regression groups to live in one file without leaking definitions, angle
+    mode, history, or diagnostics across the former file boundaries.
+
+    Legacy ``# @args ...`` remains supported.  It sets the startup arguments
+    for the current session and must appear before that session's first case.
+    """
+    sessions = []
     startup_args = []
     cases = []
+
+    def flush_session():
+        nonlocal startup_args, cases
+        if cases:
+            sessions.append((startup_args, cases))
+        startup_args = []
+        cases = []
 
     for line_number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line:
             continue
+
+        if line == "# @session" or line.startswith("# @session "):
+            flush_session()
+            arg_text = line[len("# @session"):].strip()
+            startup_args = shlex.split(arg_text, posix=(os.name != "nt")) if arg_text else []
+            continue
+
         if line.startswith("# @args "):
+            if cases:
+                raise RuntimeError(
+                    "{}:{}: # @args must precede cases in a session; use # @session for a new isolated session"
+                    .format(path, line_number)
+                )
             startup_args = shlex.split(line[len("# @args "):], posix=(os.name != "nt"))
             continue
+
         if line.startswith("#"):
             continue
 
@@ -126,15 +156,26 @@ def parse_test_text(path, text):
 
         cases.append((line_number, expr, expected, mode))
 
-    return startup_args, cases
+    flush_session()
+    return sessions
+
+
+def parse_test_text(path, text):
+    """Backward-compatible single-session parser helper."""
+    sessions = parse_test_sessions(path, text)
+    if not sessions:
+        return [], []
+    if len(sessions) != 1:
+        raise RuntimeError("{}: contains multiple # @session groups".format(path))
+    return sessions[0]
 
 
 def preload_test_files(test_files):
     loaded = []
     for path in test_files:
         text = path.read_text(encoding="utf-8")
-        startup_args, cases = parse_test_text(path, text)
-        loaded.append((path, startup_args, cases))
+        sessions = parse_test_sessions(path, text)
+        loaded.append((path, sessions))
     return loaded
 
 
@@ -388,7 +429,7 @@ def collect_test_files(arguments):
     return sorted(script_dir().glob("test*.txt"))
 
 
-RUNNER_VERSION = "V1.5 exact black-box r3"
+RUNNER_VERSION = "V1.5 exact black-box r4"
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="mmCal V1.5 black-box tests")
@@ -416,65 +457,81 @@ def main(argv=None):
 
     total = passed = failed = skipped = 0
     active_total = 0
+    session_total = 0
     file_timings = []
-    for _path, _startup_args, cases in loaded_files:
-        active_total += sum(1 for case in cases if case[2].lower() != "skip")
-        skipped += sum(1 for case in cases if case[2].lower() == "skip")
+    for _path, sessions in loaded_files:
+        session_total += len(sessions)
+        for _startup_args, cases in sessions:
+            active_total += sum(1 for case in cases if case[2].lower() != "skip")
+            skipped += sum(1 for case in cases if case[2].lower() == "skip")
 
     print("mmCal {}".format(RUNNER_VERSION))
     print("Executable: {}".format(executable))
-    print("Preloaded {} files / {} tests.".format(len(loaded_files), active_total))
+    print("Preloaded {} files / {} isolated sessions / {} tests.".format(
+        len(loaded_files), session_total, active_total))
     print("Test-file I/O and parsing are excluded from Elapsed time.")
     print(datetime.datetime.now().strftime("'%y/%m/%d/%H:%M:%S") + " start")
     print("Running tests...\n")
     started = time.perf_counter()
 
-    for test_file, startup_args, cases in loaded_files:
-        active = [case for case in cases if case[2].lower() != "skip"]
-        total += len(active)
-        if not active:
-            continue
+    for test_file, sessions in loaded_files:
+        file_elapsed_ms = 0.0
+        file_active_count = 0
 
-        try:
-            file_started = time.perf_counter()
-            responses, returncode, stderr = run_session(
-                executable, startup_args, active, args.timeout
-            )
-            file_elapsed_ms = (time.perf_counter() - file_started) * 1000.0
-            file_timings.append((file_elapsed_ms, test_file.name, len(active)))
-        except RunnerProtocolError as exc:
-            print("[RUNNER ERROR] {}: {}".format(test_file.name, exc))
-            print("Aborted: this is a runner/REPL protocol error, not {} test failures.".format(len(active)))
-            return 2
-        except Exception as exc:
-            print("[RUNNER ERROR] {}: {}".format(test_file.name, exc))
-            print("Aborted before assigning PASS/FAIL to this file.")
-            return 2
+        for session_index, (startup_args, cases) in enumerate(sessions, 1):
+            active = [case for case in cases if case[2].lower() != "skip"]
+            total += len(active)
+            file_active_count += len(active)
+            if not active:
+                continue
 
-        for case, response in zip(active, responses):
-            line_number, expr, expected, mode = case
-            got, chunk = response
-            ok, info = compare_response(got, chunk, expected, mode)
-            if ok:
-                passed += 1
-                shown = first_error_line(chunk) if first_error_type(chunk) else got
-                print("[PASS] {} => {}".format(expr, shown) if shown else "[PASS] {}".format(expr))
-            else:
-                failed += 1
-                print("[FAIL] {}".format(expr))
-                print("  file    : {}:{}".format(test_file.name, line_number))
-                print("  expected: {}".format(expected))
-                if first_error_type(chunk):
-                    print("  got     : {}".format(first_error_line(chunk)))
+            try:
+                session_started = time.perf_counter()
+                responses, returncode, stderr = run_session(
+                    executable, startup_args, active, args.timeout
+                )
+                file_elapsed_ms += (time.perf_counter() - session_started) * 1000.0
+            except RunnerProtocolError as exc:
+                print("[RUNNER ERROR] {} session {}: {}".format(
+                    test_file.name, session_index, exc))
+                print("Aborted: this is a runner/REPL protocol error, not {} test failures.".format(len(active)))
+                return 2
+            except Exception as exc:
+                print("[RUNNER ERROR] {} session {}: {}".format(
+                    test_file.name, session_index, exc))
+                print("Aborted before assigning PASS/FAIL to this session.")
+                return 2
+
+            for case, response in zip(active, responses):
+                line_number, expr, expected, mode = case
+                got, chunk = response
+                ok, info = compare_response(got, chunk, expected, mode)
+                if ok:
+                    passed += 1
+                    shown = first_error_line(chunk) if first_error_type(chunk) else got
+                    print("[PASS] {} => {}".format(expr, shown) if shown else "[PASS] {}".format(expr))
                 else:
-                    print("  got     : {}".format(got or "(empty)"))
-                if info and info != first_error_line(chunk):
-                    print("  error   : {}".format(info))
+                    failed += 1
+                    print("[FAIL] {}".format(expr))
+                    print("  file    : {}:{} (session {})".format(
+                        test_file.name, line_number, session_index))
+                    print("  expected: {}".format(expected))
+                    if first_error_type(chunk):
+                        print("  got     : {}".format(first_error_line(chunk)))
+                    else:
+                        print("  got     : {}".format(got or "(empty)"))
+                    if info and info != first_error_line(chunk):
+                        print("  error   : {}".format(info))
 
-        if returncode != 0:
-            print("[WARN] mmCal exited with code {} ({})".format(returncode, test_file.name))
-        if stderr.strip():
-            print("[WARN] stderr ({}):\n{}".format(test_file.name, stderr.strip()))
+            if returncode != 0:
+                print("[WARN] mmCal exited with code {} ({} session {})".format(
+                    returncode, test_file.name, session_index))
+            if stderr.strip():
+                print("[WARN] stderr ({} session {}):\n{}".format(
+                    test_file.name, session_index, stderr.strip()))
+
+        if file_active_count:
+            file_timings.append((file_elapsed_ms, test_file.name, file_active_count))
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     print("\n=====================")

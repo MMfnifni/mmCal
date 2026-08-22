@@ -37,6 +37,7 @@ Primary        ::= number
                  | string
                  | HistoryRef
                  | ArrayLiteral
+                 | CasesExpr
                  | IdentifierExpr
                  | Group ;
 
@@ -44,6 +45,9 @@ HistoryRef     ::= "%" , { "%" } | "@" , { "@" } ;
 ArrayLiteral   ::= "{" , [ Assignment , { "," , Assignment } ] , "}" ;
 IdentifierExpr ::= identifier , [ CallSuffix ] ;
 CallSuffix     ::= "[" , [ Assignment , { "," , Assignment } ] , "]" ;
+CasesExpr      ::= "cases" , "[" , CaseBranch , { ";" , CaseBranch } , "]" ;
+CaseBranch     ::= Assignment , "if" , Assignment
+                 | Assignment ;
 Group          ::= "(" , Assignment , ")" ;
 ImplicitMul    ::= (* 隣接規則によりParserが生成する。 *) ;
 
@@ -71,3 +75,5 @@ ImplicitMul    ::= (* 隣接規則によりParserが生成する。 *) ;
 (* 呼出し時は実引数を先に評価し、局所スコープへ仮引数として束縛した後、 *)
 (* 保存済みの函数本体を評価する。 *)
 (* ifは選択した枝だけを評価するため、停止条件を持つ再帰函数を記述できる。 *)
+(* casesは数学的な場合分け式であり，枝区切りに`;`を使う。 *)
+(* 無条件branchは最後のdefaultだけに許可し，少なくとも1つの`value if condition`を要求する。 *)

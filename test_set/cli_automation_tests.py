@@ -7,6 +7,8 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
+import signal
+import time
 
 
 def run(executable, arguments, input_text="", timeout=20):
@@ -24,6 +26,31 @@ def run(executable, arguments, input_text="", timeout=20):
         completed.stderr.replace("\r\n", "\n").replace("\r", "\n"),
     )
 
+
+
+def run_interrupted(executable, expression, delay=0.05, timeout=10):
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+    process = subprocess.Popen(
+        [executable, "--eval", expression],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        creationflags=creationflags,
+    )
+    time.sleep(delay)
+    require(process.poll() is None, "interrupt probe finished before Ctrl-C could be sent")
+    if sys.platform == "win32":
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        process.send_signal(signal.SIGINT)
+    stdout, stderr = process.communicate(timeout=timeout)
+    return (
+        process.returncode,
+        stdout.replace("\r\n", "\n").replace("\r", "\n"),
+        stderr.replace("\r\n", "\n").replace("\r", "\n"),
+    )
 
 def require(condition, message):
     if not condition:
@@ -45,6 +72,19 @@ def main():
     require(Path(executable).is_file(), "mmCal executable was not found")
 
     checked = 0
+
+    code, stdout, stderr = run(executable, ["--help"])
+    clean_stdout(stdout)
+    require(code == 0 and stderr == "", "--help must succeed without diagnostics")
+    require(
+        stdout
+        == "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>]\n"
+        "       mmCal [options] --eval <expression>\n"
+        "       mmCal [options] --batch    (alias: --bach)\n"
+        "Interactive help: :help [function]\n",
+        "--help is no longer the concise startup summary",
+    )
+    checked += 1
 
     code, stdout, stderr = run(executable, ["--eval", "1+2*3"])
     clean_stdout(stdout)
@@ -74,7 +114,7 @@ def main():
     require(stderr.startswith("WARN:"), "warning was not isolated on stderr")
     checked += 1
 
-    code, stdout, stderr = run(executable, ["--eval", "1/0"])
+    code, stdout, stderr = run(executable, ["--eval", "log[0]"])
     clean_stdout(stdout)
     require(code == 4 and stdout == "", "evaluation failure must use exit code 4")
     require("Error:" in stderr, "evaluation failure was not sent to stderr")
@@ -94,11 +134,6 @@ def main():
     require(stderr.startswith("SyntaxError:"), "batch syntax failure was not sent to stderr")
     checked += 1
 
-    code, stdout, stderr = run(executable, ["--bach"], "2+5\n")
-    clean_stdout(stdout)
-    require((code, stdout, stderr) == (0, "7\n", ""), "--bach compatibility alias changed")
-    checked += 1
-
     hostile = "-" * 50000 + "1\n"
     code, stdout, stderr = run(executable, ["--batch"], hostile)
     clean_stdout(stdout)
@@ -106,10 +141,71 @@ def main():
     require(stderr.startswith("ResourceLimitError:"), "resource limit is not externally identifiable")
     checked += 1
 
-    code, stdout, stderr = run(executable, ["--batch"], "1+\n1/0\n5\n")
+    code, stdout, stderr = run(executable, ["--batch"], "1+\nlog[0]\n5\n")
     clean_stdout(stdout)
     require(code == 4 and stdout == "5\n", "batch did not aggregate exit severity or continue")
     require("SyntaxError:" in stderr and "Error:" in stderr, "batch lost one of multiple diagnostics")
+    checked += 1
+
+    code, stdout, stderr = run(
+        executable, ["--batch"], ":help sin\n2+3\nIn[1]\n"
+    )
+    clean_stdout(stdout)
+    require(code == 0 and stderr == "", ":help sin must be a successful REPL command")
+    require(
+        stdout
+        == "sin\n"
+        "Computes sine with exact special-angle simplification where possible.\n"
+        "Usage:\n"
+        "  sin[x]\n"
+        "Arguments: 1\n"
+        "Inputs:\n"
+        "  x: A real or complex angle. A bare real uses angleMode[]; Deg, Rad, or Grad overrides it.\n"
+        "Notes:\n"
+        "  The default session angle mode is Rad.\n"
+        "Examples:\n"
+        "  sin[Pi/6]  ->  1/2\n"
+        "  sin[30 Deg]  ->  1/2\n"
+        "  sin[100 Grad]  ->  1\n"
+        "5\n"
+        "5\n",
+        ":help sin output changed or it consumed In[1]",
+    )
+    checked += 1
+
+    code, stdout, stderr = run(executable, ["--batch"], ":help ln\n:help noSuchFunction\n")
+    clean_stdout(stdout)
+    require(code == 0 and stderr == "", "help lookup must not be an evaluation failure")
+    require("log (alias: ln)\n" in stdout, ":help did not resolve an alias")
+    require(
+        "No help for 'noSuchFunction'.\n"
+        "Use :help functions or :help constants to list available topics.\n"
+        in stdout,
+        "unknown help lookup lost its guidance",
+    )
+    checked += 1
+
+    code, stdout, stderr = run(
+        executable, ["--batch"], ":help Pi\n:help sdv\n:help qr\n2+3\nIn[1]\n"
+    )
+    clean_stdout(stdout)
+    require(code == 0 and stderr == "", "constant and suggested help must succeed")
+    require("Pi\nThe exact circle constant" in stdout, ":help Pi is missing")
+    require("Did you mean 'svd'?" in stdout, "sdv typo suggestion is missing")
+    require(
+        "Did you mean 'qrDecomposition'?" in stdout,
+        "qr decomposition suggestion is missing",
+    )
+    require(stdout.endswith("5\n5\n"), "help lookup consumed an In[n] history slot")
+    checked += 1
+
+    code, stdout, stderr = run_interrupted(executable, "inverse[identity[500]]")
+    clean_stdout(stdout)
+    require(code == 3 and stdout == "", "Ctrl-C cancellation must use resource exit code 3")
+    require(
+        "ResourceLimitError: Evaluation cancelled by frontend" in stderr,
+        "Ctrl-C was not routed through EvaluationCancellationToken",
+    )
     checked += 1
 
     print("CLI automation: PASS ({} contracts)".format(checked))

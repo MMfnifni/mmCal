@@ -56,10 +56,32 @@ KernelSession::KernelSession()
           angleSemantics_) {}
 
 expression::Expr KernelSession::evaluate(std::string_view sourceText) {
+    return evaluateImpl(sourceText, nullptr);
+}
+
+expression::Expr KernelSession::evaluate(
+    std::string_view sourceText,
+    const evaluation::EvaluationCancellationToken& cancellation) {
+    return evaluateImpl(sourceText, &cancellation);
+}
+
+expression::Expr KernelSession::evaluateImpl(
+    std::string_view sourceText,
+    const evaluation::EvaluationCancellationToken* cancellation) {
     exitRequested_ = false;
     clearRequested_ = false;
     definitionsChanged_ = false;
     diagnostics_.clear();
+    evaluation::EvaluationBudget evaluationBudget{
+        evaluator_.evaluationLimits(), cancellation};
+    lastEvaluationUsage_ = {};
+    try {
+        evaluationBudget.checkInputBytes(sourceText.size());
+    }
+    catch (...) {
+        lastEvaluationUsage_ = evaluationBudget.usage();
+        throw;
+    }
 
     // Frontendで式として成立しなかった入力は履歴番号を消費しない。
     // エラー表示には次の入力番号を使い，正常にloweringできた時点で確定する。
@@ -89,11 +111,13 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
 
         const evaluation::EvaluationContext context{
             history_, inputHistory_, outputHistory_, &diagnostics_,
-            &exitRequested_, &clearRequested_, &definitionsChanged_, &angleSemantics_};
+            &exitRequested_, &clearRequested_, &definitionsChanged_, &angleSemantics_,
+            &evaluationBudget};
         expression::Expr result = evaluator_.evaluate(
             lowered.expression,
             lowered.origins,
             context);
+        lastEvaluationUsage_ = evaluationBudget.usage();
 
         // Clear[]は現在の入力を履歴へ残さず、履歴番号も1へ戻す。
         // 定義と履歴だけを消し、角度設定やRNG stateは保持する。
@@ -117,9 +141,14 @@ expression::Expr KernelSession::evaluate(std::string_view sourceText) {
         return result;
     }
     catch (error::CalcError& exception) {
+        lastEvaluationUsage_ = evaluationBudget.usage();
         // Lexer/Parser段階のエラーにも入力文書を結び付け、表示側を一貫させる。
         if (exception.span())
             exception.attachDocumentIfMissing(document);
+        throw;
+    }
+    catch (...) {
+        lastEvaluationUsage_ = evaluationBudget.usage();
         throw;
     }
 }
@@ -187,6 +216,7 @@ void KernelSession::resetForIndependentEvaluation() {
     exitRequested_ = false;
     clearRequested_ = false;
     definitionsChanged_ = false;
+    lastEvaluationUsage_ = {};
 }
 
 void KernelSession::reset() {
@@ -232,6 +262,18 @@ void KernelSession::setEvaluationDepthLimit(std::size_t limit) {
 
 std::size_t KernelSession::evaluationDepthLimit() const noexcept {
     return evaluator_.depthLimit();
+}
+
+void KernelSession::setEvaluationLimits(evaluation::EvaluationLimits limits) {
+    evaluator_.setEvaluationLimits(std::move(limits));
+}
+
+const evaluation::EvaluationLimits& KernelSession::evaluationLimits() const noexcept {
+    return evaluator_.evaluationLimits();
+}
+
+const evaluation::EvaluationUsage& KernelSession::lastEvaluationUsage() const noexcept {
+    return lastEvaluationUsage_;
 }
 
 void KernelSession::rememberSuccessfulDefinition(const syntax::SyntaxTree& tree) {
