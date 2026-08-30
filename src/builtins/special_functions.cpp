@@ -610,7 +610,8 @@ using numeric::RealNumber;
     if (!exactRealRational(arguments[1], z))
         return hold(BuiltinId::Polylog, arguments, registry);
 
-    if (order.numerator() == BigInt{2} && (z == Rational{BigInt{1}} || z == Rational{BigInt{-1}})) {
+    if (order == Rational{BigInt{2}}
+        && (z == Rational{BigInt{1}} || z == Rational{BigInt{-1}})) {
         Expr piSquared = exact::call(
             BuiltinId::Power, {piExpr(mathematics), integer(2)}, registry, mathematics, angles);
         return exact::divide(
@@ -619,6 +620,29 @@ using numeric::RealNumber;
                 : std::move(piSquared),
             integer(z.numerator().isNegative() ? 12 : 6),
             registry, mathematics, angles);
+    }
+
+    if (order > Rational{BigInt{2}}) {
+        // DLMF 25.12(ii): Li_s(1)=zeta(s)。正整数s>1では級数境界上でも有限。
+        if (z == Rational{BigInt{1}})
+            return Expr::call(registry.symbol(BuiltinId::Zeta), {rationalExpr(order)});
+
+        // Li_s(-1)=-(1-2^(1-s)) zeta(s)。unit circle上の交代級数を
+        // 数値的に長時間加算せず，既存zeta backendへexactに移す。
+        if (z == Rational{BigInt{-1}}) {
+            const auto count = numeric::tryToUint64(order.numerator());
+            if (count && *count > 1 && *count <= 100000) {
+                BigInt denominator{1};
+                denominator <<= static_cast<std::size_t>(*count - 1);
+                const Rational coefficient{
+                    -(denominator - BigInt{1}), denominator};
+                Expr zeta = Expr::call(
+                    registry.symbol(BuiltinId::Zeta), {rationalExpr(order)});
+                return exact::multiply(
+                    {rationalExpr(coefficient), std::move(zeta)},
+                    registry, mathematics, angles);
+            }
+        }
     }
 
     return hold(BuiltinId::Polylog, arguments, registry);

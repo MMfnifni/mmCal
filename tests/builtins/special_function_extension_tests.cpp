@@ -97,9 +97,21 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[fresnels[1+I],30]"),
         std::string{"-2.06188821919484046808071653669+2.06188821919484046808071653669I"},
         "Fresnel S has a certified entire complex series backend");
+    tests.expectEqual(eval(session, "N[fresnelc[7+I],20]"),
+        std::string{"10840706.412719365363+79376633.864722432483I"},
+        "Fresnel C remains certified in the former complex series-boundary region");
+    tests.expectEqual(eval(session, "N[fresnels[7+I],20]"),
+        std::string{"-79376633.364722432495+10840705.912719365365I"},
+        "Fresnel S shares the optimized certified complex series backend");
     tests.expectEqual(eval(session, "N[fresnelc[8+I],20]"),
-        std::string{"fresnelc[8+I]"},
-        "complex Fresnel exits before the audited series-performance cliff");
+        std::string{"-1613473902.7057768968+193865931.68895630904I"},
+        "complex Fresnel no longer has the historical |z|=8 work boundary");
+    tests.expectEqual(eval(session, "N[fresnelc[32+I],20]"),
+        std::string{"-227144419018168036370000000000000000000000.0+7027787067654522305300000000000000000000.0I"},
+        "complex Fresnel uses the certified asymptotic wedge for large near-axis arguments");
+    tests.expectEqual(eval(session, "N[fresnels[1+32I],20]"),
+        std::string{"227144419018168036370000000000000000000000.0+7027787067654522305300000000000000000000.0I"},
+        "complex Fresnel quarter-turn symmetry shares the asymptotic wedge across axes");
     tests.expectEqual(eval(session, "N[fresnelc[10],20]"),
         std::string{"0.49989869420551572361"},
         "Fresnel C switches safely to the large-argument backend");
@@ -165,6 +177,9 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[hypergeometric2F1[3.4,5.6,4+I,4.6+2I],20]"),
         std::string{"0.0046136876612922014955+0.0019659119401108294965I"},
         "2F1 uses a certified principal 1/z connection outside the unit disk when nondegenerate");
+    tests.expectEqual(eval(session, "N[hypergeometric2F1[3.4,5.6,4+I,4.6+2I],40]"),
+        std::string{"0.004613687661292201495472361244961975817392+0.001965911940110829496460833819409636768435I"},
+        "2F1 principal 1/z continuation remains certified at higher precision");
     tests.expectEqual(eval(session, "hypergeometric2F1[-1,2,3,2+I]"),
         std::string{"-1/3-2I/3"},
         "terminating 2F1 polynomials bypass continuation and evaluate exact complex-number arguments");
@@ -175,14 +190,32 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"34978276269386186023000000000000000000000000000000000000000000000000.0"},
         "1F1 remains certified at the bounded-work argument threshold");
     tests.expectEqual(eval(session, "N[hypergeometric1F1[1/2,5/4,161],20]"),
-        std::string{"hypergeometric1F1[1/2, 5/4, 161]"},
-        "1F1 exits immediately beyond the bounded-work argument threshold");
+        std::string{"94636147547763363460000000000000000000000000000000000000000000000000.0"},
+        "1F1 no longer imposes the former |z| <= 160 work boundary");
+    tests.expectEqual(eval(session, "N[hypergeometric1F1[1/2,5/4,-512],20]"),
+        std::string{"0.032697046018868862934"},
+        "1F1 keeps large negative real arguments certified without exact-Rational blow-up");
+    tests.expectEqual(eval(session, "precision[N[hypergeometric1F1[1/2,5/4,256+I],20]]"),
+        std::string{"19"},
+        "complex 1F1 remains precision-carrying well beyond the former magnitude boundary");
+    tests.expectEqual(eval(session, "precision[N[hypergeometric1F1[1/2,5/4,N[161,5]],20]]"),
+        std::string{"2"},
+        "1F1 does not recover hidden precision when a finite-precision argument exceeds the former boundary");
     tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,5/4,9/10],20]"),
         std::string{"1.2540597304760187485"},
         "2F1 remains certified at the bounded-work Gauss-series threshold");
     tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,5/4,19/20],20]"),
-        std::string{"hypergeometric2F1[1/2, 1/3, 5/4, 19/20]"},
-        "2F1 exits immediately in the slow near-unit-circle series region");
+        std::string{"1.3068052887857217891"},
+        "2F1 certifies the full open unit disk instead of imposing the former 9/10 work boundary");
+    tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,5/4,99/100],20]"),
+        std::string{"1.3918605978010497470"},
+        "2F1 remains certified close to the unit-circle convergence boundary");
+    tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,5/4,1],20]"),
+        std::string{"1.4908745724194916165"},
+        "2F1 uses Gauss summation at z=1 when Re(c-a-b)>0");
+    tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,1/2,1],20]"),
+        std::string{"hypergeometric2F1[1/2, 1/3, 1/2, 1]"},
+        "2F1 keeps unsupported unit-circle boundary cases unevaluated");
     tests.expectEqual(eval(session, "N[hypergeometric2F1[1/2,1/3,1/10^20,9/10],20]"),
         std::string{"131575556603428593630.0"},
         "2F1 certifies a large real value near a denominator-parameter pole without Rational blow-up");
@@ -217,9 +250,81 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[ellipticF[1/2,9/10],20]"),
         std::string{"0.51976394243782869496"},
         "ellipticF remains certified at the bounded-work parameter threshold");
+    tests.expectEqual(eval(session, "N[ellipticE[1/2,9/10],20]"),
+        std::string{"0.48155710744262109430"},
+        "ellipticE remains certified at the bounded-work parameter threshold");
+    tests.expectEqual(eval(session, "N[ellipticPi[9/10,1/2,1/3],20]"),
+        std::string{"0.54883454168831276122"},
+        "ellipticPi remains certified at the characteristic work threshold");
+    tests.expectEqual(eval(session, "N[ellipticF[3/2,9/10],20]"),
+        std::string{"2.3558627383594486071"},
+        "ellipticF amplitude-aware tail proof remains certified near Pi/2");
+    tests.expectEqual(eval(session, "N[ellipticE[3/2,9/10],20]"),
+        std::string{"1.0822199401249235350"},
+        "ellipticE amplitude-aware tail proof remains certified near Pi/2");
+    tests.expectEqual(eval(session, "N[ellipticPi[9/10,3/2,1/3],20]"),
+        std::string{"4.9290739403905673975"},
+        "ellipticPi amplitude-aware tail proof remains certified near Pi/2");
+    tests.expectEqual(eval(session, "N[ellipticF[2,9/10],20]"),
+        std::string{"3.7114432264647167179"},
+        "ellipticF keeps the conservative tail proof beyond the monotone amplitude region");
     tests.expectEqual(eval(session, "N[ellipticF[1/2,19/20],20]"),
-        std::string{"ellipticF[1/2, 19/20]"},
-        "ellipticF exits immediately before the near-singular series becomes pathological");
+        std::string{"0.52099294480389383536"},
+        "ellipticF crosses the former 9/10 work boundary through the Carlson backend");
+    tests.expectEqual(eval(session, "N[ellipticE[1/2,19/20],20]"),
+        std::string{"0.48049357622814572968"},
+        "ellipticE crosses the former 9/10 work boundary through the Carlson backend");
+    tests.expectEqual(eval(session, "N[ellipticPi[19/20,1/2,1/3],20]"),
+        std::string{"0.55154859568790941306"},
+        "ellipticPi crosses the former characteristic work boundary through RJ");
+    tests.expectEqual(eval(session, "N[ellipticF[1/2,99/100],20]"),
+        std::string{"0.52198775871658283077"},
+        "ellipticF remains certified close to the complete-parameter boundary");
+    tests.expectEqual(eval(session, "N[ellipticE[1/2,99/100],20]"),
+        std::string{"0.47963950999048385681"},
+        "ellipticE remains certified close to the complete-parameter boundary");
+    tests.expectEqual(eval(session, "N[ellipticPi[99/100,1/2,99/100],20]"),
+        std::string{"0.57149053861428088394"},
+        "ellipticPi certifies simultaneous near-one m and n through RF/RJ");
+    tests.expectEqual(eval(session, "N[ellipticF[2,19/20],20]"),
+        std::string{"4.3357836260680930745"},
+        "ellipticF Carlson backend preserves real-period reduction");
+    tests.expectEqual(eval(session, "N[ellipticPi[19/20,2,1/3],20]"),
+        std::string{"14.335569012614443776"},
+        "ellipticPi RJ path preserves real-period reduction without RC cancellation loss");
+    tests.expectEqual(eval(session, "N[ellipticF[Pi/2,19/20],20]"),
+        std::string{"2.9083372484445521001"},
+        "ellipticF reduces exact rational Pi multiples without interval quotient ambiguity");
+    tests.expectEqual(eval(session, "N[ellipticE[Pi/2,19/20],20]"),
+        std::string{"1.0604737277662782427"},
+        "ellipticE reduces exact rational Pi multiples without interval quotient ambiguity");
+    tests.expectEqual(eval(session, "N[ellipticE[Pi/2,1],20]"),
+        std::string{"1.0"},
+        "ellipticE keeps the finite exact m=1 complete-boundary degeneration");
+    tests.expectEqual(eval(session, "N[ellipticE[3Pi/2,1],20]"),
+        std::string{"3.0"},
+        "ellipticE m=1 degeneration preserves real period accumulation");
+    tests.expectEqual(eval(session, "N[ellipticPi[19/20,Pi/2,1/3],20]"),
+        std::string{"8.2772815079796133126"},
+        "ellipticPi reduces exact rational Pi multiples without interval quotient ambiguity");
+    tests.expectEqual(eval(session, "N[ellipticF[1/2,2],20]"),
+        std::string{"0.55135887907967981413"},
+        "ellipticF accepts m greater than one while the integration path stays on the real branch");
+    tests.expectEqual(eval(session, "N[ellipticPi[2,1/2,1/3],20]"),
+        std::string{"0.62289042574026551304"},
+        "ellipticPi accepts n greater than one before the first pole");
+    tests.expectEqual(eval(session, "N[ellipticF[4/5,2],20]"),
+        std::string{"ellipticF[4/5, 2]"},
+        "ellipticF does not force a real value after the principal path reaches a complex branch");
+    tests.expectEqual(eval(session, "N[ellipticPi[2,4/5,1/3],20]"),
+        std::string{"ellipticPi[2, 4/5, 1/3]"},
+        "ellipticPi does not cross a real pole without a principal-value backend");
+    tests.expectEqual(eval(session, "N[ellipticF[1/2,N[19/20,5]],20]"),
+        std::string{"0.52099"},
+        "ellipticF Carlson evaluation preserves the finite-precision parameter information floor");
+    tests.expectEqual(eval(session, "N[ellipticPi[N[19/20,5],1/2,1/3],20]"),
+        std::string{"0.55155"},
+        "ellipticPi Carlson evaluation preserves the finite-precision characteristic information floor");
     tests.expectEqual(eval(session, "D[ellipticF[x,1/3],x]"),
         std::string{"1/sqrt[1-sin[x Rad]^2/3]"},
         "ellipticF amplitude derivative is exact and explicitly radian");
@@ -263,6 +368,9 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[li[-2+I],20]"),
         std::string{"0.35983768206786498306+3.8175912081992291774I"},
         "li supports principal complex certified evaluation away from its Log branch cut");
+    tests.expectEqual(eval(session, "N[li[-2+I],40]"),
+        std::string{"0.3598376820678649830641857502620169916140+3.817591208199229177430772175717100104837I"},
+        "complex li remains certified when the Log/Arg path is evaluated at higher precision");
     tests.expectEqual(eval(session, "N[Ei[1+I],30]"),
         std::string{"1.76462598556385406842673816135+2.38776985151052241926279208910I"},
         "Ei has a certified principal complex series backend away from its cut");
@@ -276,26 +384,50 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"0.0074445393237725791671+0.0079585143427773070995I"},
         "complex Ci requires whole-value relative precision instead of per-component zero rounding");
     tests.expectEqual(eval(session, "N[Ci[140+I],20]"),
-        std::string{"Ci[140+I]"},
-        "complex Ci exits before the audited cancellation-performance cliff");
+        std::string{"0.01080710226306548880-0.0016788715636035789868I"},
+        "complex Ci crosses the former |z| <= 128 boundary through the certified asymptotic backend");
     tests.expectEqual(eval(session, "N[Ei[513I],20]"),
-        std::string{"Ei[513I]"},
-        "complex Ei exits beyond the audited bounded-work magnitude");
-    tests.expectEqual(eval(session, "N[Ei[96],20]"),
-        std::string{"5183174611003968065300000000000000000000.0"},
-        "Ei certified real series remains valid at the audited 96 boundary");
-    tests.expectEqual(eval(session, "N[Ei[97],20]"), std::string{"Ei[97]"},
-        "Ei exits immediately beyond the audited certified-series boundary");
-    tests.expectEqual(eval(session, "N[Si[96],20]"),
-        std::string{"1.5725687465291300355"},
-        "Si certified real series remains valid at the audited 96 boundary");
-    tests.expectEqual(eval(session, "N[Si[97],20]"), std::string{"Si[97]"},
-        "Si exits immediately beyond the audited certified-series boundary");
-    tests.expectEqual(eval(session, "N[Ci[96],20]"),
-        std::string{"0.010263050345143993865"},
-        "Ci certified real series remains valid at the audited 96 boundary");
-    tests.expectEqual(eval(session, "N[Ci[97],20]"), std::string{"Ci[97]"},
-        "Ci exits immediately beyond the audited certified-series boundary");
+        std::string{"-0.0015490370545520353789+3.1427759880886742510I"},
+        "complex Ei crosses the former |z| <= 512 boundary without reverting to the cancellation-heavy series");
+    tests.expectEqual(eval(session, "N[Ei[1000+I]/exp[1000+I],20]"),
+        std::string{"0.0010010010030130653917-0.0000010020050201016102752I"},
+        "complex Ei large-argument E1 continuation preserves relative precision");
+    tests.expectEqual(eval(session, "N[Ci[1000+I],20]"),
+        std::string{"0.0012757330374975137106+0.00066060412280668393821I"},
+        "complex Ci large-argument E1 relation certifies the right half-plane");
+    tests.expectEqual(eval(session, "N[Ci[-1000+I],20]"),
+        std::string{"0.0012757330374975137106+3.1409320494669865545I"},
+        "complex Ci left-half-plane continuation preserves the principal Log branch offset");
+    tests.expectEqual(eval(session, "N[Ei[97],20]"),
+        std::string{"13942532424263388810000000000000000000000.0"},
+        "Ei no longer imposes the former real |x| <= 96 work boundary");
+    tests.expectEqual(eval(session, "N[Si[97],20]"),
+        std::string{"1.5802915860056074271"},
+        "Si no longer imposes the former real |x| <= 96 work boundary");
+    tests.expectEqual(eval(session, "N[Ci[97],20]"),
+        std::string{"0.0040109142844998040983"},
+        "Ci no longer imposes the former real x <= 96 work boundary");
+    tests.expectEqual(eval(session, "N[Ei[-64],20]"),
+        std::string{"-0.0000000000000000000000000000024679685594526945427"},
+        "negative Ei preserves significant digits instead of collapsing to 0.0");
+    tests.expectEqual(eval(session, "N[Si[512],20]"),
+        std::string{"1.5727429488260625276"},
+        "Si remains certified well beyond the former real-series boundary");
+    tests.expectEqual(eval(session, "N[Ci[512],20]"),
+        std::string{"0.00015911090433721849048"},
+        "Ci remains certified well beyond the former real-series boundary");
+    tests.expectEqual(eval(session, "N[Si[10000],20]"),
+        std::string{"1.5708915453859619157"},
+        "Si large-positive asymptotic backend certifies values far beyond the former boundary");
+    tests.expectEqual(eval(session, "N[Ci[10000],20]"),
+        std::string{"-0.000030551916724485212665"},
+        "Ci large-positive asymptotic backend avoids EulerGamma cancellation at large arguments");
+    tests.expectEqual(eval(session, "N[Ei[1000]/exp[1000],20]"),
+        std::string{"0.0010010020060241207251"},
+        "positive Ei asymptotic backend preserves relative precision at large arguments");
+    tests.expectEqual(eval(session, "N[Ei[10000]/exp[10000],20]"),
+        std::string{"0.00010001000200060024012"},
+        "positive Ei asymptotic backend scales without a fixed magnitude threshold");
     tests.expectEqual(eval(session, "N[Ei[-1+I],20]"),
         std::string{"-0.00028162445198141832551+2.9622681185504342983I"},
         "complex Ei remains stable in the left half-plane away from the principal cut");
@@ -319,6 +451,10 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         "dilogarithm at one is exact");
     tests.expectEqual(eval(session, "polylog[2,-1]"), std::string{"-Pi^2/12"},
         "dilogarithm at minus one is exact");
+    tests.expectEqual(eval(session, "polylog[3,1]"), std::string{"zeta[3]"},
+        "positive integer polylog at one reduces exactly to zeta");
+    tests.expectEqual(eval(session, "polylog[3,-1]"), std::string{"-3zeta[3]/4"},
+        "positive integer polylog at minus one reduces exactly to eta and zeta");
     tests.expectEqual(eval(session, "N[polylog[2,1/2],20]"),
         std::string{"0.58224052646501250590"},
         "polylog has a certified |z|<1 real series backend for positive integer order");
@@ -335,13 +471,31 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"0.58224"},
         "polylog reuses the complex interval series for finite-precision real inputs and returns a real enclosure");
     tests.expectEqual(eval(session, "N[polylog[2,2],20]"), std::string{"polylog[2, 2]"},
-        "polylog outside the certified series disk exits without adaptive-precision runaway");
+        "dilogarithm keeps an exact point on the principal positive-real cut unevaluated");
     tests.expectEqual(eval(session, "N[polylog[2,49/50],20]"),
         std::string{"1.5457997120314656097"},
-        "polylog remains certified at the bounded-work series threshold");
+        "polylog remains certified across the former bounded-work threshold");
     tests.expectEqual(eval(session, "N[polylog[2,99/100],20]"),
-        std::string{"polylog[2, 99/100]"},
-        "polylog exits immediately before exact Rational series work becomes pathological");
+        std::string{"1.5886254480763753270"},
+        "dilogarithm uses a certified reflection backend near one");
+    tests.expectEqual(eval(session, "N[polylog[2,999/1000],20]"),
+        std::string{"1.6370226052761177427"},
+        "dilogarithm remains fast and certified close to the unit point");
+    tests.expectEqual(eval(session, "N[polylog[3,999/1000],20]"),
+        std::string{"1.2004153539954643452"},
+        "higher positive integer polylog uses the certified near-one logarithmic expansion");
+    tests.expectEqual(eval(session, "N[polylog[3,N[999/1000,8]],20]"),
+        std::string{"1.2004154"},
+        "near-one polylog preserves finite input information instead of recovering hidden precision");
+    tests.expectEqual(eval(session, "N[polylog[2,-2],20]"),
+        std::string{"-1.4367463668836809464"},
+        "dilogarithm maps the negative real axis through the DLMF connection formula");
+    tests.expectEqual(eval(session, "N[polylog[2,I],20]"),
+        std::string{"-0.20561675835602830456+0.91596559417721901505I"},
+        "dilogarithm certifies a representative unit-circle point by continuation");
+    tests.expectEqual(eval(session, "N[polylog[2,2+I],20]"),
+        std::string{"1.1866885370000578311+2.4077407693457720017I"},
+        "dilogarithm inversion certifies complex values outside the unit disk away from the cut");
 
     tests.expectEqual(eval(session, "beta[2,3]"), std::string{"1/12"},
         "Beta at positive integers is exact");
@@ -372,16 +526,27 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[zeta[3],20]"),
         std::string{"1.2020569031595942854"},
         "zeta has a certified real backend for s greater than one");
+    tests.expectEqual(eval(session, "N[zeta[3/2],20]"),
+        std::string{"2.6123753486854883433"},
+        "zeta keeps non-integer real Euler-Maclaurin evaluation certified");
+    tests.expectEqual(eval(session, "N[zeta[12/5],20]"),
+        std::string{"1.3833428588407357282"},
+        "zeta keeps general rational Euler-Maclaurin evaluation certified");
     tests.expectEqual(eval(session, "N[zeta[2+I],30]"),
         std::string{"1.15035570325490267174284993474-0.437530865919607881117527898593I"},
         "zeta has a certified complex Euler-Maclaurin backend for Re(s)>1");
     tests.expectEqual(eval(session, "N[zeta[-1/2],20]"),
         std::string{"-0.20788622497735456602"},
         "zeta uses the exact functional equation before certified evaluation on negative rationals");
-    tests.expectEqual(eval(session, "N[zeta[1/2],20]"), std::string{"zeta[1/2]"},
-        "zeta in the unsupported real critical strip is not misclassified as a domain error");
-    tests.expectEqual(eval(session, "N[zeta[1/2+I],20]"), std::string{"zeta[1/2+I]"},
-        "zeta in the unsupported complex critical strip is not misclassified as a domain error");
+    tests.expectEqual(eval(session, "N[zeta[1/2],20]"),
+        std::string{"-1.4603545088095868129"},
+        "zeta certifies the real critical strip by generalized Euler-Maclaurin evaluation");
+    tests.expectEqual(eval(session, "N[zeta[1/2+I],20]"),
+        std::string{"0.14393642707718906032-0.72209974353167308913I"},
+        "zeta certifies complex values in the critical strip");
+    tests.expectEqual(eval(session, "N[zeta[-3+I],20]"),
+        std::string{"0.014382512185224971007+0.010349659644311743514I"},
+        "zeta uses the functional equation for the complex left half-plane");
     tests.expect(evalError(session, "zeta[1]").type() == error::CalcErrorType::Domain,
         "zeta rejects its pole at one");
 
@@ -438,6 +603,9 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[ibeta[1/3,2/3,1/4],20]"),
         std::string{"0.53302858123542523627"},
         "regularized incomplete Beta has a certified real backend");
+    tests.expectEqual(eval(session, "N[ibeta[N[1/3,8],N[2/3,8],1/4],8]"),
+        std::string{"0.53302858"},
+        "ibeta propagates finite-precision positive parameter enclosures without recovering hidden exact values");
     tests.expect(evalError(session, "ibeta[1,1,2]").type() == error::CalcErrorType::Domain,
         "ibeta rejects x outside the real unit interval");
     tests.expectEqual(eval(session, "D[ibeta[2,3,x],x]"),

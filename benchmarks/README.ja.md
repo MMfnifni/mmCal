@@ -5,13 +5,13 @@
 通常の`mmCal.Tests`や`test_set`が「既知の仕様を壊していないか」を確認するのに対し，`mmCal.Benchmarks`は主に次を担当する。
 
 - BigInt / BigFloat / certified算法の性能変化を測る
-- Karatsuba，Toom-3，Burnikel–Ziegler，FFT等のthresholdを実測する
+- Karatsuba，Toom-3，Burnikel–Ziegler，FFT等の閾値を実測する
 - fixed-seed random inputで数学的不変量を検査する
-- Matrix，FFT，特殊函数等の数値backendがcertified relationを維持しているか確認する
+- Matrix，FFT，特殊函数等の数値計算基盤がcertified relationを維持しているか確認する
 - 大きなMatrixで時間・メモリ特性を調べる
 - 合法な数式を大量生成し，函数同士の未知の組合せ不具合を探索する
 
-benchmark値はCPU，compiler，最適化設定，allocator，OS，cache状態等に依存する。**異なる環境の数値を直接性能保証として比較しないこと。** thresholdを変更する場合は，実際に採用するcompilerとbuild configurationで再測定する。
+benchmark値はCPU，compiler，最適化設定，allocator，OS，cache状態等に依存する。**異なる環境の数値を直接性能保証として比較しないこと。** 閾値を変更する場合は，実際に採用するcompilerとbuild configurationで再測定する。
 
 ---
 
@@ -101,7 +101,7 @@ certified Gamma / regularized incomplete Betaのprecision scalingを単独測定
 mmCal.Benchmarks --special-functions 1
 ```
 
-80 / 160 / 320 / 640 / 1280 bitで`gamma[1/3]`と`ibeta[1/3,2/3,1/4]`のcertified backendを直接測る。Gammaのexact Rational dispatch，static exact Bernoulli table，高精度Stirling planner，ibetaのpoint fast path / shared Beta normalizationの退行監視用である。Stirling-planや定数cacheはprocess内でwarmになるため，完全なcold-start比較では各precisionを別processでも測定する。
+80 / 160 / 320 / 640 / 1280 bitで`gamma[1/3]`と`ibeta[1/3,2/3,1/4]`のcertified 計算基盤を直接測る。Gammaのexact Rational dispatch，static exact Bernoulli table，高精度Stirling planner，ibetaのpoint fast path / shared Beta normalizationの退行監視用である。Stirling-planや定数cacheはprocess内でwarmになるため，完全なcold-start比較では各precisionを別processでも測定する。
 
 random expression fuzzerを有限回実行：
 
@@ -177,7 +177,7 @@ random試験数を増やし，通常benchmarkより大きなoperand，高精度�
 | certified Matrix | 200 |
 | certified FFT | 200 |
 
-日常的なcommit前確認より，算法threshold変更，高速化patch，release前の性能監査向けである。
+日常的なcommit前確認より，算法閾値変更，高速化patch，release前の性能監査向けである。
 
 ## 3.3 `--random-only`
 
@@ -207,13 +207,13 @@ random invariantを省略し，timingだけを測る。
 mmCal.Benchmarks --exact-linear-algebra 1
 ```
 
-exact整数行列の係数height 16 / 96 / 256 / 512 bitと複数次数について，`det`と`solveLinear`のBareiss / modular backendを強制比較する。`inverse`は16 / 96 / 256 bitを別sweepし，automatic採用に十分なcrossoverがあるか確認する。dispatcher thresholdは数学仕様ではなくcompiler・CPU依存の性能policyなので，変更時はこのrunnerを正本とする。
+exact整数行列の係数height 16 / 96 / 256 / 512 bitと複数次数について，`det`と`solveLinear`のBareiss / modular 計算基盤を強制比較する。`inverse`は16 / 96 / 256 bitを別sweepし，automatic採用に十分なcrossoverがあるか確認する。dispatcher 閾値は数学仕様ではなくcompiler・CPU依存の性能policyなので，変更時はこのrunnerを正本とする。
 
 ```text
 mmCal.Benchmarks --budget-telemetry
 ```
 
-代数式，modular determinant，modular solve，certified評価，積分の代表入力を1回ずつ評価し，step，depth，generated node，探索candidate，dense Array / Matrix temporary，BigInt，precision，algebraic refinementに加えて`modular-primes`を表示する。これは既定budget値の校正用telemetryであり，PASS/FAIL判定や数学的意味論を変更しない。
+代数式，modular determinant，modular solve，certified評価，積分の代表入力を1回ずつ評価し，work count，depth，generated node，探索candidate，dense Array / Matrix temporary，BigInt，precision，algebraic refinementに加えて`modular-primes`を表示する。これは既定budget値の校正用telemetryであり，PASS/FAIL判定や数学的意味論を変更しない。
 
 ---
 
@@ -243,7 +243,7 @@ mmCal.Benchmarks --budget-telemetry
 
 出力単位は1回あたり`us`である。
 
-Karatsuba / Toom-3 / Burnikel–Ziegler等のcrossoverは数学定数ではなく実装環境依存である。threshold変更時はこの領域を特に比較する。
+Karatsuba / Toom-3 / Burnikel–Ziegler等のcrossoverは数学定数ではなく実装環境依存である。閾値変更時はこの領域を特に比較する。
 
 ## 4.2 Factorial
 
@@ -287,7 +287,7 @@ exact整数 / Rational pathとprecision-aware certified pathを同じ表の中�
 
 ## 4.5 Exact fraction-free QR
 
-exact実数QRはprimitive整数vector上のfraction-free直交化を使い，平方根をQ/Rの最終materializationまで遅延する。full-rankではGram行列のsymmetric Bareiss経路，rank-deficientではdirect fraction-free fallbackを使う。旧3×3 hard capは撤去済みで，通常benchmarkも2/4/8/16次を測る。
+exact実数QRはprimitive整数vector上のfraction-free直交化を使い，平方根をQ/Rの最終materializationまで遅延する。full-rankではGram行列のsymmetric Bareiss経路，rank-deficientではdirect fraction-free 代替経路を使う。旧3×3 hard capは撤去済みで，通常benchmarkも2/4/8/16次を測る。
 
 `--exact-linear-algebra`では係数bit長を変えながら，final Rational/radical materialization込みの`inverse/rref/rank/nullSpace/QR`と，rank-deficient 48/64次の構造系pathも測る。
 
@@ -307,17 +307,17 @@ certified QRについて，column block幅
 
 certified reduced SVDを，主に4，8，12，16次で測る。
 
-SVDはreconstruction / orthogonality relationを監査する数値backendであり，単純な`double` LAPACK benchmarkとは性質が異なる。
+SVDはreconstruction / orthogonality relationを監査する数値計算基盤であり，単純な`double` LAPACK benchmarkとは性質が異なる。
 
 ## 4.8 Eigen / Eigensystem
 
-certified approximate eigenvalue / eigensystem backendを4，8，12，16次で測る。
+certified approximate eigenvalue / eigensystem 計算基盤を4，8，12，16次で測る。
 
 timing入力は，非対角成分の絶対値を2以下，隣接する対角値の間隔を`4n+1`とした密実対称行列である。Gershgorin円板が互いに素になるためsimple spectrumが構成的に保証され，完全な固有vector基底を持たない入力をtiming failureと混同しない。
 
-backendが結果を返さない場合は，途中までのtiming行を残して`abort`するのではなく，operation，size，digitsをstderrへ出してexit code 1で終了する。
+計算基盤が結果を返さない場合は，途中までのtiming行を残して`abort`するのではなく，operation，size，digitsをstderrへ出してexit code 1で終了する。
 
-同じ4，8，12，16次の固定入力は`--random-only`でも固有関係と非零vectorを検査する。これにより，長いtiming列を開始する前に入力fixtureとbackend契約の不整合を検出する。
+同じ4，8，12，16次の固定入力は`--random-only`でも固有関係と非零vectorを検査する。これにより，長いtiming列を開始する前に入力fixtureと計算基盤契約の不整合を検出する。
 
 一般非正規行列では固有値問題そのものが摂動に敏感であるため，時間だけでなくrandom invariant側のrelation checkと併せて評価する。
 
@@ -333,7 +333,7 @@ backendが結果を返さない場合は，途中までのtiming行を残して`
 
 `--full`では512点まで拡大する。
 
-また非2冪長について，direct DFTとFFT/Bluesteinの実測を比較する。現在のdirect/Bluestein thresholdも，この測定から再評価する前提である。
+また非2冪長について，direct DFTとFFT/Bluesteinの実測を比較する。現在のdirect/Bluestein 閾値も，この測定から再評価する前提である。
 
 境界だけを旧policyから独立して再測定する場合：
 
@@ -347,7 +347,7 @@ GCC Releaseの2026-08-22再測定では383点でBluestein，384点でdirect，38
 
 ## 4.9.1 Exact Cyclotomic FFT
 
-Stage 7-7の非2冪exact Cyclotomic backendだけを短時間で測る場合：
+非2冪exact Cyclotomic 計算基盤だけを短時間で測る場合：
 
 ```text
 mmCal.Benchmarks --exact-cyclotomic-fft 5
@@ -395,7 +395,7 @@ log[x] + log[1/x]
 
 ### 2F1 / elliptic
 
-既知の退化式・恒等式をrandomなsafe-domain pointへ適用し，certified enclosureがexact値を包含することを確認する。
+既知の退化式・恒等式をrandomなsafe-定義域 pointへ適用し，certified enclosureがexact値を包含することを確認する。
 
 ### Matrix
 
@@ -414,7 +414,7 @@ Matrix random checkでは，単に期待文字列と比較するのではなく�
 
 整数・Rational・certified approximate pathを跨いで監視する。可逆性だけでは完全な固有vector基底の存在を保証しないため，Eigen relationにはdistinct eigenvalueを持つ上三角行列を別生成する。defective / near-defective行列で`eigensystem`が未評価に留まることは仕様どおりであり，failureとして扱わない。
 
-失敗時は`stage`，1-originの`case`，0-originの`case-index`，size，反例行列を出力する。固定seedなので，同一version・同一case数なら反例を再現できる。
+失敗時は実装が出力する`phase` field，1-originの`case`，0-originの`case-index`，size，反例行列を出力する。固定seedなので，同一version・同一case数なら反例を再現できる。
 
 ### FFT
 
@@ -521,7 +521,7 @@ v1.5.3の第一段階typed-node化では，同一GCC Release/LTO-offの`--matrix
 mmCal.Benchmarks --certification-boundaries
 ```
 
-`N`のcertified evaluationについて，**branch cut・pole・domain境界・certified backend境界**の近傍を重点的に生成する専用fuzzerである。通常のRandom Expression Fuzzerが式全体のsemantic invariantを広く探索するのに対し，こちらはclosed numeric expressionだけを作り，結果を次の分類へ落として契約を監査する。
+`N`のcertified evaluationについて，**分岐切断・極・定義域境界・certified 計算基盤境界**の近傍と，有限precision値に対する**metamorphic変形**を重点的に生成する専用fuzzerである。通常のRandom Expression Fuzzerが式全体のsemantic invariantを広く探索するのに対し，こちらはclosed numeric expressionを中心に，固定分類と変形前後の関係を直接監査する。
 
 ```text
 Value
@@ -536,13 +536,18 @@ OtherError
 
 主要な不変条件は次である。
 
-- exact pole / exact singularityは`DomainError`であり，有限precisionのInformationEnclosureがpoleを**含み得るだけ**なら`N::precision`である。
-- principal branch sideをInformationEnclosureから一意に決定できない場合，片側の値を捏造せず`N::precision`へ戻る。
-- 数学的な値が存在するが現certified backendの外側なら`N::unsupported`であり，`DomainError`へ誤分類しない。
+- exact 極 / exact singularityは`DomainError`であり，有限precisionのInformationEnclosureが極を**含み得るだけ**なら`N::precision`である。
+- 主値分岐 sideをInformationEnclosureから一意に決定できない場合，片側の値を捏造せず`N::precision`へ戻る。
+- 数学的な値が存在するが現certified 計算基盤の外側なら`N::unsupported`であり，`DomainError`へ誤分類しない。
 - finite information由来の境界曖昧性はguard digitを増やしても改善しないため，過剰なcertified refinementを消費しない。
 - generic `N::unevaluated`，resource exhaustion，case timeoutは通常の数学的分類とは別のfailureとして扱う。
+- `N[N[x,p],q]`で外側の要求桁を増やしても，内側の近似値より狭いInformationEnclosureやhidden guard digitsを復元しない。
+- 外側の`N`で要求桁を下げる場合，InformationEnclosureは同じか広がるだけであり，狭くならない。
+- `+0`，`*1`，二重符号反転等のexact identityは有限precision provenanceを再量子化しない。
+- `f[N[x,p]]`は`N[f[x],p]`と同じ表示値になる必要はないが，前者のInformationEnclosureはexact-routeのCertifiedEnclosureを包含しなければならない。
+- branch/極曖昧性，finite zeroを含むmatrix pivot判定，FFTや数値微積分の有限precision入力は，nested `N`等の意味保存変形によってhidden exact truthを回収しない。
 
-初期probe setは46種類で，`log/sqrt/Arg/atan2/Power`，逆三角・逆双曲線，Gamma/digamma/trigamma/zeta，`Ei/Ci/li/polylog`，`1F1/2F1`，`ibeta`，Lambert W，elliptic F等を横断する。各caseではprobeを選んだうえで，要求precisionを`2/5/20/50/100`桁，有限precision入力を`2/5/10/20`桁，exact branch-side epsilonの桁をseedから変化させる。
+固定classification probeは59種類で，`log/sqrt/Arg/atan2/Power`，逆三角・逆双曲線，Gamma/digamma/trigamma/zeta，`Ei/Ci/li/polylog`，`1F1/2F1`，`ibeta`，Lambert W，elliptic F等を横断する。さらに36種類のmetamorphic probeで，nested `N`，InformationEnclosure単調性，exact identity，persistent ambiguity，finite-precision線形代数，FFT，数値微積分，`f[N[x,p]]`と`N[f[x],p]`の関係を検査する。各caseではprobeを選んだうえで，要求precisionを`2/5/20/50/100`桁，有限precision入力を`2/5/10/20`桁，exact branch-side epsilonの桁をseedから変化させる。
 
 ## 7.1 有限実行
 
@@ -563,7 +568,7 @@ mmCal.Benchmarks --certification-boundaries --seed 1234 --case 817
 
 FAIL時にはfamily，probe名，生成式，期待分類，実分類，diagnostic，EvaluationBudget使用量を表示し，同じcommandを`Reproduce`として出す。`--case`では評価開始前に式をflushして表示するため，重いcaseやtimeout候補でも何を実行しているか確認できる。
 
-## 7.3 Timeoutとbounded-work
+## 7.3 Timeoutと計算量制限付き
 
 境界fuzzerは各caseをfrontend cancellation token付きで評価し，既定では**2000 ms/case**を超えるとcancelする。
 
@@ -573,7 +578,7 @@ mmCal.Benchmarks --certification-boundaries --timeout-ms 5000
 
 これはCoreへwall-clock deadlineを持ち込むものではない。benchmark frontendのwatchdogが既存`EvaluationCancellationToken`を要求するだけであり，timeoutは`DomainError`や`N::precision`とは別の`Timeout` failureとして報告する。
 
-また，`N::precision`が期待されるpersistent ambiguityで4096回を超えるcertified refinementを消費した場合もfailureとする。入力InformationEnclosureが境界を跨いだままなら，global budget近くまでguardを増やす挙動は性能退行とみなす。
+また，`N::precision`が期待されるpersistent ambiguityで4096回を超えるcertified refinementを消費した場合もfailureとする。入力InformationEnclosureが境界を跨いだままなら，global budget近くまでguardを増やす挙動は性能退行とみなす。一方，正常値の特殊函数計算基盤はEuler-Maclaurinや級数評価で多数のwork unitを正当に消費し得るため，fuzzer側から低いglobal `CertifiedRefinement`上限は上書きしない。正常値のcliffはcase timeoutで分離して検出する。
 
 ## 7.4 無限loop・複数thread
 
@@ -671,7 +676,7 @@ Reduced   : ...
 Reason    : ...
 Expected  : ...
 Actual    : ...
-Budget    : steps=... depth=... nodes=... simplify=... solve=... integrate=...
+Budget    : work=... depth=... nodes=... simplify=... solve=... integrate=...
 Reproduce : mmCal.Benchmarks --random-expressions --seed 92847163 --case 48172
 ```
 
@@ -784,7 +789,7 @@ dot[A,inverse[A]] == I
 
 ### FFT
 
-1～12点のexact Gaussian整数vectorについて，2冪・非2冪backendを跨いで検査する。
+1～12点のexact Gaussian整数vectorについて，2冪・非2冪計算基盤を跨いで検査する。
 
 ```text
 ifft[fft[v]] == v
@@ -794,9 +799,9 @@ ifft[fft[v]] == v
 
 二段目oracle自体もboundedである。`CertifiedEvaluator`は実再帰depth budgetを持ち，巨大なgeneric exact DFT式をWindowsのnative stack overflowまで再帰させない。oracleがこのdepth/work上限で判定できなかったcaseはFFTの数学的FAILとは区別して`inconclusive`として計数し，`--nostop-loop`の進捗表示にも件数を出す。単一`--case`再現では`[INCONCLUSIVE]`を表示する。
 
-### Domain / branch境界
+### 定義域 / branch境界
 
-`1/0`，`0^0`，`cot[0]`，`atan2[0,0]`，`atanh[1]`が必ず`DomainError`へ分類されること，`sqrt[-1] == I`，`sqrt[(-3)^2] == 3`となるprincipal square-root branchを検査する。`ResourceLimitError`や一般exceptionへの分類退行もFAILである。
+`1/0`，`0^0`，`cot[0]`，`atan2[0,0]`，`atanh[1]`が必ず`DomainError`へ分類されること，`sqrt[-1] == I`，`sqrt[(-3)^2] == 3`となる主値 square-root 分岐を検査する。`ResourceLimitError`や一般exceptionへの分類退行もFAILである。
 
 FAIL時の`Budget`行は，直前評価の`EvaluationUsage`である。反例が資源上限そのものなのか，低い使用量で生じた意味論failureなのかをseed / caseと同時に判断できる。
 
@@ -834,11 +839,11 @@ mmCal.Benchmarks --random-expressions --loop
 
 # 10. Benchmark結果の読み方
 
-## 10.1 1回の結果だけでthresholdを変えない
+## 10.1 1回の結果だけで閾値を変えない
 
 CPU boost，background process，cache，allocator等で数%程度は容易に変動する。
 
-threshold変更では，
+閾値変更では，
 
 1. 同じRelease binary
 2. 同じmachine
@@ -877,11 +882,11 @@ exact det
 N[det,16]
 ```
 
-は同じ数学函数でもbackendが異なる。
+は同じ数学函数でも計算基盤が異なる。
 
 exact pathはBigInt / Rational / symbolic expressionを維持し，approximate pathは`ApproximationContext`からBigFloat / intervalへ直接dispatchする場合がある。
 
-したがって単純に「Nを付けると何倍速い」と一般化せず，どのbackendを測っているかを見る。
+したがって単純に「Nを付けると何倍速い」と一般化せず，どの計算基盤を測っているかを見る。
 
 ---
 
@@ -895,14 +900,14 @@ black-box tests
 mmCal.Benchmarks --random-only
 ```
 
-## 数値backendを変更した場合
+## 数値計算基盤を変更した場合
 
 ```text
 mmCal.Benchmarks --random-only
 mmCal.Benchmarks --benchmark-only
 ```
 
-## BigInt算法thresholdを変更した場合
+## BigInt算法閾値を変更した場合
 
 ```text
 mmCal.Benchmarks --full --benchmark-only
@@ -952,7 +957,7 @@ mmCal.Benchmarks --random-expressions --seed <seed> --case <case>
 | `1` | random invariant / random-expression fuzzer等でFAIL |
 | `2` | option不足，未知option，矛盾したoption等のCLI error |
 
-benchmark中の内部invariant違反等ではprogramがabortする場合がある。これはtiming値を誤って正常結果として採用しないためである。ただし，certified Eigen / Eigensystem backendが結果を返せない場合は診断を表示し，code 1で終了する。
+benchmark中の内部invariant違反等ではprogramがabortする場合がある。これはtiming値を誤って正常結果として採用しないためである。ただし，certified Eigen / Eigensystem 計算基盤が結果を返せない場合は診断を表示し，code 1で終了する。
 
 ---
 
@@ -964,7 +969,7 @@ benchmark中の内部invariant違反等ではprogramがabortする場合があ�
 
 - 理論上速そう，という理由だけで算法を採用しない
 - 棄却した算法も再測定可能な形をできるだけ残す
-- thresholdをCPU/compiler非依存の普遍値だと思わない
+- 閾値をCPU/compiler非依存の普遍値だと思わない
 - arbitrary precision / intervalのコストを`double` benchmarkと混同しない
 - 大規模Matrixでは算法時間だけでなくrepresentation / allocation / parser costも監視する
 - fuzzerで見つけた未知のfailureを，再現可能な固定testへ変換する
@@ -974,3 +979,95 @@ mmCalの性能方針は，
 > **正当性を確認し，random testで揺さぶり，benchmarkで測り，速いものだけを採用する。**
 
 である。
+
+---
+
+# 14. 特殊函数 performance-cliff 監査
+
+特殊函数の計算量制限付き境界と精度増加時の計算量を同じ尺度で比較するには，次を使う。
+
+```text
+mmCal.Benchmarks --performance-cliffs [iterations]
+```
+
+各pointについて公開`KernelSession`経由の評価時間と`EvaluationUsage`を表示する。`iterations >= 2`では最初の評価を`first-ms`，以後の平均を`warm-ms`として分離する。static table/cacheのfirst-use taxと定常costを混同しないためである。
+
+主な列は次の意味を持つ。
+
+- `first-ms` / `warm-ms`: 公開評価経路全体のwall time
+- `cert-ref`: `CertifiedRefinement`
+- `work`: evaluator work count
+- `nodes`: generated Expr node
+- `CLIFF(time ...)`: 同一sweep内の隣接成功点に対してwall timeが既定4倍以上へ増えた候補
+- `CLIFF(work ...)`: wall timeより先にcertified workが4倍以上へ増えた候補
+- `BOUNDARY`: numericからheld/error等へ結果分類が切り替わった点
+
+`BOUNDARY`はperformance cliffではない。例えば分岐切断や極を跨ぐため現計算基盤が未対応の入力を即時に未評価へ戻すことは，病的な反復へ入らないための正常な計算量制限付き policyである。固定閾値は算法改善後に再監査し，数学的理由がなくなったものは撤去する。
+
+現runnerは，Gamma，LogGamma，erf/erfc，Lambert W，Fresnel，`1F1` / `2F1`，楕円積分，`Ei/Si/Ci/li`，polylog，zeta，digamma/trigamma，Beta/ibetaを一巡する。Lambert Wは`-1/e`に対する`10^-2`～`10^-160`のcomplex/real offsetと20/40/80/100桁sweepを持ち，平方根branch-point 計算基盤の浅い近傍・極端な近傍の双方を監視する。楕円積分は`m/n`境界だけでなく`m/n=9/10`でのamplitude sweepと10/20/40/80桁precision sweepも持ち，small-amplitude fast pathの改善後にcomplete case近傍へcliffが移っていないかを継続監視する。real/complexの代表計算基盤もsnapshotとして測る。
+
+2026-08-25のGCC Release / LTO offでの初回横断監査では，次が主要hotspotだった。値はalgorithm選定用のsignalであり，他CPU/compilerへ固定閾値として移植しない。
+
+| workload | warm代表値 | 主なsignal |
+|---|---:|---|
+| `N[1F1[1/2,5/4,160],20]` | 約1.08 s | `z=64 -> 128`で約7.8倍，境界160までは増加 |
+| `N[polylog[2,49/50],20]` | 約139 ms | unit-circle境界へ近づき連続的に増加 |
+| `N[ellipticF[1/2,9/10],20]` | 約162 ms | `m`増加に伴い級数cost増大 |
+| `N[ellipticE[1/2,9/10],20]` | 約206 ms | 同上 |
+| `N[ellipticPi[9/10,1/2,1/3],20]` | 約307 ms | characteristic境界側が特に重い |
+| `N[fresnelc[7+I],20]` | 約1.97 s | `\|z\|<8`境界直前で急増 |
+| complex `2F1` 解析接続代表 | 約0.98 s | `1/z` 解析接続経路が重い |
+| `N[li[-2+I],20]` | 約1.23 s | complex `Log -> Ei`経路が重い |
+| `N[zeta[3/2],20]` | 約155 ms | 約4.2万 certified refinement |
+| complex `zeta`代表 | 約0.45–0.55 s | refinement数だけでは説明できない高いinterval算術cost |
+
+一方，`gamma[1/3]`，`ibeta[1/3,2/3,1/4]`，20桁の通常`2F1`はprecisionを10→80桁へ上げても今回の4倍判定で急なcliffは出ず，ほぼ連続的に増加した。
+
+### polylog 49/50境界撤去後の再監査（2026-08-28）
+
+旧`|z|<=49/50`はexact-Rational級数のrepresentation cliffを避けるためのpolicyだった。direct termをoutward interval recurrenceへ移し，`Li_2`へDLMF connection formula，order 3～12の正実unit-point近傍へ`mu=log(z)`展開を追加した後，固定閾値を撤去した。
+
+GCC Release / LTO off，20桁，`--performance-cliffs 1`では`Li_2(z)`の`z=1/2,4/5,9/10,19/20,49/50,99/100,199/200,999/1000` sweepが約1.3～3.7 msで推移し，旧49/50位置に不連続はない。`z=999/1000`は約3.0 msである。runnerにはこのargument sweepに加え，10/20/40/80桁precision，`I/-2/2+I`等の解析接続，`Li_3/Li_4/Li_8` near-one sweepを常設する。
+### complex Fresnel / large positive 1F1 最適化後
+
+上表の初回値を受けて，complex Fresnelのtail majorantをexact Rational反復からoutward intervalへ変更し，large positive `1F1`のterm/partial sumもguard付きintervalへ移した。この段階では公開計算量制限付き境界を`Fresnel |z|<8`，`1F1 |z|<=160`のまま維持していた。
+
+同じGCC Release / LTO off環境の再測定では，`N[fresnelc[7+I],20]`は約14 ms，`N[1F1[1/2,5/4,160],20]`は約6 msまで低下した。後続のcapability監査では1F1のinterval級数を符号非依存majorantへ一般化し，real/complexとも固定`160`境界を撤去した。さらにcomplex Fresnelも軸近傍大引数へ保証付き`f/g`漸近計算基盤を追加し，旧`|z|<8`境界を撤去した。runnerは`1F1 magnitude scaling`，`z=512` / complex `256+I` precision sweepに加え，complex Fresnel `32+I` precisionとargument sweepを常設する。
+
+
+### complex 2F1 解析接続 / li の再測定（2026-08-26）
+
+後続監査で，両者の共通ボトルネックが主値 complex Log/Arg内部のcertified `atan` exact-Rational級数であることを特定した。atanの隣接部分和をoutward `RealInterval`で保持し，2F1側ではprovably-real Gammaをreal 計算基盤へ分流，complex GammaのStirling remainderも高precision dyadic下端のexact冪乗を避けた。
+
+同じGCC Release / LTO off系統の3回warm測定では，代表complex `2F1` 解析接続は約0.96 sから約100 ms，`li[-2+I]`は約1.03 sから約13.5 msへ低下した。`li[-2]`も約575 msから約9 msまで低下した。runnerには`2F1 continuation precision`と`complex li precision`を追加し，10/20/40/80桁の伸びを継続監視する。
+
+---
+
+# 15. Complex Root performance-cliff 監査
+
+Complex Algebraic Rootの全根分離と，既存isolating diskからの単根refinementを分けて測るには次を使う。
+
+```text
+mmCal.Benchmarks --algebraic-root-cliffs [iterations]
+```
+
+出力列は`create-ms`が初期の全根isolation＋決定的ordering，`refine80-ms` / `refine320-ms`が選択済みrootだけのcertified local refinementである。対称seed pathologyを拾う`x^n-2`系列，generic dense 5次，近接複素根を持つ4次caseに加え，根半径が`2^-10`と`2^10`へ分離するtwo-radius 16次caseを常設する。
+
+2026-08-28のGCC Release / LTO offでは，Newton-polygon multi-radius seed導入時点で`x^8-2`約68 ms，`x^16-2`約0.91 sを維持し，two-radius 16次caseを旧単一Cauchy半径seed約10.79 sから約0.36 sへ低下させた。その後の高次数監査でRouché証明をdirected BigFloat intervalの十分条件へ先行移行し，閉じない場合だけexact Rational Taylor boundへ切り替える構成へ変更した。Durand-Kernerも候補補正が十分小さくなればdegree回数を待たず終了し，最終Rouchéが失敗した場合だけprecisionを上げて再試行する。最終runnerでは`x^16-2`約0.16 s，一般Solveは16次約0.09 s，32次約0.36 s，64次約1.56 s，65次約1.52 sである。96次までの追加監査でも性能が連続したためRoot defining-polynomial budgetは64から96へ再設定した。今後の候補生成改善としてAberth–Ehrlich法を比較候補に残すが，採用するとしてもapproximate seed/refinementに限定し，Rouché certificationを置換しない。
+
+### real Ei / Si / Ci の大引数監査
+
+旧`|x|<=96`境界撤去後は，`--performance-cliffs`のreal `Ei/Si/Ci` sweepで96/97だけでなく512/1000/10000を継続監視する。moderate argumentのTaylorと大引数asymptoticの切替は固定magnitude contractではなく，漸近剰余が要求幅へ届くか，Taylor term cap，共通`EvaluationBudget`で決まる。`Ci[1000]`等がEulerGamma cancellation pathへ戻ること，またpositive `Ei`の巨大値でabsolute-error基準へ退行することをregressionとして検出する。
+
+### complex Fresnel の固定 `|z|<8` 境界撤去
+
+Maclaurinのexact-majorant cliffを除去した後に旧`8`境界を再監査すると，`8+I`から`20+I`まではそのままcertifyできる一方，`32+I`付近では振動的な巨大中間項の相殺によりseriesが再び秒級へ伸びた。固定境界を別の値へ移す代わりに，DLMF 7.12の複素Fresnel補助函数`f/g`漸近展開を追加した。90度回転対称性により入力を正実軸近傍へ写し，`|tan(arg z)|<=1/4`を区間端点から証明できる場合だけ，最初の未使用項で剰余を押さえられる安全なwedgeとして漸近計算基盤を使う。それ以外はentire Maclaurinへ切り替える。
+
+2026-08-27 GCC Release / LTO off，3回warmでは`32+I`が約10 msで，10/20/40/80桁は約8/10/16/35 msだった。`1+32I`もquarter-turn経路で約12 ms，`8+8I`のような対角方向はseriesのまま約13 msである。旧`|z|=8`は現在の計算基盤 capabilityを表さないため削除した。
+
+
+### complex Ei/Ci の固定512/128境界撤去
+
+`--performance-cliffs`は旧complex `Ei |z|<=512` / `Ci |z|<=128`位置の前後と10/20/40/80桁precision sweepを常設する。大引数はcertified `E1`漸近＋主値 connection，漸近証明が閉じない高precision入力はguard付きseriesへ切り替える。分岐切断を跨ぐfinite-precision enclosureは性能境界ではなく`N::precision`分類として別に監視する。
+
+2026-08-28 GCC Release / LTO offの20桁代表値は`Ei[512+I]`約8.2 ms，`Ei[513+I]`約9.4 ms，`Ci[128+I]`約44.2 ms，`Ci[129+I]`約45.7 msで，旧境界位置に不連続はない。`Ei[1000+I]`は約9.2 ms，`Ci[1000+I]`は約18.4 ms。`Ci[140+I]`は高precisionでseries 代替経路を使うため，20/50/100桁の時間も併せて監視する。

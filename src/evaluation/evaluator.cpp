@@ -642,9 +642,8 @@ expression::Expr Evaluator::evaluateMachine(
                             const expression::Symbol symbol = current.expression.asSymbol();
                             const expression::Expr* binding = environment_.find(symbol);
                             if (!binding) {
-                                // 暫定方針: 未束縛Symbolは自由記号としてそのまま通す。
-                                // Simplify/Expand/Factor/Collect/SolveをCLIから直接検証できるようにするため。
-                                // 将来SymbolicEvaluationContextを導入したら、通常評価でNameErrorに戻すモードと明示的なsymbolic modeをここで分離できる。
+                                // 未束縛SymbolはCASの自由記号として保持する。
+                                // simplify / D / integrate / solve等のsymbolic evaluationはこの意味論を共有する。
                                 results.push_back(current.expression);
                                 return;
                             }

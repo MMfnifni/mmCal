@@ -101,6 +101,10 @@ constexpr std::uint64_t maximumIntegerPowerMagnitude = 32;
         return one;
     }
 
+    if (auto fieldPower = AlgebraicNumber::integerPowerInField(
+            base, *magnitude, exponent.isNegative()))
+        return fieldPower;
+
     AlgebraicNumber factor = base;
     AlgebraicNumber result = *one;
     std::uint64_t power = *magnitude;
@@ -336,6 +340,20 @@ Expr makeCanonicalRootExpression(
         Expr{numeric::Number{BigInt::fromUnsigned(algebraic.rootIndex())}},
         Expr{expression::Symbol{"Complex"}}
     }, std::make_shared<const AlgebraicNumber>(cached));
+}
+
+Expr makeCanonicalAlgebraicExpression(
+    const AlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (const auto exact = algebraic.exactRationalParts()) {
+        if (exact->second.isZero())
+            return Expr{numeric::Number{exact->first}};
+        return Expr{numeric::Number::complex(
+            numeric::RealNumber{exact->first}, numeric::RealNumber{exact->second})};
+    }
+    if (const RealAlgebraicNumber* real = algebraic.asReal())
+        return makeCanonicalRootExpression(*real, builtins);
+    return makeCanonicalRootExpression(*algebraic.asComplex(), builtins);
 }
 
 std::optional<AlgebraicNumber> exactAlgebraicValue(

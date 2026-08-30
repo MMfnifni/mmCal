@@ -534,7 +534,7 @@ CertifiedEvaluator には病的に深い AST を防ぐための depth guard が�
 
 ```text
 depth               = 20
-rewrite steps       = 100000
+rewrite operations       = 100000
 generated terms     = 500000
 integer bits        = 10000000
 solver candidates   = 100000
@@ -551,7 +551,7 @@ working precision   = 1000000
 
 - recursion depth
 - AST node visits
-- rewrite steps
+- rewrite operations
 - generated nodes
 - generated terms
 - BigInt bit length
@@ -1222,7 +1222,7 @@ struct SeriesData {
     Symbol variable;
     Expr center;
     Rational minExponent;
-    Rational step;
+    Rational increment;
     std::vector<Expr> coefficients;
     Rational order;
 };
@@ -1894,7 +1894,7 @@ The five highest-priority refactorings are:
 1. **Canonical Algebra Layer**
    - normalize mathematically equivalent additive and multiplicative forms into a stable algebraic representation;
 2. **EvaluationContext + EvaluationBudget**
-   - manage recursion, rewrite steps, generated nodes, integer growth, candidate growth, and working precision consistently;
+   - manage recursion, rewrite operations, generated nodes, integer growth, candidate growth, and working precision consistently;
 3. **AssumptionContext**
    - share facts such as `x>0`, `element[x,Real]`, and `x!=0` across all algorithms;
 4. **Specialized Mathematical Views / IR**
@@ -2302,7 +2302,7 @@ A recursion-depth guard is necessary, but insufficient.
 A dangerous expression can be shallow and still create:
 
 ```text
-rewrite steps       = 100000
+rewrite operations       = 100000
 generated terms     = 500000
 integer bits        = 10000000
 solver candidates   = 100000
@@ -2315,7 +2315,7 @@ Potential counters:
 
 - recursion depth;
 - AST node visits;
-- rewrite steps;
+- rewrite operations;
 - generated nodes;
 - generated terms;
 - integer bit length;

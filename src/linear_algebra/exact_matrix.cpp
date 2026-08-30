@@ -323,21 +323,6 @@ template <class RationalAt>
     const std::size_t n = source.rows();
     IntegerLift lift = liftRealMatrix(source);
 
-    if (preferModularInverse(lift.matrix)) {
-        if (const auto modular = modularInverse(lift.matrix)) {
-            std::vector<Expr> elements;
-            const std::size_t shape[] = {n, n};
-            elements.reserve(expression::arrayElementCount(shape));
-            for (std::size_t row = 0; row < n; ++row)
-                for (std::size_t column = 0; column < n; ++column) {
-                    numeric::Rational value = (*modular)[row * n + column]
-                        * numeric::Rational{lift.rowScales[column]};
-                    elements.emplace_back(Number{std::move(value)});
-                }
-            return MatrixBuffer{n, n, std::move(elements)};
-        }
-    }
-
     const std::size_t columns = augmentedColumns(n);
     IntegerMatrixBuffer augmented{n, columns};
     for (std::size_t row = 0; row < n; ++row) {

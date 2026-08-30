@@ -65,6 +65,23 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expectEqual(eval(history, "@"), std::string{"100"},
         "at shorthand re-evaluates the immediately previous input");
 
+    kernel::KernelSession symbolicHistory;
+    tests.expectEqual(eval(symbolicHistory, "D[E^x cos[x],x]"),
+        std::string{"cos[x]exp[x]-exp[x]sin[x]"},
+        "symbolic history seed stores an exact derivative");
+    tests.expectEqual(eval(symbolicHistory, "integrate[Out[1],x]"),
+        std::string{"(cos[x]+sin[x])exp[x]/2-(sin[x]-cos[x])exp[x]/2"},
+        "integrate resolves an absolute Out snapshot inside its held integrand");
+    tests.expectEqual(eval(symbolicHistory, "integrate[In[1],x]"),
+        std::string{"(cos[x]+sin[x])exp[x]/2-(sin[x]-cos[x])exp[x]/2"},
+        "integrate re-evaluates an absolute In snapshot inside its held integrand");
+
+    kernel::KernelSession nestedSymbolicHistory;
+    static_cast<void>(eval(nestedSymbolicHistory, "D[E^x cos[x],x]"));
+    tests.expectEqual(eval(nestedSymbolicHistory, "integrate[2*Out[1],x]"),
+        std::string{"2((cos[x]+sin[x])exp[x]/2-(sin[x]-cos[x])exp[x]/2)"},
+        "held symbolic operators resolve nested output-history references without evaluating unrelated terms");
+
     static_cast<void>(evalError(history, "log[0]"));
     const std::size_t failedIndex = history.inputCount();
     tests.expect(history.inputHistory(failedIndex) != nullptr,
@@ -114,9 +131,18 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expect(warningCount(warnings, "N::unevaluated") == genericWarningsBefore,
         "N keeps a free symbolic value without emitting a generic warning");
 
-    static_cast<void>(warnings.evaluate("N[lambertw[2,1],20]"));
-    tests.expect(hasWarning(warnings, "N::unsupported"),
-        "N distinguishes an existing value with an unavailable certified backend from a domain error");
+    tests.expectEqual(eval(warnings, "N[lambertw[2,1],20]"),
+        std::string{"-2.4015851048680028842+10.776299516115070898I"},
+        "N certifies an explicit non-principal Lambert W branch");
+    tests.expect(!hasWarning(warnings, "N::unsupported"),
+        "implemented complex Lambert W branches do not retain the old unsupported diagnostic");
+
+    kernel::KernelSession lambertCut;
+    tests.expectEqual(eval(lambertCut, "N[lambertw[-1,-1/2],30]"),
+        std::string{"lambertw[-1, -1/2]"},
+        "N leaves the exact W_-1 negative-real cut unevaluated without logarithmic contraction");
+    tests.expect(hasWarning(lambertCut, "N::unsupported"),
+        "W_-1 negative-real cut is classified as a backend branch-convention gap");
 
     kernel::KernelSession boundedPrecision;
     auto boundedLimits = boundedPrecision.evaluationLimits();
@@ -151,18 +177,18 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         "N keeps finite 1F1 denominator-pole ambiguity as PrecisionInsufficient");
 
     kernel::KernelSession unsupportedConsumers;
-    tests.expectEqual(eval(unsupportedConsumers, "round[lambertw[2,1]]"),
-        std::string{"round[lambertw[2, 1]]"},
-        "certified-backend unsupported does not leak through rounding as DomainError");
+    tests.expect(evalError(unsupportedConsumers, "round[lambertw[-1]]").type()
+            == error::CalcErrorType::Type,
+        "rounding a certified non-real Lambert W value reports TypeError");
+    const auto lambertDerivative = unsupportedConsumers.evaluate(
+        "diff[lambertw[x],x,-1,20]");
+    tests.expect(lambertDerivative.isComplexDecimalApproximation(),
+        "numeric differentiation consumes the certified complex Lambert W derivative");
     tests.expect(evalError(
             unsupportedConsumers,
-            "diff[lambertw[2,x],x,1,20]").type() == error::CalcErrorType::Evaluation,
-        "numeric differentiation reports certified-backend unsupported as EvaluationError");
-    tests.expect(evalError(
-            unsupportedConsumers,
-            "nintegrate[lambertw[2,x],{x,1,2},20]").type()
+            "nintegrate[lambertw[x],{x,-2,-1},20]").type()
             == error::CalcErrorType::Evaluation,
-        "numeric integration reports certified-backend unsupported as EvaluationError");
+        "numeric integration reports a remaining Lambert W backend gap as EvaluationError");
 
     kernel::KernelSession nestedWarnings;
     static_cast<void>(nestedWarnings.evaluate("N[D[abs[x],x],20]"));

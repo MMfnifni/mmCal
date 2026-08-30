@@ -204,6 +204,15 @@ void runMathRegistryTests(TestRunner& tests) {
         && erf->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving
         && erfc && erfc->domainRule == mathematics::FunctionDomainRule::ComplexToComplexRealPreserving,
         "MathRegistry: erf/erfc are entire complex functions with real-axis preservation");
+    tests.expect(erf && erf->realGloballyInjective
+        && erf->realMonotonicity == mathematics::RealMonotonicity::Increasing
+        && erf->realRangeRule == mathematics::RealRangeRule::OpenMinusOneToOne
+        && !erf->inverseFunction
+        && erfc && erfc->realGloballyInjective
+        && erfc->realMonotonicity == mathematics::RealMonotonicity::Decreasing
+        && erfc->realRangeRule == mathematics::RealRangeRule::OpenZeroToTwo
+        && !erfc->inverseFunction,
+        "MathRegistry: erf/erfc expose real monotonicity and open ranges independently of inverse builtins");
     tests.expect(fresnelC && fresnelS
         && fresnelC->parity == mathematics::FunctionParity::Odd
         && fresnelS->parity == mathematics::FunctionParity::Odd

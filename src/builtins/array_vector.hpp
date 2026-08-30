@@ -11,7 +11,6 @@ namespace mmcal::builtins {
 
 [[nodiscard]] expression::Expr evaluateIdentity(std::span<const expression::Expr> arguments);
 [[nodiscard]] expression::Expr evaluateZeros(std::span<const expression::Expr> arguments);
-[[nodiscard]] expression::Expr evaluateMatrixGet(std::span<const expression::Expr> arguments);
 [[nodiscard]] expression::Expr evaluateRows(std::span<const expression::Expr> arguments);
 [[nodiscard]] expression::Expr evaluateCols(std::span<const expression::Expr> arguments);
 [[nodiscard]] expression::Expr evaluateDiag(std::span<const expression::Expr> arguments);
@@ -27,11 +26,6 @@ namespace mmcal::builtins {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateVectorScale(
-    std::span<const expression::Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles);
-[[nodiscard]] expression::Expr evaluateVectorDot(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,

@@ -268,6 +268,20 @@ void runSimplifierTests(TestRunner& tests) {
         std::string{"sqrt[x^2]"},
         "Simplifier: sqrt[x^2] is retained without a sign proof");
 
+    const Expr cbrtCube = call(builtins, BuiltinId::Power, {
+        call(builtins, BuiltinId::Cbrt, {x}), integer(3)
+    });
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            cbrtCube, context(builtins, math, positive))),
+        std::string{"x"},
+        "Simplifier: cbrt[x]^3 -> x when the cbrt argument is proven real");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            cbrtCube, context(builtins, math))),
+        std::string{"cbrt[x]^3"},
+        "Simplifier: cbrt[x]^3 retains the real-domain requirement without assumptions");
+
     const Expr sinNegative = call(builtins, BuiltinId::Sin, {
         call(builtins, BuiltinId::Negate, {x})
     });

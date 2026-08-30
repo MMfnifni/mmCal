@@ -415,14 +415,27 @@ using numeric::Number;
 
             RealSign sign = RealSign::Unknown;
             if (base.isProvablyReal()) {
-                if (base.sign == RealSign::Zero)
+                const bool even = exponent.abs().trailingZeroBits() != 0;
+                if (even) {
+                    // 実数の偶数冪は符号未知の底でも非負である。負の偶数冪は
+                    // 定義される点では底が非零なので常に正である。
+                    if (exponent.isNegative())
+                        sign = RealSign::Positive;
+                    else if (base.sign == RealSign::Zero)
+                        sign = RealSign::Zero;
+                    else if (base.sign == RealSign::Positive
+                        || base.sign == RealSign::Negative
+                        || base.sign == RealSign::NonZero)
+                        sign = RealSign::Positive;
+                    else
+                        sign = RealSign::NonNegative;
+                }
+                else if (base.sign == RealSign::Zero)
                     sign = exponent.isNegative() ? RealSign::Unknown : RealSign::Zero;
                 else if (base.sign == RealSign::Positive)
                     sign = RealSign::Positive;
-                else if (base.sign == RealSign::Negative) {
-                    const bool even = exponent.abs().trailingZeroBits() != 0;
-                    sign = even ? RealSign::Positive : RealSign::Negative;
-                }
+                else if (base.sign == RealSign::Negative)
+                    sign = RealSign::Negative;
             }
             return ValueFacts{domain, sign, base.exact && argument(1).exact, false};
         }
@@ -988,7 +1001,6 @@ using numeric::Number;
     case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
-    case BuiltinId::MatrixGet:
     case BuiltinId::Trace:
     case BuiltinId::Rows:
     case BuiltinId::Cols:
@@ -996,7 +1008,6 @@ using numeric::Number;
     case BuiltinId::VectorAdd:
     case BuiltinId::VectorSubtract:
     case BuiltinId::VectorScale:
-    case BuiltinId::VectorDot:
     case BuiltinId::VectorCross:
     case BuiltinId::VectorNorm:
     case BuiltinId::VectorManhattan:

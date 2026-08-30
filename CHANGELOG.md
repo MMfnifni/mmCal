@@ -2,89 +2,55 @@
 
 ## Unreleased
 
-### Semantic hardening and build
+Not yet.
 
-- Normalized exact complex arithmetic back to real `Number` storage whenever the imaginary component becomes zero. Also supplied the missing certified finite-precision elliptic-integral and complex `li` definitions, restoring successful CMake/GCC linking for all targets.
-- Added a certification-boundary fuzzer to `mmCal.Benchmarks`. It generates 46 families covering branch cuts, exact poles, finite-precision boundary crossings, real/complex backend boundaries, and work limits; classifies `Value`, `DomainError`, `N::precision`, `N::unsupported`, unevaluated, and resource failures separately; and is reproducible through `--seed --case`. Timeout/cancellation failures are kept distinct from mathematical failures, and the Visual Studio/CMake source sets are synchronized.
-- Made `simplify` / `fullSimplify` definedness-aware. Reductions such as `F-F -> 0`, `F/F -> 1`, `F^0 -> 1`, and special-function degeneracies are applied only when the required domain conditions are provable. This includes the `0^0` convention, negative Rational powers, `zeta[1]`, and Gamma-family poles.
-- Changed integration derivative-back regression checks to prove identities only on the common domain. The Random Expression Fuzzer now also covers `limit`, `cases`, nested `N`, AlgebraicNumber, Gröbner reduction, Array reshape, domain-hole preservation, and removable singularities.
-- Standardized the MSVC stack reserve at 16 MiB for the CLI, tests, and benchmarks. Shared builtin arity/unevaluated-call handling and Rational rounding helpers were consolidated. Exact complex `digamma` / `trigamma` also gain an exact recurrence path for positive-integer real parts to avoid unnecessary interval cancellation.
+## v1.5.4 - 2026-08-31
 
-### Certified `N` and precision provenance
+### Solver and symbolic computation
 
-- Avoided duplicate certified-function work for exact `N` inputs, where CertifiedEnclosure and InformationEnclosure are identical. Internal guard precision is also no longer compounded unnecessarily across complex `li` (`Log -> Ei`) and the principal `2F1` `1/z` connection, preserving the same principal values and interval guarantees while substantially reducing representative 20-digit runtimes.
-- Fixed `leastSquares` losing an extra output digit because its intermediate pseudoinverse was rounded to the requested display precision before the final product. The intermediate now retains working precision and only the final result is rounded. Finite-precision `nullSpace` regressions now also require both pivot existence and free-column status to be certified from InformationEnclosure rather than recovering hidden exact-zero truth.
-- Fixed an `acosh` performance cliff immediately above and below the interior branch cut `-1<x<1`, where tiny imaginary components could trigger excessive refinement and frontend timeouts. A stable path is used only after the half-plane is certified, so cases as small as `N[acosh[1/2+I/10^160],100]` retain the principal branch without pathological refinement.
-- Fixed cancellation in `expm1` / `log1p` near zero by deriving extra working precision from the binary scale of the input instead of subtracting at the requested precision. Exact real `2F1` inputs with `z>1` now use the defined principal-cut continuation value, while finite-precision inputs spanning both sides still return `N::precision`. Complex Fresnel series evaluation now has a bounded-work limit of `|z|<8`.
-- Preserved the historical `diff[...,digits]` / `nintegrate[...,digits]` contract in which `digits` counts fractional decimal places. Finite-input `InformationEnclosure` limits still cap claimed precision, but the display mode is no longer accidentally changed to the significant-digit rule used by `N`.
-- Separated singularity, branch-cut, and algorithm-boundary decisions between `CertifiedEnclosure` and `InformationEnclosure`. Exact poles yield DomainError; ambiguity caused by finite-precision input information yields `N::precision`; mathematically valid values outside the implemented certified algorithms yield `N::unsupported`. The same rule now covers the Gamma family, `Ei` / `Ci` / `li`, `zeta`, `1F1` / `2F1`, `ibeta`, `log` / `sqrt` / noninteger powers, inverse trigonometric and hyperbolic functions, `Arg` / `atan2`, `polylog`, and elliptic integrals.
-- Refactored the certified numerical layer into value representation, zero/pole/branch-cut classification, Real/Complex arithmetic, and precision helpers. This is an internal separation of responsibilities with no intended mathematical semantic change.
-- Clarified the contract between `CertifiedEnclosure` and `InformationEnclosure` in `DecimalApproximation` / `ComplexDecimalApproximation`. Proven exact zero is no longer automatically treated as reusable exact input information. `precision`, `accuracy`, `explain`, comparisons, and certified arithmetic now share the same information-quality model; `explain` adds `PrecisionDigits` / `AccuracyDigits`.
-- Audited hidden-guard reuse across finite-precision values. Zero/nonzero decisions such as `N[0,p]^0` and `1/N[0,p]`, display capping after complex-to-real projection, removable cardinal singularities, FFT cancellation, and matrix pivot/rank decisions now respect the InformationEnclosure. Continuous quantities propagate Certified/Information enclosures in parallel. `lu/qr/svd/conditionNumber/pseudoInverse/leastSquares/eigen*` remain conservative for matrices that already contain finite-precision leaves until their input-perturbation certificates are complete, rather than recovering results from hidden certified points.
-- Bounded top-level certified refinement in `N` to 16 local attempts. Finite-precision inputs that continue to straddle a branch cut, pole, or algorithm boundary return `N::precision` instead of consuming unbounded guard digits, while exact inputs may still refine when additional precision can prove the correct side.
-- Extended InformationEnclosure branch gating to inverse trigonometric/hyperbolic functions, `Arg` / `atan2`, `polylog`, and elliptic `F/E/Pi`. Complex inverse functions use a derivative-bound enclosure away from branch points to reduce dependency blow-up without inventing precision.
-- Simplified CLI rendering of certified approximations while keeping precision metadata internal. Near-zero non-point values render compactly as `0.0`; trailing zeros are shortened; and `N`-produced terminating values retain a provenance zero, e.g. `N[1/2,20] -> 0.50`, `N[2,20] -> 2.0`, `N[I,20] -> 1.0I`, and `N[log[-1+I/10^1000],20] -> 0.0+3.1415926535897932385I`. Neutral exact operations preserve metadata, and zero-centered formatting uses absolute accuracy rather than relative precision.
-- Aligned real/complex certified paths, including safe real projection for all-real `1F1` / `2F1` / `polylog`, `RealInterval` elliptic evaluation, and bounded interval evaluation for `2F1` near denominator-parameter poles. Numerical `2F1` with exact Rational parameters now accumulates the Gauss series in outward-rounded intervals instead of growing huge exact Rational numerators and denominators. `diff` / `nintegrate` propagate `CertifiedEnclosure` and `InformationEnclosure` in parallel, including held `N[...]` subexpressions, so they cannot manufacture output precision beyond the input information. Persistent singularity or branch-side ambiguity from finite input information fails locally instead of triggering pointless refinement. Dedicated N black-box/property regressions were added.
+- Expanded multivariate polynomial `solve`. Gröbner elimination and recursive specialization now completely enumerate more supported zero-dimensional systems, while positive-dimensional systems such as `x y==0` or `x^2+y^2==1` can return free parameters with exact conditions when this can be proved. mmCal still does not invent incomplete parametrizations for general varieties.
+- Extended Real `solve` for `u exp[u]=a`, affine exponential equations, positive constant-base exponentials, selected `x^x==r` cases, `lambertw[u]==r`, `cosh[u]==r`, and related forms. New range, monotonicity, and convexity proofs return an empty set or a unique exact solution only when the result is proved.
+- Added Real solving for `abs` and principal radical equations. Extraneous roots introduced by squaring are removed exactly, while Complex loci such as circles are not collapsed into finite point sets.
+- Added first-class mathematical case expressions, `cases[value if condition; ...]`, integrated with `simplify`, `N`, `D`, `integrate`, and `limit`. Unknown conditions are retained and false branches are not evaluated.
+- Added `groebnerBasis[...]` / `polynomialReduce[...]` with exact Rational Gröbner bases in Lex / GrLex / GrevLex orderings, also used by nonlinear polynomial `solve`.
+- Strengthened `simplify` / `fullSimplify` to preserve definedness. Rewrites such as `F/F -> 1`, `F^0 -> 1`, and special-function degeneracies are applied only when the required conditions are proved. Exact complex results with zero imaginary part now normalize back to real values.
 
-### Black-box validation
+### Differentiation, integration, and limits
 
-- Added public-CLI-only audits for `D`, `integrate`, `limit`, `N`, `cases`, Gröbner expressions, and exact algebraic Solve, plus property suites for derivative-back identities, Gröbner invariants, solution counts, precision provenance, recurrences, and independently generated high-precision references.
-- Fixed calculus across `cases[...]`: `D`, `integrate`, and `limit` distribute branch-wise only when conditions are independent of the calculus variable. Variable-dependent or singular branches remain unevaluated or are handled by the correct limit rather than producing spurious DomainErrors.
-- Allowed safe composition of `groebnerBasis[...]` inside held polynomial builtins, and updated pre-`cases` black-box expectations/reference examples to the current scalar-case representation.
+- Generalized exact rational-function integration with Hermite reduction and algebraic `Root` fallbacks, extending support to higher-degree and repeated denominators while preserving simpler `Log/atan/atanh` and elementary forms when available.
+- Expanded assumption-aware definite and improper integration, including Gamma/Beta/Mellin, Frullani-type, logarithmic moments, `1+x^q` families, and Dirichlet/Fresnel integrals. Results remain unevaluated when convergence or internal singularities cannot be proved safe.
+- Strengthened `D` across `cases[...]` and for higher derivatives. Variable-dependent boundaries no longer receive spurious derivative values, and Lambert W, `polylog`, and quadratic-exponential families gain compact exact higher-order formulas.
+- Added `limit[expr,{x,a,direction}]` and expanded known limits for `Ei` / `Ci` / `li`, real-function endpoints, oscillatory cases, and squeeze arguments. Integration derivative-back checks now verify identities on their common domain.
 
-### Scalar cases, polynomial ideals, and complex polygamma
+### Algebraic roots and high-degree polynomials
 
-- Added first-class scalar `cases[value if condition; ...]`, distinct from control-flow `if[...]` and `SolutionSet`. Unknown conditions are retained, false branches are not evaluated, and the construct is integrated with `simplify`, `N`, `D`, `integrate`, and `limit`.
-- Added a general multivariate polynomial core over `Q[x1,...,xn]` with Lex / GrLex / GrevLex orderings, division/normal forms, S-polynomials, and Buchberger reduction. Exact Rational Gröbner bases are exposed through `groebnerBasis[...]` / `polynomialReduce[...]` under existing evaluation budgets.
-- Connected nonlinear polynomial `solve[{...},{...}]` to Lex Gröbner elimination. Contradictory ideals return the empty set; supported zero-dimensional systems use exact univariate roots and back-substitution with exact verification; positive-dimensional cases remain `UnresolvedSolutionSet` rather than inventing parametrizations.
-- Added certified complex `N` for `digamma` / `trigamma` using recurrence and Bernoulli/Stirling asymptotics. General `polygamma[n,x]` remains future work. The Visual Studio project was synchronized with the new polynomial sources.
+- Removed major performance cliffs in high-degree Complex `Root` and general polynomial `solve`. Root isolation/refinement and irreducibility work are reused more aggressively, including difficult symmetric and multi-scale polynomials; the audited range now extends through degree 96.
+- Improved AlgebraicNumber / number-field arithmetic by avoiding unnecessary intermediate `Root` materialization while preserving exactness.
 
-### Symbolic and formatting fixes
+### Certified `N` and special functions
 
-- Improved conditional-solution `&&` spacing, nested-iterator `table`, and exact Complex Rational-imaginary formatting (`2I/29`).
-- Added exact perfect-power recognition to univariate polynomial `factor`, and fixed HoldAll `D` so `%` / `Out[n]` resolves the stored output before differentiation without changing `In[n]` re-evaluation semantics.
-- Added the general symbolic power rule for `integrate[x^n,x]`, `integrate[log[log[x]],x]`, and a branch-safe primitive for `integrate[li[x],x]`. The convergent improper integral `integrate[log[log[x]],{x,1,E}]` is now handled exactly.
-- Fixed Formatter radix-prefix collision handling at lexical boundaries, avoiding unnecessary `*` in forms such as `380x^9`. Univariate polynomials are displayed in descending degree without changing internal Expr ordering.
-- Added `limit[expr,{x,a,direction}]`, expanded known principal-branch limits for `Ei` / `Ci` / `li`, and simplified `li[0] -> 0`. Periodic oscillation of real `sin` / `cos` / `tan` now returns `Indeterminate` when no single limit exists, while a bounded squeeze rule closes cases such as `limit[x sin[1/x],x,0] -> 0` exactly.
+- Greatly expanded certified complex `N`. Principal-branch, enclosure-aware evaluation now covers broader regions for `erf/erfc`, `Ei/Si/Ci`, Fresnel functions, `1F1`, `2F1`, `polylog`, `zeta`, `gamma`, `digamma/trigamma`, Lambert W, and elliptic integrals.
+- Removed many artificial fixed-magnitude limits. Real `Ei/Si/Ci`, complex `Ei/Ci`, Fresnel functions, `1F1`, `2F1`, `polylog`, and `ellipticF/E/Pi` now select algorithms from convergence and resource limits instead. Certified `zeta` now covers the finite complex plane except `s=1`, and `ibeta` accepts positive real interval parameters including finite-precision inputs.
+- Added certified complex Lambert W near the `-1/e` branch point and for arbitrary integer branches. If finite-precision input does not determine the branch side, mmCal returns `N::precision` instead of guessing.
+- Clarified `CertifiedEnclosure` versus `InformationEnclosure` so hidden guard digits from finite-precision inputs cannot be promoted into unsupported output precision. Pole, branch-cut, and algorithm-boundary ambiguity is separated from mathematical DomainError and reported as `N::precision` or `N::unsupported` as appropriate.
+- Simplified approximate CLI rendering while retaining approximation provenance. Nested `N`, `diff[...,digits]`, and `nintegrate[...,digits]` now share the same precision and information limits.
+- Fixed cancellation and excessive refinement near the `acosh` branch cut, around zero in `expm1/log1p`, and in several `2F1` / complex `li` paths.
 
-### `D`, integration, and certified complex `N` audit
+### Exact linear algebra
 
-- Audited derivative formulas, primitives, special-function identities, principal branches, and removable singularities. Rules were added or strengthened for Beta-family functions, finite combinatorial functions, `Ei/Si/Ci/li/digamma/trigamma/LambertW`, `polylog`, `1F1/2F1`, `ibeta`, and `sinc/cosc/expc` families.
-- Derivatives of `sinc/cosc/tanc/sinhc/tanhc/expc` now retain continuous-extension values at zero through `cases[...]`; `Si'`, principal `LambertW`, and `polylog` likewise preserve finite zero-point derivatives where appropriate.
-- Extended certified complex `N` on `ComplexInterval` to `erf/erfc`, `Ei/Si/Ci`, Fresnel functions, `1F1`, `2F1`, `polylog`, `zeta`, and `gamma` using convergent series, Euler-Maclaurin, Stirling, and explicit remainder bounds. `2F1` uses the principal `1/z` connection formula only when its safety conditions are provable.
-- Negative noninteger Rational `digamma/trigamma` and negative Rational `zeta` are routed through exact recurrence/functional equations. `lgamma` remains real-axis `log|Gamma|`. Derivative-back auditing avoids promoting local principal-branch identities into unsafe global identities.
+- Added `conditionNumber`, `pseudoInverse`, and `leastSquares`. Exact matrices use exact rank decisions, while outer `N[...]` paths use certified SVD where supported.
+- Added a modular + CRT path for exact Integer/Rational `det` and `solveLinear`, selected against Bareiss with exact verification. Also fixed avoidable precision loss in `leastSquares` intermediates.
 
-### Certified backend and algorithm thresholds
+### Evaluation resources and CLI
 
-- Clarified `PrecisionInsufficient` versus `CertifiedBackendUnsupported`: fixed series ranges, term limits, and planning limits that cannot be resolved by extra precision now return `N::unsupported`; interval-width ambiguity at branch/work boundaries may still refine.
-- Retuned special-function series boundaries and cancellation planning. Real `Ei/Si/Ci` remain bounded at 96, complex `Ei` at `|z|<=512`, and complex `Ci` at `|z|<=128`; `Si/Ci` and complex `Ei/Ci` now add argument-dependent working precision for cancellation. The existing `1F1: |z|<=160`, `2F1: |z|<=9/10`, elliptic `F/E: |m|<=9/10` (plus `|n|<=9/10` for `Pi`), and positive-order `polylog: |z|<=49/50` limits remain.
-- Corrected `zeta` classification so only `s=1` is a DomainError; regions unsupported by the present Euler-Maclaurin backend are no longer mislabeled as mathematically undefined.
-- Bounded certified FFT precision retries to 12 and kept the direct-DFT/Bluestein policy boundary at 384 points. Regression tests now explicitly cross exact-linear-algebra and BigUInt Karatsuba / Toom-3 / Burnikel-Ziegler / decimal-conversion thresholds.
+- Added shared per-evaluation `EvaluationBudget` / `EvaluationLimits` covering large integers, Arrays/Matrices, Solver and integration work, algebraic construction, and requested precision. Exhaustion is reported as `ResourceLimitError`.
+- Added cooperative cancellation with Ctrl-C / Ctrl-Break / SIGINT.
+- Added `--batch` for line-oriented automation. REPL `:help` now provides a complete callable catalog, constants, input rules, examples, and nearby-name suggestions.
 
-### Exact linear algebra and cancellation
+### Validation and compatibility
 
-- Added `conditionNumber`, `pseudoInverse`, and `leastSquares`. Exact matrices use exact rank decisions; the pseudoinverse uses rank factorization to construct the Moore-Penrose inverse exactly, including rank-deficient Rational and complex matrices. The outer-`N` path for exact input uses certified SVD. Matrices that already contain finite-precision leaves are currently kept conservative rather than recovering rank or singular subspaces from hidden guard digits. Zero-sized matrix shapes are preserved.
-- Added a 31-bit prime-field + CRT modular path for exact Integer/Rational matrices. `det` reconstructs to a Hadamard-bound certificate; `solveLinear` uses rational reconstruction followed by exact `A X = B` verification; `inverse` verifies the reconstructed adjugate and falls back to Bareiss when needed.
-- Added measured Bareiss/modular dispatch for `det` / `solveLinear`. `inverse`, `rref`, `matrixRank`, and `nullSpace` remain on Bareiss for now. Modular-prime telemetry and `--exact-linear-algebra` / `--budget-telemetry` benchmarks were added.
-- Connected `EvaluationCancellationToken` to top-level CLI evaluation. Ctrl-C / Ctrl-Break on Windows and SIGINT on POSIX request cooperative cancellation, reported as `ResourceLimitError`; noninteractive exit code `3` is preserved.
-
-### Evaluation resource policy
-
-- Added per-top-level-evaluation `EvaluationBudget` / `EvaluationLimits` / `EvaluationUsage`, covering evaluation steps/depth, generated Expr nodes, Simplifier/Solve/integration candidates, certified refinements, Array/Matrix elements, BigInt size, requested precision, and algebraic construction work.
-- Added `KernelSession::setEvaluationLimits`, `evaluationLimits`, and `lastEvaluationUsage`; legacy `setEvaluationDepthLimit` maps into the common limits. Resource exhaustion is reported as `ResourceLimitError` with the resource name and limit, separate from DomainError and ordinary unevaluated results.
-- Large integer powers/factorials, Arrays, Matrix workspaces, `N[expr,p]`, and source text are checked as early as practical before expensive allocation or computation. Core remains free of wall-clock deadlines; deterministic operation budgets are separate from frontend cancellation/timeout policy.
-
-### Fuzzing and validation
-
-- Extended the Random Expression Fuzzer with derivative-back, Solve, `A inverse[A] == I`, `ifft[fft[v]] == v`, DomainError classification, and principal-`sqrt` boundary checks. Polynomial identities use structural residuals plus independent substitutions, and Solve compares `SolutionSet` bindings as sets.
-- Exact FFT round-trips first use structural equality; remaining root-of-unity cancellation forms are passed directly to `CertifiedEvaluator` as a second oracle. Deep cases stop under a recursion-depth budget, and indeterminate cases are counted separately as `inconclusive` rather than mathematical failures.
-- Failure output now includes seed/case/reduced expression and budget telemetry; regression coverage was added for limit crossings, reset behavior, and success/failure telemetry.
-
-### CLI and compatibility
-
-- Added `--batch` for line-oriented automation.
-- Kept startup `--help` concise while expanding REPL `:help` into a complete callable catalog with descriptions, input rules, and examples. Added `:help Pi` / `:help constants` and deterministic nearby-name suggestions; help remains frontend-only and does not consume evaluation/history slots.
-- Added `mmCal.Benchmarks --fft-threshold [iterations]` to compare direct DFT and forced Bluestein from 65–509 points. GCC/MSVC measurements retuned the certified non-power-of-two FFT policy boundary to 384 points, retained by forced-comparison tests.
+- Expanded public-CLI black-box audits and the Random Expression Fuzzer across `D`, `integrate`, `limit`, `N`, `cases`, Gröbner operations, Solve, exact FFT, linear algebra, and precision provenance.
+- Fixed regressions in formatting, history references, calculus across `cases[...]`, principal branches, removable singularities, and DomainError classification while preserving the public syntax and exact-first semantics.
 
 ## v1.5.3 — 2026-08-16
 

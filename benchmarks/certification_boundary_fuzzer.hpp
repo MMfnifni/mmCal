@@ -17,8 +17,8 @@ struct CertificationBoundaryFuzzerOptions final {
     bool noStopLoop = false;
 };
 
-// branch cut・pole・backend boundary近傍のclosed numeric inputを生成し，
-// certified evaluationの分類契約とbounded-workを監査する。
+// branch cut・pole・backend boundary近傍のclosed numeric inputとmetamorphic変形を生成し，
+// certified evaluationの分類，InformationEnclosure provenance，bounded-workを監査する。
 [[nodiscard]] bool runCertificationBoundaryFuzzer(
     const CertificationBoundaryFuzzerOptions& options);
 

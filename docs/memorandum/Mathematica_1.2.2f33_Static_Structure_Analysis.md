@@ -1607,7 +1607,7 @@ If[Length1 != length4, ...]
 
 特にソースコメントが面白い。
 
-ODE式を毎step，
+ODE式を毎反復，
 
 ```text
 f /. Thread[vars -> vals]

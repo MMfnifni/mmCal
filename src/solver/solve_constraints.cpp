@@ -4,8 +4,7 @@
 #include "error/error_message.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "mathematics/predicate.hpp"
-#include "simplification/simplification_context.hpp"
-#include "simplification/simplifier.hpp"
+#include "solver_support.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -32,27 +31,8 @@ using mathematics::TruthValue;
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<RelationKind> relationKind(
-    const Expr& expression,
-    const evaluation::BuiltinRegistry& builtins) {
-    if (!expression.isCall())
-        return std::nullopt;
-    const auto* definition = builtins.find(expression.asCall().head);
-    if (!definition || expression.asCall().arguments.size() != 2)
-        return std::nullopt;
-    switch (definition->id) {
-    case BuiltinId::Equal: return RelationKind::Equal;
-    case BuiltinId::NotEqual: return RelationKind::NotEqual;
-    case BuiltinId::Less: return RelationKind::Less;
-    case BuiltinId::LessEqual: return RelationKind::LessEqual;
-    case BuiltinId::Greater: return RelationKind::Greater;
-    case BuiltinId::GreaterEqual: return RelationKind::GreaterEqual;
-    default: return std::nullopt;
-    }
-}
-
 [[nodiscard]] Expr zeroExpr() {
-    return Expr{numeric::Number{numeric::BigInt{0}}};
+    return integerExpr(0);
 }
 
 [[nodiscard]] Predicate canonicalRelation(
@@ -65,9 +45,9 @@ using mathematics::TruthValue;
     if (rhs.isNumber() && rhs.asNumber().isZero())
         return mathematics::relation(kind, lhs, rhs);
 
-    Expr difference = simplification::Simplifier{}.simplify(
+    Expr difference = simplifyForSolve(
         Expr::call(builtins.symbol(BuiltinId::Subtract), {lhs, rhs}),
-        simplification::SimplificationContext{builtins, mathematics, angles});
+        builtins, mathematics, angles);
     return mathematics::relation(kind, std::move(difference), zeroExpr());
 }
 
@@ -107,7 +87,7 @@ void parseSpec(
     }
 
     if (spec.isCall()) {
-        if (const auto relation = relationKind(spec, builtins)) {
+        if (const auto relation = relationKindOf(spec, builtins)) {
             const auto& arguments = spec.asCall().arguments;
             if (*relation == RelationKind::Less
                 || *relation == RelationKind::LessEqual
@@ -133,17 +113,6 @@ void parseSpec(
     error::throwCalcError(
         error::CalcErrorType::Type,
         "solve constraints must be a domain, comparison, or one-dimensional array");
-}
-
-[[nodiscard]] Expr simplifyExpr(
-    Expr expression,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles,
-    const mathematics::AssumptionSet& assumptions) {
-    return simplification::Simplifier{}.simplify(
-        expression,
-        simplification::SimplificationContext{builtins, mathematics, angles, assumptions});
 }
 
 [[nodiscard]] Expr substituteExpr(
@@ -190,12 +159,12 @@ void parseSpec(
     if (const auto* relation = std::get_if<mathematics::RelationPredicate>(&predicate)) {
         return mathematics::relation(
             relation->relation,
-            simplifyExpr(substituteExpr(relation->lhs, bindings), builtins, mathematics, angles, assumptions),
-            simplifyExpr(substituteExpr(relation->rhs, bindings), builtins, mathematics, angles, assumptions));
+            simplifyForSolve(substituteExpr(relation->lhs, bindings), builtins, mathematics, angles, assumptions),
+            simplifyForSolve(substituteExpr(relation->rhs, bindings), builtins, mathematics, angles, assumptions));
     }
     const auto& domain = std::get<mathematics::DomainPredicate>(predicate);
     return mathematics::elementOf(
-        simplifyExpr(substituteExpr(domain.expression, bindings), builtins, mathematics, angles, assumptions),
+        simplifyForSolve(substituteExpr(domain.expression, bindings), builtins, mathematics, angles, assumptions),
         domain.domain);
 }
 
@@ -236,7 +205,7 @@ void appendUnique(mathematics::AssumptionSet& target, const mathematics::Assumpt
     }
 
     // まずambient domainだけを前提に、solver自身が付けたbranch conditionを再検証する。
-    // branch conditionを最初からAssumptionへ入れると「自分自身を根拠にTrue」となり、
+    // 分岐条件を最初からAssumptionへ入れると「自分自身を根拠にTrue」となり，
     // Real制約によって x!=I が自明になった場合などを除去できない。
     mathematics::AssumptionSet processedAssumptions;
     for (const SolverVariable& variable : variables)

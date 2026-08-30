@@ -3,9 +3,9 @@
 
 #include "evaluation/builtin_registry.hpp"
 #include "expression/array_utils.hpp"
-#include "simplification/simplification_context.hpp"
-#include "simplification/simplifier.hpp"
+#include "solver_support.hpp"
 
+#include <utility>
 #include <vector>
 
 namespace mmcal::solver {
@@ -81,9 +81,8 @@ expression::Expr normalizeForSolve(
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions) {
     Expr normalized = canonicalizeBuiltinHeads(expression, builtins);
-    return simplification::Simplifier{}.simplify(
-        normalized,
-        simplification::SimplificationContext{builtins, mathematics, angles, assumptions});
+    return simplifyForSolve(
+        std::move(normalized), builtins, mathematics, angles, assumptions);
 }
 
 } // namespace mmcal::solver

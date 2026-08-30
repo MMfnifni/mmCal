@@ -82,6 +82,23 @@ void runExactAlgebraTests(TestRunner& tests) {
         sqrt2Polynomial, 2, symbolic::AlgebraicRootDomain::Real);
     tests.expect(sqrt2Root.has_value(),
         "NumberField: creates the selected exact generator embedding");
+
+    {
+        // (x^4-2^40)(x^4-2^-40): 4根ずつが半径2^-10と2^10へ分かれる。
+        // Newton-polygon初期値を使っても，最終結果は従来どおりRoucheで全根を分離する。
+        const numeric::BigInt scale = numeric::BigInt{1} << 40;
+        std::vector<numeric::Rational> polynomial(9);
+        polynomial.front() = numeric::Rational{numeric::BigInt{1}};
+        polynomial[4] = -(numeric::Rational{scale}
+            + numeric::Rational{numeric::BigInt{1}, scale});
+        polynomial.back() = numeric::Rational{numeric::BigInt{1}};
+        const auto roots = symbolic::ComplexAlgebraicNumber::isolateAll(polynomial);
+        tests.expect(roots && roots->size() == 8
+                && std::all_of(roots->begin(), roots->end(), [](const auto& root) {
+                    return numeric::Rational{} < root.isolatingDisk().radius;
+                }),
+            "Complex Root: multi-radius Newton-polygon candidates preserve certified all-root isolation");
+    }
     if (sqrt2Root) {
         auto field = symbolic::NumberFieldContext::create(*sqrt2Root);
         tests.expect(field && field->degree() == 2,

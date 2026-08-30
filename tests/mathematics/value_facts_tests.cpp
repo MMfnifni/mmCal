@@ -2,6 +2,7 @@
 #include "value_facts_tests.hpp"
 
 #include "kernel/kernel_session.hpp"
+#include "mathematics/assumption_set.hpp"
 #include "mathematics/value_facts.hpp"
 #include "test_framework.hpp"
 
@@ -59,6 +60,20 @@ void runValueFactsTests(TestRunner& tests) {
         sinPi, session.builtinRegistry(), session.mathRegistry());
     tests.expect(sinFacts.isProvablyReal(),
         "ValueFacts: sin maps a known real argument to real");
+
+    const auto x = session.evaluate("x");
+    mathematics::AssumptionSet realX;
+    realX.add(mathematics::elementOf(x, mathematics::NumericDomain::Real));
+    const auto squareFacts = mathematics::inferValueFacts(
+        session.evaluate("x^2"), session.builtinRegistry(), session.mathRegistry(), realX);
+    tests.expect(squareFacts.isProvablyReal()
+        && squareFacts.sign == mathematics::RealSign::NonNegative,
+        "ValueFacts: an even power of an unconstrained real base is nonnegative");
+    const auto reciprocalSquareFacts = mathematics::inferValueFacts(
+        session.evaluate("x^(-2)"), session.builtinRegistry(), session.mathRegistry(), realX);
+    tests.expect(reciprocalSquareFacts.isProvablyReal()
+        && reciprocalSquareFacts.sign == mathematics::RealSign::Positive,
+        "ValueFacts: a negative even power is positive wherever it is defined");
 }
 
 } // namespace mmcal::tests

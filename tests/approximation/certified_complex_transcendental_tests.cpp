@@ -57,6 +57,21 @@ void runCertifiedComplexTranscendentalTests(TestRunner& tests) {
             "0.78539816339744830961566084581987572104929234984377646"),
         "Certified complex Log: imaginary part lies inside a Pi/4 bracket");
 
+    const auto nonDyadicLog = approximation::enclosePrincipalComplexLog(
+        complexPoint(rational(-23, 5), rational(-2), bits), bits);
+    tests.expect(
+        nonDyadicLog.interval.real().lower().toRational() > numeric::Rational::parse(
+            "1.61262771591611988770805581122609921021853894560817275")
+        && nonDyadicLog.interval.real().upper().toRational() < numeric::Rational::parse(
+            "1.61262771591611988770805581122609921021853894560817276"),
+        "Certified complex Log: non-dyadic real component keeps a tight real enclosure");
+    tests.expect(
+        nonDyadicLog.interval.imaginary().lower().toRational() > numeric::Rational::parse(
+            "-2.73146531304830224601143261242428361928463864052889394")
+        && nonDyadicLog.interval.imaginary().upper().toRational() < numeric::Rational::parse(
+            "-2.73146531304830224601143261242428361928463864052889393"),
+        "Certified complex Log: non-dyadic Arg stays certified without Rational-series growth");
+
     const auto exponential = approximation::encloseComplexExp(
         complexPoint(rational(1), rational(1), bits), bits);
     tests.expect(

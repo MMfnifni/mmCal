@@ -11,6 +11,7 @@
 #include "simplification/simplifier.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "expression/array_utils.hpp"
+#include "symbolic/algebra_transforms.hpp"
 #include "symbolic/substitution.hpp"
 
 #include <cstdint>
@@ -389,6 +390,16 @@ using numeric::Rational;
                     expression,
                     call(builtins, BuiltinId::Log, {a[0]}),
                     std::move(dv)});
+            }
+
+            // u^u is defined only where the principal Power itself is defined.  On that
+            // domain d(u^u)=u^u u' (Log[u]+1), so constructing u/u is unnecessary and
+            // would leave a removable-looking but semantically delicate quotient in output.
+            if (a[0] == a[1]) {
+                Expr du = derivativeCore(a[0], variable, builtins, mathematics, angles);
+                return multiply(builtins, {
+                    expression, std::move(du),
+                    add(builtins, {call(builtins, BuiltinId::Log, {a[0]}), integer(1)})});
             }
 
             Expr du = derivativeCore(a[0], variable, builtins, mathematics, angles);
@@ -889,25 +900,16 @@ using numeric::Rational;
         if ((a.size() == 1 || a.size() == 2)
             && (a.size() == 1 || !containsVariable(a[0], variable))) {
             const Expr& z = a.back();
-            Expr w = expression;
-            // dW_k(z)/dz = W_k(z) / (z (1 + W_k(z)))。branch indexは定数として扱う。
-            Expr kernel = divide(builtins, w, multiply(builtins, {
-                z, add(builtins, {integer(1), w})}));
-            const Expr innerDerivative = derivativeCore(
-                z, variable, builtins, mathematics, angles);
-            Expr ordinary = multiply(builtins, {innerDerivative, std::move(kernel)});
-
-            bool principalBranch = a.size() == 1;
-            if (a.size() == 2 && a[0].isNumber() && a[0].asNumber().isReal())
-                principalBranch = a[0].asNumber().asReal().toRational().isZero();
-            if (!principalBranch)
-                return ordinary;
-
-            Expr nonzero = call(builtins, BuiltinId::NotEqual, {z, integer(0)});
-            Expr zeroCondition = call(builtins, BuiltinId::Equal, {z, integer(0)});
-            return cases(builtins, {
-                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
-                caseBranch(builtins, innerDerivative, std::move(zeroCondition))});
+            const Expr w = expression;
+            // DLMF 4.13.4 gives two equivalent forms.  Exp[-W]/(1+W) is preferable
+            // symbolically because it remains regular at W_0(0)=0 and therefore lets
+            // higher derivatives proceed without an artificial x!=0 / x==0 Cases split.
+            Expr kernel = divide(builtins,
+                call(builtins, BuiltinId::Exp, {negate(builtins, w)}),
+                add(builtins, {integer(1), w}));
+            return multiply(builtins, {
+                derivativeCore(z, variable, builtins, mathematics, angles),
+                std::move(kernel)});
         }
         break;
 
@@ -1136,7 +1138,6 @@ using numeric::Rational;
     case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
-    case BuiltinId::MatrixGet:
     case BuiltinId::Trace:
     case BuiltinId::Rows:
     case BuiltinId::Cols:
@@ -1144,7 +1145,6 @@ using numeric::Rational;
     case BuiltinId::VectorAdd:
     case BuiltinId::VectorSubtract:
     case BuiltinId::VectorScale:
-    case BuiltinId::VectorDot:
     case BuiltinId::VectorCross:
     case BuiltinId::VectorNorm:
     case BuiltinId::VectorManhattan:
@@ -1194,26 +1194,75 @@ using numeric::Rational;
     case BuiltinId::Cases:
         {
             std::vector<Expr> branches;
+            std::vector<Expr> boundaryConditions;
             branches.reserve(a.size());
+            bool safe = true;
             for (const Expr& branchExpression : a) {
                 if (!isHead(branchExpression, builtins, BuiltinId::CaseBranch)
                     || branchExpression.asCall().arguments.empty()
-                    || branchExpression.asCall().arguments.size() > 2)
+                    || branchExpression.asCall().arguments.size() > 2) {
+                    safe = false;
                     break;
+                }
                 const auto& branch = branchExpression.asCall().arguments;
-                // 条件自体が微分変数へ依存するpiecewise式は境界で微分可能とは限らない。
-                // branch内部だけを機械的に微分すると境界情報を捨てるため，未解決のDとして保持する。
-                if (branch.size() == 2 && containsVariable(branch[1], variable))
-                    break;
+                std::optional<Expr> derivativeCondition;
+                if (branch.size() == 2) {
+                    derivativeCondition = branch[1];
+                    if (containsVariable(branch[1], variable)) {
+                        if (!branch[1].isCall()) {
+                            safe = false;
+                            break;
+                        }
+                        const auto* conditionDefinition = builtins.find(branch[1].asCall().head);
+                        if (!conditionDefinition
+                            || branch[1].asCall().arguments.size() != 2) {
+                            safe = false;
+                            break;
+                        }
+
+                        // Piecewise derivative is automatically valid only in the interior of
+                        // each region.  A closed boundary (<=/>=) needs a separate derivative
+                        // test using neighbouring branches; until that is proved, keep D[...]
+                        // explicitly at the boundary instead of inventing a value there.
+                        if (conditionDefinition->id == BuiltinId::GreaterEqual
+                            || conditionDefinition->id == BuiltinId::LessEqual) {
+                            const auto& conditionArguments = branch[1].asCall().arguments;
+                            const BuiltinId strictId = conditionDefinition->id == BuiltinId::GreaterEqual
+                                ? BuiltinId::Greater : BuiltinId::Less;
+                            derivativeCondition = call(builtins, strictId, {
+                                conditionArguments[0], conditionArguments[1]});
+                            Expr boundary = call(builtins, BuiltinId::Equal, {
+                                conditionArguments[0], conditionArguments[1]});
+                            if (std::find(boundaryConditions.begin(), boundaryConditions.end(), boundary)
+                                == boundaryConditions.end())
+                                boundaryConditions.push_back(std::move(boundary));
+                        }
+                        else if (conditionDefinition->id != BuiltinId::Greater
+                            && conditionDefinition->id != BuiltinId::Less) {
+                            // Equal/NotEqual often encode a removable singularity (polylog,
+                            // cardinal functions).  Differentiating the isolated branch value
+                            // is not the derivative of the surrounding function.  Compound
+                            // predicates likewise require boundary analysis, so stay unresolved.
+                            safe = false;
+                            break;
+                        }
+                    }
+                }
+
                 std::vector<Expr> branchArguments{
                     derivativeCore(branch[0], variable, builtins, mathematics, angles)};
-                if (branch.size() == 2)
-                    branchArguments.push_back(branch[1]);
+                if (derivativeCondition)
+                    branchArguments.push_back(std::move(*derivativeCondition));
                 branches.push_back(call(
                     builtins, BuiltinId::CaseBranch, std::move(branchArguments)));
             }
-            if (branches.size() == a.size())
+            if (safe && branches.size() == a.size()) {
+                for (Expr& boundary : boundaryConditions)
+                    branches.push_back(caseBranch(
+                        builtins, unresolvedDerivative(expression, variable, builtins),
+                        std::move(boundary)));
                 return cases(builtins, std::move(branches));
+            }
         }
         break;
     case BuiltinId::CaseBranch:
@@ -1246,7 +1295,222 @@ using numeric::Rational;
     return unresolvedDerivative(expression, variable, builtins);
 }
 
+[[nodiscard]] Expr polylogOrderShift(
+    const Expr& order,
+    std::uint64_t shift,
+    const Expr& z,
+    const evaluation::BuiltinRegistry& builtins) {
+    Expr lowered = order;
+    if (shift != 0) {
+        if (order.isNumber() && order.asNumber().isReal()) {
+            const Rational shifted = order.asNumber().asReal().toRational()
+                - Rational{BigInt::fromUnsigned(shift)};
+            lowered = Expr{Number{numeric::RealNumber{shifted}}};
+        }
+        else
+            lowered = subtract(builtins, order, integer(static_cast<std::int64_t>(shift)));
+    }
+    if (lowered.isNumber() && lowered.asNumber().isReal()) {
+        const auto rationalOrder = lowered.asNumber().asReal().toRational();
+        if (rationalOrder == Rational{BigInt{1}})
+            return negate(builtins, call(builtins, BuiltinId::Log, {
+                subtract(builtins, integer(1), z)}));
+        if (rationalOrder == Rational{BigInt{0}})
+            return divide(builtins, z, subtract(builtins, integer(1), z));
+    }
+    return call(builtins, BuiltinId::Polylog, {std::move(lowered), z});
+}
+
+[[nodiscard]] std::optional<Expr> repeatedQuadraticExponentialDerivative(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    std::uint64_t order,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (order == 0 || order > 64
+        || !isHead(expression, builtins, BuiltinId::Exp)
+        || expression.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const Expr& exponent = expression.asCall().arguments[0];
+    if (!containsVariable(exponent, variable))
+        return std::nullopt;
+
+    Expr first = simplify(
+        derivativeCore(exponent, variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    Expr second = simplify(
+        derivativeCore(first, variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    Expr third = simplify(
+        derivativeCore(second, variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    if (!(third.isNumber() && third.asNumber().isZero()))
+        return std::nullopt;
+
+    // exp[q(x)] with third derivative zero: P_0=1, P_(n+1)=P'_n+q'P_n.
+    // The recurrence keeps the common exponential factor outside instead of
+    // repeatedly expanding it through the generic product rule.
+    Expr polynomial = integer(1);
+    for (std::uint64_t n = 0; n < order; ++n) {
+        Expr derivative = simplify(
+            derivativeCore(polynomial, variable, builtins, mathematics, angles),
+            builtins, mathematics, angles);
+        polynomial = simplify(
+            add(builtins, {
+                std::move(derivative),
+                multiply(builtins, {first, polynomial})}),
+            builtins, mathematics, angles);
+    }
+    polynomial = expandExpression(polynomial, builtins, mathematics, angles, {256});
+    return multiply(builtins, {std::move(polynomial), expression});
+}
+
+[[nodiscard]] std::optional<Expr> repeatedDirectLambertDerivative(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    std::uint64_t order,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (order == 0 || order > 64
+        || !isHead(expression, builtins, BuiltinId::LambertW))
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if ((arguments.size() != 1 && arguments.size() != 2)
+        || !arguments.back().isSymbol()
+        || !arguments.back().asSymbol().sameIdentity(variable)
+        || (arguments.size() == 2 && containsVariable(arguments[0], variable)))
+        return std::nullopt;
+
+    // DLMF 4.13.4_1--4.13.4_2:
+    // D^n W = exp[-n W] p_(n-1)(W)/(1+W)^(2n-1),
+    // p_0=1, p_n=(1+W)p'_(n-1)+(1-n(W+3))p_(n-1).
+    // 係数をexact BigIntで更新し，x=0のremovable singularityを人工的に作らない。
+    std::vector<BigInt> coefficients{BigInt{1}};
+    for (std::uint64_t n = 1; n < order; ++n) {
+        std::vector<BigInt> next(coefficients.size() + 1, BigInt{0});
+        const BigInt nBig = BigInt::fromUnsigned(n);
+        const BigInt constantFactor = BigInt{1} - BigInt::fromUnsigned(3 * n);
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            const BigInt& coefficient = coefficients[i];
+            next[i] += constantFactor * coefficient;
+            next[i + 1] -= nBig * coefficient;
+            if (i == 0)
+                continue;
+            const BigInt iBig = BigInt::fromUnsigned(i);
+            next[i - 1] += iBig * coefficient;
+            next[i] += iBig * coefficient;
+        }
+        coefficients = std::move(next);
+    }
+
+    const Expr w = expression;
+    std::vector<Expr> polynomialTerms;
+    polynomialTerms.reserve(coefficients.size());
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        const BigInt& coefficient = coefficients[i];
+        if (coefficient.isZero())
+            continue;
+        Expr monomial = i == 0
+            ? integer(1)
+            : (i == 1 ? w : power(builtins, w, integer(static_cast<std::int64_t>(i))));
+        if (coefficient == BigInt{-1})
+            monomial = negate(builtins, std::move(monomial));
+        else if (!(coefficient == BigInt{1}))
+            monomial = multiply(builtins, {
+                Expr{Number{coefficient}}, std::move(monomial)});
+        polynomialTerms.push_back(std::move(monomial));
+    }
+    Expr polynomial = polynomialTerms.size() == 1
+        ? std::move(polynomialTerms.front())
+        : add(builtins, std::move(polynomialTerms));
+    Expr exponential = call(builtins, BuiltinId::Exp, {
+        multiply(builtins, {
+            integer(-static_cast<std::int64_t>(order)), w})});
+    Expr denominator = power(builtins,
+        add(builtins, {integer(1), w}),
+        integer(static_cast<std::int64_t>(2 * order - 1)));
+    return divide(builtins,
+        multiply(builtins, {std::move(polynomial), std::move(exponential)}),
+        std::move(denominator));
+}
+
+[[nodiscard]] std::optional<Expr> repeatedDirectPolylogDerivative(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    std::uint64_t order,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (order == 0 || order > 64
+        || !isHead(expression, builtins, BuiltinId::Polylog)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if (containsVariable(arguments[0], variable)
+        || !arguments[1].isSymbol()
+        || !arguments[1].asSymbol().sameIdentity(variable))
+        return std::nullopt;
+
+    // D^n = z^-n * theta(theta-1)...(theta-n+1), theta=z D.
+    // theta^k Li_s = Li_{s-k}; coefficients are signed Stirling numbers s(n,k).
+    std::vector<BigInt> stirling(static_cast<std::size_t>(order + 1), BigInt{0});
+    stirling[0] = BigInt{1};
+    for (std::uint64_t n = 1; n <= order; ++n) {
+        std::vector<BigInt> next(static_cast<std::size_t>(order + 1), BigInt{0});
+        for (std::uint64_t k = 1; k <= n; ++k)
+            next[static_cast<std::size_t>(k)] =
+                stirling[static_cast<std::size_t>(k - 1)]
+                - BigInt::fromUnsigned(n - 1) * stirling[static_cast<std::size_t>(k)];
+        stirling = std::move(next);
+    }
+
+    std::vector<Expr> terms;
+    terms.reserve(static_cast<std::size_t>(order));
+    const Expr z = arguments[1];
+    for (std::uint64_t k = 1; k <= order; ++k) {
+        const BigInt& coefficient = stirling[static_cast<std::size_t>(k)];
+        if (coefficient.isZero())
+            continue;
+        Expr term = polylogOrderShift(arguments[0], k, z, builtins);
+        if (!(coefficient == BigInt{1}))
+            term = multiply(builtins, {Expr{Number{coefficient}}, std::move(term)});
+        terms.push_back(std::move(term));
+    }
+    Expr ordinary = divide(
+        builtins, add(builtins, std::move(terms)),
+        power(builtins, z, integer(static_cast<std::int64_t>(order))));
+
+    BigInt factorial{1};
+    for (std::uint64_t k = 2; k <= order; ++k)
+        factorial *= BigInt::fromUnsigned(k);
+    Expr atZero = divide(
+        builtins, Expr{Number{factorial}},
+        power(builtins, Expr{Number{BigInt::fromUnsigned(order)}}, arguments[0]));
+    return cases(builtins, {
+        caseBranch(builtins, std::move(ordinary),
+            call(builtins, BuiltinId::NotEqual, {z, integer(0)})),
+        caseBranch(builtins, std::move(atZero),
+            call(builtins, BuiltinId::Equal, {z, integer(0)}))});
+}
+
 } // namespace
+
+std::optional<Expr> differentiateKnownRepeatedExpression(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    std::uint64_t order,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (auto exponential = repeatedQuadraticExponentialDerivative(
+            expression, variable, order, builtins, mathematics, angles))
+        return simplify(std::move(*exponential), builtins, mathematics, angles);
+    if (auto lambert = repeatedDirectLambertDerivative(
+            expression, variable, order, builtins))
+        return simplify(std::move(*lambert), builtins, mathematics, angles);
+    if (auto polylog = repeatedDirectPolylogDerivative(
+            expression, variable, order, builtins))
+        return simplify(std::move(*polylog), builtins, mathematics, angles);
+    return std::nullopt;
+}
 
 Expr differentiateExpression(
     const Expr& expression,

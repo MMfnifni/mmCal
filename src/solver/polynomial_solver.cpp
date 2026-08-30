@@ -1696,6 +1696,56 @@ SolutionSet solveUnivariatePolynomialRelation(
         {{variable, mathematics::NumericDomain::Real}});
 }
 
+[[nodiscard]] symbolic::RationalPolynomial derivativePolynomial(
+    const symbolic::RationalPolynomial& polynomial) {
+    if (polynomial.degree() == 0)
+        return symbolic::RationalPolynomial{};
+    std::vector<Rational> coefficients(polynomial.degree(), rational(0));
+    for (std::size_t exponent = 1; exponent <= polynomial.degree(); ++exponent)
+        coefficients[exponent - 1] = polynomial.coefficient(exponent)
+            * Rational{BigInt::fromUnsigned(exponent)};
+    return symbolic::RationalPolynomial{std::move(coefficients)};
+}
+
+[[nodiscard]] symbolic::RationalPolynomial polynomialRemainder(
+    const symbolic::RationalPolynomial& numerator,
+    const symbolic::RationalPolynomial& denominator) {
+    if (denominator.isZero())
+        throw std::invalid_argument("Polynomial remainder requires nonzero denominator");
+    std::vector<Rational> remainder = numerator.coefficients();
+    const auto trim = [](std::vector<Rational>& coefficients) {
+        while (coefficients.size() > 1 && coefficients.back().isZero())
+            coefficients.pop_back();
+        if (coefficients.empty())
+            coefficients.push_back(rational(0));
+    };
+    trim(remainder);
+    const Rational leading = denominator.coefficient(denominator.degree());
+    while (!(remainder.size() == 1 && remainder.front().isZero())
+        && remainder.size() - 1 >= denominator.degree()) {
+        const std::size_t shift = remainder.size() - 1 - denominator.degree();
+        const Rational factor = remainder.back() / leading;
+        for (std::size_t i = 0; i <= denominator.degree(); ++i)
+            remainder[i + shift] -= factor * denominator.coefficient(i);
+        trim(remainder);
+    }
+    return symbolic::RationalPolynomial{std::move(remainder)};
+}
+
+[[nodiscard]] bool hasRepeatedPolynomialFactor(
+    const symbolic::RationalPolynomial& polynomial) {
+    if (polynomial.degree() < 2)
+        return false;
+    symbolic::RationalPolynomial lhs = polynomial;
+    symbolic::RationalPolynomial rhs = derivativePolynomial(polynomial);
+    while (!rhs.isZero()) {
+        symbolic::RationalPolynomial remainder = polynomialRemainder(lhs, rhs);
+        lhs = std::move(rhs);
+        rhs = std::move(remainder);
+    }
+    return lhs.degree() > 0;
+}
+
 std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
     const Expr& equation,
     const expression::Symbol& variable,
@@ -1729,6 +1779,23 @@ std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
             symbolic::makeCanonicalRootExpression(canonical ? *canonical : root, builtins)));
     }
     return SolutionSet::finite(variables, std::move(branches));
+}
+
+std::optional<SolutionSet> solveRepeatedRealAlgebraicPolynomialEquation(
+    const Expr& equation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto relation = relationKindOf(equation, builtins);
+    if (relation && *relation != RelationKind::Equal)
+        return std::nullopt;
+    const Expr zeroForm = equationZeroForm(equation, builtins, mathematics, angles);
+    const auto polynomial = symbolic::toRationalPolynomial(zeroForm, variable, builtins);
+    if (!polynomial || polynomial->degree() <= 2 || !hasRepeatedPolynomialFactor(*polynomial))
+        return std::nullopt;
+    return solveRealAlgebraicPolynomialEquation(
+        equation, variable, builtins, mathematics, angles);
 }
 
 SolutionSet solvePolynomialEquation(
@@ -1805,35 +1872,542 @@ SolutionSet solvePolynomialEquation(
     if (const auto roots = symbolic::ComplexAlgebraicNumber::isolateAll(polynomial->coefficients())) {
         if (roots->empty())
             return SolutionSet::empty(variables);
+        const auto canonicalRoots = symbolic::ComplexAlgebraicNumber::canonicalizeAll(*roots);
         std::vector<SolutionBranch> branches;
         branches.reserve(roots->size());
-        for (const symbolic::ComplexAlgebraicNumber& root : *roots) {
-            const auto canonical = symbolic::ComplexAlgebraicNumber::create(
-                root.polynomial(), root.rootIndex());
-            branches.push_back(branch(variable,
-                symbolic::makeCanonicalRootExpression(canonical ? *canonical : root, builtins)));
+        if (canonicalRoots) {
+            for (const symbolic::ComplexAlgebraicNumber& root : *canonicalRoots)
+                branches.push_back(branch(
+                    variable, symbolic::makeCanonicalRootExpression(root, builtins)));
+        }
+        else {
+            for (const symbolic::ComplexAlgebraicNumber& root : *roots) {
+                const auto canonical = symbolic::ComplexAlgebraicNumber::create(
+                    root.polynomial(), root.rootIndex());
+                branches.push_back(branch(variable,
+                    symbolic::makeCanonicalRootExpression(canonical ? *canonical : root, builtins)));
+            }
         }
         return SolutionSet::finite(variables, std::move(branches));
     }
     return SolutionSet::unresolved(variables);
 }
 
-std::optional<SolutionSet> solvePolynomialSystem(
-    std::span<const Expr> equations,
-    std::span<const expression::Symbol> variableSymbols,
+
+[[nodiscard]] SolutionSet applyAmbientDomainToSystemSolution(
+    SolutionSet solution,
+    mathematics::NumericDomain ambientDomain,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (equations.empty() || variableSymbols.size() < 2)
+    if (ambientDomain == mathematics::NumericDomain::Complex)
+        return solution;
+    SolveConstraints constraints;
+    constraints.domain = ambientDomain;
+    return applySolveConstraints(
+        std::move(solution), constraints, builtins, mathematics, angles);
+}
+
+[[nodiscard]] SolutionSet solvePolynomialSubsystem(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variables,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::vector<SolverVariable> solverVariables;
+    solverVariables.reserve(variables.size());
+    for (const expression::Symbol& variable : variables)
+        solverVariables.push_back(SolverVariable{variable, ambientDomain});
+
+    if (variables.empty()) {
+        for (const Expr& equation : equations) {
+            const Expr zeroForm = equationZeroForm(equation, builtins, mathematics, angles);
+            if (proveZero(zeroForm, builtins, mathematics) == mathematics::TruthValue::True)
+                continue;
+            if (proveNonZero(zeroForm, builtins, mathematics) == mathematics::TruthValue::True)
+                return SolutionSet::empty({});
+            return SolutionSet::unresolved({});
+        }
+        return SolutionSet::universal({});
+    }
+
+    if (variables.size() == 1) {
+        if (equations.empty())
+            return SolutionSet::universal(std::move(solverVariables));
+
+        SolutionSet result = solveUnivariatePolynomialRelation(
+            equations.front(), variables.front(), builtins, mathematics, angles);
+        for (std::size_t i = 1; i < equations.size(); ++i) {
+            const SolveConstraints relationConstraint = parseSolveConstraints(
+                equations[i], variables, builtins, mathematics, angles);
+            result = applySolveConstraints(
+                std::move(result), relationConstraint, builtins, mathematics, angles);
+        }
+        return applyAmbientDomainToSystemSolution(
+            std::move(result), ambientDomain, builtins, mathematics, angles);
+    }
+
+    SolutionSet result = [&] {
+        if (auto polynomial = solvePolynomialSystem(
+                equations, variables, ambientDomain, builtins, mathematics, angles))
+            return std::move(*polynomial);
+        return solveLinearPolynomialSystem(
+            equations, variables, builtins, mathematics, angles);
+    }();
+    return applyAmbientDomainToSystemSolution(
+        std::move(result), ambientDomain, builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveByEliminantSpecialization(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> orderedSymbols,
+    std::span<const expression::Symbol> outputSymbols,
+    mathematics::NumericDomain ambientDomain,
+    const expression::Symbol& lastVariable,
+    const SolutionSet& lastSolutions,
+    bool lastSolutionsCertifiedReal,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    constexpr std::size_t maximumSpecializationRoots = 64;
+    constexpr std::size_t maximumSpecializationVariables = 4;
+    if (orderedSymbols.size() > maximumSpecializationVariables
+        || lastSolutions.branches().size() > maximumSpecializationRoots)
+        return std::nullopt;
+
+    std::vector<expression::Symbol> remainingSymbols{
+        orderedSymbols.begin(), orderedSymbols.end() - 1};
+    std::vector<SolverVariable> resultVariables;
+    resultVariables.reserve(outputSymbols.size());
+    for (const expression::Symbol& variable : outputSymbols)
+        resultVariables.push_back(SolverVariable{variable, ambientDomain});
+
+    std::vector<SolutionBranch> resultBranches;
+    for (const SolutionBranch& rootBranch : lastSolutions.branches()) {
+        if (!rootBranch.unconditional() || !rootBranch.freeVariables.empty()
+            || rootBranch.bindings.size() != 1
+            || !(rootBranch.bindings.front().variable == lastVariable))
+            return std::nullopt;
+
+        const Expr& root = rootBranch.bindings.front().value;
+        std::vector<Expr> specializedEquations;
+        specializedEquations.reserve(equations.size());
+        for (const Expr& equation : equations) {
+            Expr specialized = symbolic::substituteSymbol(equation, lastVariable, root);
+            specializedEquations.push_back(
+                simplify(std::move(specialized), builtins, mathematics, angles));
+        }
+
+        SolutionSet remaining = solvePolynomialSubsystem(
+            specializedEquations, remainingSymbols, ambientDomain,
+            builtins, mathematics, angles);
+        if (remaining.kind() == SolutionSetKind::Unresolved
+            || remaining.kind() == SolutionSetKind::Conditional)
+            return std::nullopt;
+        if (remaining.kind() == SolutionSetKind::Empty)
+            continue;
+
+        auto appendBranch = [&](const SolutionBranch* subBranch) {
+            SolutionBranch combined;
+            if (subBranch) {
+                combined.bindings.assign(
+                    subBranch->bindings.begin(), subBranch->bindings.end());
+                combined.freeVariables.assign(
+                    subBranch->freeVariables.begin(), subBranch->freeVariables.end());
+                combined.conditions = subBranch->conditions;
+                for (const mathematics::Predicate& predicate : remaining.conditions().predicates())
+                    combined.conditions.add(predicate);
+            }
+            else {
+                for (const expression::Symbol& variable : remainingSymbols)
+                    combined.freeVariables.push_back(SolverVariable{variable, ambientDomain});
+                combined.conditions = remaining.conditions();
+            }
+            combined.bindings.push_back(SolutionBinding{lastVariable, root});
+
+            std::vector<SolutionBinding> orderedBindings;
+            orderedBindings.reserve(combined.bindings.size());
+            for (const expression::Symbol& variable : outputSymbols) {
+                const auto found = std::find_if(
+                    combined.bindings.begin(), combined.bindings.end(),
+                    [&](const SolutionBinding& binding) { return binding.variable == variable; });
+                if (found != combined.bindings.end())
+                    orderedBindings.push_back(*found);
+            }
+            combined.bindings = std::move(orderedBindings);
+
+            if (ambientDomain == mathematics::NumericDomain::Real
+                && lastSolutionsCertifiedReal
+                && (!subBranch || (subBranch->bindingsCertifiedDomain
+                    && mathematics::isSubdomainOf(
+                        *subBranch->bindingsCertifiedDomain,
+                        mathematics::NumericDomain::Real))))
+                combined.bindingsCertifiedDomain = mathematics::NumericDomain::Real;
+
+            if (std::find(resultBranches.begin(), resultBranches.end(), combined)
+                == resultBranches.end())
+                resultBranches.push_back(std::move(combined));
+        };
+
+        if (remaining.kind() == SolutionSetKind::Universal)
+            appendBranch(nullptr);
+        else {
+            for (const SolutionBranch& branch : remaining.branches())
+                appendBranch(&branch);
+        }
+    }
+
+    if (resultBranches.empty())
+        return SolutionSet::empty(std::move(resultVariables));
+    return SolutionSet::finite(std::move(resultVariables), std::move(resultBranches));
+}
+
+
+[[nodiscard]] std::optional<SolutionSet> solveSinglePolynomialProjection(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variables,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if ((ambientDomain != mathematics::NumericDomain::Complex
+            && ambientDomain != mathematics::NumericDomain::Real)
+        || equations.size() != 1 || variables.size() < 2
+        || relationKindOf(equations.front(), builtins) != RelationKind::Equal)
+        return std::nullopt;
+
+    const Expr zeroForm = equationZeroForm(
+        equations.front(), builtins, mathematics, angles);
+    const auto multivariate = symbolic::toMultivariateRationalPolynomial(
+        zeroForm, builtins, symbolic::PolynomialConversionOptions{64, 256});
+    if (!multivariate || multivariate->totalDegree() <= 1)
+        return std::nullopt;
+    for (const expression::Symbol& symbol : multivariate->variables())
+        if (!sameVariable(symbol, variables))
+            return std::nullopt;
+
+    const expression::Symbol* solvedVariable = nullptr;
+    for (auto iterator = variables.rbegin(); iterator != variables.rend(); ++iterator) {
+        const std::size_t degree = multivariate->degree(*iterator);
+        if (degree >= 1 && degree <= 2) {
+            solvedVariable = &*iterator;
+            break;
+        }
+    }
+    if (!solvedVariable)
+        return std::nullopt;
+
+    const auto conversion = symbolic::toExpressionPolynomialWithConditions(
+        zeroForm, *solvedVariable, builtins, mathematics, angles,
+        symbolic::PolynomialConversionOptions{2, 256});
+    if (!conversion || conversion->polynomial.degree() > 2)
+        return std::nullopt;
+
+    // Realの正次元二次射影では，複素二次公式をそのまま返すと
+    // sqrt[discriminant]の実在条件が自由parameterから落ちる。
+    // 最高次係数が常に非零と証明できる場合だけ，判別式>=0をparameter domainとして
+    // exactに保持する。1自由parameterなら既存の一変数不等式solverで区間へ正規化する。
+    if (ambientDomain == mathematics::NumericDomain::Real
+        && conversion->polynomial.degree() == 2) {
+        const Expr a = conversion->polynomial.coefficient(2);
+        if (proveNonZero(a, builtins, mathematics) != mathematics::TruthValue::True)
+            return std::nullopt;
+
+        const Expr b = conversion->polynomial.coefficient(1);
+        const Expr c = conversion->polynomial.coefficient(0);
+        const Expr discriminant = symbolicQuadraticDiscriminant(
+            a, b, c, builtins, mathematics, angles);
+        const bool centeredQuadratic = proveZero(b, builtins, mathematics)
+            == mathematics::TruthValue::True;
+        Expr realRootArgument = discriminant;
+        if (centeredQuadratic) {
+            Expr minusC = simplify(
+                Expr::call(builtins.symbol(BuiltinId::Negate), {c}),
+                builtins, mathematics, angles);
+            realRootArgument = simplify(
+                symbolic::expandExpression(
+                    Expr::call(builtins.symbol(BuiltinId::Divide), {std::move(minusC), a}),
+                    builtins, mathematics, angles, {256}),
+                builtins, mathematics, angles);
+        }
+
+        std::vector<SolverVariable> resultVariables;
+        resultVariables.reserve(variables.size());
+        std::vector<SolverVariable> freeVariables;
+        freeVariables.reserve(variables.size() - 1);
+        for (const expression::Symbol& variable : variables) {
+            resultVariables.push_back(SolverVariable{variable, ambientDomain});
+            if (!(variable == *solvedVariable))
+                freeVariables.push_back(SolverVariable{variable, mathematics::NumericDomain::Real});
+        }
+
+        mathematics::AssumptionSet realParameterAssumptions;
+        for (const SolverVariable& parameter : freeVariables)
+            realParameterAssumptions.add(mathematics::elementOf(
+                Expr{parameter.symbol}, mathematics::NumericDomain::Real));
+        const mathematics::KnowledgeContext realKnowledge{
+            builtins, mathematics, realParameterAssumptions};
+        const mathematics::Predicate nonnegative = mathematics::relation(
+            RelationKind::GreaterEqual, realRootArgument, zeroExpr());
+        const mathematics::TruthValue nonnegativeTruth = realKnowledge.prove(nonnegative);
+        if (nonnegativeTruth == mathematics::TruthValue::False)
+            return SolutionSet::empty(std::move(resultVariables));
+
+        std::vector<mathematics::AssumptionSet> parameterRegions;
+        if (nonnegativeTruth == mathematics::TruthValue::True) {
+            parameterRegions.emplace_back();
+        }
+        else if (freeVariables.size() == 1) {
+            Expr relation = Expr::call(
+                builtins.symbol(BuiltinId::GreaterEqual), {realRootArgument, zeroExpr()});
+            const SolutionSet range = solveUnivariatePolynomialRelation(
+                relation, freeVariables.front().symbol, builtins, mathematics, angles);
+            if (range.kind() == SolutionSetKind::Empty)
+                return SolutionSet::empty(std::move(resultVariables));
+            if (range.kind() == SolutionSetKind::Universal) {
+                parameterRegions.emplace_back();
+            }
+            else if (range.kind() == SolutionSetKind::Finite) {
+                for (const SolutionBranch& rangeBranch : range.branches()) {
+                    // >= の一変数solverはfree-variable region branchを返す。
+                    // point binding等へ変わる将来実装では，このbridgeで推測parameterizationをしない。
+                    if (!rangeBranch.bindings.empty())
+                        return std::nullopt;
+                    parameterRegions.push_back(rangeBranch.conditions);
+                }
+            }
+            else {
+                parameterRegions.push_back(mathematics::AssumptionSet{std::vector<mathematics::Predicate>{nonnegative}});
+            }
+        }
+        else {
+            parameterRegions.push_back(mathematics::AssumptionSet{std::vector<mathematics::Predicate>{nonnegative}});
+        }
+
+        const auto discriminantZero = proveZero(realRootArgument, builtins, mathematics);
+        const auto centeredRoot = [&](bool plus) {
+            Expr root = simplify(
+                Expr::call(builtins.symbol(BuiltinId::Sqrt), {realRootArgument}),
+                builtins, mathematics, angles);
+            if (plus)
+                return root;
+            return simplify(
+                Expr::call(builtins.symbol(BuiltinId::Negate), {std::move(root)}),
+                builtins, mathematics, angles);
+        };
+        std::vector<SolutionBranch> branches;
+        const auto appendRoot = [&](Expr value, const mathematics::AssumptionSet& region,
+                                    std::optional<std::size_t> multiplicity = std::nullopt) {
+            SolutionBranch branch;
+            branch.bindings.push_back(SolutionBinding{*solvedVariable, std::move(value)});
+            branch.freeVariables = freeVariables;
+            branch.multiplicity = multiplicity;
+            branch.bindingsCertifiedDomain = mathematics::NumericDomain::Real;
+            for (const mathematics::Predicate& predicate : conversion->domainConditions.predicates())
+                branch.conditions.add(predicate);
+            for (const mathematics::Predicate& predicate : region.predicates())
+                branch.conditions.add(predicate);
+            if (std::find(branches.begin(), branches.end(), branch) == branches.end())
+                branches.push_back(std::move(branch));
+        };
+
+        for (const mathematics::AssumptionSet& region : parameterRegions) {
+            if (discriminantZero == mathematics::TruthValue::True) {
+                appendRoot(
+                    symbolicRepeatedQuadraticRoot(a, b, builtins, mathematics, angles),
+                    region, std::size_t{2});
+                continue;
+            }
+            appendRoot(centeredQuadratic
+                ? centeredRoot(true)
+                : symbolicQuadraticRoot(
+                    a, b, discriminant, true, builtins, mathematics, angles), region);
+            appendRoot(centeredQuadratic
+                ? centeredRoot(false)
+                : symbolicQuadraticRoot(
+                    a, b, discriminant, false, builtins, mathematics, angles), region);
+        }
+
+        if (branches.empty())
+            return SolutionSet::empty(std::move(resultVariables));
+        return SolutionSet::finite(std::move(resultVariables), std::move(branches));
+    }
+
+    const SolutionSet projected = solveExpressionPolynomial(
+        conversion->polynomial, *solvedVariable, builtins, mathematics, angles);
+    if (projected.kind() == SolutionSetKind::Unresolved)
+        return std::nullopt;
+
+    std::vector<SolverVariable> resultVariables;
+    resultVariables.reserve(variables.size());
+    for (const expression::Symbol& variable : variables)
+        resultVariables.push_back(SolverVariable{variable, ambientDomain});
+
+    auto freeParameters = [&](bool includeSolved) {
+        std::vector<SolverVariable> result;
+        for (const expression::Symbol& variable : variables)
+            if (includeSolved || !(variable == *solvedVariable))
+                result.push_back(SolverVariable{variable, ambientDomain});
+        return result;
+    };
+
+    std::vector<SolutionBranch> branches;
+    auto appendProjectedBranch = [&](SolutionBranch branch,
+                                     const mathematics::AssumptionSet& caseConditions) {
+        for (const mathematics::Predicate& predicate : conversion->domainConditions.predicates())
+            branch.conditions.add(predicate);
+        for (const mathematics::Predicate& predicate : caseConditions.predicates())
+            branch.conditions.add(predicate);
+        branch.freeVariables = freeParameters(false);
+        if (ambientDomain == mathematics::NumericDomain::Real
+            && conversion->polynomial.degree() <= 1)
+            branch.bindingsCertifiedDomain = mathematics::NumericDomain::Real;
+        if (std::find(branches.begin(), branches.end(), branch) == branches.end())
+            branches.push_back(std::move(branch));
+    };
+    auto appendUniversalBranch = [&](const mathematics::AssumptionSet& caseConditions) {
+        SolutionBranch branch;
+        branch.freeVariables = freeParameters(true);
+        for (const mathematics::Predicate& predicate : conversion->domainConditions.predicates())
+            branch.conditions.add(predicate);
+        for (const mathematics::Predicate& predicate : caseConditions.predicates())
+            branch.conditions.add(predicate);
+        if (std::find(branches.begin(), branches.end(), branch) == branches.end())
+            branches.push_back(std::move(branch));
+    };
+
+    switch (projected.kind()) {
+    case SolutionSetKind::Empty:
+        return SolutionSet::empty(std::move(resultVariables));
+    case SolutionSetKind::Universal:
+        appendUniversalBranch(projected.conditions());
+        break;
+    case SolutionSetKind::Finite:
+        for (const SolutionBranch& branch : projected.branches())
+            appendProjectedBranch(branch, projected.conditions());
+        break;
+    case SolutionSetKind::Conditional:
+        for (const SolutionCase& item : projected.cases()) {
+            if (item.outcome == SolutionSetKind::Unresolved
+                || item.outcome == SolutionSetKind::Conditional)
+                return std::nullopt;
+            if (item.outcome == SolutionSetKind::Empty)
+                continue;
+            if (item.outcome == SolutionSetKind::Universal) {
+                appendUniversalBranch(item.conditions);
+                continue;
+            }
+            for (const SolutionBranch& branch : item.branches)
+                appendProjectedBranch(branch, item.conditions);
+        }
+        break;
+    case SolutionSetKind::Unresolved:
+        return std::nullopt;
+    }
+
+    if (branches.empty())
+        return SolutionSet::empty(std::move(resultVariables));
+    return SolutionSet::finite(std::move(resultVariables), std::move(branches));
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveFactoredPolynomialSystem(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variables,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    constexpr std::size_t maximumFactorBranches = 16;
+    for (std::size_t equationIndex = 0; equationIndex < equations.size(); ++equationIndex) {
+        if (relationKindOf(equations[equationIndex], builtins) != RelationKind::Equal)
+            continue;
+        const Expr zeroForm = equationZeroForm(
+            equations[equationIndex], builtins, mathematics, angles);
+        Expr factored = zeroForm;
+        if (!isHead(factored, builtins, BuiltinId::Multiply)) {
+            const auto polynomial = symbolic::toMultivariateRationalPolynomial(
+                zeroForm, builtins, symbolic::PolynomialConversionOptions{16, 64});
+            if (polynomial && polynomial->totalDegree() <= 16 && polynomial->termCount() <= 64)
+                factored = symbolic::factorExpression(
+                    zeroForm, builtins, mathematics, angles);
+        }
+        if (!isHead(factored, builtins, BuiltinId::Multiply)
+            || factored.asCall().arguments.size() < 2
+            || factored.asCall().arguments.size() > maximumFactorBranches)
+            continue;
+
+        std::vector<Expr> factors;
+        for (const Expr& factor : factored.asCall().arguments) {
+            if (!containsAnySolverVariable(factor, variables)) {
+                if (proveNonZero(factor, builtins, mathematics) == mathematics::TruthValue::True)
+                    continue;
+                return std::nullopt;
+            }
+            if (std::find(factors.begin(), factors.end(), factor) == factors.end())
+                factors.push_back(factor);
+        }
+        if (factors.size() < 2)
+            continue;
+
+        std::vector<SolverVariable> resultVariables;
+        resultVariables.reserve(variables.size());
+        for (const expression::Symbol& variable : variables)
+            resultVariables.push_back(SolverVariable{variable, ambientDomain});
+        std::vector<SolutionBranch> unionBranches;
+
+        for (const Expr& factor : factors) {
+            std::vector<Expr> branchEquations;
+            branchEquations.reserve(equations.size());
+            for (std::size_t i = 0; i < equations.size(); ++i) {
+                if (i == equationIndex)
+                    continue;
+                branchEquations.push_back(equations[i]);
+            }
+            branchEquations.push_back(Expr::call(
+                builtins.symbol(BuiltinId::Equal), {factor, zeroExpr()}));
+
+            SolutionSet branchSolution = solvePolynomialSubsystem(
+                branchEquations, variables, ambientDomain,
+                builtins, mathematics, angles);
+            if (branchSolution.kind() == SolutionSetKind::Unresolved
+                || branchSolution.kind() == SolutionSetKind::Conditional)
+                return std::nullopt;
+            if (branchSolution.kind() == SolutionSetKind::Universal)
+                return SolutionSet::universal(std::move(resultVariables));
+            if (branchSolution.kind() == SolutionSetKind::Empty)
+                continue;
+            for (const SolutionBranch& branch : branchSolution.branches())
+                if (std::find(unionBranches.begin(), unionBranches.end(), branch)
+                    == unionBranches.end())
+                    unionBranches.push_back(branch);
+        }
+
+        if (unionBranches.empty())
+            return SolutionSet::empty(std::move(resultVariables));
+        return SolutionSet::finite(std::move(resultVariables), std::move(unionBranches));
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<SolutionSet> solvePolynomialSystemInOrder(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> orderedSymbols,
+    std::span<const expression::Symbol> outputSymbols,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (equations.empty() || orderedSymbols.size() < 2)
         return std::nullopt;
 
     std::vector<SolverVariable> variables;
-    variables.reserve(variableSymbols.size());
-    for (const expression::Symbol& variable : variableSymbols)
-        variables.push_back(SolverVariable{variable, mathematics::NumericDomain::Complex});
+    variables.reserve(outputSymbols.size());
+    for (const expression::Symbol& variable : outputSymbols)
+        variables.push_back(SolverVariable{variable, ambientDomain});
 
     const symbolic::PolynomialRing ring{
-        std::vector<expression::Symbol>{variableSymbols.begin(), variableSymbols.end()},
+        std::vector<expression::Symbol>{orderedSymbols.begin(), orderedSymbols.end()},
         symbolic::MonomialOrder::Lex};
     std::vector<symbolic::MultivariateRationalPolynomial> generators;
     generators.reserve(equations.size());
@@ -1872,7 +2446,7 @@ std::optional<SolutionSet> solvePolynomialSystem(
             return SolutionSet::empty(std::move(variables));
     }
 
-    const expression::Symbol& lastVariable = variableSymbols.back();
+    const expression::Symbol& lastVariable = orderedSymbols.back();
     const symbolic::MultivariateRationalPolynomial* eliminant = nullptr;
     for (const auto& polynomial : computation.basis) {
         if (polynomial.degree(lastVariable) == 0)
@@ -1890,8 +2464,35 @@ std::optional<SolutionSet> solvePolynomialSystem(
     const Expr eliminantExpr = symbolic::polynomialToExpandedExpr(*eliminant, builtins);
     const Expr eliminantEquation = Expr::call(
         builtins.symbol(BuiltinId::Equal), {eliminantExpr, zeroExpr()});
-    const SolutionSet lastSolutions = solvePolynomialEquation(
-        eliminantEquation, lastVariable, builtins, mathematics, angles);
+    bool lastSolutionsCertifiedReal = false;
+    SolutionSet lastSolutions = [&] {
+        if (ambientDomain == mathematics::NumericDomain::Real) {
+            SolutionSet explicitRoots = solvePolynomialEquation(
+                eliminantEquation, lastVariable, builtins, mathematics, angles);
+            SolveConstraints realConstraint;
+            realConstraint.domain = mathematics::NumericDomain::Real;
+            explicitRoots = applySolveConstraints(
+                std::move(explicitRoots), realConstraint, builtins, mathematics, angles);
+            const bool explicitComplete = explicitRoots.kind() == SolutionSetKind::Finite
+                && std::all_of(
+                    explicitRoots.branches().begin(), explicitRoots.branches().end(),
+                    [](const SolutionBranch& branch) {
+                        return branch.unconditional() && branch.freeVariables.empty()
+                            && branch.bindings.size() == 1;
+                    });
+            if (explicitComplete) {
+                lastSolutionsCertifiedReal = true;
+                return explicitRoots;
+            }
+            if (auto real = solveRealAlgebraicPolynomialEquation(
+                    eliminantEquation, lastVariable, builtins, mathematics, angles)) {
+                lastSolutionsCertifiedReal = true;
+                return std::move(*real);
+            }
+        }
+        return solvePolynomialEquation(
+            eliminantEquation, lastVariable, builtins, mathematics, angles);
+    }();
     if (lastSolutions.kind() != SolutionSetKind::Finite)
         return SolutionSet::unresolved(std::move(variables));
 
@@ -1900,8 +2501,8 @@ std::optional<SolutionSet> solvePolynomialSystem(
     // 必要になるため，公開候補を作る前にQ[t]上の剰余として一括検証する。
     std::vector<SolutionBinding> shapeBindings;
     shapeBindings.push_back(SolutionBinding{lastVariable, Expr{lastVariable}});
-    for (std::size_t reverse = variableSymbols.size() - 1; reverse-- > 0;) {
-        const expression::Symbol& variable = variableSymbols[reverse];
+    for (std::size_t reverse = orderedSymbols.size() - 1; reverse-- > 0;) {
+        const expression::Symbol& variable = orderedSymbols[reverse];
         const symbolic::MultivariateRationalPolynomial* relationPolynomial = nullptr;
         Rational variableCoefficient{BigInt{0}};
 
@@ -1913,7 +2514,7 @@ std::optional<SolutionSet> solvePolynomialSystem(
             Rational coefficient{BigInt{0}};
             for (const symbolic::PolynomialTerm& term : polynomial.terms()) {
                 for (std::size_t earlier = 0; earlier < reverse; ++earlier)
-                    if (term.monomial.exponentOf(variableSymbols[earlier]) != 0)
+                    if (term.monomial.exponentOf(orderedSymbols[earlier]) != 0)
                         containsEarlier = true;
                 const std::size_t exponent = term.monomial.exponentOf(variable);
                 if (exponent == 0)
@@ -1931,8 +2532,14 @@ std::optional<SolutionSet> solvePolynomialSystem(
                 break;
             }
         }
-        if (!relationPolynomial)
+        if (!relationPolynomial) {
+            if (auto specialized = solveByEliminantSpecialization(
+                    equations, orderedSymbols, outputSymbols, ambientDomain,
+                    lastVariable, lastSolutions, lastSolutionsCertifiedReal,
+                    builtins, mathematics, angles))
+                return specialized;
             return SolutionSet::unresolved(std::move(variables));
+        }
 
         std::vector<symbolic::PolynomialTerm> restTerms;
         for (const symbolic::PolynomialTerm& term : relationPolynomial->terms()) {
@@ -1988,8 +2595,8 @@ std::optional<SolutionSet> solvePolynomialSystem(
 
         const Expr& root = lastBranch.bindings.front().value;
         std::vector<SolutionBinding> bindings;
-        bindings.reserve(variableSymbols.size());
-        for (const expression::Symbol& variable : variableSymbols) {
+        bindings.reserve(outputSymbols.size());
+        for (const expression::Symbol& variable : outputSymbols) {
             if (variable == lastVariable) {
                 bindings.push_back(SolutionBinding{variable, root});
                 continue;
@@ -2006,13 +2613,219 @@ std::optional<SolutionSet> solvePolynomialSystem(
 
         SolutionBranch branchResult;
         branchResult.bindings = std::move(bindings);
-        branchResult.bindingsCertifiedDomain = mathematics::NumericDomain::Complex;
+        branchResult.bindingsCertifiedDomain = lastSolutionsCertifiedReal
+            ? mathematics::NumericDomain::Real
+            : mathematics::NumericDomain::Complex;
         resultBranches.push_back(std::move(branchResult));
     }
 
     if (resultBranches.empty())
         return SolutionSet::empty(std::move(variables));
     return SolutionSet::finite(std::move(variables), std::move(resultBranches));
+}
+
+
+
+[[nodiscard]] std::optional<SolutionSet> solveByConstantLinearElimination(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variables,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (equations.size() < 2 || variables.size() < 2
+        || (ambientDomain != mathematics::NumericDomain::Complex
+            && ambientDomain != mathematics::NumericDomain::Real))
+        return std::nullopt;
+
+    constexpr std::size_t maximumEliminationVariables = 6;
+    if (variables.size() > maximumEliminationVariables)
+        return std::nullopt;
+
+    for (std::size_t equationIndex = 0; equationIndex < equations.size(); ++equationIndex) {
+        if (relationKindOf(equations[equationIndex], builtins) != RelationKind::Equal)
+            continue;
+
+        const Expr zeroForm = equationZeroForm(
+            equations[equationIndex], builtins, mathematics, angles);
+        const auto multivariate = symbolic::toMultivariateRationalPolynomial(
+            zeroForm, builtins, symbolic::PolynomialConversionOptions{64, 512});
+        if (!multivariate || multivariate->totalDegree() == 0)
+            continue;
+
+        for (auto variableIterator = variables.rbegin(); variableIterator != variables.rend(); ++variableIterator) {
+            const expression::Symbol variable = *variableIterator;
+            if (multivariate->degree(variable) != 1)
+                continue;
+
+            const auto conversion = symbolic::toExpressionPolynomialWithConditions(
+                zeroForm, variable, builtins, mathematics, angles,
+                symbolic::PolynomialConversionOptions{1, 512});
+            if (!conversion || conversion->polynomial.degree() != 1
+                || !conversion->domainConditions.empty())
+                continue;
+
+            const Expr coefficient = conversion->polynomial.coefficient(1);
+            bool coefficientDependsOnSolverVariable = false;
+            for (const expression::Symbol& candidate : variables)
+                if (symbolic::containsSymbol(coefficient, candidate)) {
+                    coefficientDependsOnSolverVariable = true;
+                    break;
+                }
+            if (coefficientDependsOnSolverVariable
+                || proveNonZero(coefficient, builtins, mathematics) != mathematics::TruthValue::True)
+                continue;
+
+            Expr negatedConstant = simplify(
+                Expr::call(builtins.symbol(BuiltinId::Negate), {
+                    conversion->polynomial.coefficient(0)}),
+                builtins, mathematics, angles);
+            Expr solvedValue = simplify(
+                symbolic::expandExpression(
+                    Expr::call(builtins.symbol(BuiltinId::Divide), {
+                        std::move(negatedConstant), coefficient}),
+                    builtins, mathematics, angles, {512}),
+                builtins, mathematics, angles);
+
+            std::vector<expression::Symbol> remainingVariables;
+            remainingVariables.reserve(variables.size() - 1);
+            for (const expression::Symbol& candidate : variables)
+                if (!(candidate == variable))
+                    remainingVariables.push_back(candidate);
+
+            std::vector<Expr> reducedEquations;
+            reducedEquations.reserve(equations.size() - 1);
+            for (std::size_t i = 0; i < equations.size(); ++i) {
+                if (i == equationIndex)
+                    continue;
+                Expr reduced = symbolic::substituteSymbol(equations[i], variable, solvedValue);
+                reducedEquations.push_back(simplify(
+                    std::move(reduced), builtins, mathematics, angles));
+            }
+
+            SolutionSet remaining = solvePolynomialSubsystem(
+                reducedEquations, remainingVariables, ambientDomain,
+                builtins, mathematics, angles);
+            if (remaining.kind() == SolutionSetKind::Unresolved
+                || remaining.kind() == SolutionSetKind::Conditional)
+                continue;
+
+            std::vector<SolverVariable> resultVariables;
+            resultVariables.reserve(variables.size());
+            for (const expression::Symbol& candidate : variables)
+                resultVariables.push_back(SolverVariable{candidate, ambientDomain});
+
+            if (remaining.kind() == SolutionSetKind::Empty)
+                return SolutionSet::empty(std::move(resultVariables));
+
+            auto combineBranch = [&](const SolutionBranch* subBranch) -> SolutionBranch {
+                SolutionBranch combined;
+                if (subBranch) {
+                    combined.bindings.assign(
+                        subBranch->bindings.begin(), subBranch->bindings.end());
+                    combined.freeVariables.assign(
+                        subBranch->freeVariables.begin(), subBranch->freeVariables.end());
+                    combined.conditions = subBranch->conditions;
+                    for (const mathematics::Predicate& predicate : remaining.conditions().predicates())
+                        combined.conditions.add(predicate);
+                }
+                else {
+                    for (const expression::Symbol& freeVariable : remainingVariables)
+                        combined.freeVariables.push_back(SolverVariable{freeVariable, ambientDomain});
+                    combined.conditions = remaining.conditions();
+                }
+
+                Expr specializedValue = solvedValue;
+                if (subBranch)
+                    for (const SolutionBinding& binding : subBranch->bindings)
+                        specializedValue = symbolic::substituteSymbol(
+                            specializedValue, binding.variable, binding.value);
+                specializedValue = simplify(
+                    std::move(specializedValue), builtins, mathematics, angles);
+                combined.bindings.push_back(SolutionBinding{variable, std::move(specializedValue)});
+
+                std::vector<SolutionBinding> orderedBindings;
+                orderedBindings.reserve(combined.bindings.size());
+                for (const expression::Symbol& outputVariable : variables) {
+                    const auto found = std::find_if(
+                        combined.bindings.begin(), combined.bindings.end(),
+                        [&](const SolutionBinding& binding) {
+                            return binding.variable == outputVariable;
+                        });
+                    if (found != combined.bindings.end())
+                        orderedBindings.push_back(*found);
+                }
+                combined.bindings = std::move(orderedBindings);
+
+                if (ambientDomain == mathematics::NumericDomain::Real
+                    && (!subBranch || (subBranch->bindingsCertifiedDomain
+                        && mathematics::isSubdomainOf(
+                            *subBranch->bindingsCertifiedDomain,
+                            mathematics::NumericDomain::Real))))
+                    combined.bindingsCertifiedDomain = mathematics::NumericDomain::Real;
+                return combined;
+            };
+
+            std::vector<SolutionBranch> branches;
+            if (remaining.kind() == SolutionSetKind::Universal)
+                branches.push_back(combineBranch(nullptr));
+            else {
+                branches.reserve(remaining.branches().size());
+                for (const SolutionBranch& branch : remaining.branches())
+                    branches.push_back(combineBranch(&branch));
+            }
+
+            return branches.empty()
+                ? std::optional<SolutionSet>{SolutionSet::empty(std::move(resultVariables))}
+                : std::optional<SolutionSet>{SolutionSet::finite(
+                    std::move(resultVariables), std::move(branches))};
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<SolutionSet> solvePolynomialSystem(
+    std::span<const Expr> equations,
+    std::span<const expression::Symbol> variableSymbols,
+    mathematics::NumericDomain ambientDomain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (equations.empty() || variableSymbols.size() < 2)
+        return std::nullopt;
+
+    const auto primary = solvePolynomialSystemInOrder(
+        equations, variableSymbols, variableSymbols, ambientDomain, builtins, mathematics, angles);
+    if (!primary || primary->kind() != SolutionSetKind::Unresolved)
+        return primary;
+
+    // 2変数lex Groebner基底は，射影変数の選択だけでshape-position復元に失敗することがある。
+    // 反対側の射影を1回だけ試し，解集合を変えずに定数係数の一次逆代入関係を探す。
+    if (variableSymbols.size() == 2) {
+        const std::array<expression::Symbol, 2> swapped{
+            variableSymbols[1], variableSymbols[0]};
+        const auto alternate = solvePolynomialSystemInOrder(
+            equations, swapped, variableSymbols, ambientDomain, builtins, mathematics, angles);
+        if (alternate && alternate->kind() != SolutionSetKind::Unresolved)
+            return alternate;
+    }
+
+    // Gröbnerのzero-dimensional経路を先に尊重し，既存のcanonical Root/shape表示を
+    // 奪わない。一般経路で完全解を構成できなかった場合だけ，定数係数の線形変数を
+    // exactに消去して低次元systemへ落とす。その後に積=0のbranch分解と
+    // 一方の変数を自由parameterにする低次projectionを試す。
+    if (auto eliminated = solveByConstantLinearElimination(
+            equations, variableSymbols, ambientDomain, builtins, mathematics, angles))
+        return eliminated;
+    if (auto factored = solveFactoredPolynomialSystem(
+            equations, variableSymbols, ambientDomain, builtins, mathematics, angles))
+        return factored;
+    if (auto projected = solveSinglePolynomialProjection(
+            equations, variableSymbols, ambientDomain, builtins, mathematics, angles))
+        return projected;
+
+    return primary;
 }
 
 SolutionSet solveLinearPolynomialSystem(

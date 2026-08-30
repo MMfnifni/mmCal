@@ -467,6 +467,15 @@ MathRegistry MathRegistry::defaults(
     registry.setRealInverseKnowledge(FunctionId::Tan, FunctionId::Atan, false,
         RealMonotonicity::Unknown, RealRangeRule::AllReal);
 
+    // DLMF 7.10.1より，実軸上ではerf' = 2 exp(-x^2)/sqrt(Pi) > 0。
+    // DLMF 7.2.2のerfc=1-erfと実軸端点値からerf(R)=(-1,1)，
+    // erfc(R)=(0,2)を得る。逆函数をpublic builtinとして持たなくても，
+    // injectivity/range知識はSolverの存在性証明へ独立に供給できる。
+    registry.setRealBehaviorKnowledge(FunctionId::Erf, true,
+        RealMonotonicity::Increasing, RealRangeRule::OpenMinusOneToOne);
+    registry.setRealBehaviorKnowledge(FunctionId::Erfc, true,
+        RealMonotonicity::Decreasing, RealRangeRule::OpenZeroToTwo);
+
     // 定義される全点で0を取らない函数。definednessとは独立に保持し、
     // Simplifier/Solver/積分検証が同じ非零知識を利用する。
     registry.setZeroKnowledge(FunctionId::Exp, FunctionZeroRule::NeverZero);
@@ -547,6 +556,22 @@ void MathRegistry::setRealInverseKnowledge(
     if (iterator == functions_.end())
         throw std::invalid_argument("Mathematical function symbol is not registered");
     iterator->second.inverseFunction = inverse;
+    iterator->second.realGloballyInjective = globallyInjective;
+    iterator->second.realMonotonicity = monotonicity;
+    iterator->second.realRangeRule = rangeRule;
+}
+
+void MathRegistry::setRealBehaviorKnowledge(
+    FunctionId id,
+    bool globallyInjective,
+    RealMonotonicity monotonicity,
+    RealRangeRule rangeRule) {
+    const auto symbolIterator = functionSymbols_.find(id);
+    if (symbolIterator == functionSymbols_.end())
+        throw std::invalid_argument("Mathematical function ID is not registered");
+    auto iterator = functions_.find(symbolIterator->second.id());
+    if (iterator == functions_.end())
+        throw std::invalid_argument("Mathematical function symbol is not registered");
     iterator->second.realGloballyInjective = globallyInjective;
     iterator->second.realMonotonicity = monotonicity;
     iterator->second.realRangeRule = rangeRule;

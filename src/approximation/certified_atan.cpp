@@ -49,10 +49,11 @@ struct PointAtanResult final {
 //
 // 0 <= x <= 1/2 では項の絶対値が単調減少するので、交代級数の基本定理から
 // 真値は「現在の部分和」と「次項まで加えた部分和」の間に必ず存在する。
-// つまり誤差の大きさを経験的に推測する必要がない。
 //
-// ここはreference実装としてRationalを完全exactに保つ。atanはArg/Log/Powerの
-// branchを決める根幹なので、まず証明が最も単純な算法を採用する。
+// 入力xはRationalとしてexactだが、級数の全中間値までnormalized Rationalで
+// 保持する必要はない。高precision dyadic xでは分母が項ごとに巨大化し、Arg/Log
+// 全体のperformance cliffになる。固定working precisionのoutward intervalで
+// 隣接部分和を包含し、そのhullを返せば交代級数の証明はそのまま保てる。
 [[nodiscard]] PointAtanResult encloseAtanSeriesPositive(
     const Rational& x,
     std::size_t precisionBits) {
@@ -61,12 +62,15 @@ struct PointAtanResult final {
     if (x.isZero())
         return PointAtanResult{rational(0), rational(0), 1};
 
+    const std::size_t workBits = checkedPrecisionAdd(
+        precisionBits, 32, "Certified atan working precision is too large");
     const Rational threshold = binaryPrecisionThreshold(checkedPrecisionAdd(
         precisionBits, 16, "Certified atan precision is too large"));
-    const Rational xSquared = x * x;
+    const RealInterval xInterval = RealInterval::fromRational(x, workBits);
+    const RealInterval xSquared = multiply(xInterval, xInterval, workBits);
 
-    Rational power = x;   // x^(2k+1)
-    Rational sum = x;     // k=0 の部分和
+    RealInterval power = xInterval; // x^(2k+1)
+    RealInterval sum = xInterval;   // k=0 の部分和
     bool nextNegative = true;
     std::uint64_t odd = 1;
     std::size_t termsUsed = 1;
@@ -77,21 +81,27 @@ struct PointAtanResult final {
         if (odd > std::numeric_limits<std::uint64_t>::max() - 2)
             throw std::overflow_error("Certified atan series index overflow");
         odd += 2;
-        power *= xSquared;
+        power = multiply(power, xSquared, workBits);
 
         if (odd > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
             throw std::overflow_error("Certified atan series index exceeds BigInt small-integer range");
 
-        const Rational magnitude = power / Rational{BigInt{static_cast<std::int64_t>(odd)}};
-        const Rational nextSum = nextNegative ? sum - magnitude : sum + magnitude;
+        const Rational inverseOdd{BigInt{1}, BigInt{static_cast<std::int64_t>(odd)}};
+        const RealInterval magnitude = multiply(
+            power, RealInterval::fromRational(inverseOdd, workBits), workBits);
+        const RealInterval nextSum = nextNegative
+            ? subtract(sum, magnitude, workBits)
+            : add(sum, magnitude, workBits);
 
-        // 交代級数では真値が隣接する二つの部分和の間にある。
-        // magnitude <= threshold まで狭まれば、この区間は要求binary precisionより
-        // 十分細かい。最終10進丸めの一意性はさらに上位層が検査する。
-        if (magnitude <= threshold) {
-            const Rational lower = sum < nextSum ? sum : nextSum;
-            const Rational upper = sum < nextSum ? nextSum : sum;
-            return PointAtanResult{lower, upper, termsUsed};
+        // magnitudeの上端が閾値以下なら、真の次項も必ず閾値以下である。
+        // 真値はexactな隣接部分和の間にあり、それぞれをsum/nextSumが包含するため、
+        // interval hullは丸めを含めても厳密なatan(x) enclosureになる。
+        if (magnitude.upper().toRational() <= threshold) {
+            const RealInterval enclosure = hull(sum, nextSum).roundedOutward(precisionBits);
+            return PointAtanResult{
+                enclosure.lower().toRational(),
+                enclosure.upper().toRational(),
+                termsUsed};
         }
 
         sum = nextSum;

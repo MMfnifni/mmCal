@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(mmCal VERSION 1.5.3 LANGUAGES CXX)
+project(mmCal VERSION 1.5.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,7 @@ target_include_directories(mmCal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_executable(mmCal.Benchmarks EXCLUDE_FROM_ALL
     benchmarks/benchmark_main.cpp
     benchmarks/certification_boundary_fuzzer.cpp
+    benchmarks/performance_cliff_audit.cpp
     benchmarks/random_expression_fuzzer.cpp)
 target_link_libraries(mmCal.Benchmarks PRIVATE mmCal.Core)
 target_include_directories(mmCal.Benchmarks PRIVATE

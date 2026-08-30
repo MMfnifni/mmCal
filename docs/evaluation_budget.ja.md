@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-`EvaluationBudget`は，1回のtop-level評価が使用できる決定論的資源量を一つの文脈で管理する。数学的な定義域，解の有無，backendの対応範囲とは別概念である。
+`EvaluationBudget`は，1回のtop-level評価が使用できる決定論的資源量を一つの文脈で管理する。数学的な定義域，解の有無，計算基盤の対応範囲とは別概念である。
 
 上限超過はすべて`ResourceLimitError`である。`DomainError`，空の`SolutionSet`，`Unresolved`，未評価式へ読み替えてはならない。
 
@@ -29,8 +29,8 @@
 | `maxDenseArrayElements` | 10,000,000 | 評価対象となるdense Array要素の累積量 |
 | `maxTemporaryMatrixElements` | 25,000,000 | Matrix作業buffer・symbolic minorの累積量 |
 | `maxBigIntegerBits` | 8,000,000 | exact整数・Rational成分の最大bit長 |
-| `maxRequestedPrecisionDigits` | 100,000 | `N[expr,p]`の要求10進桁数 |
-| `maxAlgebraicDegree` | 64 | root / AlgebraicNumber構成次数 |
+| `maxRequestedPrecisionDigits` | 100,000 | `N[expr,p]`，`diff[...,p]`，`nintegrate[...,p]`等が要求する10進桁数 |
+| `maxAlgebraicDegree` | 96 | root / AlgebraicNumber構成次数 |
 | `maxAlgebraicRefinements` | 100,000 | isolating interval / disk refinement回数 |
 
 値は安全性の絶対保証だけでなく，既存の実用入力を不必要に拒否しない初期policyである。公開後は負荷測定とfailure corpusを根拠に調整し，変更時はchangelogへ記録する。
@@ -46,13 +46,13 @@
 - Matrix / SVD / Eigenのprecision retry数
 - AlgebraicNumber内部の次数・分離上限
 
-局所上限が先に尽き，正しい未評価fallbackを返す既存契約は維持する。一方，共通budgetが先に尽きた場合はfallbackへ偽装せず`ResourceLimitError`を送出する。
+局所上限が先に尽き，正しい未評価代替経路を返す既存契約は維持する。一方，共通budgetが先に尽きた場合は代替経路へ偽装せず`ResourceLimitError`を送出する。
 
 ## 5. BigInt・精度・allocationの事前検査
 
 整数冪とfactorialは，結果を作ってからbit長を測るだけではmemory防御にならない。この二経路では入力から結果bit長の下界を求め，上限超過が確実な場合は演算前に停止する。
 
-通常のexact四則演算，packed Array，SolutionSet binding等は，生成結果の整数・Rational numerator / denominator・complex成分を走査し，実bit長を記録する。要求精度は`ApproximationContext`を構築する前に検査する。
+通常のexact四則演算，packed Array，SolutionSet binding等は，生成結果の整数・Rational numerator / denominator・complex成分を走査し，実bit長を記録する。要求精度は`ApproximationContext`を構築する前に共通budgetで検査する。これはtop-level `N`だけでなく，`diff` / `nintegrate`のprecision引数と，それらが保持した式の内部で再評価されるnested `N[...]`にも適用する。
 
 `range` / `table`，`zeros` / `identity`，`dot`出力およびMatrix作業bufferは，vectorの`reserve` / `assign`より前に要素数を算出してbudgetへ請求する。結果を確保してから上限超過を報告する経路にはしない。入力のpacked / mixed Arrayについてもexact成分を走査し，数値literalのbit長を評価開始時に検査する。
 
@@ -77,7 +77,7 @@ mmcal::evaluation::EvaluationCancellationToken cancellation;
 auto result = session.evaluate("longRunningExpression", cancellation);
 ```
 
-`lastEvaluationUsage()`は直前の成功評価だけでなく，`ResourceLimitError`を含む失敗評価についても取得できる。fuzzerはこれを反例出力へ含める。`EvaluationUsage::modularPrimes`はexact modular Matrix backendが試行したprime image数を記録するtelemetry専用counterであり，独立したlimitではない。
+`lastEvaluationUsage()`は直前の成功評価だけでなく，`ResourceLimitError`を含む失敗評価についても取得できる。fuzzerはこれを反例出力へ含める。`EvaluationUsage::modularPrimes`はexact modular Matrix 計算基盤が試行したprime image数を記録するtelemetry専用counterであり，独立したlimitではない。
 
 代表負荷の計測には次を使う。
 

@@ -575,6 +575,25 @@ struct LocalPolynomialBehavior final {
             return atNegativeInfinity
                 ? imaginaryPi(builtins, mathematics, angles, assumptions)
                 : integer(0);
+        // DLMF 6.2.14: Si(x) -> +/- Pi/2 on the real axis.
+        if (isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::SineIntegralSi)) {
+            Expr halfPi = divide(Expr{mathematics.findConstant(mathematics::ConstantId::Pi)->symbol},
+                integer(2), builtins, mathematics, angles, assumptions);
+            return atNegativeInfinity
+                ? negate(std::move(halfPi), builtins, mathematics, angles, assumptions)
+                : halfPi;
+        }
+
+        // DLMF 7.2.9: both Fresnel C and S tend to 1/2 at +Infinity; both are odd.
+        if (isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::FresnelC)
+            || isUnaryFunctionOfVariable(
+                expression, variable, builtins, BuiltinId::FresnelS))
+            return rational(atNegativeInfinity
+                ? Rational{BigInt{-1}, BigInt{2}}
+                : Rational{BigInt{1}, BigInt{2}});
+
 
         // li(x)=Ei(Log(x)). On the positive real axis li(x)->+Infinity.
         // Along x->-Infinity on the principal branch, Log(x)=log|x|+I Pi and
@@ -615,6 +634,14 @@ struct LocalPolynomialBehavior final {
                     case BuiltinId::Asinh:
                         return signedInfinity(argumentSign,
                             builtins, mathematics, angles, infinity, assumptions);
+                    case BuiltinId::Sqrt:
+                        // principal sqrtは正実軸上で非負であり，
+                        // 引数が+Infinityへ走る場合だけ実の+Infinityへ発散する。
+                        // 負実軸側はprincipal branch上で虚方向へ発散するため，
+                        // DirectedInfinityを持たない現在は未解決に残す。
+                        if (argumentSign > 0)
+                            return Expr{infinity};
+                        break;
                     default:
                         break;
                     }
@@ -646,6 +673,14 @@ struct LocalPolynomialBehavior final {
             if (isUnaryFunctionOfVariable(
                     expression, variable, builtins, BuiltinId::LogarithmicIntegralLi))
                 return integer(0);
+            // Si, Fresnel C and Fresnel S are entire odd functions and vanish at zero.
+            if (isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::SineIntegralSi)
+                || isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::FresnelC)
+                || isUnaryFunctionOfVariable(
+                    expression, variable, builtins, BuiltinId::FresnelS))
+                return integer(0);
         }
 
         // li(x)=Ei(Log(x)) and Ei(t)->-Infinity as t->0 from either real side.
@@ -655,6 +690,19 @@ struct LocalPolynomialBehavior final {
             && isUnaryFunctionOfVariable(
                 expression, variable, builtins, BuiltinId::LogarithmicIntegralLi))
             return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+
+        // DLMF 4.37.24: principal atanh(x)=1/2 Log((1+x)/(1-x))。
+        // 実定義域(-1,1)の内側からbranch pointへ近づく一側極限だけを
+        // real Infinityとして確定する。反対側はprincipal branch cut上で
+        // 虚部を伴うため，現在のInfinity sentinelでは表現しない。
+        if (isUnaryFunctionOfVariable(expression, variable, builtins, BuiltinId::Atanh)) {
+            if (*rationalPoint == Rational{BigInt{1}}
+                && direction == LimitDirection::Left)
+                return Expr{infinity};
+            if (*rationalPoint == Rational{BigInt{-1}}
+                && direction == LimitDirection::Right)
+                return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+        }
 
         if (auto rationalLimit = rationalFunctionFiniteLimit(
                 expression, variable, *rationalPoint, direction,

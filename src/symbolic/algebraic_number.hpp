@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <cstdint>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -74,6 +75,10 @@ public:
 
     [[nodiscard]] static std::optional<std::vector<ComplexAlgebraicNumber>> isolateAll(
         std::span<const numeric::Rational> polynomial);
+    // isolateAllで既に得た全根を，多項式の因数分解とfactorごとの根分離を一度ずつ共有して
+    // minimal-polynomial Rootへ一括canonicalizeする。失敗時はnulloptを返し，呼出し側が従来経路へfallbackできる。
+    [[nodiscard]] static std::optional<std::vector<ComplexAlgebraicNumber>> canonicalizeAll(
+        std::span<const ComplexAlgebraicNumber> roots);
 
     [[nodiscard]] std::span<const numeric::Rational> polynomial() const noexcept;
     [[nodiscard]] std::size_t degree() const noexcept;
@@ -132,6 +137,11 @@ public:
         const AlgebraicNumber& lhs,
         const AlgebraicNumber& rhs,
         AlgebraicBinaryOperation operation);
+    // 既存の実number field座標を保ったまま整数冪を計算し、最後に一度だけRootへmaterializeする。
+    [[nodiscard]] static std::optional<AlgebraicNumber> integerPowerInField(
+        const AlgebraicNumber& base,
+        std::uint64_t exponent,
+        bool reciprocal = false);
 
     [[nodiscard]] AlgebraicRootDomain domain() const noexcept;
     [[nodiscard]] std::span<const numeric::Rational> polynomial() const noexcept;

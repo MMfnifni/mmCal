@@ -410,7 +410,7 @@ O(n)
 
 # 6. `BigUInt` の乗算とsquare
 
-v1.5.1で導入した適応dispatchをv1.5.2でも維持し，operand sizeと形状に応じてbackendを切り替える。
+v1.5.1で導入した適応dispatchをv1.5.2でも維持し，operand sizeと形状に応じて計算基盤を切り替える。
 
 ```text
 small / unbalanced
@@ -422,7 +422,7 @@ Karatsuba
 Toom-3
 ```
 
-1 limbは32bit。thresholdは数学的定数ではなく，GCC環境でのmicrobenchmarkから選んだ既定値であり，CPU/compiler/allocatorが変われば`mmCal.Benchmarks`で再測定する。
+1 limbは32bit。閾値は数学的定数ではなく，GCC環境でのmicrobenchmarkから選んだ既定値であり，CPU/compiler/allocatorが変われば`mmCal.Benchmarks`で再測定する。
 
 ## 6.1 schoolbook
 
@@ -469,7 +469,7 @@ xy = z2 B^(2m) + z1 B^m + z0
 
 さらに巨大なbalanced operandは3分割し，`0, 1, -1, 2, infinity`の5点評価・補間で5回の再帰乗算へ落とす。
 
-Top-levelでは小サイズでevaluation/interpolation overheadが勝つため，v1.5.1の既定thresholdは約1280 limbs。Toom再帰内部では既に分割overheadを払っているため，より低い約448 limbsを再帰thresholdとして使う。
+Top-levelでは小サイズでevaluation/interpolation overheadが勝つため，v1.5.1の既定閾値は約1280 limbs。Toom再帰内部では既に分割overheadを払っているため，より低い約448 limbsを再帰閾値として使う。
 
 代表測定ではKaratsuba-only比で4096 limbs級が約1.17倍，6144 limbs級が約1.3倍高速だった。
 
@@ -481,7 +481,7 @@ Top-levelでは小サイズでevaluation/interpolation overheadが勝つため�
 
 一般乗算と比較して512 limbsで約1.7倍，1024 limbsで約1.7倍程度の改善が得られ，`pow`のrepeated squaringにもそのまま波及する。
 
-Toom-3専用squareも実装・比較したが，現在のthreshold域では通常のKaratsuba squareより遅かったため既定経路には採用していない。
+Toom-3専用squareも実装・比較したが，現在の閾値域では通常のKaratsuba squareより遅かったため既定経路には採用していない。
 
 ## 6.5 採用しなかったworkspace化
 
@@ -591,7 +591,7 @@ v1.5.1のGCC benchmarkでは32 limbs前後から利益が安定したため，�
 
 ## 8.4 不変条件
 
-どのbackendでも返す結果は必ず
+どの計算基盤でも返す結果は必ず
 
 ```text
 q*d + r == dividend
@@ -858,7 +858,7 @@ Karatsuba/Toom-3と専用squareの導入後，product treeは巨大factorialで�
 
 ### Prime-Swingを採用しなかった理由
 
-Prime-Swing factorialも実装し，sieve，odd factorial，2の冪分離，balanced productまで比較した。しかし現在のBigInt backendでは既存product treeの方が速かった。
+Prime-Swing factorialも実装し，sieve，odd factorial，2の冪分離，balanced productまで比較した。しかし現在のBigInt 計算基盤では既存product treeの方が速かった。
 
 代表例:
 
@@ -870,7 +870,7 @@ Prime-Swing   約1.5 s
 
 初版Prime-Swingにはprime exponentの重複計算等の無駄があったためそこも最適化したが，最終的にも逆転しなかった。したがってv1.5.1では「高度そうだから」という理由だけで置換せず，実測で勝つproduct treeを既定とした。
 
-Prime-Swing自体を一般に否定するものではなく，乗算backendやprime処理が変われば再評価可能である。
+Prime-Swing自体を一般に否定するものではなく，乗算計算基盤やprime処理が変われば再評価可能である。
 
 ## 11.5 integer square root
 
@@ -1226,7 +1226,7 @@ int64_t
 
 を内部値として持たない。
 
-数学的domain errorやInfinityという数学記号は上位層で扱う。
+数学的定義域エラーやInfinityという数学記号は上位層で扱う。
 
 ---
 
@@ -1505,7 +1505,7 @@ TowardZero
 
 でdominant値そのもの，または直上/直下のrepresentable valueのどれになるかを証明して返すことである。
 
-曖昧なcaseは必ず従来exact alignmentへfallbackする。
+曖昧なcaseは必ず従来exact alignmentへ切り替える。
 
 代表測定では53bit precisionの`1 + 2^-5,000,000`級が約1.4 msからsub-µs級へ短縮され，全4 rounding modeを旧実装と差分照合している。
 
@@ -1525,7 +1525,7 @@ exponent = lhs.exponent + rhs.exponent
 
 をexactに作り，最後に `fromDyadic()` で指定precisionへ丸める。
 
-仮数乗算の速度は基礎`BigInt`の適応schoolbook/Karatsuba/Toom-3 backendの影響を直接受ける。
+仮数乗算の速度は基礎`BigInt`の適応schoolbook/Karatsuba/Toom-3 計算基盤の影響を直接受ける。
 
 ---
 
@@ -1821,7 +1821,7 @@ informationUpper          InformationEnclosure上界 Rational
 
 ## 32.1 CertifiedEnclosure
 
-`[certifiedLower, certifiedUpper]`は，真値を必ず含むことをbackendが証明した区間である。内部guard桁によってユーザー要求より狭くてもよい。
+`[certifiedLower, certifiedUpper]`は，真値を必ず含むことを計算基盤が証明した区間である。内部guard桁によってユーザー要求より狭くてもよい。
 
 用途は，
 
@@ -1857,7 +1857,7 @@ CertifiedEnclosure ⊆ InformationEnclosure
 
 をInformationEnclosureへ少なくとも含める。したがって同じ`p`でも絶対幅は値のscaleに追従する。zero-centered approximationは相対Precisionを持てないため，伝播したInformationEnclosureそのものからabsolute Accuracyを保持する。CertifiedEnclosureが内部guard桁によってこれより狭くても，その隠れた桁を後続計算でAccuracyとして回収しない。CertifiedEnclosure自体がこの丸め区間より外まで広い場合は，双方のhullをInformationEnclosureとする。
 
-InformationEnclosureは確率的confidence intervalではない。backendはCertifiedEnclosureによってより狭い真値範囲を既に証明していてよく，InformationEnclosureは「現在のApproximation値から再利用可能な情報量」の契約だけを担当する。
+InformationEnclosureは確率的confidence intervalではない。計算基盤はCertifiedEnclosureによってより狭い真値範囲を既に証明していてよく，InformationEnclosureは「現在のApproximation値から再利用可能な情報量」の契約だけを担当する。
 
 ## 32.3 certified approximation同士の四則演算
 
@@ -2010,7 +2010,7 @@ InformationEnclosureがその情報量を許す？
 
 ## 35.1 v1.5.2のprecision-aware `N`
 
-一般のscalar式では上記の`CertifiedEvaluator`が中心になる。ただしv1.5.2では，FFTや線形代数のように「exactな巨大中間式を作ってから近似すると本質的に遅い」builtinについて，`N`が要求precisionを**先に**確定してから専用backendへdispatchできる。
+一般のscalar式では上記の`CertifiedEvaluator`が中心になる。ただしv1.5.2では，FFTや線形代数のように「exactな巨大中間式を作ってから近似すると本質的に遅い」builtinについて，`N`が要求precisionを**先に**確定してから専用計算基盤へdispatchできる。
 
 概念的には，
 
@@ -2141,7 +2141,7 @@ Pi = 16 atan(1/5) - 4 atan(1/239)
 
 は保証構造が明快だったが，高桁で逐次Rational級数のcostが急増し，`N[Pi,10000]`が約12秒級になった。
 
-v1.5.1では旧Machin実装をreferenceとして残し，既定を**binary-splitting Chudnovsky**へ変更した。巨大整数演算はKaratsuba/Toom/Burnikel–Ziegler等の下位backendを再利用し，最終的な区間化・丸め保証はRealInterval側の契約を維持する。
+v1.5.1では旧Machin実装をreferenceとして残し，既定を**binary-splitting Chudnovsky**へ変更した。巨大整数演算はKaratsuba/Toom/Burnikel–Ziegler等の下位計算基盤を再利用し，最終的な区間化・丸め保証はRealInterval側の契約を維持する。
 
 代表値:
 
@@ -2153,7 +2153,7 @@ Chudnovsky内部の係数もterm indexが大きい場合にmachine 64bit overflo
 
 ## 37.2 exp / E
 
-逐次RealInterval Taylorは高桁でinterval objectとRational中間値のcostが大きかったため，v1.5.1では**binary splitting + certified range reduction**へ移行した。
+逐次RealInterval Taylorは高桁でinterval objectとRational中間値のcostが大きかったため，v1.5.1では**binary splitting + certified 値域 reduction**へ移行した。
 
 小さいexact Rationalではexact binary splitting，大きい分子・分母では固定precision interval binary splittingを使い，中間exact integerの異常膨張を避ける。
 
@@ -2177,7 +2177,7 @@ point Rationalだけでなく，`sqrt[2]`を含むような保証区間全体に
 
 # 38. 現行実装の計算量上の特徴
 
-大まかには次の通り。threshold以下ではより単純な算法へ戻るため，表は巨大operand側の性格を示す。
+大まかには次の通り。閾値以下ではより単純な算法へ戻るため，表は巨大operand側の性格を示す。
 
 | 演算 | v1.5.2現在の主要算法 | 備考 |
 |---|---|---|
@@ -2196,7 +2196,7 @@ point Rationalだけでなく，`sqrt[2]`を含むような保証区間全体に
 | BigFloat mul | BigInt adaptive multiplication + rounding | exact significand積 |
 | BigFloat div | BigInt divmod + rounding | BZが波及 |
 | Pi | binary-splitting Chudnovsky | certified enclosureへ接続 |
-| exp/log | binary splitting + range reduction | certified interval |
+| exp/log | binary splitting + 値域 reduction | certified interval |
 | trig huge radian | certified argument reduction | Pi enclosureを利用 |
 
 v1.5.1で導入した乗算・除算・10進I/O・主要超越函数の高速化をv1.5.2でも維持しており，大きなquadratic/逐次bottleneckはかなり緩和されている。一方，さらに巨大な整数ではhigher Toom / FFT系，高桁`log`ではbit-burst/AGM系などが次候補になる。
@@ -2357,8 +2357,8 @@ v1.5.2現在でも「未実装」と「実装して比較したが棄却」を�
 - small-buffer optimization for limbs
 - limb-level custom allocator
 - arbitrary-size BigFloat exponent
-- MPFR/GMP/Boost.Multiprecision backend
-- Exact/Certifiedと暗黙に混在するMachine/double backend
+- MPFR/GMP/Boost.Multiprecision 計算基盤
+- Exact/Certifiedと暗黙に混在するMachine/double 計算基盤
 
 最後の項目は単なる未実装ではなく，通常意味論を速度のためにmachine精度へ落とさないという設計判断でもある。
 
@@ -2452,17 +2452,17 @@ v1.5.1でKaratsuba/Toom-3，専用square，Burnikel–Ziegler，10進D&C，BigFl
 
 ## 42.2 GCD
 
-RationalはGCDを頻繁に使う。binary GCDは現backendでは退行したため，次に試すならLehmer GCD等が候補。
+RationalはGCDを頻繁に使う。binary GCDは現計算基盤では退行したため，次に試すならLehmer GCD等が候補。
 
 ## 42.3 超高精度log/exp
 
-binary splittingで数千桁は大幅改善したが，さらに高桁では`log`のbit-burst / AGM系，`exp`のrange reduction調整を比較する価値がある。
+binary splittingで数千桁は大幅改善したが，さらに高桁では`log`のbit-burst / AGM系，`exp`の値域 reduction調整を比較する価値がある。
 
 ## 42.4 特殊函数横断benchmark
 
 Gamma / erf等を5000～10000桁まで振り，逐次級数やinterval object生成が新たな崖にならないか`mmCal.Benchmarks`へ追加する。
 
-性能候補は`performance_optimization.ja.md`に採用・棄却理由を残し，threshold変更時は固定seed正当性試験を先に通す。
+性能候補は`performance_optimization.ja.md`に採用・棄却理由を残し，閾値変更時は固定seed正当性試験を先に通す。
 
 ## 42.5 representation最適化
 
@@ -2516,7 +2516,7 @@ lower <= exact <= upper
 
 # 44. 実装上の弱点・今後の注意
 
-## 44.1 thresholdは環境依存
+## 44.1 閾値は環境依存
 
 Karatsuba / Toom-3 / Burnikel–ZieglerのcrossoverはCPU，compiler，allocator，cacheに依存する。v1.5.1値を普遍的な定数として扱わず，MSVC等では`mmCal.Benchmarks`で再測定する。
 
@@ -2530,22 +2530,22 @@ Euclidean GCDはBZ除算の恩恵を受けるが，巨大Rationalの反復約分
 
 ## 44.4 高精度超越函数
 
-`Pi`, `exp`, `log`, 巨大trigはv1.5.1で大幅改善したが，さらに高桁では`log`のbit-burst/AGM系や特殊函数固有のasymptotic/binary-splitting backendが候補になる。
+`Pi`, `exp`, `log`, 巨大trigはv1.5.1で大幅改善したが，さらに高桁では`log`のbit-burst/AGM系や特殊函数固有のasymptotic/binary-splitting 計算基盤が候補になる。
 
 ## 44.5 directed roundingを壊さないこと
 
-BigFloat backend最適化で最重要。NearestEvenだけ正しくても不十分で，
+BigFloat 計算基盤最適化で最重要。NearestEvenだけ正しくても不十分で，
 
 ```text
 TowardNegative
 TowardPositive
 ```
 
-が1 ulpでも内側へ入るとRealInterval全体の保証が壊れる。そのためexponent-gap fast pathも証明可能caseだけに限定し，曖昧なら旧exact alignmentへfallbackする。
+が1 ulpでも内側へ入るとRealInterval全体の保証が壊れる。そのためexponent-gap fast pathも証明可能caseだけに限定し，曖昧なら旧exact alignmentへ切り替える。
 
 ## 44.6 performance testを正当性testと混同しない
 
-速い結果が正しい証拠にはならない。`mmCal.Benchmarks`はthreshold sweepと固定seedrandom invariantを同じprojectへ置くが，通常のUnit/black-box regressionとは役割を分ける。
+速い結果が正しい証拠にはならない。`mmCal.Benchmarks`は閾値 sweepと固定seedrandom invariantを同じprojectへ置くが，通常のUnit/black-box regressionとは役割を分ける。
 
 # 45. 既存基盤の要約
 
@@ -2594,7 +2594,7 @@ v1.5.1～v1.5.2を通して重要なのは「高速算法を入れたこと」�
 
 Prime-Swing，binary GCD，workspace化，Toom-3 squareは実際に試したが現環境では採用しなかった。逆にKaratsuba/Toom-3，専用square，Burnikel–Ziegler，decimal D&C，Chudnovsky，binary-splitting exp/logは実測利益と正当性試験の双方を確認して採用した。
 
-今後backendを更新する場合も，最優先で守る境界は
+今後計算基盤を更新する場合も，最優先で守る境界は
 
 ```text
 BigUInt/BigIntのexact arithmetic
@@ -2655,7 +2655,7 @@ DecimalApproximation
 
 ## 47.6 benchmarkで速いから採用する
 
-random invariantや境界試験を先に通す。mmCalではPrime-Swing，binary GCD，workspace Karatsuba，Toom-3 squareなどを実装した上で，現backendでは遅かったため採用しなかった。
+random invariantや境界試験を先に通す。mmCalではPrime-Swing，binary GCD，workspace Karatsuba，Toom-3 squareなどを実装した上で，現計算基盤では遅かったため採用しなかった。
 
 # 48. コードを読むならこの順
 
@@ -2663,13 +2663,13 @@ random invariantや境界試験を先に通す。mmCalではPrime-Swing，binary
 
 1. `numeric/detail/big_uint.hpp` — limb APIとinvariantを見る。
 2. `numeric/big_int.hpp` — sign-magnitudeの薄いwrapperであることを見る。
-3. `numeric/rational.cpp` — cross-cancelとcanonicalizationを見る。
+3. `numeric/rational.cpp` — cross-cancelと正準化を見る。
 4. `numeric/big_float.hpp/.cpp` — dyadic表現とrounding modeを見る。
 5. `approximation/real_interval.cpp` — outward roundingがどこで入るかを見る。
 6. `numeric/decimal_approximation.cpp` — 最終10進表示の確定条件を見る。
 7. `approximation/certified_evaluator.cpp` — 式全体をどうinterval化するかを見る。
 8. `builtins/signal_processing.cpp`，`linear_algebra/*` — precision-aware `N`がexact式構築を避ける実例を見る。
-9. `benchmarks/benchmark_main.cpp` — thresholdが理論ではなく実測で決められていることを見る。
+9. `benchmarks/benchmark_main.cpp` — 閾値が理論ではなく実測で決められていることを見る。
 
 # 49. 自作多倍長の設計チェックリスト
 
@@ -2689,7 +2689,7 @@ mmCal以外で同種の型を書く場合にも使える最低限の確認項目
 - 0を含む区間によるdivisionを拒否するか。
 - decimal表示と内部precision metadataを混同していないか。
 - compiler差のある評価順やmove状態へ依存していないか。
-- algorithm thresholdをCPU非依存の数学定数だと思っていないか。
+- algorithm 閾値をCPU非依存の数学定数だと思っていないか。
 - 大値だけでなく，小値のobject fixed costも測ったか。
 
 # 50. v1.5.2時点での結論

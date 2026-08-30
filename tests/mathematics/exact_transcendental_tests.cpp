@@ -99,7 +99,7 @@ void runExactTranscendentalTests(TestRunner& tests) {
         "Exact transcendental: quarter-turn exponential is exact");
 
     tests.expectEqual(evaluateAndFormat(session, "Infinity"), std::string{"Infinity"},
-        "Exact transcendental: Infinity is not predefined; temporary free-symbol mode preserves the name");
+        "Exact transcendental: Infinity is a protected predefined exceptional value");
 }
 
 } // namespace mmcal::tests

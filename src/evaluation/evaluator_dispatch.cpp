@@ -31,7 +31,10 @@
 #include "evaluation/iterator_spec.hpp"
 #include "simplification/full_simplifier.hpp"
 #include "simplification/simplifier.hpp"
+#include "solver/absolute_value_solver.hpp"
 #include "solver/polynomial_solver.hpp"
+#include "solver/radical_solver.hpp"
+#include "solver/real_equation_prover.hpp"
 #include "solver/solve_constraints.hpp"
 #include "solver/solve_normalization.hpp"
 #include "solver/transcendental_solver.hpp"
@@ -400,7 +403,6 @@ void validateSolveVariable(
     case BuiltinId::VectorAdd:
     case BuiltinId::VectorSubtract:
     case BuiltinId::VectorScale:
-    case BuiltinId::VectorDot:
     case BuiltinId::VectorCross:
     case BuiltinId::VectorNorm:
     case BuiltinId::VectorManhattan:
@@ -484,6 +486,47 @@ void consumeSolverSolutionBranches(const solver::SolutionSet& solutions) {
 
 } // namespace
 
+
+expression::Expr Evaluator::resolveHeldHistoryReferences(
+    const expression::Expr& expression) {
+    if (!expression.isCall())
+        return expression;
+
+    const expression::CallExpr& call = expression.asCall();
+    if (const BuiltinDefinition* definition = registry_.find(call.head)) {
+        if (definition->id == BuiltinId::History)
+            return resolveHeldHistoryReferences(evaluateHistory(call.arguments));
+        if (definition->id == BuiltinId::OutputHistory)
+            return resolveHeldHistoryReferences(evaluateIndexedHistory(call.arguments, false));
+        if (definition->id == BuiltinId::InputHistory) {
+            const expression::Expr input = evaluateIndexedHistory(call.arguments, true);
+
+            // In[n]は保存入力を現在の環境で再評価する。外側のHoldを解除して
+            // 入力全体を評価すると他の項まで副作用を受けるため，履歴参照だけを
+            // 独立Evaluatorで再評価し，PRNGとsession contextは現在のものを引き継ぐ。
+            Evaluator nested{
+                environment_, registry_, userFunctions_, symbolRegistry_, mathematics_, angleSemantics_};
+            nested.setEvaluationLimits(limits_);
+            nested.randomEngine_ = randomEngine_;
+            expression::Expr evaluated = nested.evaluateMachine(input, nullptr, context_);
+            randomEngine_ = nested.randomEngine_;
+            return evaluated;
+        }
+    }
+
+    std::vector<expression::Expr> arguments;
+    arguments.reserve(call.arguments.size());
+    bool changed = false;
+    for (const expression::Expr& argument : call.arguments) {
+        expression::Expr resolved = resolveHeldHistoryReferences(argument);
+        changed = changed || !(resolved == argument);
+        arguments.push_back(std::move(resolved));
+    }
+    return changed
+        ? expression::Expr::rebuildCall(call, std::move(arguments))
+        : expression;
+}
+
 expression::Expr Evaluator::dispatchBuiltin(
     const BuiltinDefinition& definition,
     const expression::CallExpr& call,
@@ -524,34 +567,8 @@ expression::Expr Evaluator::dispatchBuiltin(
             error::throwCalcError(error::CalcErrorType::Type,
                 "D expects an expression followed by one or more derivative specifications");
 
-        // Dは変数指定や代入を不用意に評価しないためHoldAllだが，% / Out[n] は
-        // 「直前の値そのもの」を指すsnapshot参照である。これまでD[% ,x]ではHistory callを
-        // 未知函数として微分し0になっていたため，副作用を伴わない出力履歴だけ先に展開する。
-        const auto resolveOutputHistory = [&](const auto& self, const expression::Expr& value) -> expression::Expr {
-            if (!value.isCall())
-                return value;
-            const expression::CallExpr& heldCall = value.asCall();
-            if (const BuiltinDefinition* heldDefinition = registry_.find(heldCall.head)) {
-                if (heldDefinition->id == BuiltinId::History)
-                    return self(self, evaluateHistory(heldCall.arguments));
-                if (heldDefinition->id == BuiltinId::OutputHistory)
-                    return self(self, evaluateIndexedHistory(heldCall.arguments, false));
-            }
-
-            std::vector<expression::Expr> rebuiltArguments;
-            rebuiltArguments.reserve(heldCall.arguments.size());
-            bool changed = false;
-            for (const expression::Expr& argument : heldCall.arguments) {
-                expression::Expr rebuilt = self(self, argument);
-                changed = changed || !(rebuilt == argument);
-                rebuiltArguments.push_back(std::move(rebuilt));
-            }
-            return changed
-                ? expression::Expr::rebuildCall(heldCall, std::move(rebuiltArguments))
-                : value;
-        };
-
-        expression::Expr result = resolveOutputHistory(resolveOutputHistory, arguments[0]);
+        // DはHoldAllだが，明示的なIn/Out/%参照はhistory snapshotとして先に解決する。
+        expression::Expr result = resolveHeldHistoryReferences(arguments[0]);
         for (std::size_t i = 1; i < arguments.size(); ++i) {
             expression::Symbol variable;
             std::uint64_t order = 1;
@@ -585,6 +602,13 @@ expression::Expr Evaluator::dispatchBuiltin(
                     "D derivative specification must be a symbol or {symbol, nonnegative integer}");
             }
 
+            if (order > 1) {
+                if (auto knownRepeated = symbolic::differentiateKnownRepeatedExpression(
+                        result, variable, order, registry_, mathematics_, angleSemantics_)) {
+                    result = std::move(*knownRepeated);
+                    continue;
+                }
+            }
             for (std::uint64_t derivative = 0; derivative < order; ++derivative) {
                 result = symbolic::differentiateExpression(
                     result, variable, registry_, mathematics_, angleSemantics_);
@@ -608,11 +632,12 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments.size() == 3)
             assumptions = mathematics::parseAssumptions(arguments[2], registry_, mathematics_);
 
+        const expression::Expr integrand = resolveHeldHistoryReferences(arguments[0]);
         std::optional<expression::Expr> result;
         std::optional<symbolic::IntegrationDisposition> integrationDisposition;
         if (arguments[1].isSymbol()) {
             symbolic::IntegrationResult detailed = symbolic::integrateExpressionDetailed(
-                arguments[0], arguments[1].asSymbol(), registry_, mathematics_,
+                integrand, arguments[1].asSymbol(), registry_, mathematics_,
                 angleSemantics_, assumptions);
             integrationDisposition = detailed.disposition;
             result = std::move(detailed.expression);
@@ -622,7 +647,7 @@ expression::Expr Evaluator::dispatchBuiltin(
             if (!infinity)
                 error::throwCalcError(error::CalcErrorType::Internal, "Infinity symbol is not registered");
             result = symbolic::integrateExpression(
-                arguments[0], iterator->variable, iterator->lower, iterator->upper,
+                integrand, iterator->variable, iterator->lower, iterator->upper,
                 registry_, mathematics_, angleSemantics_, infinity->symbol, assumptions);
         }
         else {
@@ -1073,8 +1098,6 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateIdentity(arguments);
     case BuiltinId::Zeros:
         return builtins::evaluateZeros(arguments);
-    case BuiltinId::MatrixGet:
-        return builtins::evaluateMatrixGet(arguments);
     case BuiltinId::Trace:
         if (const auto* approximation = currentApproximationContext())
             if (const auto result = builtins::evaluateApproximateTrace(
@@ -1093,8 +1116,6 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateVectorSubtract(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorScale:
         return builtins::evaluateVectorScale(arguments, registry_, mathematics_, angleSemantics_);
-    case BuiltinId::VectorDot:
-        return builtins::evaluateDot(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorCross:
         return builtins::evaluateVectorCross(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorNorm:
@@ -1406,6 +1427,18 @@ expression::Expr Evaluator::dispatchBuiltin(
                 const bool realDomain = constraints.domain
                     && mathematics::isSubdomainOf(
                         *constraints.domain, mathematics::NumericDomain::Real);
+                if (auto absolute = solver::solveRealAbsoluteValueRelation(
+                        solveInput, variables.front(), realDomain,
+                        registry_, mathematics_, angleSemantics_, constraints.assumptions))
+                    return *absolute;
+                if (auto radical = solver::solveRadicalRelation(
+                        solveInput, variables.front(), registry_, mathematics_,
+                        angleSemantics_, constraints.assumptions))
+                    return *radical;
+                if (auto principalLambert = solver::solvePrincipalLambertRelation(
+                        solveInput, variables.front(), registry_, mathematics_,
+                        angleSemantics_, constraints.assumptions))
+                    return *principalLambert;
                 if (realDomain) {
                     consumeEvaluationBudget(EvaluationResource::SolverBranch, 3);
                     if (auto exponential = solver::solveRealExponentialRelation(
@@ -1420,6 +1453,20 @@ expression::Expr Evaluator::dispatchBuiltin(
                             solveInput, variables.front(), registry_, mathematics_,
                             angleSemantics_, constraints.assumptions))
                         return *transcendental;
+                    const auto* infinity = symbolRegistry_.find("Infinity");
+                    if (!infinity)
+                        error::throwCalcError(
+                            error::CalcErrorType::Internal,
+                            "Infinity symbol is not registered");
+                    // 高次repeated polynomialは一般函数proofより先にalgebraic Root fallbackへ渡す。
+                    // proof layerが同じ零点をsqrt等へ再表現してfallbackのcanonical契約を奪わない。
+                    if (auto repeatedAlgebraic = solver::solveRepeatedRealAlgebraicPolynomialEquation(
+                            solveInput, variables.front(), registry_, mathematics_, angleSemantics_))
+                        return *repeatedAlgebraic;
+                    if (auto proved = solver::solveRealEquationByProof(
+                            solveInput, variables.front(), registry_, mathematics_,
+                            angleSemantics_, infinity->symbol, constraints.assumptions))
+                        return *proved;
                 }
                 solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
                     solveInput, variables.front(), registry_, mathematics_, angleSemantics_);
@@ -1469,8 +1516,14 @@ expression::Expr Evaluator::dispatchBuiltin(
                 return result;
             }
 
+            const mathematics::NumericDomain polynomialSystemDomain = constraints.domain
+                && mathematics::isSubdomainOf(
+                    *constraints.domain, mathematics::NumericDomain::Real)
+                ? mathematics::NumericDomain::Real
+                : mathematics::NumericDomain::Complex;
             if (auto polynomialSystem = solver::solvePolynomialSystem(
-                    equations, variables, registry_, mathematics_, angleSemantics_))
+                    equations, variables, polynomialSystemDomain,
+                    registry_, mathematics_, angleSemantics_))
                 return *polynomialSystem;
 
             return solver::solveLinearPolynomialSystem(

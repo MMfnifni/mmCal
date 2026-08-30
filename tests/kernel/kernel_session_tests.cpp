@@ -1389,6 +1389,30 @@ void runKernelSessionTests(TestRunner& tests) {
     }
     {
         evaluation::EvaluationLimits limits;
+        limits.maxRequestedPrecisionDigits = 10;
+        expectResourceLimit(limits, "diff[x^2,x,1,20]",
+            "Requested precision budget", "numeric derivative requested precision");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxRequestedPrecisionDigits = 10;
+        expectResourceLimit(limits, "nintegrate[x,{x,0,1},20]",
+            "Requested precision budget", "numeric integral requested precision");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxRequestedPrecisionDigits = 10;
+        expectResourceLimit(limits, "diff[N[Pi,20]*x,x,1,5]",
+            "Requested precision budget", "held nested N requested precision");
+    }
+    {
+        evaluation::EvaluationLimits limits;
+        limits.maxCertifiedRefinements = 0;
+        expectResourceLimit(limits, "diff[x^2,x,1,20]",
+            "Certified refinement budget", "numeric derivative retry accounting");
+    }
+    {
+        evaluation::EvaluationLimits limits;
         limits.maxAlgebraicDegree = 1;
         expectResourceLimit(limits, "root[{-2,0,1},1]", "Algebraic construction degree budget", "algebraic degree");
     }
@@ -1425,8 +1449,13 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "D[cases[x^2 if x>0;sin[x] if x<=0],x]"),
-        std::string{"D[cases[x^2 if x > 0; sin[x] if x <= 0], x]"},
-        "KernelSession: D preserves cases with derivative-variable-dependent boundaries");
+        std::string{"cases[2x if x > 0; cos[x] if x < 0; D[cases[x^2 if x > 0; sin[x] if x <= 0], x] if x == 0]"},
+        "KernelSession: D differentiates open pieces but preserves an unresolved boundary derivative");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "D[cases[x^2 if x>=0;-x if x<0],x]"),
+        std::string{"cases[2x if x > 0; -1 if x < 0; D[cases[x^2 if x >= 0; -x if x < 0], x] if x == 0]"},
+        "KernelSession: D does not assign a derivative at an unproved closed piecewise boundary");
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "integrate[cases[x if a>0;x^2 if a<=0],x]"),
@@ -1493,9 +1522,68 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"{{x == 1, y == 1, z == 1}, {x == -1, y == -1, z == -1}}"},
         "KernelSession: polynomial Solve handles a three-variable zero-dimensional shape basis");
     tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y}],10]"),
+        std::string{"{{x == -0.7746228995+0.0I, y == -1.264927127+0.0I}, {x == 0.0, y == 1.0}, {x == 1.185885346+0.0I, y == -1.551233076+0.0I}, {x == 2.360409337+0.0I, y == -2.563499998+0.0I}, {x == 3.228328216+0.0I, y == 3.37966020+0.0I}}"},
+        "KernelSession: bivariate polynomial Solve retries the alternate Lex projection when the requested order is not in shape position");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y},Real],10]"),
+        std::string{"{{x == -0.7746228995, y == -1.264927127}, {x == 0.0, y == 1.0}, {x == 1.185885346, y == -1.551233076}, {x == 2.360409337, y == -2.563499998}, {x == 3.228328216, y == 3.37966020}}"},
+        "KernelSession: Real bivariate polynomial Solve isolates the eliminant directly on the real axis");
+    tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession, "solve[{x y==0},{x,y}]"),
-        std::string{"UnresolvedSolutionSet[x, y]"},
-        "KernelSession: positive-dimensional polynomial systems remain explicitly unresolved");
+        std::string{"{x == 0 where y in Complex, y == 0 where x in Complex}"},
+        "KernelSession: factored positive-dimensional polynomial systems split into complete free-variable branches");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x^2-y^2==0},{x,y}]"),
+        std::string{"{x == y where y in Complex, x == -y where y in Complex}"},
+        "KernelSession: polynomial factorization exposes positive-dimensional linear components");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x y==1},{x,y}]"),
+        std::string{"{y == 1/x where x in Complex if x != 0}"},
+        "KernelSession: one-equation polynomial systems project onto a low-degree variable with a free parameter");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x y==1},{x,y},Real]"),
+        std::string{"{y == 1/x where x in Real if x != 0}"},
+        "KernelSession: Real linear projection preserves the nonzero free-parameter domain");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x^2+y^2==1},{x,y},Real]"),
+        std::string{"{y == sqrt[1-x^2] where x in Real if x >= -1 && x <= 1, y == -sqrt[1-x^2] where x in Real if x >= -1 && x <= 1}"},
+        "KernelSession: Real quadratic projection derives the exact interval of a free parameter");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{y^2-x==0},{x,y},Real]"),
+        std::string{"{y == sqrt[x] where x in Real if x >= 0, y == -sqrt[x] where x in Real if x >= 0}"},
+        "KernelSession: Real quadratic projection keeps a one-sided radicand domain");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "solve[{x^2+y^2+z^2==1},{x,y,z},Real]"),
+        std::string{"{z == sqrt[1-x^2-y^2] where x in Real, y in Real if -x^2-y^2 >= -1, z == -sqrt[1-x^2-y^2] where x in Real, y in Real if -x^2-y^2 >= -1}"},
+        "KernelSession: Real quadratic projection preserves a multivariate semialgebraic parameter domain");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{z-x-y==0,x^2+y^2==1},{x,y,z},Real]"),
+        std::string{"{{y == sqrt[1-x^2], z == x+sqrt[1-x^2]} where x in Real if x >= -1 && x <= 1, {y == -sqrt[1-x^2], z == x-sqrt[1-x^2]} where x in Real if x >= -1 && x <= 1}"},
+        "KernelSession: Real positive-dimensional systems eliminate a constant-linear variable before parameter projection");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{z==x+y,x*y==1},{x,y,z},Real]"),
+        std::string{"{{y == 1/x, z == x+1/x} where x in Real if x != 0}"},
+        "KernelSession: linear elimination preserves a Real free-parameter hole from the reduced system");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{z==x+y,x*y==0},{x,y,z}]"),
+        std::string{"{{x == 0, z == y} where y in Complex, {y == 0, z == x} where x in Complex}"},
+        "KernelSession: linear elimination composes with factored positive-dimensional components");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{x^4+y^4==1,x^2+y^2==1},{x,y}]"),
+        std::string{"{{x == 1, y == 0}, {x == -1, y == 0}, {x == 0, y == 1}, {x == 0, y == -1}}"},
+        "KernelSession: non-shape zero-dimensional systems specialize exact eliminant roots recursively");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "solve[{x y z==1,x+y+z==3,x y+y z+z x==3},{x,y,z}]"),
+        std::string{"{{x == 1, y == 1, z == 1}}"},
+        "KernelSession: three-variable triangular specialization closes repeated eliminant roots");
 
     kernel::KernelSession failedUsageSession;
     evaluation::EvaluationLimits failedUsageLimits = failedUsageSession.evaluationLimits();

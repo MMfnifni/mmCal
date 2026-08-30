@@ -520,16 +520,6 @@ bool preferModularSolve(
         || (variables >= 6 && height >= 512);
 }
 
-bool preferModularInverse(const IntegerMatrixBuffer& matrix) noexcept {
-    if (matrix.rows() != matrix.columns() || matrix.rows() < 4)
-        return false;
-
-    // 2026-08-25 crossover再測定でも32x32・256-bitまでBareissが優勢だった。
-    // backendは直接監査できる状態で保持するが，未測定域を推測してautomatic pathへ
-    // 送らない。将来のbenchmarkで実測crossoverが得られた時点でpolicyだけ更新する。
-    return false;
-}
-
 BigInt modularDeterminant(
     const IntegerMatrixBuffer& matrix,
     ModularLinearAlgebraStats* stats) {

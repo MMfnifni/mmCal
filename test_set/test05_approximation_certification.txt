@@ -163,14 +163,14 @@ N[sqrt[-1+I*sin[N[Pi,5]]],20]==>sqrt[-1.0+0.0I]
 N[log[-1+I*sin[N[Pi,5]]],20]==>log[-1.0+0.0I]
 N[Ei[-1+I*sin[N[Pi,5]]],20]==>Ei[-1.0+0.0I]
 N[Ci[-1+I*sin[N[Pi,5]]],20]==>Ci[-1.0+0.0I]
-N[hypergeometric1F1[1,2,160+sin[N[Pi,5]]],20]==>hypergeometric1F1[1, 2, 160.0]
-N[hypergeometric2F1[1,1,2,9/10+sin[N[Pi,5]]],20]==>hypergeometric2F1[1, 1, 2, 0.90]
-N[polylog[2,49/50+I*sin[N[Pi,5]]],20]==>polylog[2, 0.980+0.0I]
+N[hypergeometric1F1[1,2,160+sin[N[Pi,5]]],20]=>19200000000000000000000000000000000000000000000000000000000000000000.0
+N[hypergeometric2F1[1,1,2,9/10+sin[N[Pi,5]]],20]==>2.558
+N[polylog[2,49/50+I*sin[N[Pi,5]]],20]==>1.5+0.0I
 N[hypergeometric2F1[1,2,N[0,5],2],20]==>hypergeometric2F1[1, 2, 0.0, 2]
 N[hypergeometric1F1[1,N[0,5],2],20]==>hypergeometric1F1[1, 0.0, 2]
-round[lambertw[2,1]]==>round[lambertw[2,1]]
-diff[lambertw[2,x],x,1,20]==>EvaluationError
-nintegrate[lambertw[2,x],{x,1,2},20]==>EvaluationError
+round[lambertw[-1]]==>TypeError
+diff[lambertw[x],x,-1,20]=>-0.69737020568869652814-0.59349767346448261341I
+nintegrate[lambertw[x],{x,-2,-1},20]==>EvaluationError
 # Exact branch-side information must remain refinable/certifiable.
 N[log[-1+I/10^1000],20]=>3.1415926535897932385I
 
@@ -194,15 +194,16 @@ N[polylog[2,N[1/2,5]],20]==>0.58224
 N[ellipticF[N[1/2,5],1/3],20]==>0.50685
 N[ellipticE[N[1/2,5],1/3],20]==>0.49332
 N[ellipticPi[1/4,N[1/2,5],1/3],20]==>0.51737
-# Work-boundary ambiguity is precision insufficiency; a provably outside interval is unsupported.
-N[ellipticF[1/2,N[9/10,5]],20]==>ellipticF[1/2, 0.90]
-N[ellipticF[1/2,N[91/100,5]],20]==>ellipticF[1/2, 0.910]
-N[ellipticPi[N[9/10,5],1/2,1/3],20]==>ellipticPi[0.90, 1/2, 1/3]
-N[ellipticPi[N[91/100,5],1/2,1/3],20]==>ellipticPi[0.910, 1/2, 1/3]
-N[polylog[2,N[49/50,5]],20]==>polylog[2, 0.980]
-N[polylog[2,N[99/100,5]],20]==>polylog[2, 0.990]
-N[hypergeometric2F1[1,1,2,N[9/10,5]],20]==>hypergeometric2F1[1, 1, 2, 0.90]
-N[hypergeometric2F1[1,1,2,N[91/100,5]],20]==>hypergeometric2F1[1, 1, 2, 0.910]
+N[ellipticF[1/2,N[9/10,5]],20]==>0.51976
+N[ellipticF[1/2,N[91/100,5]],20]==>0.52001
+N[ellipticPi[N[9/10,5],1/2,1/3],20]==>0.54883
+N[ellipticPi[N[91/100,5],1/2,1/3],20]==>0.54937
+N[polylog[2,N[49/50,5]],20]==>1.5458
+N[polylog[2,N[99/100,5]],20]==>1.5886
+N[polylog[3,N[999/1000,8]],20]==>1.2004154
+N[hypergeometric2F1[1,1,2,N[9/10,5]],20]==>2.5584
+N[hypergeometric2F1[1,1,2,N[91/100,5]],20]==>2.6461
+N[hypergeometric2F1[1/2,1/3,5/4,N[1,5]],20]==>hypergeometric2F1[1/2, 1/3, 5/4, 1.0]
 # 2F1 near denominator-parameter poles remains certified without exact-Rational term blow-up.
 N[hypergeometric2F1[1/2,1/3,1/10^20,9/10],20]==>131575556603428593630.0
 N[hypergeometric2F1[1/2,1/3,-1+1/10^20,9/10],20]==>-1060297781389105452800.0
@@ -219,6 +220,11 @@ N[N[0,5],20]==>0.0
 
 # Whole-complex certification must not accept independently zero-rounded components.
 N[Ci[120+I],20]=>0.0074445393237725791671+0.0079585143427773070995I
+N[Ci[140+I],20]=>0.01080710226306548880-0.0016788715636035789868I
+N[Ei[513I],20]=>-0.0015490370545520353789+3.1427759880886742510I
+N[Ei[1000+I]/exp[1000+I],20]=>0.0010010010030130653917-0.0000010020050201016102752I
+N[Ci[1000+I],20]=>0.0012757330374975137106+0.00066060412280668393821I
+N[Ci[-1000+I],20]=>0.0012757330374975137106+3.1409320494669865545I
 
 # Finite-precision negative-real inputs use the valid complex recurrence/principal branch.
 N[digamma[N[-1/2,5]],20]=>0.0365

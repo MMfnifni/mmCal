@@ -23,6 +23,7 @@
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/number_field.hpp"
 #include "certification_boundary_fuzzer.hpp"
+#include "performance_cliff_audit.hpp"
 #include "random_expression_fuzzer.hpp"
 
 #include <algorithm>
@@ -1140,7 +1141,7 @@ struct DisplayedComplex final {
             arguments, fixture.registry, fixture.mathematics, fixture.angles,
             mmcal::approximation::ApproximationContext{16});
         if (!system || !system->isList() || system->asList().elements.size() != 2) {
-            std::cerr << "Fixed Eigen timing input failure: stage=shape size=" << size
+            std::cerr << "Fixed Eigen timing input failure: phase=shape size=" << size
                 << " matrix=" << mmcal::formatting::formatExpr(matrix) << '\n';
             return false;
         }
@@ -1150,7 +1151,7 @@ struct DisplayedComplex final {
             || !vectors.isArray()
             || vectors.asArray().shape != std::vector<std::size_t>{size, size}
             || !verifyDisplayedEigenRelation(matrix, values, vectors)) {
-            std::cerr << "Fixed Eigen timing input failure: stage=relation size=" << size
+            std::cerr << "Fixed Eigen timing input failure: phase=relation size=" << size
                 << " matrix=" << mmcal::formatting::formatExpr(matrix) << '\n';
             return false;
         }
@@ -1162,7 +1163,7 @@ struct DisplayedComplex final {
         const std::array<mmcal::expression::Expr, 1> unary{matrix};
         const auto reportFailure = [&](std::string_view stage,
             const mmcal::expression::Expr& subject) {
-            std::cerr << "Random certified Matrix failure: stage=" << stage
+            std::cerr << "Random certified Matrix failure: phase=" << stage
                 << " case=" << (caseIndex + 1)
                 << " case-index=" << caseIndex
                 << " size=" << subject.asArray().shape[0]
@@ -2210,8 +2211,7 @@ void runExactLinearAlgebraBackendBenchmark(std::size_t iterations) {
             std::cout << std::setw(4) << size << "x" << size
                       << " inverse-core[B/M]=" << bareissInverse << '/' << modularInverse << " ms"
                       << " p=" << inversePrimes
-                      << " auto=" << (mmcal::linear_algebra::preferModularInverse(matrix)
-                          ? "M" : "B") << '\n';
+                      << " auto=B" << '\n';
         }
     }
 
@@ -2287,7 +2287,7 @@ void printEvaluationUsage(
     std::cout << label << "  "
               << std::chrono::duration<double, std::milli>(end - start).count() << " ms\n"
               << "  input=" << usage.inputBytes
-              << " steps=" << usage.evaluationSteps
+              << " work=" << usage.evaluationSteps
               << " depth=" << usage.maximumDepth
               << " nodes=" << usage.generatedNodes
               << " simplify=" << usage.simplificationCandidates
@@ -2332,11 +2332,13 @@ void printUsage() {
         << "  --fft-threshold [iterations] compare certified direct DFT with forced Bluestein\n"
         << "  --exact-linear-algebra [iterations] compare Bareiss and modular exact backends\n"
         << "  --budget-telemetry collect representative EvaluationBudget usage\n"
+        << "  --performance-cliffs [iterations] audit special-function bounded-work/performance cliffs\n"
+        << "  --algebraic-root-cliffs [iterations] audit Complex Root isolation/refinement cliffs\n"
         << "    op: transpose trace ndot det ndet ninv rref rank nrank nsolve nnull lu nlu nqr nsvd neigen neigensystem\n"
         << "  --random-expressions [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--max-depth N] [--report-every N]\n"
         << "    grammar-aware semantic fuzzer; --loop stops on the first FAIL, --nostop-loop reports FAILs and continues\n"
         << "  --certification-boundaries [--loop|--nostop-loop] [--threads N] [--seed N] [--case N] [--cases N] [--report-every N] [--timeout-ms N]\n"
-        << "    branch/pole/backend-boundary fuzzer; closed numeric cases classify Value/Domain/Precision/Unsupported\n";
+        << "    certification fuzzer; boundary classification plus N/provenance metamorphic invariants\n";
 }
 
 } // namespace
@@ -2352,6 +2354,10 @@ int runBenchmarkMain(int argc, char** argv) {
     std::size_t algebraicFieldIterations = 8;
     bool specialFunctionBenchmark = false;
     std::size_t specialFunctionIterations = 1;
+    bool performanceCliffAudit = false;
+    std::size_t performanceCliffIterations = 1;
+    bool algebraicRootCliffAudit = false;
+    std::size_t algebraicRootCliffIterations = 1;
     bool exactCyclotomicFftBenchmark = false;
     std::size_t exactCyclotomicFftIterations = 3;
     bool approximateFftThresholdBenchmark = false;
@@ -2403,6 +2409,16 @@ int runBenchmarkMain(int argc, char** argv) {
             specialFunctionBenchmark = true;
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 specialFunctionIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--performance-cliffs") {
+            performanceCliffAudit = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                performanceCliffIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
+        }
+        else if (arg == "--algebraic-root-cliffs") {
+            algebraicRootCliffAudit = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                algebraicRootCliffIterations = static_cast<std::size_t>(std::stoull(argv[++i]));
         }
         else if (arg == "--exact-cyclotomic-fft") {
             exactCyclotomicFftBenchmark = true;
@@ -2574,6 +2590,26 @@ int runBenchmarkMain(int argc, char** argv) {
             return 2;
         }
         runCertifiedSpecialFunctionBenchmark(specialFunctionIterations);
+        return 0;
+    }
+
+    if (performanceCliffAudit) {
+        if (performanceCliffIterations == 0) {
+            std::cerr << "--performance-cliffs iterations must be at least 1\n";
+            return 2;
+        }
+        mmcal::benchmarks::runSpecialFunctionPerformanceCliffAudit(
+            {.iterations = performanceCliffIterations});
+        return 0;
+    }
+
+    if (algebraicRootCliffAudit) {
+        if (algebraicRootCliffIterations == 0) {
+            std::cerr << "--algebraic-root-cliffs iterations must be at least 1\n";
+            return 2;
+        }
+        mmcal::benchmarks::runAlgebraicRootPerformanceCliffAudit(
+            {.iterations = algebraicRootCliffIterations});
         return 0;
     }
 

@@ -176,8 +176,10 @@ void checkNumberBudget(const Number& number) {
     symbolic::AlgebraicBinaryOperation operation,
     const evaluation::BuiltinRegistry& registry) {
     const auto left = algebraicValue(lhs, registry);
+    if (!left)
+        return std::nullopt;
     const auto right = algebraicValue(rhs, registry);
-    if (!left || !right)
+    if (!right)
         return std::nullopt;
     const auto result = symbolic::AlgebraicNumber::combine(*left, *right, operation);
     if (!result)
@@ -557,6 +559,10 @@ Expr evaluatePower(
         const auto algebraicBase = algebraicValue(base, registry);
         const auto magnitude = numeric::tryToUint64(integerExponent.abs());
         if (algebraicBase && magnitude && *magnitude <= 32) {
+            if (auto fieldPower = symbolic::AlgebraicNumber::integerPowerInField(
+                    *algebraicBase, *magnitude, integerExponent.isNegative()))
+                return algebraicExpr(*fieldPower, registry);
+
             auto result = symbolic::AlgebraicNumber::fromRational(Rational{BigInt{1}});
             auto factor = algebraicBase;
             std::uint64_t power = *magnitude;

@@ -94,6 +94,50 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[1/((x+1)^2*(x-1)),x]"),
         std::string{"(x+1)^(-1)/2+log[x-1]/4-log[x+1]/4"},
         "partial fractions support repeated linear factors");
+    tests.expectEqual(eval(session, "integrate[1/(x^4-1),x]"),
+        std::string{"-atan[x]/2+log[x-1]/4-log[x+1]/4"},
+        "rational integration factors quartic denominators into exact linear/quadratic components");
+    tests.expectEqual(eval(session, "integrate[1/(x^2+1)^2,x]"),
+        std::string{"x/(2(x^2+1))+atan[x]/2"},
+        "partial fractions integrate repeated irreducible quadratic factors by exact recurrence");
+    tests.expectEqual(eval(session, "integrate[x^2/(x^4+1),x]"),
+        std::string{"x^3hypergeometric2F1[1, 3/4, 7/4, -x^4]/3"},
+        "rational binomial kernels support monomial numerators beyond the reciprocal case");
+
+
+    const std::string algebraicCubic = eval(session, "integrate[1/(x^3+x+1),x]");
+    tests.expect(algebraicCubic.find("integrate[") == std::string::npos
+            && algebraicCubic.find("root[") != std::string::npos
+            && algebraicCubic.find("log[") != std::string::npos,
+        "square-free irreducible cubic rational functions use exact algebraic logarithms");
+    const std::string algebraicCubicProof = derivativeBackProof(
+        session, algebraicCubic, "1/(x^3+x+1)");
+    tests.expect(algebraicCubicProof.find("D[") == std::string::npos
+            && algebraicCubicProof.find("integrate[") == std::string::npos,
+        "algebraic-log residue derivative is fully evaluable after round-trip parsing");
+
+    const std::string repeatedCubic = eval(session, "integrate[1/(x^3+x+1)^3,x]");
+    tests.expect(repeatedCubic.find("integrate[") == std::string::npos
+            && repeatedCubic.find("/(x^3+x+1)^2") != std::string::npos
+            && repeatedCubic.find("root[") != std::string::npos,
+        "Hermite reduction lowers repeated irreducible cubic powers before algebraic logs");
+    const std::string repeatedCubicProof = derivativeBackProof(
+        session, repeatedCubic, "1/(x^3+x+1)^3");
+    tests.expect(repeatedCubicProof.find("D[") == std::string::npos
+            && repeatedCubicProof.find("integrate[") == std::string::npos,
+        "Hermite-reduced cubic derivative remains fully evaluable");
+
+    const std::string mixedMultiplicity = eval(
+        session, "integrate[(x^4+1)/((x^3+x+1)^2*(x^2+1)),x]");
+    tests.expect(mixedMultiplicity.find("integrate[") == std::string::npos
+            && mixedMultiplicity.find("atan[x]") != std::string::npos
+            && mixedMultiplicity.find("root[") != std::string::npos,
+        "square-free decomposition separates mixed multiplicities without factor-engine support");
+    const std::string mixedMultiplicityProof = derivativeBackProof(
+        session, mixedMultiplicity, "(x^4+1)/((x^3+x+1)^2*(x^2+1))");
+    tests.expect(mixedMultiplicityProof.find("D[") == std::string::npos
+            && mixedMultiplicityProof.find("integrate[") == std::string::npos,
+        "mixed Hermite and quadratic derivative remains fully evaluable");
 
     tests.expectEqual(eval(session, "integrate[1/sqrt[x^2-1],x]"),
         std::string{"log[x+sqrt[x^2-1]]"},

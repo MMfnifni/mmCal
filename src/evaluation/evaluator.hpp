@@ -97,6 +97,8 @@ private:
     [[nodiscard]] expression::Expr evaluateIndexedHistory(
         std::span<const expression::Expr> arguments,
         bool input);
+    [[nodiscard]] expression::Expr resolveHeldHistoryReferences(
+        const expression::Expr& expression);
     [[nodiscard]] expression::Expr evaluateDefinitions() const;
     [[nodiscard]] expression::Expr evaluateUndefine(std::span<const expression::Expr> arguments);
     void emitWarning(std::string_view code, std::string message);

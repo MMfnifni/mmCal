@@ -3,7 +3,7 @@
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Current release: v1.5.3**
+**開発対象: v1.5.4**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -35,88 +35,59 @@ Out[1]> 999999999999999999999999999998000000000000000000000000000001
 In [2]> 0.1+0.2==0.3
 Out[2]> True
 
-In [3]> 1/3+1/6
-Out[3]> 1/2
+In [3]> sqrt[72]+sin[Pi/6]
+Out[3]> 1/2+6sqrt[2]
 
-In [4]> sqrt[72]+sin[Pi/6]
-Out[4]> 1/2+6sqrt[2]
+In [4]> factor[expand[(x+1)^3]-1]
+Out[4]> x*(x^2+3x+3)
 
-In [5]> factor[expand[(x+1)^3]-1]
-Out[5]> x*(x^2+3x+3)
+In [5]> fullSimplify[(x^2-1)/(x-1),x!=1]
+Out[5]> x+1
 
-In [6]> fullSimplify[(x^2-1)/(x-1),x!=1]
-Out[6]> 1+x
+In [6]> simplify[sqrt[x^2],element[x,Real]]
+Out[6]> abs[x]
 
-In [7]> simplify[sqrt[x^2],element[x,Real]]
-Out[7]> abs[x]
+In [7]> D[exp[x^2],x]
+Out[7]> 2x exp[x^2]
 
-In [8]> D[exp[x^2],x]
-Out[8]> 2x exp[x^2]
+In [8]> integrate[x^2+sin[x],{x,0,Pi}]
+Out[8]> 2+Pi^3/3
 
-In [9]> integrate[x^2+sin[x],{x,0,Pi}]
-Out[9]> 2+Pi^3/3
+In [9]> limit[(1-cos[x])/x^2,x,0]
+Out[9]> 1/2
 
-In [10]> limit[(1-cos[x])/x^2,x,0]
-Out[10]> 1/2
+In [10]> solve[1.1^x==x^2,x,Real]
+Out[10]> {x == -2lambertw[log[11/10]/2]/log[11/10], x == -2lambertw[-log[11/10]/2]/log[11/10], x == -2lambertw[-1, -log[11/10]/2]/log[11/10]}
 
-In [11]> root[{-2,0,1},2]==sqrt[2]
-Out[11]> True
+In [11]> N[%,20]
+Out[11]> {x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.716830168405222740}
 
-In [12]> element[sqrt[2]+sqrt[3],Rational]
-Out[12]> False
+In [12]> inverse[{{1,2},{3,4}}]
+Out[12]> {{-2, 1}, {3/2, -1/2}}
 
-In [13]> solve[1.1^x==x^2,x,Real]
-Out[13]> {x == -2lambertw[log[11/10]/2]/log[11/10], x == -2lambertw[-log[11/10]/2]/log[11/10], x == -2lambertw[-1, -log[11/10]/2]/log[11/10]}
-
-In [14]> N[%,20]
-Out[14]> {x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.71683016840522274}
-
-In [15]> solve[x^2+1==0,x,Complex]
-Out[15]> {x == I, x == -I}
-
-In [16]> A:={{1,2},{3,4}}
-Out[16]> {{1,2},{3,4}}
-
-In [17]> det[dot[A,inverse[A]]]
-Out[17]> 1
-
-In [18]> ifft[fft[{1,2,3,4,5,6,7}]]
-Out[18]> {1,2,3,4,5,6,7}
-
-In [19]> Pi
-Out[19]> Pi
-
-In [20]> N[@+x,30]
-Out[20]> 3.14159265358979323846264338328+x
-
-In [21]> explain[N[@@,5]]
-Out[21]> {{"Kind", "DecimalApproximation"}, {"Domain", "Real"}, {"Exactness", "CertifiedApproximation"}, {"RequestedPrecisionDigits", 5}, {"DisplayedFractionalDigits", 4}, {"Rounded", True}, {"CertifiedEnclosure", {6908435304715/2199023255552, 13816870609431/4398046511104}}, {"InformationEnclosure", {62831/20000, 62833/20000}}}
+In [13]> ifft[fft[{1,2,3,4,5,6,7}]]
+Out[13]> {1, 2, 3, 4, 5, 6, 7}
 ```
 
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
 
-## v1.5.3
+## v1.5.4 開発中
 
-v1.5.3は，v1.5.2までのexact-first CAS基盤を保ったまま，**代数数をpersistent number fieldへ進め，Solver・domain knowledge・certified `N`・exact FFTまで表現横断で接続したrelease**である。
+v1.5.4では，新函数を増やすこと自体よりも，既存のexact-first基盤を**より完全に，より一貫して，性能の崖なく使える状態へ仕上げること**を主眼としている。
 
-主な変更:
+主な変更点:
 
-- Real/Complex `root[...]`，minimal polynomial，primitive element，persistent `NumberFieldContext` / `AlgebraicElement`，exact equality / Real orderingを統合
-- `root[...]`と`sqrt` / `cbrt` / `Phi`等を内部exact algebraic viewで接続し，表示形を変えず比較・domain・Solveの知識を共有
-- `solve[equation,Real]`等のdomain短縮形，solve-safe normalization，Lambert Wによる証明付き指数方程式解法，`N[solve[...]]`を追加
-- certified近似値をfirst-class数値として扱い，CertifiedEnclosure / InformationEnclosureを分離。`N[x+Pi,p]`のようなstructural partial numericalizationにも対応
-- `zeta` / `digamma` / `trigamma` / `ibeta`を追加し，Gamma/Beta高精度backendを大幅に高速化
-- first-class `cases[...]`，general `Q[x1,...,xn]` Gröbner basis（Lex / GrLex / GrevLex），`polynomialReduce`，zero-dimensional polynomial Solve統合を追加
-- `digamma` / `trigamma`のcertified `N`をcomplex入力まで拡張
-- exact非2冪FFTへCyclotomic quotient backendを追加し，5/7/10/12点等のround-tripを巨大なroot-of-unity式なしでexactに閉じる
-- `Expr::Node` typed-node化とimmutable paged packed Array + stride viewにより，大規模Array/Matrixのmemory固定費とtranspose costを削減
-- `isprime` / `factorint`等の軽量数論，bit utility，`range` / `table` / `map` / `explain`を追加
-- semantic fuzzer，black-box timing，algebraic / special-function / cyclotomic FFT benchmarkを常設し，採用しなかった最適化も実測理由付きで記録
+- **Solver**: 多変数多項式の正次元射影とspecialization，Real `abs` / 主値radical，affine指数函数のLambert W正規化，値域・単調性・凸性を用いる非存在／一意性証明を拡張
+- **積分・極限**: 仮定付きGamma/Beta/Mellin・Frullani・Dirichlet/Fresnel型の定積分を追加し，Q[x]上のHermite reductionとexact algebraic-log表現で一般有理函数積分を拡張
+- **微分**: `cases[...]`の分岐境界を壊さない微分と，Lambert W / `polylog` / 二次多項式指数の高階微分を専用漸化式で強化
+- **Algebraic Root**: 高次Complex Rootの候補生成・Rouché証明・一括canonicalizationを高速化し，一般高次`solve`の再isolation／factorization性能崖を削減
+- **保証付き `N`**: CertifiedEnclosure / InformationEnclosureの意味論を整理し，有限precision表示，極・分岐切断・算法未対応の分類，複素特殊函数の保証評価を横断的に強化
+- **特殊函数**: `Ei/Ci/Si`，`polylog`，楕円積分等の人工的な固定絶対値境界を段階的に撤去し，級数・漸近展開・Carlson形式等を証明付きで切り替える
+- **線形代数・資源管理**: `conditionNumber` / `pseudoInverse` / `leastSquares`，exact modular `det` / `solveLinear`，共通`EvaluationBudget`，協調的な計算取消しを追加
+- **検証・CLI**: certification境界fuzzer，performance-cliff監査，意味論fuzzerを拡張し，`--batch`と全callable函数を対象にした`:help` catalogを整備
 
-正式化時点の検証値はinternal **2335 / 2335**，black-box **1715 / 1715**，Random Expression Fuzzer **100000 / 100000 PASS（8 threads）**。
-
-詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)を参照のこと。
+詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)の**v1.5.4 — Unreleased**を参照。READMEとReferenceは原則として現在仕様を記述し，旧版固有の変更説明はCHANGELOGへ集約する。
 
 ## 1. まず使う
 
@@ -176,7 +147,7 @@ In [4]> N[Pi,30]
 Out[4]> 3.14159265358979323846264338328
 ```
 
-`N[式,p]`は式そのものを`p`有効桁のcertified近似値へ評価する。値のscaleが変わっても相対Precisionを基準にする。branch cutやbackend境界を区間幅だけが跨ぐ場合はguard precisionを増やして再判定するが，top-level `N`は局所16回で必ず停止する。既存の有限precision入力enclosureが原因で要求桁を確定できない場合は`N::precision`，数学値は存在するが現certified backend未対応なら`N::unsupported`として式を保持し，真のDomainErrorとは区別する。
+`N[式,p]`は式そのものを`p`有効桁のcertified近似値へ評価する。値のscaleが変わっても相対Precisionを基準にする。分岐切断や計算基盤境界を区間幅だけが跨ぐ場合はguard precisionを増やして再判定するが，top-level `N`は局所16回で必ず停止する。既存の有限precision入力enclosureが原因で要求桁を確定できない場合は`N::precision`，数学値は存在するが現certified 計算基盤未対応なら`N::unsupported`として式を保持し，真のDomainErrorとは区別する。
 一方，`:fix`は**画面上の小数点以下表示桁数だけ**を変更し，保存されるexact値や`N`のPrecision意味論は変更しない。
 
 ```text
@@ -199,8 +170,8 @@ Out[6]> 1/3
 ### precision / accuracy / rationalize
 
 `N`で得た近似値は，単なる表示文字列ではなく，真値保証用のCertifiedEnclosureと後続計算で利用してよい情報量を表すInformationEnclosureを保持する。
-近似値同士，または近似値とexact Numberの四則演算に加え，interval backendを持つ`sin` / `exp` / `log` / `sqrt`等のscalar函数へも近似値をそのまま再投入できる。
-誤差伝播や相殺で保証可能なAccuracy / Precisionは自然に低下し，`N[N[Pi,20],100]`のように外側の`N`を増桁しても，元の近似値に存在しない情報やbackend内部のguard桁を新しいAccuracyとして復元しない。
+近似値同士，または近似値とexact Numberの四則演算に加え，interval 計算基盤を持つ`sin` / `exp` / `log` / `sqrt`等のscalar函数へも近似値をそのまま再投入できる。
+誤差伝播や相殺で保証可能なAccuracy / Precisionは自然に低下し，`N[N[Pi,20],100]`のように外側の`N`を増桁しても，元の近似値に存在しない情報や計算基盤内部のguard桁を新しいAccuracyとして復元しない。
 
 - `accuracy[x]`: 真値に対して保証できる**絶対10進桁数**の整数下限
 - `precision[x]`: 真値に対して保証できる**相対10進桁数**の整数下限
@@ -420,8 +391,8 @@ integrate[exp[-x],{x,0,Infinity}]
 -> 1
 ```
 
-v1.5.2では，個別規則の羅列だけでなく三角整数冪の有限Fourier還元，負整数冪のsec/csc reduction，異周波数product-to-sum，bounded Weierstrass置換，inverse-chain候補，二次根号等を共通知識として強化した。
-積分できない場合も「未実装」「一部のみ解決」「条件不足」「現在の標準函数語彙では既知の有限閉形式なし」を区別してWarningを出し，証明器不足だけを理由に既存のprimitiveを削らない。
+積分器は，三角整数冪の有限Fourier還元，負整数冪のsec/csc漸化式，異周波数の積和変換，有界Weierstrass置換，inverse-chain候補，二次根号，一般有理函数のHermite reduction等を共通知識として扱う。
+積分できない場合も「未対応」「一部のみ解決」「条件不足」「現在の標準函数語彙では既知の有限閉形式なし」を区別してWarningを出し，証明器不足だけを理由に既存の原始函数候補を捨てない。
 
 ### 特殊函数
 
@@ -435,9 +406,8 @@ ellipticF[phi,m]  ellipticE[phi,m]  ellipticPi[n,phi,m]
 Ei[x]  Si[x]  Ci[x]  li[x]  polylog[s,z]
 ```
 
-v1.5.3ではさらに，`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`を追加し，代表exact値・微分関係・当初対応していた実領域のcertified `N`へ接続した。現Unreleased treeでは`digamma` / `trigamma`のcertified評価をcomplex入力まで拡張している。
-また軽量数論として`isprime` / `nextprime` / `prevprime` / `factorint` / `totient`を`uint64`範囲で決定的に評価する。
-証明backendを超えるBigIntをprobable-primeとして確定しない。
+`zeta` / `digamma` / `trigamma` / 正則化不完全Beta `ibeta`も実装している。`zeta`は`s=1`を除く有限複素平面へ保証付き解析接続し，`digamma` / `trigamma`は複素入力を扱う。`ibeta`は対応可能な実パラメータ領域で有限precision入力の情報量を保持して評価する。Lambert Wは実分岐に加え，保証付き縮小写像が閉じる範囲で任意整数分岐の複素`N`を扱う。
+また軽量数論として`isprime` / `nextprime` / `prevprime` / `factorint` / `totient`を`uint64`範囲で決定的に評価する。証明計算基盤を超えるBigIntをprobable-primeだけで`True`に確定しない。
 
 代表例:
 
@@ -458,10 +428,10 @@ integrate[sin[x]/x,x] -> Si[x]
 integrate[cos[x]/x,x] -> Ci[x]
 integrate[exp[x]/x,x] -> Ei[x]
 integrate[1/log[x],x] -> li[x]
-integrate[log[1-x]/x,x] -> -polylog[2,x]
+integrate[log[1-x]/x,x] -> -polylog[2, x]
 ```
 
-一般の特殊函数方程式について逆函数を捏造せず，branchや単射性を証明できない場合は`solve`を未解決のまま保持する。
+一般の特殊函数方程式について逆函数を捏造せず，枝や単射性を証明できない場合は`solve`を未解決のまま保持する。
 
 ### 極限
 
@@ -487,10 +457,10 @@ solve[sin[x]==0,x,Real]
 -> {x == Pi k where k in Integer}
 ```
 
-`sin/cos/tan`の実軸周期解は，exact非零一次係数を持つaffine argumentから段階的にinteger-parameter familyへ対応している。
-非線形argumentやComplex全解をprincipal inverseだけから捏造しない。
+`sin/cos/tan`の実軸周期解は，exact非零一次係数を持つaffine argumentから段階的に整数パラメータ族へ対応している。
+非線形argumentやComplex全解を主値 inverseだけから捏造しない。
 
-一般高次Rational係数多項式のReal解は，既存radical solverで自然に閉じない場合にexact `root`へfallbackできる。
+一般高次Rational係数多項式のReal解は，既存radical solverで自然に閉じない場合にexact `root`へ切り替えられる。
 `root[{a0,...,an},k]`は昇冪係数多項式の異なる実根を小さい順に数えた第`k`根で，`N`ではSturm分離区間をcertifiedに細分化する。
 
 ```text
@@ -501,10 +471,10 @@ N[root[{-2,0,1},2],30]
 -> 1.41421356237309504880168872421
 ```
 
-Complex側は`root[{a0,...,an},k,Complex]`で全複素根をcertified isolating diskへ分離し，高次Rational係数多項式のComplex Solveもexact Rootへfallbackできる。
+Complex側は`root[{a0,...,an},k,Complex]`で全複素根をcertified isolating diskへ分離し，高次Rational係数多項式のComplex Solveもexact Rootへ切り替えられる。
 個々のRoot生成時には，次数16以下で証明可能な場合に有理既約因子をexactに選択して定義多項式をminimal polynomialへ縮約する。
-Root同士の`+ - * /`では，operandのminimal polynomialが既約と証明でき，`theta=alpha+c beta`が積次数の既約拡大を生成すると証明できる場合にprimitive-element reductionを使い，それ以外はresultantとisolating regionによる再同定へfallbackする。
-v1.5.3ではbounded exact algebraic equalityとReal orderingまで実装済みである。
+Root同士の`+ - * /`では，operandのminimal polynomialが既約と証明でき，`theta=alpha+c beta`が積次数の既約拡大を生成すると証明できる場合にprimitive-element reductionを使い，それ以外はresultantとisolating regionによる再同定へ切り替える。
+bounded exact algebraic equalityとReal orderingも実装済みである。
 異なるprimitive generator / subfieldを含む一般field merge，`rootApproximant`，次数budgetを超える完全なQ因子分解は意図的に後続へ残す。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
@@ -513,7 +483,7 @@ v1.5.3ではbounded exact algebraic equalityとReal orderingまで実装済み�
 ## 8. Array・行列・ベクトル・統計
 
 `{...}`は一般の有限brace containerであり，vector / matrix / tensor専用の構文ではない。
-child shapeが全て一致する矩形値はdense `ArrayExpr`へ自動最適化し，v1.5.3ではphysical storageを固定1024要素のimmutable packed page，logical layoutをshape / offset / stridesとして保持する。
+child shapeが全て一致する矩形値はdense `ArrayExpr`へ自動最適化し，physical storageを固定1024要素のimmutable packed page，logical layoutをshape / offset / stridesとして保持する。
 transposeや一部のview操作はbackingを共有し，`{Q,R}`のようにshapeが異なる値は一般braceとして保持する。
 Matrix函数へ入る境界では矩形性を監査し，非矩形値はWarning + 未評価とする。
 shapeをbraceだけでは保存できない空Arrayのみ`reshape`を用いて表示する。
@@ -543,7 +513,7 @@ zeros[0,3]
 有限列の生成と明示的なelement-wise適用には`range` / `table` / `map`を使う。`table`のiteratorはlocal scopeであり，外側の同名定義を汚さない。`map`はscalar leafへ明示適用するため，通常の`exp[A]`等を自動element-wise化しない。
 
 ```text
-range[0,1,1/3] -> {0,1/3,2/3,1}
+range[0,1,1/3] -> {0, 1/3, 2/3, 1}
 table[i^2,{i,5}] -> {1,4,9,16,25}
 map[sin,{0,Pi/2,Pi}] -> {0,1,0}
 ```
@@ -598,18 +568,18 @@ normalize[{3,4}]
 `A*B`を行列積にはせず，同shape Arrayの`+` / `-`とscalar×Arrayのみを通常算術へ統合する。行列積・内積は`dot[A,B]`で明示する。
 
 整数・Rational行列は不用意にBigFloatへ変換せずexactに処理する。
-`det` / `rref` / `matrixRank` / `nullSpace` / `inverse` / `solveLinear`は行ごとの分母除去で整数workspaceへliftする。`rref` / `matrixRank` / `nullSpace`と小規模・疎な`det` / `solveLinear`はBareiss fraction-free eliminationを使い，大きいdense exact整数/Rationalの`det`は31-bit prime + CRT，`solveLinear`はCRT + rational reconstructionへ自動dispatchする。modular solveの候補は元の整数系でexact verificationした場合だけ採用し，bad primeや復元失敗時はBareissへfallbackする。modular inverse backendも実装しているが，現GCC benchmarkではautomatic pathはBareissのままとする。
-exact complex行列は`Number` Gaussian backendへfallbackする。
+`det` / `rref` / `matrixRank` / `nullSpace` / `inverse` / `solveLinear`は行ごとの分母除去で整数workspaceへliftする。`rref` / `matrixRank` / `nullSpace`と小規模・疎な`det` / `solveLinear`はBareiss fraction-free eliminationを使い，大きいdense exact整数/Rationalの`det`は31-bit prime + CRT，`solveLinear`はCRT + rational reconstructionへ自動dispatchする。modular solveの候補は元の整数系でexact verificationした場合だけ採用し，bad primeや復元失敗時はBareissへ切り替える。modular inverse 計算基盤も実装しているが，現GCC benchmarkではautomatic pathはBareissのままとする。
+exact complex行列は`Number` Gaussian 計算基盤へ切り替える。
 `solveLinear[A,b]`は一意解だけを返し，整合した過剰決定系もfull column rankなら扱う。
-不整合系や自由変数が残る系はDomain errorとし，parametric solutionを捏造しない。
+不整合系や自由変数が残る系は定義域エラーとし，parametric solutionを捏造しない。
 一般symbolic determinant / inverseには式爆発を防ぐ展開budgetを設け，三角・疎行列など安全に処理できる場合を除き，巨大な式を作る前に未評価で保持する。
-`luDecomposition[A]`は正方行列に`{P,L,U}`を返す。`qrDecomposition[A]`は矩形にも対応するreduced Householder QRで，m×nに対し`k=min[m,n]`，`Q:m×k`，`R:k×n`の`{Q,R}`を返す。
-`svd[A]`も矩形reduced `{U,S,V}`を返し，一般数値backendは条件数を二乗する`A^H A`を形成せずHouseholder bidiagonalization + one-sided Jacobiを使う。
-`at[result,0]`等でfactorを取り出せる。一般exact QRは式爆発を避けるため3×3以下に制限し，上三角/上台形caseだけ任意次数のexact fast pathを許す。
+`luDecomposition[A]`は正方行列に`{P,L,U}`を返す。`qrDecomposition[A]`は矩形にも対応するreduced QRで，m×nに対し`k=min[m,n]`，`Q:m×k`，`R:k×n`の`{Q,R}`を返す。
+`svd[A]`も矩形reduced `{U,S,V}`を返し，一般数値計算基盤は条件数を二乗する`A^H A`を形成せずHouseholder bidiagonalization + one-sided Jacobiを使う。
+`at[result,0]`等でfactorを取り出せる。exact実数QRは平方根を途中生成しないfraction-free直交化を使い，full-rankではGram + symmetric Bareissをfast pathとする。従来の3×3 hard capは撤去済みで，rank落ちではdirect fraction-free経路へ切り替える。
 `eigenvalues` / `eigenvectors` / `eigensystem`は正方行列を対象とし，exact pathは三角・対角・distinct-root exact Number 2×2を処理，一般`N[...]`はHessenberg + implicit shifted complex QRでSchur形を作り，元入力intervalに対するSchur/eigenpair relationを監査する。
 defective/近接重根で独立vectorを安全に構成できない場合は推測しない。
 
-`N`の下ではFFTと同様にprecision-aware backendへ直接dispatchする。
+`N`の下ではFFTと同様にprecision-aware 計算基盤へ直接dispatchする。単にexact経路より早い。
 
 ```text
 N[det[{{Pi,0},{0,2}}],12]
@@ -632,7 +602,7 @@ N[eigenvalues[{{1,2},{3,4}}],8]
 `solveLinear`もaugmented interval eliminationを直接試し，pivotと整合性を証明できない場合にepsilonで推測しない。
 特に依存した過剰決定系ではinterval相関のため整合性証明が難しい場合がある。
 `matrixRank`と`nullSpace`はrank deficiencyに依存する不連続量なのでexact入力ではexact eliminationを先に使い，近似入力・未解決caseでもepsilon閾値は導入しない。
-interval backendはpivot構造を証明できる場合だけ結果を返し，rank deficiencyを推測しない。
+interval 計算基盤はpivot構造を証明できる場合だけ結果を返し，rank deficiencyを推測しない。
 
 `N`の表示ではexact有限小数は `N[1/2,10] -> 0.5` のように不要な0埋めをしない。certified interval由来の有効桁結果で末尾0が連続する場合も冗長な0列は圧縮し，要求Precisionと両enclosureはmetadataに保持する。固定小数点以下桁数が必要なら`:fix`を使う。
 
@@ -705,7 +675,7 @@ WARN: integrate could not fully prove the symbolic antiderivative or definite in
 :status
 ```
 
-`:help 函数名`はBuiltinRegistryの函数名・alias・引数個数を正本とし，全callable builtinに個別の説明，明示的な入力規則，一つ以上の例を表示する。`integrate` / `root` / `qrDecomposition` / `svd` / `solve`等の複数形式を持つ函数では，各形式と追加note・複数例も示す。`:help Pi`と`:help constants`は保護された定数，domain，角度単位symbolを扱う。未知名が明確な近傍topicを持つ場合は，`sdv` -> `svd`，`qr` -> `qrDecomposition`のように候補を提示する。
+`:help 函数名`はBuiltinRegistryの函数名・alias・引数個数を正本とし，全callable builtinに個別の説明，明示的な入力規則，一つ以上の例を表示する。`integrate` / `root` / `qrDecomposition` / `svd` / `solve`等の複数形式を持つ函数では，各形式と追加note・複数例も示す。`:help Pi`と`:help constants`は保護された定数，定義域，角度単位symbolを扱う。未知名が明確な近傍topicを持つ場合は，`sdv` -> `svd`，`qr` -> `qrDecomposition`のように候補を提示する。
 `:help functions`は利用可能なcanonical名とcallable aliasを一覧する。
 `:help` / `:fix` / `:status`は評価式ではないため`In[n]`を進めず，履歴にも入らない。
 `:fix n`は小数点以下最大`n`桁へ丸めて**表示するだけ**で，保存されている値や`precision` / `accuracy`の意味は変更しない。
@@ -735,9 +705,8 @@ D N In Out Exit Clear Defs UnDef
 - `docs/architecture.md` — 開発者向け内部構造
 - `docs/grammar.ebnf` — 文法の機械可読な概要
 - `docs/multiprecision_implementation.ja.md` — 多倍長整数・任意精度・保証付き評価の実装詳細
-- `docs/performance_optimization.ja.md` — v1.5.1–v1.5.3で採用・棄却した高速化と実測根拠
+- `docs/performance_optimization.ja.md` — 採用・棄却した高速化と実測根拠
 - `docs/evaluation_budget.ja.md` — 評価資源上限，cancellation，telemetry，diagnostic契約
-- `docs/roadmap.md` — 意図的未実装，探索上限，次の優先候補
 - `CHANGELOG.ja.md` — releaseごとの主要変更
 
 ## 14. ライセンスと商標
@@ -754,9 +723,9 @@ D N In Out Exit Clear Defs UnDef
 
 ## 15. テスト・制作環境
 
-v1.5.3正式化時点で，本プロジェクトには2335件の内部回帰テストと1715件のブラックボックステストが含まれる。
+現在の開発treeでは，内部回帰テスト **2954 / 2954**，ブラックボックステスト **2127 / 2127** の通過を確認している。
 exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
-さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法threshold sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
+さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法閾値 sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 
 主なWindows開発環境:
 
@@ -789,6 +758,8 @@ LinuxではGCCおよびClangによるビルド・テストも行っている。
 ## 謝辞
 
 このツール開発のきっかけとなった過去の自分，学びの園であった大学と教授殿，そして実使用環境となっている現職場に感謝の意を表します。
+
+また、数値計算は一部[DLMF](https://dlmf.nist.gov/)を参考に実装してる。著者の皆様に深く感謝申し上げる。
 
 ## 要望等
 

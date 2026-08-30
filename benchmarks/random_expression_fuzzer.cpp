@@ -1167,7 +1167,7 @@ struct Failure final {
     std::ostringstream output;
     output
         << "input-bytes=" << usage.inputBytes
-        << " steps=" << usage.evaluationSteps
+        << " work=" << usage.evaluationSteps
         << " depth=" << usage.maximumDepth
         << " nodes=" << usage.generatedNodes
         << " simplify=" << usage.simplificationCandidates

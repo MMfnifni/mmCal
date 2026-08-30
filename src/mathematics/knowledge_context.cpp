@@ -202,6 +202,135 @@ using numeric::Number;
     return relation;
 }
 
+struct RationalRangeBound final {
+    numeric::Rational value;
+    bool inclusive = false;
+};
+
+struct RationalRange final {
+    std::optional<RationalRangeBound> lower;
+    std::optional<RationalRangeBound> upper;
+};
+
+[[nodiscard]] std::optional<RationalRange> knownRealRange(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics,
+    const AssumptionSet& assumptions) {
+    if (!expression.isCall() || expression.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const auto* function = mathematics.findFunction(expression.asCall().head);
+    if (!function || function->realRangeRule == RealRangeRule::Unknown
+        || function->definednessRule != FunctionDefinednessRule::Everywhere)
+        return std::nullopt;
+
+    const ValueFacts argument = inferValueFacts(
+        expression.asCall().arguments[0], builtins, mathematics, assumptions);
+    if (!argument.isProvablyReal())
+        return std::nullopt;
+
+    using numeric::BigInt;
+    using numeric::Rational;
+    const auto q = [](std::int64_t value) { return Rational{BigInt{value}}; };
+    switch (function->realRangeRule) {
+    case RealRangeRule::AllReal:
+        return RationalRange{};
+    case RealRangeRule::Positive:
+        return RationalRange{RationalRangeBound{q(0), false}, std::nullopt};
+    case RealRangeRule::NonNegative:
+        return RationalRange{RationalRangeBound{q(0), true}, std::nullopt};
+    case RealRangeRule::OpenMinusOneToOne:
+        return RationalRange{
+            RationalRangeBound{q(-1), false}, RationalRangeBound{q(1), false}};
+    case RealRangeRule::OpenZeroToTwo:
+        return RationalRange{
+            RationalRangeBound{q(0), false}, RationalRangeBound{q(2), false}};
+    case RealRangeRule::ClosedMinusOneToOne:
+        return RationalRange{
+            RationalRangeBound{q(-1), true}, RationalRangeBound{q(1), true}};
+    case RealRangeRule::OneToInfinity:
+        return RationalRange{RationalRangeBound{q(1), true}, std::nullopt};
+    case RealRangeRule::Unknown:
+        break;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] TruthValue proveRealRangeRelation(
+    RelationKind relation,
+    const Expr& functionExpression,
+    const Expr& boundExpression,
+    bool functionOnLeft,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics,
+    const AssumptionSet& assumptions) {
+    if (!boundExpression.isNumber() || !boundExpression.asNumber().isReal())
+        return TruthValue::Unknown;
+    const auto range = knownRealRange(
+        functionExpression, builtins, mathematics, assumptions);
+    if (!range)
+        return TruthValue::Unknown;
+
+    if (!functionOnLeft)
+        relation = reversedRelation(relation);
+
+    const numeric::Rational bound = boundExpression.asNumber().asReal().toRational();
+    const auto lowerComparison = range->lower
+        ? std::optional<int>{range->lower->value < bound ? -1
+            : range->lower->value > bound ? 1 : 0}
+        : std::nullopt;
+    const auto upperComparison = range->upper
+        ? std::optional<int>{range->upper->value < bound ? -1
+            : range->upper->value > bound ? 1 : 0}
+        : std::nullopt;
+
+    switch (relation) {
+    case RelationKind::Less:
+        if (upperComparison && (*upperComparison < 0
+                || (*upperComparison == 0 && !range->upper->inclusive)))
+            return TruthValue::True;
+        if (lowerComparison && *lowerComparison >= 0)
+            return TruthValue::False;
+        return TruthValue::Unknown;
+    case RelationKind::LessEqual:
+        if (upperComparison && *upperComparison <= 0)
+            return TruthValue::True;
+        if (lowerComparison && (*lowerComparison > 0
+                || (*lowerComparison == 0 && !range->lower->inclusive)))
+            return TruthValue::False;
+        return TruthValue::Unknown;
+    case RelationKind::Greater:
+        if (lowerComparison && (*lowerComparison > 0
+                || (*lowerComparison == 0 && !range->lower->inclusive)))
+            return TruthValue::True;
+        if (upperComparison && *upperComparison <= 0)
+            return TruthValue::False;
+        return TruthValue::Unknown;
+    case RelationKind::GreaterEqual:
+        if (lowerComparison && *lowerComparison >= 0)
+            return TruthValue::True;
+        if (upperComparison && (*upperComparison < 0
+                || (*upperComparison == 0 && !range->upper->inclusive)))
+            return TruthValue::False;
+        return TruthValue::Unknown;
+    case RelationKind::Equal: {
+        const bool below = lowerComparison && (*lowerComparison > 0
+            || (*lowerComparison == 0 && !range->lower->inclusive));
+        const bool above = upperComparison && (*upperComparison < 0
+            || (*upperComparison == 0 && !range->upper->inclusive));
+        return below || above ? TruthValue::False : TruthValue::Unknown;
+    }
+    case RelationKind::NotEqual: {
+        const bool below = lowerComparison && (*lowerComparison > 0
+            || (*lowerComparison == 0 && !range->lower->inclusive));
+        const bool above = upperComparison && (*upperComparison < 0
+            || (*upperComparison == 0 && !range->upper->inclusive));
+        return below || above ? TruthValue::True : TruthValue::Unknown;
+    }
+    }
+    return TruthValue::Unknown;
+}
+
 } // namespace
 
 KnowledgeContext::KnowledgeContext(
@@ -272,6 +401,19 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
         algebraic != TruthValue::Unknown)
         return algebraic;
 
+    // MathRegistryのreal rangeが有限境界を持つ函数は，実引数・everywhere-definedが
+    // 証明できる場合だけ，sin[x] <= 1 のような全域boundを利用する。
+    if (const TruthValue range = proveRealRangeRelation(
+            relationPredicate.relation, relationPredicate.lhs, relationPredicate.rhs, true,
+            builtins_, mathematics_, assumptions_);
+        range != TruthValue::Unknown)
+        return range;
+    if (const TruthValue range = proveRealRangeRelation(
+            relationPredicate.relation, relationPredicate.rhs, relationPredicate.lhs, false,
+            builtins_, mathematics_, assumptions_);
+        range != TruthValue::Unknown)
+        return range;
+
     // MathRegistryに「定義域内では決して0にならない」と登録された函数は、
     // exp[z]!=0 のような非零性を局所実装へ重複記述せず証明できる。
     if ((relationPredicate.relation == RelationKind::Equal
@@ -326,30 +468,29 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
             relationPredicate.rhs, relationPredicate.lhs)))
         return TruthValue::True;
 
-    // a-b == 0 / != 0 は a == b / != b と完全に同値。
-    // FullSimplify等が因子 (x-1) の非零性を x!=1 から証明できるよう、数値展開に依存しないこの最小限のrelation正規化を共有知識層で行う。
-    if (relationPredicate.relation == RelationKind::Equal
-        || relationPredicate.relation == RelationKind::NotEqual) {
-        auto differenceRelation = [&](const Expr& difference) -> std::optional<TruthValue> {
-            if (!difference.isCall())
-                return std::nullopt;
-            const auto* definition = builtins_.find(difference.asCall().head);
-            if (!definition || definition->id != evaluation::BuiltinId::Subtract
-                || difference.asCall().arguments.size() != 2)
-                return std::nullopt;
-            const auto& arguments = difference.asCall().arguments;
-            return prove(relation(
-                relationPredicate.relation, arguments[0], arguments[1]));
-        };
+    // a-b relation 0 は a relation b へexactに正規化できる。ordered relationでは
+    // 再帰先がReal性まで証明できた場合だけTrue/Falseになるため，Complex順序を捏造しない。
+    auto differenceRelation = [&](const Expr& difference) -> std::optional<TruthValue> {
+        if (!difference.isCall())
+            return std::nullopt;
+        const auto* definition = builtins_.find(difference.asCall().head);
+        if (!definition || definition->id != evaluation::BuiltinId::Subtract
+            || difference.asCall().arguments.size() != 2)
+            return std::nullopt;
+        const auto& arguments = difference.asCall().arguments;
+        return prove(relation(
+            relationPredicate.relation, arguments[0], arguments[1]));
+    };
 
-        if (isZero(relationPredicate.rhs)) {
-            if (const auto normalized = differenceRelation(relationPredicate.lhs))
+    if (isZero(relationPredicate.rhs)) {
+        if (const auto normalized = differenceRelation(relationPredicate.lhs))
+            if (*normalized != TruthValue::Unknown)
                 return *normalized;
-        }
-        if (isZero(relationPredicate.lhs)) {
-            if (const auto normalized = differenceRelation(relationPredicate.rhs))
+    }
+    if (isZero(relationPredicate.lhs)) {
+        if (const auto normalized = differenceRelation(relationPredicate.rhs))
+            if (*normalized != TruthValue::Unknown)
                 return *normalized;
-        }
     }
 
     // 明示前提の論理的な補集合も最低限認識する。solverのcase分岐で

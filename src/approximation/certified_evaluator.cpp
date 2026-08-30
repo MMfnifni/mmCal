@@ -15,8 +15,10 @@
 #include "certified_special_functions.hpp"
 #include "certified_trigonometry.hpp"
 #include "certified_value_math.hpp"
+#include "builtins/exact_operations.hpp"
 #include "interval_math.hpp"
 #include "mathematics/exact_trigonometry.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
@@ -687,9 +689,12 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             : defaultPrecisionDigits;
         if (digits == 0)
             return std::nullopt;
+        evaluation::checkEvaluationRequestedPrecisionDigits(digits);
 
         ApproximationContext context{digits};
         for (;;) {
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::CertifiedRefinement);
             const std::size_t nestedBits = context.workingBinaryBits();
             const auto information = encloseBound(
                 call.arguments[0], nestedBits, bindings, EnclosureKind::Information, recursionDepth + 1);
@@ -706,12 +711,37 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             if (growth > std::numeric_limits<std::size_t>::max() - context.guardDigits())
                 return std::nullopt;
             context.setGuardDigits(context.guardDigits() + growth);
-            if (context.guardDigits() > digits + 256)
+            constexpr std::size_t extraGuardDigits = 256;
+            if (context.guardDigits() > extraGuardDigits
+                && context.guardDigits() - extraGuardDigits > digits)
                 return std::nullopt;
         }
     }
 
     case BuiltinId::Root: {
+        if (call.algebraicValue) {
+            if (call.algebraicValue->domain() == symbolic::AlgebraicRootDomain::Complex) {
+                if (const auto exact = call.algebraicValue->exactRationalParts())
+                    return CertifiedValue{ComplexInterval{
+                        RealInterval::fromRational(exact->first, precisionBits),
+                        RealInterval::fromRational(exact->second, precisionBits)}};
+                const auto* algebraic = call.algebraicValue->asComplex();
+                if (!algebraic)
+                    return std::nullopt;
+                const symbolic::RationalComplexDisk disk = algebraic->refined(precisionBits);
+                return CertifiedValue{ComplexInterval{
+                    RealInterval::fromRationalBounds(
+                        disk.real - disk.radius, disk.real + disk.radius, precisionBits),
+                    RealInterval::fromRationalBounds(
+                        disk.imaginary - disk.radius, disk.imaginary + disk.radius, precisionBits)}};
+            }
+            const auto* algebraic = call.algebraicValue->asReal();
+            if (!algebraic)
+                return std::nullopt;
+            const symbolic::RationalRootInterval interval = algebraic->refined(precisionBits);
+            return CertifiedValue{RealInterval::fromRationalBounds(
+                interval.lower, interval.upper, precisionBits)};
+        }
         if (call.arguments.size() == 3) {
             const auto algebraic = complexAlgebraicRoot(call);
             if (!algebraic)
@@ -1192,29 +1222,137 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (call.arguments.empty() || call.arguments.size() > 2)
             return std::nullopt;
 
-        int branch = 0;
+        BigInt branch{0};
         std::size_t valueIndex = 0;
         if (call.arguments.size() == 2) {
             const auto branchInteger = exactIntegerExponent(call.arguments[0]);
             if (!branchInteger)
                 return std::nullopt;
-            if (*branchInteger == BigInt{0})
-                branch = 0;
-            else if (*branchInteger == BigInt{-1})
-                branch = -1;
-            else
-                throw CertifiedBackendUnsupported{
-                    "Certified complex Lambert W branches other than 0 and -1 are not implemented"};
+            branch = *branchInteger;
             valueIndex = 1;
+        }
+
+        // branch point -1/e へ極端に近いcomplex exact式は，z全体を先に
+        // 数値化すると無関係なreal/imag合成側のadaptive refinementを受け得る。
+        // z+1/eがexact Numberまで簡約でき，虚部のsideも明白な場合は，
+        // rational offsetを直接interval化してbranch-point kernelへ送る。
+        // finite-precision値や未簡約式は従来のInformationEnclosure判定へ残す。
+        if (const auto* e = mathematics_.findConstant(ConstantId::E)) {
+            const Expr reciprocalE = builtins::exact::divide(
+                Expr{Number{BigInt{1}}}, Expr{e->symbol},
+                builtins_, mathematics_, angleSemantics_);
+            const Expr offsetExpression = builtins::exact::add(
+                {call.arguments[valueIndex], reciprocalE},
+                builtins_, mathematics_, angleSemantics_);
+            if (offsetExpression.isNumber()) {
+                const auto& number = offsetExpression.asNumber();
+                ComplexInterval offsetComplex = ComplexInterval::fromReal(
+                    RealInterval::fromRational(number.isReal()
+                        ? number.asReal().toRational() : rational(0), precisionBits));
+                if (!number.isReal()) {
+                    const auto& complexNumber = number.asComplex();
+                    offsetComplex = ComplexInterval{
+                        RealInterval::fromRational(
+                            complexNumber.real.toRational(), precisionBits),
+                        RealInterval::fromRational(
+                            complexNumber.imaginary.toRational(), precisionBits)};
+                }
+
+                const numeric::BigFloat zero;
+                const bool upperSide = offsetComplex.imaginary().lower() >= zero
+                    && offsetComplex.imaginary().upper() > zero;
+                const bool lowerSide = offsetComplex.imaginary().upper() <= zero
+                    && offsetComplex.imaginary().lower() < zero;
+                const bool positiveRealOffset = offsetComplex.imaginary().isPoint()
+                    && offsetComplex.imaginary().lower().isZero()
+                    && offsetComplex.real().lower() > zero
+                    && (branch.isZero() || branch == BigInt{-1});
+                if (upperSide || lowerSide || positiveRealOffset) {
+                    try {
+                        const ComplexInterval local = encloseLambertWBranchPointOffset(
+                            offsetComplex, branch, precisionBits);
+                        if (positiveRealOffset)
+                            return CertifiedValue{local.real()};
+                        return normalizeCertifiedComplex(local);
+                    } catch (const CertifiedBackendUnsupported&) {
+                        // branch-point局所枝でない／近傍外なら通常経路へ続ける。
+                    }
+                }
+            }
         }
 
         const auto value = encloseArgument(valueIndex);
         if (!value)
             return std::nullopt;
-        if (!value->isReal())
-            throw CertifiedBackendUnsupported{
-                "Certified complex Lambert W evaluation is not implemented"};
-        return CertifiedValue{encloseLambertWReal(value->asReal(), branch, precisionBits)};
+
+        // branch 0/-1 が実数値を持つ区間では既存の単調bisectionが最も強い。
+        // principal branch は実backend外でもprincipal complex値へ続けられる。
+        // 一方 W_-1 の負実軸上で実backend外となる点はbranch cutそのものであり，
+        // 上側/下側のどちらを採るかをexact real入力だけから決めない。ここで即座に
+        // Unsupportedへ戻し，log-contractionのbounded workをcut上で浪費しない。
+        if (value->isReal() && (branch.isZero() || branch == BigInt{-1})) {
+            try {
+                return CertifiedValue{encloseLambertWReal(
+                    value->asReal(), branch.isZero() ? 0 : -1, precisionBits)};
+            } catch (const CertifiedBackendUnsupported&) {
+                if (branch == BigInt{-1} && value->asReal().upper() < numeric::BigFloat{})
+                    throw;
+                // principal branch，または正実軸上の非principal branchはcomplex backendへ続ける。
+            }
+        }
+
+        const ComplexInterval complex = value->toComplex();
+        if (enclosureKind == EnclosureKind::Information
+            && informationCrossesPrincipalNegativeRealCut(complex)) {
+            bool ambiguousCut = !branch.isZero();
+            if (branch.isZero()) {
+                const std::size_t domainBits = checkedPrecisionWithGuard(precisionBits, 24);
+                const RealInterval branchPoint = negate(encloseExp(
+                    RealInterval::fromRational(rational(-1), domainBits), domainBits).interval);
+                ambiguousCut = complex.real().lower() <= branchPoint.upper();
+            }
+            if (ambiguousCut)
+                throw PrecisionInsufficient{
+                    "Lambert W InformationEnclosure cannot determine the branch-cut side",
+                    PrecisionInsufficientKind::InputInformation};
+        }
+
+        // -1/eへ要求精度より深く接近するexact式では，zを先に数値化してから
+        // e*z+1を作るとbranch-point offsetをcancellationで失う。局所近傍だけ，
+        // exact式上で z+1/e を先に簡約し，そのoffsetを平方根kernelへ直接渡す。
+        const std::size_t domainBits = checkedPrecisionWithGuard(precisionBits, 24);
+        const RealInterval eInterval = encloseExp(
+            RealInterval::fromRational(rational(1), domainBits), domainBits).interval;
+        const RealInterval qReal = add(
+            multiply(complex.real().roundedOutward(domainBits), eInterval, domainBits),
+            RealInterval::fromRational(rational(1), domainBits), domainBits);
+        const RealInterval qImaginary = multiply(
+            complex.imaginary().roundedOutward(domainBits), eInterval, domainBits);
+        const bool nearBranchPoint = intervalMagnitudeUpper(qReal) < rational(1, 8)
+            && intervalMagnitudeUpper(qImaginary) < rational(1, 8);
+        if (nearBranchPoint) {
+            if (const auto* e = mathematics_.findConstant(ConstantId::E)) {
+                const Expr reciprocalE = builtins::exact::divide(
+                    Expr{Number{BigInt{1}}}, Expr{e->symbol},
+                    builtins_, mathematics_, angleSemantics_);
+                const Expr offsetExpression = builtins::exact::add(
+                    {call.arguments[valueIndex], reciprocalE},
+                    builtins_, mathematics_, angleSemantics_);
+                if (const auto offset = encloseBound(
+                        offsetExpression, precisionBits, bindings, enclosureKind,
+                        recursionDepth + 1)) {
+                    try {
+                        return normalizeCertifiedComplex(encloseLambertWBranchPointOffset(
+                            offset->toComplex(), branch, precisionBits));
+                    } catch (const CertifiedBackendUnsupported&) {
+                        // 局所branchに接続しない枝または近傍外なら既存backendへ続ける。
+                    }
+                }
+            }
+        }
+
+        return normalizeCertifiedComplex(encloseLambertWComplex(
+            complex, branch, precisionBits));
     }
 
     case BuiltinId::Hypergeometric1F1: {
@@ -1255,7 +1393,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         const auto z = exactRealRational(call.arguments[3]);
         if (a && b && c && z) {
             const Rational absZ = z->numerator().isNegative() ? -*z : *z;
-            if (absZ <= rational(9, 10))
+            if (absZ < rational(1))
                 return CertifiedValue{encloseHypergeometric2F1Real(
                     *a, *b, *c, *z, precisionBits)};
         }
@@ -1290,6 +1428,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::EllipticE: {
         if (call.arguments.size() != 2)
             return std::nullopt;
+        const auto exactPiCoefficient = mathematics::extractRationalPiMultiple(
+            call.arguments[0], builtins_, mathematics_);
         const auto exactPhi = exactRealRational(call.arguments[0]);
         const auto exactM = exactRealRational(call.arguments[1]);
         if (exactPhi && exactM)
@@ -1313,6 +1453,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             throw CertifiedBackendUnsupported{
                 "Certified complex elliptic F/E backend is not implemented"};
         }
+        if (exactPiCoefficient)
+            return CertifiedValue{definition->id == BuiltinId::EllipticF
+                ? encloseEllipticFRealPiMultiple(*exactPiCoefficient, *realM, precisionBits)
+                : encloseEllipticERealPiMultiple(*exactPiCoefficient, *realM, precisionBits)};
         return CertifiedValue{definition->id == BuiltinId::EllipticF
             ? encloseEllipticFReal(*realPhi, *realM, precisionBits)
             : encloseEllipticEReal(*realPhi, *realM, precisionBits)};
@@ -1321,6 +1465,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::EllipticPi: {
         if (call.arguments.size() != 3)
             return std::nullopt;
+        const auto exactPiCoefficient = mathematics::extractRationalPiMultiple(
+            call.arguments[1], builtins_, mathematics_);
         const auto exactN = exactRealRational(call.arguments[0]);
         const auto exactPhi = exactRealRational(call.arguments[1]);
         const auto exactM = exactRealRational(call.arguments[2]);
@@ -1347,6 +1493,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             throw CertifiedBackendUnsupported{
                 "Certified complex elliptic Pi backend is not implemented"};
         }
+        if (exactPiCoefficient)
+            return CertifiedValue{encloseEllipticPiRealPiMultiple(
+                *realN, *exactPiCoefficient, *realM, precisionBits)};
         return CertifiedValue{encloseEllipticPiReal(
             *realN, *realPhi, *realM, precisionBits)};
     }
@@ -1414,11 +1563,6 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             const RealInterval& real = value->asReal();
             const Rational lower = real.lower().toRational();
             const Rational upper = real.upper().toRational();
-            if (informationInput && lower > Rational{}
-                && lower <= rational(96) && upper > rational(96))
-                throw PrecisionInsufficient{
-                    "Ci InformationEnclosure crosses the certified series boundary x=96",
-                    PrecisionInsufficientKind::InputInformation};
             if (lower > Rational{})
                 return CertifiedValue{encloseCosineIntegralCiPositive(real, precisionBits)};
             if (upper < Rational{}) {
@@ -1475,8 +1619,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (z->isReal()) {
             const ComplexInterval result = enclosePolylogComplex(
                 *count, z->toComplex(), precisionBits);
-            // 現bounded-work領域は|z|<=49/50でprincipal cutの手前にある。
-            // 実入力ならpolylogは実数値なのでreal componentだけを返す。
+            // unit disk内の実入力ではpolylogは実数値なのでreal componentだけを返す。
             return CertifiedValue{result.real()};
         }
         return normalizeCertifiedComplex(enclosePolylogComplex(
@@ -1523,11 +1666,11 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                 "ibeta x InformationEnclosure crosses the x in [0,1] domain boundary",
                 PrecisionInsufficientKind::InputInformation};
 
-        if (!exactA || !exactB)
-            throw CertifiedBackendUnsupported{
-                "Certified ibeta currently requires exact a and b parameters"};
+        if (exactA && exactB)
+            return CertifiedValue{encloseIncompleteBetaRegularized(
+                *exactA, *exactB, xInterval, precisionBits)};
         return CertifiedValue{encloseIncompleteBetaRegularized(
-            *exactA, *exactB, xInterval, precisionBits)};
+            a->asReal(), b->asReal(), xInterval, precisionBits)};
     }
 
     case BuiltinId::Beta:
@@ -2242,7 +2385,6 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
-    case BuiltinId::MatrixGet:
     case BuiltinId::Trace:
     case BuiltinId::Rows:
     case BuiltinId::Cols:
@@ -2250,7 +2392,6 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::VectorAdd:
     case BuiltinId::VectorSubtract:
     case BuiltinId::VectorScale:
-    case BuiltinId::VectorDot:
     case BuiltinId::VectorCross:
     case BuiltinId::VectorNorm:
     case BuiltinId::VectorManhattan:

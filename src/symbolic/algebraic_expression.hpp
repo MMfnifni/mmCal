@@ -34,6 +34,9 @@ namespace mmcal::symbolic {
 [[nodiscard]] expression::Expr makeCanonicalRootExpression(
     const ComplexAlgebraicNumber& algebraic,
     const evaluation::BuiltinRegistry& builtins);
+[[nodiscard]] expression::Expr makeCanonicalAlgebraicExpression(
+    const AlgebraicNumber& algebraic,
+    const evaluation::BuiltinRegistry& builtins);
 
 // Exprとして保持されているexact代数数を，可能な範囲でAlgebraicNumberへ持ち上げる。
 // root[...]の内部cacheだけでなく，Rational/complex Rational，sqrt/cbrt，Phi，および

@@ -170,6 +170,18 @@ void runKnowledgeContextTests(TestRunner& tests) {
             == TruthValue::True,
         "KnowledgeContext: relation assumptions are recognized in reversed form");
 
+    const Expr cosX = Expr::call(builtins.symbol(evaluation::BuiltinId::Cos), {x});
+    tests.expect(
+        assumedKnowledge.prove(mathematics::relation(RelationKind::LessEqual, cosX, integer(1)))
+            == TruthValue::True,
+        "KnowledgeContext: registered closed real ranges prove unary function upper bounds");
+    const Expr cosMinusOne = Expr::call(
+        builtins.symbol(evaluation::BuiltinId::Subtract), {cosX, integer(1)});
+    tests.expect(
+        assumedKnowledge.prove(mathematics::relation(
+            RelationKind::LessEqual, cosMinusOne, integer(0))) == TruthValue::True,
+        "KnowledgeContext: ordered difference relations reuse exact function range bounds");
+
     const Expr expX = Expr::call(builtins.symbol(evaluation::BuiltinId::Exp), {x});
     tests.expect(
         baseKnowledge.prove(mathematics::relation(RelationKind::NotEqual, expX, integer(0)))

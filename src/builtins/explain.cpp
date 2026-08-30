@@ -206,6 +206,7 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
     case RealRangeRule::Positive: return "Positive";
     case RealRangeRule::NonNegative: return "NonNegative";
     case RealRangeRule::OpenMinusOneToOne: return "OpenMinusOneToOne";
+    case RealRangeRule::OpenZeroToTwo: return "OpenZeroToTwo";
     case RealRangeRule::ClosedMinusOneToOne: return "ClosedMinusOneToOne";
     case RealRangeRule::OneToInfinity: return "OneToInfinity";
     }

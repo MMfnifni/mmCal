@@ -29,11 +29,25 @@ namespace mmcal::approximation {
     std::size_t precisionBits);
 
 // Lambert W の実数branch。branch=0 は [-1/e,inf) 上のprincipal branch，
-// branch=-1 は [-1/e,0) 上のlower real branchだけを扱う。
-// 複素branchはCertifiedEvaluator側で未対応として保持する。
+// branch=-1 は [-1/e,0) 上のlower real branchを単調性付きで直接囲う。
 [[nodiscard]] RealInterval encloseLambertWReal(
     const RealInterval& input,
     int branch,
+    std::size_t precisionBits);
+
+// 複素branch。principal branchの小円板ではMaclaurin級数，その他は
+// Log_k(z)-Log(w)の縮小写像を証明できる領域で任意整数branchを囲う。
+[[nodiscard]] ComplexInterval encloseLambertWComplex(
+    const ComplexInterval& input,
+    const numeric::BigInt& branch,
+    std::size_t precisionBits);
+
+// -1/eからのoffsetをexact構造のまま受け取る局所backend。
+// z=-1/e+offset として平方根branchをcertifyし，極端に小さいoffsetで
+// e*z+1 の数値的cancellationにより情報を失うことを避ける。
+[[nodiscard]] ComplexInterval encloseLambertWBranchPointOffset(
+    const ComplexInterval& offset,
+    const numeric::BigInt& branch,
     std::size_t precisionBits);
 
 [[nodiscard]] RealInterval encloseErfReal(
@@ -105,8 +119,8 @@ namespace mmcal::approximation {
     std::size_t precisionBits);
 
 // Legendre不完全楕円積分。amplitudeは常にRadian。
-// 現backendは |m|<1（Piは加えて|n|<1）のexact Rational pointを
-// m/n級数とsin偶数冪積分の漸化式で保証評価する。
+// 小振幅ではm/n級数をfast pathとし，実効tail収束率が遅い領域は
+// Carlson symmetric forms RF/RD/RJの保証付きduplicationへ送る。
 [[nodiscard]] RealInterval encloseEllipticFReal(
     const numeric::Rational& phi,
     const numeric::Rational& m,
@@ -121,8 +135,8 @@ namespace mmcal::approximation {
     const numeric::Rational& m,
     std::size_t precisionBits);
 
-// 有限precisionの実数入力用。m/nのbounded-work範囲を区間全体で証明し，
-// 同じ級数をRealInterval上で評価する。
+// 有限precisionの実数入力用。級数fast pathとCarlson backendのどちらでも
+// InformationEnclosureを保持したままbranch/pole条件を証明する。
 [[nodiscard]] RealInterval encloseEllipticFReal(
     const RealInterval& phi,
     const RealInterval& m,
@@ -134,6 +148,22 @@ namespace mmcal::approximation {
 [[nodiscard]] RealInterval encloseEllipticPiReal(
     const RealInterval& n,
     const RealInterval& phi,
+    const RealInterval& m,
+    std::size_t precisionBits);
+
+// amplitudeがexactなq*Piである場合の専用経路。period番号をRationalのまま決定し，
+// Piの独立な区間近似同士の除算による境界曖昧性を避ける。
+[[nodiscard]] RealInterval encloseEllipticFRealPiMultiple(
+    const numeric::Rational& piCoefficient,
+    const RealInterval& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticERealPiMultiple(
+    const numeric::Rational& piCoefficient,
+    const RealInterval& m,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseEllipticPiRealPiMultiple(
+    const RealInterval& n,
+    const numeric::Rational& piCoefficient,
     const RealInterval& m,
     std::size_t precisionBits);
 
@@ -164,7 +194,8 @@ namespace mmcal::approximation {
     const ComplexInterval& input,
     std::size_t precisionBits);
 
-// 現backendは正整数sと|z|<1のexact Rational pointを級数で保証評価する。
+// 正整数sを保証評価する。|z|<1の級数に加え，Li_2のprincipal connection formulaと，
+// z≈1の正実数ではmu=log(z)整数極限展開を使う。有限precision実区間も幅を保って伝播する。
 [[nodiscard]] RealInterval enclosePolylogReal(
     std::uint64_t order,
     const numeric::Rational& z,
@@ -223,6 +254,12 @@ namespace mmcal::approximation {
     std::size_t precisionBits);
 
 // 正則化不完全Beta I_x(a,b)。a,bはexact positive Rational、xは[0,1]のcertified interval。
+[[nodiscard]] RealInterval encloseIncompleteBetaRegularized(
+    const RealInterval& a,
+    const RealInterval& b,
+    const RealInterval& x,
+    std::size_t precisionBits);
+
 [[nodiscard]] RealInterval encloseIncompleteBetaRegularized(
     const numeric::Rational& a,
     const numeric::Rational& b,

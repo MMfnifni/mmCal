@@ -149,7 +149,14 @@ struct TrigFactor final {
 
 } // namespace
 
-std::optional<Expr> reduceTrigMonomial(
+Expr scaledTrigArgumentForFrequency(
+    const Expr& source,
+    std::size_t multiplier,
+    const evaluation::BuiltinRegistry& builtins) {
+    return scaledAngleArgument(source, multiplier, builtins);
+}
+
+std::optional<TrigFourierExpansion> expandTrigMonomial(
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
     std::size_t maximumTotalDegree) {
@@ -194,8 +201,7 @@ std::optional<Expr> reduceTrigMonomial(
         return std::nullopt;
 
     // (y-y^-1)^m (y+y^-1)^n の整数係数を直接畳み込む。
-    // 旧来の個別sin^2/cos^2規則を高次数へコピーするのではなく、
-    // すべての整数冪を同じ有限Fourier恒等式から生成するためこの形にした。
+    // 旧来の個別sin^2/cos^2規則を高次数へコピーせず，全整数冪を同じ恒等式から生成する。
     std::vector<BigInt> coefficients{BigInt{1}};
     for (std::size_t factorIndex = 0; factorIndex < total; ++factorIndex) {
         const bool sineFactor = factorIndex < sinePower;
@@ -210,7 +216,7 @@ std::optional<Expr> reduceTrigMonomial(
     BigInt denominator{1};
     denominator <<= total;
     const BigInt pairDenominator = denominator >> 1U;
-    std::vector<Expr> terms;
+    std::vector<TrigFourierTerm> terms;
 
     if ((sinePower & 1U) == 0) {
         const bool negativePhase = ((sinePower / 2U) & 1U) != 0;
@@ -220,19 +226,16 @@ std::optional<Expr> reduceTrigMonomial(
                 numerator = -numerator;
             if (numerator.isZero())
                 continue;
-            const std::size_t frequency = total - 2U * j;
-            Expr cosine = call(builtins, BuiltinId::Cos, {
-                scaledAngleArgument(argument, frequency, builtins)});
-            terms.push_back(scaledTerm(
-                Rational{std::move(numerator), pairDenominator},
-                std::move(cosine), builtins));
+            terms.push_back(TrigFourierTerm{
+                Rational{std::move(numerator), pairDenominator}, total - 2U * j, false});
         }
         if ((total & 1U) == 0) {
             BigInt numerator = coefficients[total / 2U];
             if (negativePhase)
                 numerator = -numerator;
             if (!numerator.isZero())
-                terms.push_back(rational(Rational{std::move(numerator), denominator}));
+                terms.push_back(TrigFourierTerm{
+                    Rational{std::move(numerator), denominator}, 0, false});
         }
     }
     else {
@@ -243,13 +246,32 @@ std::optional<Expr> reduceTrigMonomial(
                 numerator = -numerator;
             if (numerator.isZero())
                 continue;
-            const std::size_t frequency = total - 2U * j;
-            Expr sine = call(builtins, BuiltinId::Sin, {
-                scaledAngleArgument(argument, frequency, builtins)});
-            terms.push_back(scaledTerm(
-                Rational{std::move(numerator), pairDenominator},
-                std::move(sine), builtins));
+            terms.push_back(TrigFourierTerm{
+                Rational{std::move(numerator), pairDenominator}, total - 2U * j, true});
         }
+    }
+
+    return TrigFourierExpansion{std::move(argument), std::move(terms), total};
+}
+
+std::optional<Expr> reduceTrigMonomial(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    std::size_t maximumTotalDegree) {
+    auto expansion = expandTrigMonomial(expression, builtins, maximumTotalDegree);
+    if (!expansion)
+        return std::nullopt;
+
+    std::vector<Expr> terms;
+    terms.reserve(expansion->terms.size());
+    for (TrigFourierTerm& term : expansion->terms) {
+        if (term.frequency == 0) {
+            terms.push_back(rational(std::move(term.coefficient)));
+            continue;
+        }
+        Expr atom = call(builtins, term.sine ? BuiltinId::Sin : BuiltinId::Cos, {
+            scaledTrigArgumentForFrequency(expansion->argument, term.frequency, builtins)});
+        terms.push_back(scaledTerm(std::move(term.coefficient), std::move(atom), builtins));
     }
 
     if (terms.empty())

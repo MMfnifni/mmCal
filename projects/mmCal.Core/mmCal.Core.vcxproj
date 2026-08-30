@@ -209,7 +209,11 @@
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp" />
     <ClInclude Include="..\..\src\symbolic\groebner.hpp" />
     <ClInclude Include="..\..\src\symbolic\algebra_transforms.hpp" />
+    <ClInclude Include="..\..\src\solver\absolute_value_solver.hpp" />
     <ClInclude Include="..\..\src\solver\polynomial_solver.hpp" />
+    <ClInclude Include="..\..\src\solver\radical_solver.hpp" />
+    <ClInclude Include="..\..\src\solver\real_equation_prover.hpp" />
+    <ClInclude Include="..\..\src\solver\real_function_analysis.hpp" />
     <ClInclude Include="..\..\src\solver\solve_constraints.hpp" />
     <ClInclude Include="..\..\src\solver\solve_normalization.hpp" />
     <ClInclude Include="..\..\src\solver\transcendental_solver.hpp" />
@@ -334,10 +338,15 @@
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp" />
     <ClCompile Include="..\..\src\symbolic\groebner.cpp" />
     <ClCompile Include="..\..\src\symbolic\algebra_transforms.cpp" />
+    <ClCompile Include="..\..\src\solver\absolute_value_solver.cpp" />
     <ClCompile Include="..\..\src\solver\polynomial_solver.cpp" />
+    <ClCompile Include="..\..\src\solver\radical_solver.cpp" />
+    <ClCompile Include="..\..\src\solver\real_equation_prover.cpp" />
+    <ClCompile Include="..\..\src\solver\real_function_analysis.cpp" />
     <ClCompile Include="..\..\src\solver\transcendental_solver.cpp" />
     <ClCompile Include="..\..\src\solver\solve_constraints.cpp" />
     <ClCompile Include="..\..\src\solver\solve_normalization.cpp" />
+    <ClCompile Include="..\..\src\solver\solver_support.cpp" />
     <ClCompile Include="..\..\src\builtins\discrete_math.cpp" />
     <ClCompile Include="..\..\src\builtins\elementary_utilities.cpp" />
     <ClCompile Include="..\..\src\symbolic\differentiation.cpp" />

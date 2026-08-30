@@ -27,7 +27,7 @@ struct EvaluationLimits final {
     std::size_t maxTemporaryMatrixElements = 25'000'000;
     std::size_t maxBigIntegerBits = 8'000'000;
     std::size_t maxRequestedPrecisionDigits = 100'000;
-    std::size_t maxAlgebraicDegree = 64;
+    std::size_t maxAlgebraicDegree = 96;
     std::size_t maxAlgebraicRefinements = 100'000;
 
     [[nodiscard]] bool operator==(const EvaluationLimits&) const = default;
@@ -275,6 +275,11 @@ inline void recordEvaluationModularPrime() {
 inline void checkEvaluationBigIntegerBits(std::size_t bits) {
     if (activeEvaluationBudget)
         activeEvaluationBudget->checkBigIntegerBits(bits);
+}
+
+inline void checkEvaluationRequestedPrecisionDigits(std::size_t digits) {
+    if (activeEvaluationBudget)
+        activeEvaluationBudget->checkRequestedPrecisionDigits(digits);
 }
 
 inline void checkEvaluationAlgebraicDegree(std::size_t degree) {

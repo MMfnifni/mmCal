@@ -23,7 +23,6 @@ struct ModularLinearAlgebraStats final {
 [[nodiscard]] bool preferModularSolve(
     const IntegerMatrixBuffer& augmented,
     std::size_t variables) noexcept;
-[[nodiscard]] bool preferModularInverse(const IntegerMatrixBuffer& matrix) noexcept;
 
 // det(A) mod pを複数の31-bit primeで計算し，Hadamard上界を越えるまでCRT再構成する。
 [[nodiscard]] numeric::BigInt modularDeterminant(

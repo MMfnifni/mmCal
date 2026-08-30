@@ -117,10 +117,12 @@
   <ItemGroup>
     <ClCompile Include="..\..\benchmarks\benchmark_main.cpp" />
     <ClCompile Include="..\..\benchmarks\certification_boundary_fuzzer.cpp" />
+    <ClCompile Include="..\..\benchmarks\performance_cliff_audit.cpp" />
     <ClCompile Include="..\..\benchmarks\random_expression_fuzzer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\benchmarks\certification_boundary_fuzzer.hpp" />
+    <ClInclude Include="..\..\benchmarks\performance_cliff_audit.hpp" />
     <ClInclude Include="..\..\benchmarks\random_expression_fuzzer.hpp" />
   </ItemGroup>
   <ItemGroup>

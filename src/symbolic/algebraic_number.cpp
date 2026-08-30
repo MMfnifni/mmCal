@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <mutex>
@@ -27,7 +28,9 @@ namespace {
 using numeric::BigInt;
 using numeric::Rational;
 
-constexpr std::size_t maximumAlgebraicDegree = 64;
+// backend自体の実装上限。request-scoped EvaluationBudgetはこれより小さい値を課せるが，
+// request-scoped budgetとbackend上限の小さい方を適用する。
+constexpr std::size_t maximumSupportedAlgebraicDegree = 96;
 constexpr std::size_t maximumIsolationSplits = 1'000'000;
 constexpr std::size_t maximumComparisonRefinementBits = 4096;
 
@@ -294,48 +297,107 @@ void normalizeMod(ModPolynomial& polynomial) {
     return result;
 }
 
-[[nodiscard]] std::vector<std::size_t> distinctPrimeFactors(std::size_t value) {
-    std::vector<std::size_t> result;
-    for (std::size_t divisor = 2; divisor <= value / divisor; ++divisor) {
-        if (value % divisor != 0)
-            continue;
-        result.push_back(divisor);
-        while (value % divisor == 0)
-            value /= divisor;
-    }
-    if (value > 1)
-        result.push_back(value);
-    return result;
+
+[[nodiscard]] ModPolynomial modDerivative(
+    const ModPolynomial& polynomial,
+    std::uint32_t prime) {
+    if (polynomial.size() <= 1)
+        return {};
+    ModPolynomial derivative(polynomial.size() - 1);
+    for (std::size_t i = 1; i < polynomial.size(); ++i)
+        derivative[i - 1] = modMultiply(
+            polynomial[i], static_cast<std::uint32_t>(i % prime), prime);
+    normalizeMod(derivative);
+    return derivative;
 }
 
-[[nodiscard]] bool irreducibleModuloPrime(
+void subtractModX(ModPolynomial& polynomial, std::uint32_t prime) {
+    if (polynomial.size() < 2)
+        polynomial.resize(2);
+    polynomial[1] = polynomial[1] == 0 ? prime - 1 : polynomial[1] - 1;
+    normalizeMod(polynomial);
+}
+
+// good prime上のsquare-free分解について，Q上のproper factorが取り得るdegreeを返す。
+// gcd(f,x^(p^k)-x)のdegreeから各既約因子degreeの個数を復元し，subset-sumを取る。
+// Q上の因子degreeは全good primeでこの集合に属するため，複数primeの共通部分が空なら
+// 元多項式はQ上既約である。
+[[nodiscard]] std::optional<std::uint64_t> possibleProperFactorDegreesModuloPrime(
     const Polynomial& polynomial,
     std::uint32_t prime) {
     const auto reduced = polynomialModulo(polynomial, prime);
     if (!reduced || reduced->size() <= 1)
-        return false;
+        return std::nullopt;
     const std::size_t degree = reduced->size() - 1;
+    const std::size_t halfDegree = degree / 2;
+    if (halfDegree >= 63)
+        return std::nullopt;
+
+    const ModPolynomial derivative = modDerivative(*reduced, prime);
+    if (derivative.empty() || modGcd(*reduced, derivative, prime).size() > 1)
+        return std::nullopt;
+
     ModPolynomial x{0, 1};
     ModPolynomial frobenius = x;
-    std::vector<ModPolynomial> powers(degree + 1);
-    powers[0] = x;
-    for (std::size_t i = 1; i <= degree; ++i) {
+    std::vector<std::size_t> factorCounts(halfDegree + 1);
+    for (std::size_t k = 1; k <= halfDegree; ++k) {
         frobenius = modPowerPolynomial(
             std::move(frobenius), prime, *reduced, prime);
-        powers[i] = frobenius;
+        ModPolynomial difference = frobenius;
+        subtractModX(difference, prime);
+        const ModPolynomial common = modGcd(*reduced, std::move(difference), prime);
+        const std::size_t commonDegree = common.empty() ? 0 : common.size() - 1;
+
+        std::size_t accountedDegree = 0;
+        for (std::size_t divisor = 1; divisor < k; ++divisor)
+            if (k % divisor == 0)
+                accountedDegree += divisor * factorCounts[divisor];
+        if (commonDegree < accountedDegree
+            || (commonDegree - accountedDegree) % k != 0)
+            return std::nullopt;
+        factorCounts[k] = (commonDegree - accountedDegree) / k;
     }
-    if (powers[degree] != x)
+
+    std::uint64_t degreeMask = 1; // degree 0
+    const std::uint64_t keepMask = (std::uint64_t{1} << (halfDegree + 1)) - 1;
+    for (std::size_t factorDegree = 1; factorDegree <= halfDegree; ++factorDegree)
+        for (std::size_t count = 0; count < factorCounts[factorDegree]; ++count)
+            degreeMask |= (degreeMask << factorDegree) & keepMask;
+    return degreeMask & ~std::uint64_t{1};
+}
+
+
+[[nodiscard]] std::optional<Rational> exactRationalSquareRoot(const Rational& value) {
+    if (value < Rational{})
+        return std::nullopt;
+    const auto numerator = numeric::integerSqrt(value.numerator());
+    const auto denominator = numeric::integerSqrt(value.denominator());
+    if (!numerator.remainder.isZero() || !denominator.remainder.isZero())
+        return std::nullopt;
+    return Rational{numerator.root, denominator.root};
+}
+
+// monic化した偶四次 x^4+b x^2+d のQ上可約性を完全判定する。
+// (x^2+p x+q)(x^2-p x+s) と置けば p(s-q)=0 なので，
+// p=0 または q=s の二場合だけをexact square判定すればよい。
+[[nodiscard]] std::optional<bool> irreducibleEvenQuarticOverQ(
+    const Polynomial& polynomial) {
+    if (polynomial.size() != 5 || polynomial[4].isZero()
+        || !polynomial[1].isZero() || !polynomial[3].isZero())
+        return std::nullopt;
+
+    const Rational b = polynomial[2] / polynomial[4];
+    const Rational d = polynomial[0] / polynomial[4];
+
+    // p=0: q,s are rational roots of t^2-b t+d.
+    if (exactRationalSquareRoot(b * b - Rational{BigInt{4}} * d))
         return false;
 
-    for (const std::size_t divisor : distinctPrimeFactors(degree)) {
-        ModPolynomial difference = powers[degree / divisor];
-        if (difference.size() < 2)
-            difference.resize(2);
-        difference[1] = difference[1] == 0 ? prime - 1 : difference[1] - 1;
-        normalizeMod(difference);
-        const ModPolynomial common = modGcd(*reduced, std::move(difference), prime);
-        if (common.size() > 1)
-            return false;
+    // q=s: q^2=d and p^2=2q-b.
+    if (const auto sqrtD = exactRationalSquareRoot(d)) {
+        for (const Rational& q : {*sqrtD, -*sqrtD})
+            if (exactRationalSquareRoot(Rational{BigInt{2}} * q - b))
+                return false;
     }
     return true;
 }
@@ -346,9 +408,19 @@ void normalizeMod(ModPolynomial& polynomial) {
     constexpr std::uint32_t primes[] = {
         2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47
     };
-    for (const std::uint32_t prime : primes)
-        if (irreducibleModuloPrime(polynomial, prime))
+    std::optional<std::uint64_t> possibleDegrees;
+    for (const std::uint32_t prime : primes) {
+        const auto modularDegrees = possibleProperFactorDegreesModuloPrime(polynomial, prime);
+        if (!modularDegrees)
+            continue;
+        possibleDegrees = possibleDegrees
+            ? (*possibleDegrees & *modularDegrees)
+            : *modularDegrees;
+        if (*possibleDegrees == 0)
             return true;
+    }
+    if (const auto evenQuartic = irreducibleEvenQuarticOverQ(polynomial))
+        return *evenQuartic;
     return false;
 }
 
@@ -652,7 +724,7 @@ struct PendingInterval final {
     const Polynomial& polynomial) {
     if (polynomial.size() <= 1)
         return std::vector<RationalRootInterval>{};
-    if (polynomial.size() - 1 > maximumAlgebraicDegree)
+    if (polynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
 
     const auto sturm = sturmSequence(polynomial);
@@ -815,7 +887,7 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::create(
     if (normalizedPolynomial.size() <= 1)
         return std::nullopt;
     evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
-    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+    if (normalizedPolynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
     const auto intervals = isolateIntervals(normalizedPolynomial);
@@ -837,7 +909,7 @@ std::optional<RealAlgebraicNumber> RealAlgebraicNumber::createFromMinimalPolynom
     if (normalizedPolynomial.size() > 1)
         evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
     if (normalizedPolynomial.size() <= 1
-        || normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+        || normalizedPolynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
     if (normalizedPolynomial.size() > 2 && !provenIrreducibleOverQ(normalizedPolynomial))
@@ -875,7 +947,7 @@ std::optional<std::vector<RealAlgebraicNumber>> RealAlgebraicNumber::isolateAll(
     Polynomial normalizedPolynomial = normalized(polynomial);
     if (normalizedPolynomial.size() <= 1)
         return std::vector<RealAlgebraicNumber>{};
-    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+    if (normalizedPolynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
     const auto intervals = isolateIntervals(normalizedPolynomial);
@@ -957,75 +1029,230 @@ struct RationalComplex final {
         a.real * b.real - a.imaginary * b.imaginary,
         a.real * b.imaginary + a.imaginary * b.real};
 }
-[[nodiscard]] RationalComplex rcScale(const RationalComplex& a, const Rational& s) {
-    return {a.real * s, a.imaginary * s};
-}
 [[nodiscard]] Rational rcL1(const RationalComplex& a) {
     return absolute(a.real) + absolute(a.imaginary);
 }
 [[nodiscard]] Rational rcMagnitudeSquared(const RationalComplex& a) {
     return a.real * a.real + a.imaginary * a.imaginary;
 }
-[[nodiscard]] RationalComplex rcPower(RationalComplex base, std::size_t exponent) {
-    RationalComplex result{Rational{BigInt{1}}, Rational{}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result = rcMultiply(result, base);
-        exponent >>= 1U;
-        if (exponent != 0)
-            base = rcMultiply(base, base);
-    }
-    return result;
+
+struct IntervalComplexProof final {
+    approximation::RealInterval real;
+    approximation::RealInterval imaginary;
+};
+
+[[nodiscard]] BigFloat absoluteBigFloat(const BigFloat& value) {
+    return value.isNegative() ? -value : value;
 }
 
-[[nodiscard]] std::uint64_t binomialSmall(std::size_t n, std::size_t k) {
-    k = std::min(k, n - k);
-    std::uint64_t result = 1;
-    for (std::size_t i = 1; i <= k; ++i)
-        result = (result * static_cast<std::uint64_t>(n - k + i)) / static_cast<std::uint64_t>(i);
-    return result;
+[[nodiscard]] BigFloat intervalAbsoluteUpper(
+    const approximation::RealInterval& value) {
+    const BigFloat lower = absoluteBigFloat(value.lower());
+    const BigFloat upper = absoluteBigFloat(value.upper());
+    return lower > upper ? lower : upper;
 }
+
+[[nodiscard]] BigFloat intervalAbsoluteLower(
+    const approximation::RealInterval& value) {
+    const BigFloat zero;
+    if (value.lower() <= zero && value.upper() >= zero)
+        return zero;
+    const BigFloat lower = absoluteBigFloat(value.lower());
+    const BigFloat upper = absoluteBigFloat(value.upper());
+    return lower < upper ? lower : upper;
+}
+
+[[nodiscard]] IntervalComplexProof intervalComplexAdd(
+    const IntervalComplexProof& a,
+    const IntervalComplexProof& b,
+    std::size_t bits) {
+    return {
+        approximation::add(a.real, b.real, bits),
+        approximation::add(a.imaginary, b.imaginary, bits)};
+}
+
+[[nodiscard]] IntervalComplexProof intervalComplexMultiply(
+    const IntervalComplexProof& a,
+    const IntervalComplexProof& b,
+    std::size_t bits) {
+    const auto ac = approximation::multiply(a.real, b.real, bits);
+    const auto bd = approximation::multiply(a.imaginary, b.imaginary, bits);
+    const auto ad = approximation::multiply(a.real, b.imaginary, bits);
+    const auto bc = approximation::multiply(a.imaginary, b.real, bits);
+    return {
+        approximation::subtract(ac, bd, bits),
+        approximation::add(ad, bc, bits)};
+}
+
+[[nodiscard]] IntervalComplexProof intervalComplexFromRational(
+    const RationalComplex& value,
+    std::size_t bits) {
+    return {
+        approximation::RealInterval::fromRational(value.real, bits),
+        approximation::RealInterval::fromRational(value.imaginary, bits)};
+}
+
+[[nodiscard]] bool certifiesUniqueRootWithOutwardBounds(
+    const Polynomial& polynomial,
+    const RationalComplexDisk& disk,
+    std::size_t bits) {
+    const std::size_t proofBits = bits <= 4032 ? bits + 64 : bits;
+    const RationalComplex center{disk.real, disk.imaginary};
+    const IntervalComplexProof centerInterval = intervalComplexFromRational(center, proofBits);
+    IntervalComplexProof value = intervalComplexFromRational(
+        {polynomial.back(), Rational{}}, proofBits);
+    IntervalComplexProof derivativeValue = intervalComplexFromRational({}, proofBits);
+
+    for (std::size_t exponent = polynomial.size() - 1; exponent-- > 0;) {
+        derivativeValue = intervalComplexAdd(
+            intervalComplexMultiply(derivativeValue, centerInterval, proofBits),
+            value, proofBits);
+        value = intervalComplexAdd(
+            intervalComplexMultiply(value, centerInterval, proofBits),
+            intervalComplexFromRational({polynomial[exponent], Rational{}}, proofBits),
+            proofBits);
+    }
+
+    const BigFloat valueUpper = numeric::add(
+        intervalAbsoluteUpper(value.real),
+        intervalAbsoluteUpper(value.imaginary),
+        proofBits, RoundingMode::TowardPositive);
+    const BigFloat derivativeRealLower = intervalAbsoluteLower(derivativeValue.real);
+    const BigFloat derivativeImaginaryLower = intervalAbsoluteLower(derivativeValue.imaginary);
+    const BigFloat derivativeSquaredLower = numeric::add(
+        numeric::multiply(derivativeRealLower, derivativeRealLower, proofBits, RoundingMode::TowardNegative),
+        numeric::multiply(derivativeImaginaryLower, derivativeImaginaryLower, proofBits, RoundingMode::TowardNegative),
+        proofBits, RoundingMode::TowardNegative);
+    if (derivativeSquaredLower.isZero())
+        return false;
+
+    const BigFloat centerNormUpper = numeric::add(
+        intervalAbsoluteUpper(centerInterval.real),
+        intervalAbsoluteUpper(centerInterval.imaginary),
+        proofBits, RoundingMode::TowardPositive);
+    const BigFloat radiusUpper = BigFloat::fromRational(
+        disk.radius, proofBits, RoundingMode::TowardPositive);
+    const BigFloat radiusLower = BigFloat::fromRational(
+        disk.radius, proofBits, RoundingMode::TowardNegative);
+    const BigFloat boundaryNormUpper = numeric::add(
+        centerNormUpper, radiusUpper, proofBits, RoundingMode::TowardPositive);
+
+    BigFloat secondDerivativeUpper;
+    if (polynomial.size() > 2) {
+        const std::size_t degree = polynomial.size() - 1;
+        const Rational leadingSecond = absolute(polynomial.back()) * Rational{
+            BigInt::fromUnsigned(static_cast<std::uint64_t>(degree * (degree - 1)))};
+        secondDerivativeUpper = BigFloat::fromRational(
+            leadingSecond, proofBits, RoundingMode::TowardPositive);
+        for (std::size_t exponent = degree - 1; exponent >= 2; --exponent) {
+            const Rational coefficient = absolute(polynomial[exponent]) * Rational{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(exponent * (exponent - 1)))};
+            secondDerivativeUpper = numeric::add(
+                numeric::multiply(secondDerivativeUpper, boundaryNormUpper, proofBits, RoundingMode::TowardPositive),
+                BigFloat::fromRational(coefficient, proofBits, RoundingMode::TowardPositive),
+                proofBits, RoundingMode::TowardPositive);
+            if (exponent == 2)
+                break;
+        }
+    }
+
+    const BigFloat radiusSquaredUpper = numeric::multiply(
+        radiusUpper, radiusUpper, proofBits, RoundingMode::TowardPositive);
+    const BigFloat nonlinearUpper = polynomial.size() <= 2
+        ? BigFloat{}
+        : numeric::divide(
+            numeric::multiply(radiusSquaredUpper, secondDerivativeUpper, proofBits, RoundingMode::TowardPositive),
+            BigFloat::fromRational(Rational{BigInt{2}}, proofBits, RoundingMode::TowardNegative),
+            proofBits, RoundingMode::TowardPositive);
+    const BigFloat remainderUpper = numeric::add(
+        valueUpper, nonlinearUpper, proofBits, RoundingMode::TowardPositive);
+    const BigFloat lhsSquaredUpper = numeric::multiply(
+        remainderUpper, remainderUpper, proofBits, RoundingMode::TowardPositive);
+    const BigFloat radiusSquaredLower = numeric::multiply(
+        radiusLower, radiusLower, proofBits, RoundingMode::TowardNegative);
+    const BigFloat rhsSquaredLower = numeric::multiply(
+        derivativeSquaredLower, radiusSquaredLower, proofBits, RoundingMode::TowardNegative);
+    return lhsSquaredUpper < rhsSquaredLower;
+}
+
 
 [[nodiscard]] std::vector<RationalComplex> taylorAt(
     const Polynomial& polynomial,
     const RationalComplex& center) {
-    const std::size_t degree = polynomial.size() - 1;
-    std::vector<RationalComplex> result(degree + 1);
-    for (std::size_t k = 0; k <= degree; ++k) {
-        RationalComplex sum{};
-        for (std::size_t j = k; j <= degree; ++j) {
-            const Rational choose{BigInt::fromUnsigned(binomialSmall(j, k))};
-            const RationalComplex term = rcScale(
-                rcPower(center, j - k), polynomial[j] * choose);
-            sum = rcAdd(sum, term);
-        }
-        result[k] = std::move(sum);
+    // p(center + y)を高次係数からHornerで直接構成する。旧実装は各Taylor係数ごとに
+    // center^kと二項係数を再計算していたため，1中心あたり実質O(n^3)のexact演算に
+    // なっていた。このtranslationは同じexact RationalComplex係数をO(n^2)で得る。
+    std::vector<RationalComplex> shifted;
+    shifted.reserve(polynomial.size());
+    shifted.push_back({polynomial.back(), Rational{}});
+
+    for (std::size_t exponent = polynomial.size() - 1; exponent-- > 0;) {
+        shifted.push_back({});
+        for (std::size_t k = shifted.size() - 1; k > 0; --k)
+            shifted[k] = rcAdd(rcMultiply(shifted[k], center), shifted[k - 1]);
+        shifted[0] = rcAdd(rcMultiply(shifted[0], center), {polynomial[exponent], Rational{}});
     }
-    return result;
+    return shifted;
 }
 
 [[nodiscard]] bool certifiesUniqueRoot(
     const Polynomial& polynomial,
-    const RationalComplexDisk& disk) {
+    const RationalComplexDisk& disk,
+    std::size_t bits) {
     if (disk.radius <= Rational{})
         return false;
-    const auto taylor = taylorAt(polynomial, {disk.real, disk.imaginary});
-    if (taylor.size() < 2)
-        return false;
+    if (certifiesUniqueRootWithOutwardBounds(polynomial, disk, bits))
+        return true;
 
-    Rational remainderBound = rcL1(taylor[0]);
-    Rational radiusPower = disk.radius * disk.radius;
-    for (std::size_t k = 2; k < taylor.size(); ++k) {
-        remainderBound += rcL1(taylor[k]) * radiusPower;
-        radiusPower *= disk.radius;
+    const RationalComplex center{disk.real, disk.imaginary};
+    RationalComplex value{polynomial.back(), Rational{}};
+    RationalComplex derivativeValue{};
+    for (std::size_t exponent = polynomial.size() - 1; exponent-- > 0;) {
+        derivativeValue = rcAdd(rcMultiply(derivativeValue, center), value);
+        value = rcAdd(rcMultiply(value, center), {polynomial[exponent], Rational{}});
     }
-    const Rational derivativeSquared = rcMagnitudeSquared(taylor[1]);
+    const Rational derivativeSquared = rcMagnitudeSquared(derivativeValue);
     if (derivativeSquared.isZero())
         return false;
-    // |q0| + sum_{k>=2}|qk|r^k < |q1|r なら，境界上で線形項が残差を支配する。
+
+    // A(t)=sum |a_j|t^j, C=|Re(c)|+|Im(c)| とする。|w|=r に対し
+    // |p(c+w)-p(c)-p'(c)w| <= A(C+r)-A(C)-A'(C)r
+    // が二項展開から従う。全Taylor係数をexact展開せず，一意根証明に必要な
+    // 2次以上の残差だけをO(n)のRational Hornerでmajorizeする。
+    const Rational centerNorm = absolute(center.real) + absolute(center.imaginary);
+    Rational absoluteValueAtCenter = absolute(polynomial.back());
+    Rational absoluteDerivativeAtCenter{};
+    Rational absoluteValueAtBoundary = absolute(polynomial.back());
+    const Rational boundaryNorm = centerNorm + disk.radius;
+    for (std::size_t exponent = polynomial.size() - 1; exponent-- > 0;) {
+        absoluteDerivativeAtCenter = absoluteDerivativeAtCenter * centerNorm + absoluteValueAtCenter;
+        absoluteValueAtCenter = absoluteValueAtCenter * centerNorm + absolute(polynomial[exponent]);
+        absoluteValueAtBoundary = absoluteValueAtBoundary * boundaryNorm + absolute(polynomial[exponent]);
+    }
+    Rational nonlinearBound = absoluteValueAtBoundary - absoluteValueAtCenter
+        - absoluteDerivativeAtCenter * disk.radius;
+    if (nonlinearBound < Rational{})
+        nonlinearBound = Rational{};
+    const Rational remainderBound = rcL1(value) + nonlinearBound;
+
+    // |p(c)| + nonlinear remainder < |p'(c)| r なら，境界上で線形項が残差を支配する。
     // Roucheによりdisk内のpの零点数は線形多項式と同じ1個になる。
-    return remainderBound * remainderBound
-        < derivativeSquared * disk.radius * disk.radius;
+    if (remainderBound * remainderBound
+        < derivativeSquared * disk.radius * disk.radius)
+        return true;
+
+    // L1 center majorantが粗すぎるclustered caseでは従来のexact Taylor boundへfallbackする。
+    const auto taylor = taylorAt(polynomial, center);
+    Rational exactRemainderBound = rcL1(taylor[0]);
+    Rational radiusPower = disk.radius * disk.radius;
+    for (std::size_t k = 2; k < taylor.size(); ++k) {
+        exactRemainderBound += rcL1(taylor[k]) * radiusPower;
+        radiusPower *= disk.radius;
+    }
+    const Rational exactDerivativeSquared = rcMagnitudeSquared(taylor[1]);
+    return !exactDerivativeSquared.isZero()
+        && exactRemainderBound * exactRemainderBound
+            < exactDerivativeSquared * disk.radius * disk.radius;
 }
 
 [[nodiscard]] bool disksDisjoint(
@@ -1114,22 +1341,151 @@ struct ApproxComplex final {
     return bf(midpoint, bits);
 }
 
+[[nodiscard]] long double approximateLog2Abs(const BigInt& value) {
+    const BigInt magnitude = value.abs();
+    const std::size_t bitLength = magnitude.bitLength();
+    if (bitLength == 0)
+        return -std::numeric_limits<long double>::infinity();
+
+    constexpr std::size_t retainedBits = 60;
+    const std::size_t shift = bitLength > retainedBits ? bitLength - retainedBits : 0;
+    const BigInt leading = magnitude >> shift;
+    return std::log2(std::stold(leading.toString())) + static_cast<long double>(shift);
+}
+
+[[nodiscard]] long double approximateLog2Abs(const Rational& value) {
+    return approximateLog2Abs(value.numerator())
+        - approximateLog2Abs(value.denominator());
+}
+
+struct NewtonSeedCircle final {
+    std::size_t rootCount = 0;
+    long double log2Radius = 0.0L;
+};
+
+// Durand-Kernerの初期値専用。証明には使わないため，係数heightはlong doubleの
+// Newton polygonへ落としてよい。最終結果は従来どおりexact Rouche判定で保証する。
+[[nodiscard]] std::vector<NewtonSeedCircle> newtonPolygonSeedCircles(
+    const Polynomial& polynomial) {
+    struct Point final {
+        std::size_t exponent = 0;
+        long double height = 0.0L;
+    };
+
+    std::vector<Point> points;
+    points.reserve(polynomial.size());
+    for (std::size_t exponent = 0; exponent < polynomial.size(); ++exponent) {
+        if (!polynomial[exponent].isZero())
+            points.push_back({exponent, approximateLog2Abs(polynomial[exponent])});
+    }
+    if (points.size() < 2 || points.front().exponent != 0
+        || points.back().exponent != polynomial.size() - 1)
+        return {};
+
+    std::vector<Point> hull;
+    hull.reserve(points.size());
+    for (const Point& point : points) {
+        while (hull.size() >= 2) {
+            const Point& a = hull[hull.size() - 2];
+            const Point& b = hull.back();
+            const long double cross =
+                static_cast<long double>(b.exponent - a.exponent) * (point.height - b.height)
+                - (b.height - a.height)
+                    * static_cast<long double>(point.exponent - b.exponent);
+            if (cross < 0.0L)
+                break;
+            hull.pop_back();
+        }
+        hull.push_back(point);
+    }
+
+    std::vector<NewtonSeedCircle> circles;
+    circles.reserve(hull.size() - 1);
+    std::size_t totalRoots = 0;
+    for (std::size_t i = 1; i < hull.size(); ++i) {
+        const std::size_t count = hull[i].exponent - hull[i - 1].exponent;
+        if (count == 0)
+            return {};
+        const long double log2Radius =
+            (hull[i - 1].height - hull[i].height) / static_cast<long double>(count);
+        if (!std::isfinite(log2Radius))
+            return {};
+        circles.push_back({count, log2Radius});
+        totalRoots += count;
+    }
+    if (totalRoots != polynomial.size() - 1)
+        return {};
+    return circles;
+}
+
+[[nodiscard]] std::optional<BigFloat> seedRadiusFromLog2(
+    long double log2Radius,
+    std::size_t bits) {
+    if (!std::isfinite(log2Radius))
+        return std::nullopt;
+    const long double exponentFloor = std::floor(log2Radius);
+    if (exponentFloor < static_cast<long double>(std::numeric_limits<BigFloat::exponent_type>::min() + 64)
+        || exponentFloor > static_cast<long double>(std::numeric_limits<BigFloat::exponent_type>::max() - 64))
+        return std::nullopt;
+
+    constexpr int significandBits = 60;
+    const long double fraction = std::exp2(log2Radius - exponentFloor);
+    const long double scaled = std::ldexp(fraction, significandBits);
+    std::uint64_t significand = static_cast<std::uint64_t>(std::llround(scaled));
+    BigFloat::exponent_type exponent = static_cast<BigFloat::exponent_type>(exponentFloor) - significandBits;
+    if (significand == (std::uint64_t{1} << (significandBits + 1))) {
+        significand >>= 1;
+        ++exponent;
+    }
+    if (significand == 0)
+        return std::nullopt;
+    return BigFloat::fromDyadic(BigInt::fromUnsigned(significand), exponent, bits);
+}
+
 [[nodiscard]] std::vector<ApproxComplex> durandKernerCandidates(
     const Polynomial& polynomial,
     std::size_t bits) {
     const std::size_t degree = polynomial.size() - 1;
-    const Rational radiusRational = cauchyBound(polynomial) + Rational{BigInt{1}};
-    const BigFloat radius = bf(radiusRational, bits);
+    std::vector<NewtonSeedCircle> circles = newtonPolygonSeedCircles(polynomial);
+    if (circles.empty()) {
+        const Rational radius = cauchyBound(polynomial) + Rational{BigInt{1}};
+        circles.push_back({degree, approximateLog2Abs(radius)});
+    }
+
     std::vector<ApproxComplex> roots;
     roots.reserve(degree);
-    for (std::size_t k = 0; k < degree; ++k) {
-        const Rational turns{
-            BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * k + 1)),
-            BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * degree))};
-        const auto cosine = approximation::encloseCosTurns(turns, bits + 16).interval;
-        const auto sine = approximation::encloseSinTurns(turns, bits + 16).interval;
-        roots.push_back(acScale(
-            {intervalMidpoint(cosine, bits), intervalMidpoint(sine, bits)}, radius, bits));
+    std::size_t globalIndex = 0;
+    for (std::size_t circleIndex = 0; circleIndex < circles.size(); ++circleIndex) {
+        const NewtonSeedCircle& circle = circles[circleIndex];
+        auto radius = seedRadiusFromLog2(circle.log2Radius, bits);
+        if (!radius) {
+            const Rational fallback = cauchyBound(polynomial) + Rational{BigInt{1}};
+            radius = bf(fallback, bits);
+        }
+
+        for (std::size_t localIndex = 0; localIndex < circle.rootCount; ++localIndex, ++globalIndex) {
+            const Rational baseTurns{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * localIndex + 1)),
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(2 * circle.rootCount))};
+            const Rational circlePhase{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(circleIndex + 1)),
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(16 * degree))};
+            const std::uint64_t jitterNumerator = static_cast<std::uint64_t>((globalIndex + 1) * (globalIndex + 1));
+            const std::uint64_t jitterDenominator = static_cast<std::uint64_t>(64 * degree * degree);
+            const Rational turns = baseTurns + circlePhase + Rational{
+                BigInt::fromUnsigned(jitterNumerator),
+                BigInt::fromUnsigned(jitterDenominator)};
+            const auto cosine = approximation::encloseCosTurns(turns, bits + 16).interval;
+            const auto sine = approximation::encloseSinTurns(turns, bits + 16).interval;
+            // 各Newton-polygon円でも完全対称seedを避ける。近似初期値だけを摂動し，
+            // 根の存在・一意性は後段のexact Rouche証明だけで決定する。
+            const Rational radialScale{
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(32 * degree + globalIndex + 1)),
+                BigInt::fromUnsigned(static_cast<std::uint64_t>(32 * degree))};
+            const BigFloat perturbedRadius = bfMul(*radius, bf(radialScale, bits), bits);
+            roots.push_back(acScale(
+                {intervalMidpoint(cosine, bits), intervalMidpoint(sine, bits)}, perturbedRadius, bits));
+        }
     }
 
     const std::size_t iterations = std::min<std::size_t>(4096, 128 + bits * 2);
@@ -1154,7 +1510,9 @@ struct ApproxComplex final {
                 tinyCorrection = false;
         }
         roots = std::move(next);
-        if (tinyCorrection && iteration > degree)
+        // 候補値は最終証明ではない。補正が十分小さければ次数ぶんの空反復を続けず，
+        // 後段Rouche証明へ渡す。候補が不十分なら証明失敗後にworking precisionを上げて再試行する。
+        if (tinyCorrection && iteration >= 4)
             break;
     }
     return roots;
@@ -1172,11 +1530,28 @@ struct ApproxComplex final {
         center = acSub(center,
             acDiv(evaluateApprox(polynomial, center, bits), derivative, bits), bits);
     }
-    const RationalComplex rationalCenter{center.real.toRational(), center.imaginary.toRational()};
-    const ApproxComplex derivative = evaluateDerivativeApprox(polynomial, center, bits);
+    // Newton中心の全working bitsをexact Rationalへ持ち込むと，Taylor係数の
+    // 分母が不要に巨大化する。Rouche証明に必要なのは十分近い有理中心なので，
+    // working precisionの半分へ丸めたdyadic中心を使い，その中心で残差も再評価する。
+    const std::size_t rationalCenterBits = std::max<std::size_t>(64, bits / 2);
+    RationalComplex rationalCenter{
+        bf(center.real.toRational(), rationalCenterBits).toRational(),
+        bf(center.imaginary.toRational(), rationalCenterBits).toRational()};
+    const Rational centerScale = Rational{BigInt{1}}
+        + absolute(rationalCenter.real) + absolute(rationalCenter.imaginary);
+    const std::size_t zeroBits = rationalCenterBits > 8 ? rationalCenterBits - 8 : 1;
+    const Rational zeroThreshold = centerScale / powerOfTwo(zeroBits);
+    if (absolute(rationalCenter.real) < zeroThreshold)
+        rationalCenter.real = Rational{};
+    if (absolute(rationalCenter.imaginary) < zeroThreshold)
+        rationalCenter.imaginary = Rational{};
+    const ApproxComplex certificationCenter{
+        bf(rationalCenter.real, bits), bf(rationalCenter.imaginary, bits)};
+    const ApproxComplex derivative = evaluateDerivativeApprox(polynomial, certificationCenter, bits);
     Rational correctionL1;
     if (!(derivative.real.isZero() && derivative.imaginary.isZero())) {
-        const ApproxComplex correction = acDiv(evaluateApprox(polynomial, center, bits), derivative, bits);
+        const ApproxComplex correction = acDiv(
+            evaluateApprox(polynomial, certificationCenter, bits), derivative, bits);
         correctionL1 = absolute(correction.real.toRational())
             + absolute(correction.imaginary.toRational());
     }
@@ -1190,7 +1565,7 @@ struct ApproxComplex final {
         RationalComplexDisk disk{
             rationalCenter.real, rationalCenter.imaginary,
             base * Rational{BigInt{multiplier}}};
-        if (certifiesUniqueRoot(polynomial, disk))
+        if (certifiesUniqueRoot(polynomial, disk, bits))
             return disk;
     }
     return std::nullopt;
@@ -1223,7 +1598,7 @@ struct RationalIntervalPair final { Rational lower; Rational upper; };
     std::size_t minimumBits = 128) {
     if (polynomial.size() <= 1)
         return std::vector<RationalComplexDisk>{};
-    if (polynomial.size() - 1 > maximumAlgebraicDegree)
+    if (polynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     const std::size_t degree = polynomial.size() - 1;
 
@@ -1298,6 +1673,43 @@ struct RationalIntervalPair final { Rational lower; Rational upper; };
     return disk.radius * powerOfTwo(precisionBits + 8) <= scale;
 }
 
+[[nodiscard]] bool diskContainedIn(
+    const RationalComplexDisk& inner,
+    const RationalComplexDisk& outer) {
+    const Rational centerDistanceUpper = absolute(inner.real - outer.real)
+        + absolute(inner.imaginary - outer.imaginary);
+    return centerDistanceUpper + inner.radius <= outer.radius;
+}
+
+[[nodiscard]] std::optional<RationalComplexDisk> refineComplexDiskLocally(
+    const Polynomial& polynomial,
+    const RationalComplexDisk& current,
+    std::size_t precisionBits) {
+    if (complexDiskNarrowEnough(current, precisionBits))
+        return current;
+
+    // certifiedDiskAroundの最小半径は概ね2^(-bits/2)なので，requested bitsを
+    // 一度で満たせる作業precisionから開始する。候補中心は既存isolating diskから
+    // Newtonで磨くが，返すdiskは必ず旧diskに包含され，Roucheで一意根を再証明する。
+    const std::size_t requestedWorkBits = precisionBits >= 1984
+        ? 4096
+        : 2 * (precisionBits + 64);
+    for (std::size_t bits = std::max<std::size_t>(128, requestedWorkBits);
+         bits <= 4096;
+         bits *= 2) {
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::AlgebraicRefinement);
+        ApproxComplex center{bf(current.real, bits), bf(current.imaginary, bits)};
+        const auto refined = certifiedDiskAround(polynomial, std::move(center), bits);
+        if (refined && diskContainedIn(*refined, current)
+            && complexDiskNarrowEnough(*refined, precisionBits))
+            return refined;
+        if (bits == 4096)
+            break;
+    }
+    return std::nullopt;
+}
+
 
 struct ReducedComplexRoot final {
     Polynomial polynomial;
@@ -1330,6 +1742,25 @@ findComplexRootInFactor(
             return std::nullopt;
     }
     return std::nullopt;
+}
+
+[[nodiscard]] bool factorIntoProvenIrreducibles(
+    Polynomial polynomial,
+    std::vector<Polynomial>& factors) {
+    polynomial = canonicalPolynomial(polynomial);
+    if (polynomial.size() <= 1)
+        return false;
+    if (polynomial.size() == 2 || provenIrreducibleOverQ(polynomial)) {
+        factors.push_back(std::move(polynomial));
+        return true;
+    }
+    if (polynomial.size() - 1 > maximumMinimalPolynomialDegree)
+        return false;
+    const auto split = kroneckerSplit(polynomial);
+    if (!split)
+        return false;
+    return factorIntoProvenIrreducibles(split->first, factors)
+        && factorIntoProvenIrreducibles(split->second, factors);
 }
 
 [[nodiscard]] ReducedComplexRoot reduceComplexRootPolynomial(
@@ -1381,7 +1812,7 @@ std::optional<ComplexAlgebraicNumber> ComplexAlgebraicNumber::create(
     if (normalizedPolynomial.size() <= 1)
         return std::nullopt;
     evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
-    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+    if (normalizedPolynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
     const auto disks = isolateComplexDisks(normalizedPolynomial);
@@ -1399,7 +1830,7 @@ std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::isola
     if (normalizedPolynomial.size() <= 1)
         return std::vector<ComplexAlgebraicNumber>{};
     evaluation::checkEvaluationAlgebraicDegree(normalizedPolynomial.size() - 1);
-    if (normalizedPolynomial.size() - 1 > maximumAlgebraicDegree)
+    if (normalizedPolynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
     normalizedPolynomial = canonicalPolynomial(normalizedPolynomial);
     const auto disks = isolateComplexDisks(normalizedPolynomial);
@@ -1412,6 +1843,77 @@ std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::isola
     return roots;
 }
 
+std::optional<std::vector<ComplexAlgebraicNumber>> ComplexAlgebraicNumber::canonicalizeAll(
+    std::span<const ComplexAlgebraicNumber> roots) {
+    if (roots.empty())
+        return std::vector<ComplexAlgebraicNumber>{};
+
+    Polynomial polynomial{roots.front().polynomial().begin(), roots.front().polynomial().end()};
+    for (const ComplexAlgebraicNumber& root : roots)
+        if (!std::equal(
+                polynomial.begin(), polynomial.end(),
+                root.polynomial().begin(), root.polynomial().end()))
+            return std::nullopt;
+
+    // minimal-polynomial canonicalizationの対象外次数では，既約性証明やfactorizationを
+    // 行っても返すRoot表現は変わらない。高次数で高価なmod-p解析だけを実行しない。
+    if (polynomial.size() <= 2 || polynomial.size() - 1 > maximumMinimalPolynomialDegree
+        || provenIrreducibleOverQ(polynomial))
+        return std::vector<ComplexAlgebraicNumber>{roots.begin(), roots.end()};
+
+    std::vector<Polynomial> factors;
+    if (!factorIntoProvenIrreducibles(polynomial, factors) || factors.size() <= 1)
+        return std::nullopt;
+
+    struct FactorRoots final {
+        Polynomial polynomial;
+        std::vector<RationalComplexDisk> disks;
+    };
+
+    for (const std::size_t bits : std::array<std::size_t, 5>{128,256,512,1024,2048}) {
+        std::vector<FactorRoots> factorRoots;
+        factorRoots.reserve(factors.size());
+        bool failed = false;
+        for (const Polynomial& factor : factors) {
+            const auto disks = isolateComplexDisks(factor, bits);
+            if (!disks) {
+                failed = true;
+                break;
+            }
+            factorRoots.push_back(FactorRoots{factor, *disks});
+        }
+        if (failed)
+            continue;
+
+        std::vector<ComplexAlgebraicNumber> canonical;
+        canonical.reserve(roots.size());
+        for (const ComplexAlgebraicNumber& root : roots) {
+            const RationalComplexDisk& target = root.isolatingDisk();
+            const FactorRoots* matchedFactor = nullptr;
+            std::size_t matchedIndex = 0;
+            RationalComplexDisk matchedDisk{};
+            std::size_t matches = 0;
+            for (const FactorRoots& factor : factorRoots)
+                for (std::size_t i = 0; i < factor.disks.size(); ++i)
+                    if (!disksDisjoint(target, factor.disks[i])) {
+                        ++matches;
+                        matchedFactor = &factor;
+                        matchedIndex = i + 1;
+                        matchedDisk = factor.disks[i];
+                    }
+            if (matches != 1) {
+                failed = true;
+                break;
+            }
+            canonical.push_back(ComplexAlgebraicNumber{
+                matchedFactor->polynomial, matchedIndex, std::move(matchedDisk)});
+        }
+        if (!failed)
+            return canonical;
+    }
+    return std::nullopt;
+}
+
 std::span<const Rational> ComplexAlgebraicNumber::polynomial() const noexcept { return polynomial_; }
 std::size_t ComplexAlgebraicNumber::degree() const noexcept { return polynomial_.size() - 1; }
 std::size_t ComplexAlgebraicNumber::rootIndex() const noexcept { return rootIndex_; }
@@ -1422,6 +1924,8 @@ RationalComplexDisk ComplexAlgebraicNumber::refined(std::size_t precisionBits) c
         evaluation::EvaluationResource::AlgebraicRefinement);
     if (complexDiskNarrowEnough(disk_, precisionBits))
         return disk_;
+    if (const auto local = refineComplexDiskLocally(polynomial_, disk_, precisionBits))
+        return *local;
     const auto disks = isolateComplexDisks(polynomial_, std::min<std::size_t>(4096, precisionBits + 64));
     if (!disks || rootIndex_ > disks->size())
         throw std::runtime_error("Complex algebraic root refinement did not converge");
@@ -2066,7 +2570,7 @@ private:
     const AlgebraicNumber& lhs,
     const AlgebraicNumber& rhs,
     AlgebraicBinaryOperation operation) {
-    if (polynomial.size() <= 1 || polynomial.size() - 1 > maximumAlgebraicDegree)
+    if (polynomial.size() <= 1 || polynomial.size() - 1 > maximumSupportedAlgebraicDegree)
         return std::nullopt;
 
     if (domain == AlgebraicRootDomain::Real) {
@@ -2336,6 +2840,68 @@ std::optional<AlgebraicNumber> AlgebraicNumber::fromComplexRational(
     return std::nullopt;
 }
 
+std::optional<AlgebraicNumber> AlgebraicNumber::integerPowerInField(
+    const AlgebraicNumber& base,
+    std::uint64_t exponent,
+    bool reciprocal) {
+    if (base.domain() != AlgebraicRootDomain::Real || exponent == 0)
+        return std::nullopt;
+
+    AlgebraicNumber fieldBase = base.withGeneratorField();
+    const AlgebraicElement* baseElement = fieldBase.arithmeticElement();
+    if (!baseElement)
+        return std::nullopt;
+
+    auto one = rationalFieldElement(*baseElement, Rational{BigInt{1}});
+    if (!one)
+        return std::nullopt;
+    AlgebraicElement result = *one;
+    AlgebraicElement factor = *baseElement;
+    std::uint64_t power = exponent;
+    while (power != 0) {
+        if ((power & 1U) != 0U) {
+            auto multiplied = result.multiply(factor);
+            if (!multiplied)
+                return std::nullopt;
+            result = std::move(*multiplied);
+        }
+        power >>= 1U;
+        if (power == 0)
+            break;
+        auto squared = factor.multiply(factor);
+        if (!squared)
+            return std::nullopt;
+        factor = std::move(*squared);
+    }
+
+    if (reciprocal) {
+        auto inverted = one->divide(result);
+        if (!inverted)
+            return std::nullopt;
+        result = std::move(*inverted);
+    }
+
+    const auto minimal = result.minimalPolynomial();
+    if (!minimal || minimal->size() <= 1)
+        return std::nullopt;
+    if (!provenIrreducibleOverQ(*minimal) && minimal->size() > 2)
+        return std::nullopt;
+
+    for (const std::size_t bits : std::array<std::size_t, 7>{32,64,128,256,512,1024,2048}) {
+        auto interval = result.refinedRealInterval(bits);
+        if (!interval)
+            break;
+        auto root = RealAlgebraicNumber::createFromMinimalPolynomialInterval(
+            *minimal, std::move(*interval));
+        if (!root)
+            continue;
+        AlgebraicNumber materialized = AlgebraicNumber::fromRealRoot(std::move(*root));
+        return materialized.withArithmeticElement(
+            std::make_shared<const AlgebraicElement>(std::move(result)));
+    }
+    return std::nullopt;
+}
+
 std::optional<AlgebraicNumber> AlgebraicNumber::combine(
     const AlgebraicNumber& lhs,
     const AlgebraicNumber& rhs,
@@ -2565,6 +3131,12 @@ AlgebraicNumber AlgebraicNumber::withArithmeticElement(
 
 AlgebraicNumber AlgebraicNumber::withGeneratorField() const {
     if (arithmeticElement_)
+        return *this;
+
+    // arithmetic backendの対象外次数ではgenerator fieldを構築しても後続演算に使えない。
+    // 高次Rootごとに同じ既約性証明を繰り返すだけなので，Root cacheはisolating dataだけ保持する。
+    if (polynomial().size() <= 1
+        || polynomial().size() - 1 > maximumAlgebraicArithmeticDegree)
         return *this;
 
     Polynomial definingPolynomial(polynomial().begin(), polynomial().end());

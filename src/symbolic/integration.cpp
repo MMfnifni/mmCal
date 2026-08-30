@@ -16,6 +16,7 @@
 #include "simplification/simplifier.hpp"
 #include "evaluation/evaluation_budget.hpp"
 #include "symbolic/differentiation.hpp"
+#include "symbolic/algebraic_expression.hpp"
 #include "symbolic/limit.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/polynomial.hpp"
@@ -994,9 +995,15 @@ struct FactorSplit final {
         || !provablyNonZero(baseDerivative, builtins, mathematics))
         return std::nullopt;
 
-    if (*exponent == Rational{BigInt{-1}})
+    if (*exponent == Rational{BigInt{-1}}) {
+        Expr logArgument = a[0];
+        if (const auto affine = toRationalPolynomial(
+                a[0], variable, builtins, PolynomialConversionOptions{2, 16});
+            affine && affine->degree() == 1)
+            logArgument = polynomialToExpandedExpr(*affine, variable, builtins);
         return divide(builtins, mathematics, angles,
-            call(builtins, BuiltinId::Log, {a[0]}), baseDerivative);
+            call(builtins, BuiltinId::Log, {std::move(logArgument)}), baseDerivative);
+    }
 
     const Rational next = *exponent + Rational{BigInt{1}};
     if (next.isZero())
@@ -1230,6 +1237,90 @@ struct PolynomialDivision final {
     return scalePolynomial(lhs, Rational{BigInt{1}} / leading);
 }
 
+
+[[nodiscard]] RationalPolynomial differentiatePolynomial(
+    const RationalPolynomial& polynomial) {
+    if (polynomial.degree() == 0)
+        return RationalPolynomial{};
+    std::vector<Rational> coefficients(polynomial.degree(), Rational{BigInt{0}});
+    for (std::size_t exponent = 1; exponent <= polynomial.degree(); ++exponent)
+        coefficients[exponent - 1] = polynomial.coefficient(exponent)
+            * Rational{BigInt::fromUnsigned(exponent)};
+    return RationalPolynomial{std::move(coefficients)};
+}
+
+struct PolynomialExtendedGcd final {
+    RationalPolynomial gcd;
+    RationalPolynomial lhsCoefficient;
+    RationalPolynomial rhsCoefficient;
+};
+
+[[nodiscard]] PolynomialExtendedGcd polynomialExtendedGcd(
+    RationalPolynomial lhs,
+    RationalPolynomial rhs) {
+    RationalPolynomial oldS{{Rational{BigInt{1}}}};
+    RationalPolynomial s;
+    RationalPolynomial oldT;
+    RationalPolynomial t{{Rational{BigInt{1}}}};
+
+    while (!rhs.isZero()) {
+        PolynomialDivision division = dividePolynomials(lhs, rhs);
+        RationalPolynomial nextS = addPolynomials(
+            oldS, negatePolynomial(multiplyPolynomials(division.quotient, s)));
+        RationalPolynomial nextT = addPolynomials(
+            oldT, negatePolynomial(multiplyPolynomials(division.quotient, t)));
+        lhs = std::move(rhs);
+        rhs = std::move(division.remainder);
+        oldS = std::move(s);
+        s = std::move(nextS);
+        oldT = std::move(t);
+        t = std::move(nextT);
+    }
+
+    if (lhs.isZero())
+        return PolynomialExtendedGcd{
+            RationalPolynomial{}, RationalPolynomial{}, RationalPolynomial{}};
+    const Rational inverseLeading = Rational{BigInt{1}} / lhs.coefficient(lhs.degree());
+    return PolynomialExtendedGcd{
+        scalePolynomial(lhs, inverseLeading),
+        scalePolynomial(oldS, inverseLeading),
+        scalePolynomial(oldT, inverseLeading)};
+}
+
+[[nodiscard]] std::optional<RationalPolynomial> polynomialInverseModulo(
+    const RationalPolynomial& value,
+    const RationalPolynomial& modulus) {
+    PolynomialExtendedGcd extended = polynomialExtendedGcd(value, modulus);
+    if (extended.gcd.degree() != 0 || extended.gcd.coefficient(0).isZero())
+        return std::nullopt;
+    PolynomialDivision reduced = dividePolynomials(extended.lhsCoefficient, modulus);
+    return reduced.remainder;
+}
+
+[[nodiscard]] std::optional<AlgebraicNumber> evaluatePolynomialAtAlgebraic(
+    const RationalPolynomial& polynomial,
+    const AlgebraicNumber& point) {
+    auto value = AlgebraicNumber::fromRational(
+        polynomial.coefficient(polynomial.degree()));
+    if (!value)
+        return std::nullopt;
+    for (std::size_t exponent = polynomial.degree(); exponent-- > 0;) {
+        auto multiplied = AlgebraicNumber::combine(
+            *value, point, AlgebraicBinaryOperation::Multiply);
+        if (!multiplied)
+            return std::nullopt;
+        auto coefficient = AlgebraicNumber::fromRational(polynomial.coefficient(exponent));
+        if (!coefficient)
+            return std::nullopt;
+        auto added = AlgebraicNumber::combine(
+            *multiplied, *coefficient, AlgebraicBinaryOperation::Add);
+        if (!added)
+            return std::nullopt;
+        value = std::move(added);
+    }
+    return value;
+}
+
 [[nodiscard]] RationalPolynomial multiplyPolynomialByMonomial(
     const RationalPolynomial& polynomial,
     std::size_t exponent) {
@@ -1253,6 +1344,63 @@ struct RationalFactor final {
     RationalPolynomial polynomial;
     std::size_t multiplicity = 1;
 };
+
+
+[[nodiscard]] bool isNonzeroConstantPolynomial(const RationalPolynomial& polynomial) {
+    return polynomial.degree() == 0 && !polynomial.coefficient(0).isZero();
+}
+
+[[nodiscard]] std::optional<std::vector<RationalFactor>> factorIntoSquareFreePowers(
+    RationalPolynomial polynomial) {
+    if (polynomial.degree() == 0)
+        return std::nullopt;
+
+    // Yunのsquare-free decompositionをQ[x]上で行う。irreducible factorizationは不要で，
+    // f = product f_i^i の各f_iだけをgcd(f,f')からexactに回収する。
+    const Rational leading = polynomial.coefficient(polynomial.degree());
+    polynomial = scalePolynomial(polynomial, Rational{BigInt{1}} / leading);
+    RationalPolynomial repeated = polynomialGcdMonic(
+        polynomial, differentiatePolynomial(polynomial));
+    PolynomialDivision initial = dividePolynomials(polynomial, repeated);
+    if (!initial.remainder.isZero())
+        return std::nullopt;
+    RationalPolynomial remaining = std::move(initial.quotient);
+
+    std::vector<RationalFactor> factors;
+    for (std::size_t multiplicity = 1;
+         !isNonzeroConstantPolynomial(remaining);
+         ++multiplicity) {
+        if (multiplicity > polynomial.degree())
+            return std::nullopt;
+        RationalPolynomial shared = polynomialGcdMonic(remaining, repeated);
+        PolynomialDivision distinct = dividePolynomials(remaining, shared);
+        if (!distinct.remainder.isZero())
+            return std::nullopt;
+        if (!isNonzeroConstantPolynomial(distinct.quotient))
+            factors.push_back(RationalFactor{
+                std::move(distinct.quotient), multiplicity});
+
+        remaining = std::move(shared);
+        PolynomialDivision nextRepeated = dividePolynomials(repeated, remaining);
+        if (!nextRepeated.remainder.isZero())
+            return std::nullopt;
+        repeated = std::move(nextRepeated.quotient);
+    }
+
+    if (factors.empty())
+        return std::nullopt;
+
+    RationalPolynomial reconstructed{{Rational{BigInt{1}}}};
+    for (const RationalFactor& factor : factors)
+        reconstructed = multiplyPolynomials(
+            reconstructed, powerPolynomial(factor.polynomial, factor.multiplicity));
+    if (reconstructed.degree() != polynomial.degree())
+        return std::nullopt;
+    for (std::size_t exponent = 0; exponent <= polynomial.degree(); ++exponent)
+        if (!(reconstructed.coefficient(exponent) == polynomial.coefficient(exponent)))
+            return std::nullopt;
+    return factors;
+}
 
 [[nodiscard]] std::optional<std::vector<RationalFactor>> factorIntoLinearQuadratic(
     RationalPolynomial polynomial) {
@@ -1298,6 +1446,89 @@ struct RationalFactor final {
             return std::nullopt;
         factors.push_back(RationalFactor{std::move(linear), multiplicity});
     }
+    return factors;
+}
+
+
+[[nodiscard]] bool samePolynomial(
+    const RationalPolynomial& lhs,
+    const RationalPolynomial& rhs) {
+    if (lhs.degree() != rhs.degree())
+        return false;
+    for (std::size_t i = 0; i <= lhs.degree(); ++i)
+        if (!(lhs.coefficient(i) == rhs.coefficient(i)))
+            return false;
+    return true;
+}
+
+[[nodiscard]] std::optional<std::vector<RationalFactor>> factorIntoRationalFactorsViaFactorEngine(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const Expr source = polynomialToExpandedExpr(polynomial, variable, builtins);
+    const Expr factored = factorExpression(source, builtins, mathematics, angles);
+
+    std::vector<RationalFactor> factors;
+    Rational scalar{BigInt{1}};
+    const auto appendFactor = [&](const Expr& factor, std::size_t multiplicity,
+                                  auto&& appendFactorRef) -> bool {
+        if (multiplicity == 0)
+            return true;
+        if (isHead(factor, builtins, BuiltinId::Multiply)) {
+            if (multiplicity != 1)
+                return false;
+            for (const Expr& nested : factor.asCall().arguments)
+                if (!appendFactorRef(nested, 1, appendFactorRef))
+                    return false;
+            return true;
+        }
+        if (isHead(factor, builtins, BuiltinId::Power)
+            && factor.asCall().arguments.size() == 2) {
+            const auto exponent = exactRealRational(factor.asCall().arguments[1]);
+            if (!exponent || !exponent->isInteger() || exponent->numerator().isNegative())
+                return false;
+            const auto count = numeric::tryToUint64(exponent->numerator());
+            if (!count || *count == 0 || *count > 64)
+                return false;
+            return appendFactorRef(
+                factor.asCall().arguments[0],
+                multiplicity * static_cast<std::size_t>(*count),
+                appendFactorRef);
+        }
+        if (!containsVariable(factor, variable)) {
+            const auto value = exactRealRational(factor);
+            if (!value)
+                return false;
+            for (std::size_t i = 0; i < multiplicity; ++i)
+                scalar *= *value;
+            return true;
+        }
+
+        const auto part = toRationalPolynomial(
+            factor, variable, builtins, PolynomialConversionOptions{64, 1024});
+        if (!part || part->degree() == 0 || part->degree() > 12)
+            return false;
+        for (RationalFactor& existing : factors) {
+            if (samePolynomial(existing.polynomial, *part)) {
+                existing.multiplicity += multiplicity;
+                return true;
+            }
+        }
+        factors.push_back(RationalFactor{*part, multiplicity});
+        return true;
+    };
+
+    if (!appendFactor(factored, 1, appendFactor) || factors.empty())
+        return std::nullopt;
+
+    RationalPolynomial reconstructed{{scalar}};
+    for (const RationalFactor& factor : factors)
+        reconstructed = multiplyPolynomials(
+            reconstructed, powerPolynomial(factor.polynomial, factor.multiplicity));
+    if (!samePolynomial(reconstructed, polynomial))
+        return std::nullopt;
     return factors;
 }
 
@@ -1352,12 +1583,209 @@ struct PartialFractionBasis final {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 
+[[nodiscard]] std::optional<Expr> integrateInverseQuadraticPower(
+    const RationalPolynomial& quadratic,
+    std::size_t powerIndex,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (quadratic.degree() != 2 || powerIndex == 0)
+        return std::nullopt;
+    const Rational a = quadratic.coefficient(2);
+    const Rational b = quadratic.coefficient(1);
+    const Rational c = quadratic.coefficient(0);
+    const Rational delta = Rational{BigInt{4}} * a * c - b * b;
+    if (a.isZero() || delta.isZero())
+        return std::nullopt;
+
+    const Expr q = polynomialToExpandedExpr(quadratic, variable, builtins);
+    Expr currentFraction = call(builtins, BuiltinId::Divide, {integer(1), q});
+    auto current = tryRationalLowDegree(
+        currentFraction, variable, builtins, mathematics, angles);
+    if (!current)
+        return std::nullopt;
+    if (powerIndex == 1)
+        return current;
+
+    // I_k = (2ax+b)/(delta(k-1) q^(k-1))
+    //     + 2a(2k-3)/(delta(k-1)) I_(k-1).
+    // Completing the square proves this recurrence over Q without numerical roots.
+    for (std::size_t k = 2; k <= powerIndex; ++k) {
+        const Rational km1{BigInt::fromUnsigned(k - 1)};
+        Expr linear = add(builtins, mathematics, angles, {
+            multiply(builtins, mathematics, angles, {
+                rational(Rational{BigInt{2}} * a), Expr{variable}}),
+            rational(b)});
+        Expr first = divide(builtins, mathematics, angles,
+            std::move(linear),
+            multiply(builtins, mathematics, angles, {
+                rational(delta * km1),
+                power(builtins, mathematics, angles, q,
+                    integer(static_cast<std::int64_t>(k - 1)))}));
+        const Rational recurrence = Rational{BigInt{2}} * a
+            * Rational{BigInt::fromUnsigned(2 * k - 3)} / (delta * km1);
+        *current = add(builtins, mathematics, angles, {
+            std::move(first),
+            multiply(builtins, mathematics, angles, {
+                rational(recurrence), std::move(*current)})});
+    }
+    return current;
+}
+
+[[nodiscard]] std::optional<Expr> integrateQuadraticPartialFraction(
+    const RationalPolynomial& numerator,
+    const RationalPolynomial& quadratic,
+    std::size_t denominatorPower,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (quadratic.degree() != 2 || numerator.degree() > 1 || denominatorPower == 0)
+        return std::nullopt;
+    const Rational a = quadratic.coefficient(2);
+    const Rational b = quadratic.coefficient(1);
+    if (a.isZero())
+        return std::nullopt;
+    const Rational linear = numerator.coefficient(1);
+    const Rational constant = numerator.coefficient(0);
+    const Rational alpha = linear / (Rational{BigInt{2}} * a);
+    const Rational beta = constant - alpha * b;
+    const Expr q = polynomialToExpandedExpr(quadratic, variable, builtins);
+
+    std::vector<Expr> terms;
+    if (!alpha.isZero()) {
+        if (denominatorPower == 1)
+            terms.push_back(multiply(builtins, mathematics, angles, {
+                rational(alpha), call(builtins, BuiltinId::Log, {q})}));
+        else {
+            const Rational exponent{BigInt{1 - static_cast<std::int64_t>(denominatorPower)}};
+            terms.push_back(multiply(builtins, mathematics, angles, {
+                rational(alpha / exponent),
+                power(builtins, mathematics, angles, q, rational(exponent))}));
+        }
+    }
+    if (!beta.isZero()) {
+        auto inversePower = integrateInverseQuadraticPower(
+            quadratic, denominatorPower, variable, builtins, mathematics, angles);
+        if (!inversePower)
+            return std::nullopt;
+        terms.push_back(multiply(builtins, mathematics, angles, {
+            rational(beta), std::move(*inversePower)}));
+    }
+    if (terms.empty())
+        return integer(0);
+    return add(builtins, mathematics, angles, std::move(terms));
+}
+
+struct HermitePowerReduction final {
+    std::vector<std::pair<RationalPolynomial, std::size_t>> rationalTerms;
+    RationalPolynomial squareFreeNumerator;
+};
+
+[[nodiscard]] std::optional<HermitePowerReduction> hermiteReduceSquareFreePower(
+    RationalPolynomial numerator,
+    const RationalPolynomial& squareFreeFactor,
+    std::size_t denominatorPower,
+    const RationalPolynomial& inverseDerivativeModuloFactor) {
+    if (denominatorPower == 0)
+        return std::nullopt;
+
+    HermitePowerReduction result;
+    const RationalPolynomial derivative = differentiatePolynomial(squareFreeFactor);
+    while (denominatorPower > 1 && !numerator.isZero()) {
+        PolynomialDivision inverseProduct = dividePolynomials(
+            multiplyPolynomials(numerator, inverseDerivativeModuloFactor),
+            squareFreeFactor);
+        const Rational scale = -Rational{BigInt{1}}
+            / Rational{BigInt::fromUnsigned(denominatorPower - 1)};
+        RationalPolynomial correction = scalePolynomial(inverseProduct.remainder, scale);
+
+        // d(B/f^(k-1)) = (B' f - (k-1) B f') / f^k.
+        // B = -A (f')^-1/(k-1) mod f と取ると残差はexactにfで割れ，
+        // 分母冪を1段下げられる。数値rootや因数分解は使わないHermite stepである。
+        RationalPolynomial residual = addPolynomials(numerator,
+            addPolynomials(
+                negatePolynomial(multiplyPolynomials(
+                    differentiatePolynomial(correction), squareFreeFactor)),
+                scalePolynomial(
+                    multiplyPolynomials(correction, derivative),
+                    Rational{BigInt::fromUnsigned(denominatorPower - 1)})));
+        PolynomialDivision lowered = dividePolynomials(residual, squareFreeFactor);
+        if (!lowered.remainder.isZero())
+            return std::nullopt;
+
+        if (!correction.isZero())
+            result.rationalTerms.emplace_back(
+                std::move(correction), denominatorPower - 1);
+        numerator = std::move(lowered.quotient);
+        --denominatorPower;
+    }
+    result.squareFreeNumerator = std::move(numerator);
+    return result;
+}
+
+[[nodiscard]] std::optional<Expr> integrateSquareFreeAlgebraicLog(
+    const RationalPolynomial& numerator,
+    const RationalPolynomial& denominator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (numerator.isZero())
+        return integer(0);
+    if (denominator.degree() < 3 || denominator.degree() > 12)
+        return std::nullopt;
+
+    const RationalPolynomial derivative = differentiatePolynomial(denominator);
+    if (polynomialGcdMonic(denominator, derivative).degree() != 0)
+        return std::nullopt;
+
+    auto roots = ComplexAlgebraicNumber::isolateAll(denominator.coefficients());
+    if (!roots || roots->size() != denominator.degree())
+        return std::nullopt;
+    if (auto canonical = ComplexAlgebraicNumber::canonicalizeAll(*roots))
+        roots = std::move(canonical);
+
+    std::vector<Expr> terms;
+    terms.reserve(roots->size());
+    for (const ComplexAlgebraicNumber& root : *roots) {
+        const AlgebraicNumber point =
+            AlgebraicNumber::fromComplexRoot(root).withGeneratorField();
+        const auto numeratorAtRoot = evaluatePolynomialAtAlgebraic(numerator, point);
+        const auto derivativeAtRoot = evaluatePolynomialAtAlgebraic(derivative, point);
+        if (!numeratorAtRoot || !derivativeAtRoot)
+            return std::nullopt;
+        const auto residue = AlgebraicNumber::combine(
+            *numeratorAtRoot, *derivativeAtRoot, AlgebraicBinaryOperation::Divide);
+        if (!residue)
+            return std::nullopt;
+        const auto exactResidue = residue->exactRationalParts();
+        if (exactResidue && exactResidue->first.isZero() && exactResidue->second.isZero())
+            continue;
+
+        Expr residueExpr = makeCanonicalAlgebraicExpression(*residue, builtins);
+        Expr rootExpr = makeCanonicalRootExpression(root, builtins);
+        Expr logarithm = call(builtins, BuiltinId::Log, {
+            subtract(builtins, mathematics, angles, Expr{variable}, std::move(rootExpr))});
+        terms.push_back(multiply(builtins, mathematics, angles, {
+            std::move(residueExpr), std::move(logarithm)}));
+    }
+
+    if (terms.empty())
+        return integer(0);
+    // square-free Q に対する P/Q = sum P(r)/(Q'(r)(x-r)) はexactな留数分解。
+    // Rootは各rをcertifiedに識別するため，近似候補を恒等式の根拠には使わない。
+    return add(builtins, mathematics, angles, std::move(terms));
+}
+
 [[nodiscard]] std::optional<Expr> tryRationalFactored(
     const Expr& expression,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
+    const mathematics::AngleSemantics& angles,
+    bool allowAlgebraicFactors = false) {
     if (!isHead(expression, builtins, BuiltinId::Divide)
         || expression.asCall().arguments.size() != 2)
         return std::nullopt;
@@ -1372,16 +1800,28 @@ struct PartialFractionBasis final {
         return std::nullopt;
 
     PolynomialDivision division = dividePolynomials(*numerator, *denominator);
-    const auto factors = factorIntoLinearQuadratic(*denominator);
+    auto factors = factorIntoLinearQuadratic(*denominator);
+    if (!factors)
+        factors = factorIntoRationalFactorsViaFactorEngine(
+            *denominator, variable, builtins, mathematics, angles);
+    if (factors && allowAlgebraicFactors) {
+        for (const RationalFactor& factor : *factors) {
+            if (polynomialGcdMonic(
+                    factor.polynomial, differentiatePolynomial(factor.polynomial)).degree() != 0) {
+                factors.reset();
+                break;
+            }
+        }
+    }
+    if (!factors && allowAlgebraicFactors)
+        factors = factorIntoSquareFreePowers(*denominator);
     if (!factors)
         return std::nullopt;
 
     std::vector<PartialFractionBasis> basis;
     for (std::size_t i = 0; i < factors->size(); ++i) {
         const std::size_t degree = (*factors)[i].polynomial.degree();
-        if (degree == 0 || degree > 2)
-            return std::nullopt;
-        if (degree == 2 && (*factors)[i].multiplicity != 1)
+        if (degree == 0 || degree > 12 || (!allowAlgebraicFactors && degree > 2))
             return std::nullopt;
         for (std::size_t k = 1; k <= (*factors)[i].multiplicity; ++k)
             for (std::size_t j = 0; j < degree; ++j)
@@ -1451,23 +1891,91 @@ struct PartialFractionBasis final {
             continue;
         }
 
-        std::vector<Rational> numeratorCoefficients(2, Rational{BigInt{0}});
-        for (std::size_t column = 0; column < basis.size(); ++column) {
-            if (basis[column].factorIndex == factorIndex
-                && basis[column].denominatorPower == 1)
-                numeratorCoefficients[basis[column].numeratorExponent] += (*coefficients)[column];
-        }
-        RationalPolynomial partialNumerator{std::move(numeratorCoefficients)};
-        if (partialNumerator.isZero())
+        if (factor.polynomial.degree() == 2) {
+            for (std::size_t k = 1; k <= factor.multiplicity; ++k) {
+                std::vector<Rational> numeratorCoefficients(2, Rational{BigInt{0}});
+                for (std::size_t column = 0; column < basis.size(); ++column) {
+                    if (basis[column].factorIndex == factorIndex
+                        && basis[column].denominatorPower == k)
+                        numeratorCoefficients[basis[column].numeratorExponent]
+                            += (*coefficients)[column];
+                }
+                RationalPolynomial partialNumerator{std::move(numeratorCoefficients)};
+                if (partialNumerator.isZero())
+                    continue;
+                const auto primitive = integrateQuadraticPartialFraction(
+                    partialNumerator, factor.polynomial, k,
+                    variable, builtins, mathematics, angles);
+                if (!primitive)
+                    return std::nullopt;
+                primitiveTerms.push_back(*primitive);
+            }
             continue;
-        Expr partial = divide(
-            builtins, mathematics, angles,
-            polynomialToExpandedExpr(partialNumerator, variable, builtins), factorExpr);
-        const auto primitive = tryRationalLowDegree(
-            partial, variable, builtins, mathematics, angles);
-        if (!primitive)
+        }
+
+        const RationalPolynomial derivative = differentiatePolynomial(factor.polynomial);
+        if (polynomialGcdMonic(factor.polynomial, derivative).degree() != 0)
             return std::nullopt;
-        primitiveTerms.push_back(*primitive);
+        const auto inverseDerivative = polynomialInverseModulo(derivative, factor.polynomial);
+        if (!inverseDerivative)
+            return std::nullopt;
+
+        RationalPolynomial squareFreeNumerator;
+        std::vector<RationalPolynomial> rationalNumerators(
+            factor.multiplicity, RationalPolynomial{});
+        for (std::size_t k = 1; k <= factor.multiplicity; ++k) {
+            std::vector<Rational> numeratorCoefficients(
+                factor.polynomial.degree(), Rational{BigInt{0}});
+            for (std::size_t column = 0; column < basis.size(); ++column) {
+                if (basis[column].factorIndex == factorIndex
+                    && basis[column].denominatorPower == k)
+                    numeratorCoefficients[basis[column].numeratorExponent]
+                        += (*coefficients)[column];
+            }
+            RationalPolynomial partialNumerator{std::move(numeratorCoefficients)};
+            if (partialNumerator.isZero())
+                continue;
+            if (k == 1) {
+                squareFreeNumerator = addPolynomials(squareFreeNumerator, partialNumerator);
+                continue;
+            }
+
+            const auto reduced = hermiteReduceSquareFreePower(
+                partialNumerator, factor.polynomial, k, *inverseDerivative);
+            if (!reduced)
+                return std::nullopt;
+            squareFreeNumerator = addPolynomials(
+                squareFreeNumerator, reduced->squareFreeNumerator);
+            for (const auto& [rationalNumerator, denominatorPower] : reduced->rationalTerms) {
+                if (denominatorPower == 0 || denominatorPower >= rationalNumerators.size())
+                    return std::nullopt;
+                rationalNumerators[denominatorPower] = addPolynomials(
+                    rationalNumerators[denominatorPower], rationalNumerator);
+            }
+        }
+
+        for (std::size_t denominatorPower = 1;
+             denominatorPower < rationalNumerators.size(); ++denominatorPower) {
+            if (rationalNumerators[denominatorPower].isZero())
+                continue;
+            Expr rationalNumerator = polynomialToExpandedExpr(
+                rationalNumerators[denominatorPower], variable, builtins);
+            Expr rationalDenominator = power(
+                builtins, mathematics, angles, factorExpr,
+                integer(static_cast<std::int64_t>(denominatorPower)));
+            primitiveTerms.push_back(divide(
+                builtins, mathematics, angles,
+                std::move(rationalNumerator), std::move(rationalDenominator)));
+        }
+
+        if (!squareFreeNumerator.isZero()) {
+            const auto logarithmic = integrateSquareFreeAlgebraicLog(
+                squareFreeNumerator, factor.polynomial,
+                variable, builtins, mathematics, angles);
+            if (!logarithmic)
+                return std::nullopt;
+            primitiveTerms.push_back(*logarithmic);
+        }
     }
 
     if (primitiveTerms.empty())
@@ -1516,9 +2024,13 @@ struct PartialFractionBasis final {
             return std::nullopt;
         const Rational remainder = division.remainder.coefficient(0);
         if (!remainder.isZero()) {
+            // normalizeRationalFunctionがcontentを外へ出した場合でも，
+            // Logの引数は元の一次多項式の展開形を使う。
+            // 定数倍の違いは積分定数へ吸収できるが，2(x+3/2)より2x+3をcanonicalとする。
+            Expr logArgument = polynomialToExpandedExpr(*denominator, variable, builtins);
             primitiveTerms.push_back(multiply(builtins, mathematics, angles, {
                 rational(remainder / slope),
-                call(builtins, BuiltinId::Log, {denominatorExpr})}));
+                call(builtins, BuiltinId::Log, {std::move(logArgument)})}));
         }
     }
     else {
@@ -2275,10 +2787,14 @@ struct EllipticTrigKernel final {
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    // ∫(1+beta*x^n)^p dx
-    // = x 2F1(-p,1/n;1+1/n;-beta*x^n)。
+    // ∫x^m(1+beta*x^n)^p dx
+    // = x^(m+1)/(m+1) 2F1(-p,(m+1)/n;1+(m+1)/n;-beta*x^n)。
+    // ここではmを非負整数monomialに限定し、principal branchの既存binomial ruleを
+    // numerator付きへexactに拡張する。
     const Expr* base = nullptr;
     std::optional<Rational> exponent;
+    Rational outside{BigInt{1}};
+    std::size_t numeratorDegree = 0;
 
     if (isHead(expression, builtins, BuiltinId::Sqrt)
         && expression.asCall().arguments.size() == 1) {
@@ -2291,9 +2807,26 @@ struct EllipticTrigKernel final {
         exponent = exactRealRational(expression.asCall().arguments[1]);
     }
     else if (isHead(expression, builtins, BuiltinId::Divide)
-        && expression.asCall().arguments.size() == 2
-        && isOne(expression.asCall().arguments[0])) {
+        && expression.asCall().arguments.size() == 2) {
+        const Expr& numeratorExpr = expression.asCall().arguments[0];
         const Expr& denominator = expression.asCall().arguments[1];
+        const auto numerator = toRationalPolynomial(
+            numeratorExpr, variable, builtins, PolynomialConversionOptions{4096, 8192});
+        if (!numerator)
+            return std::nullopt;
+        std::optional<std::size_t> monomialDegree;
+        for (std::size_t i = 0; i <= numerator->degree(); ++i) {
+            if (numerator->coefficient(i).isZero())
+                continue;
+            if (monomialDegree)
+                return std::nullopt;
+            monomialDegree = i;
+            outside = numerator->coefficient(i);
+        }
+        if (!monomialDegree)
+            return integer(0);
+        numeratorDegree = *monomialDegree;
+
         if (isHead(denominator, builtins, BuiltinId::Sqrt)
             && denominator.asCall().arguments.size() == 1) {
             base = &denominator.asCall().arguments[0];
@@ -2320,14 +2853,20 @@ struct EllipticTrigKernel final {
     if (beta.isZero() || degree > 4096)
         return std::nullopt;
 
-    const Rational b{BigInt{1}, BigInt::fromUnsigned(degree)};
+    const BigInt mPlusOne = BigInt::fromUnsigned(numeratorDegree + 1);
+    const Rational b{mPlusOne, BigInt::fromUnsigned(degree)};
     const Rational c = Rational{BigInt{1}} + b;
     Expr xPower = power(builtins, mathematics, angles,
         Expr{variable}, integer(static_cast<std::int64_t>(degree)));
     Expr z = multiply(builtins, mathematics, angles, {
         rational(-beta), std::move(xPower)});
+    Expr leading = divide(builtins, mathematics, angles,
+        multiply(builtins, mathematics, angles, {
+            rational(outside),
+            power(builtins, mathematics, angles, Expr{variable}, Expr{Number{mPlusOne}})}),
+        Expr{Number{mPlusOne}});
     return multiply(builtins, mathematics, angles, {
-        Expr{variable},
+        std::move(leading),
         call(builtins, BuiltinId::Hypergeometric2F1, {
             rational(-*exponent), rational(b), rational(c), std::move(z)})});
 }
@@ -2715,6 +3254,57 @@ struct EllipticTrigKernel final {
     default:
         return std::nullopt;
     }
+}
+
+[[nodiscard]] std::optional<Expr> integrateTrigFourierExpansion(
+    mathematics::TrigFourierExpansion expansion,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    TrigArgument info = trigArgument(expansion.argument, builtins, mathematics, angles);
+    Expr du = differentiateExpression(
+        info.argument, variable, builtins, mathematics, angles);
+    if (containsVariable(du, variable) || !provablyNonZero(du, builtins, mathematics))
+        return std::nullopt;
+
+    Expr inverseDerivativeScale = divide(
+        builtins, mathematics, angles, std::move(info.inverseScale), std::move(du));
+    std::vector<Expr> primitives;
+    primitives.reserve(expansion.terms.size());
+
+    for (const mathematics::TrigFourierTerm& term : expansion.terms) {
+        if (term.frequency == 0) {
+            primitives.push_back(call(builtins, BuiltinId::Multiply, {
+                rational(term.coefficient), Expr{variable}}));
+            continue;
+        }
+
+        Expr atom = call(builtins, term.sine ? BuiltinId::Cos : BuiltinId::Sin, {
+            mathematics::scaledTrigArgumentForFrequency(
+                expansion.argument, term.frequency, builtins)});
+        Rational coefficient = term.coefficient
+            / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(term.frequency))};
+        if (term.sine)
+            coefficient = -coefficient;
+
+        std::vector<Expr> factors;
+        if (coefficient != Rational{BigInt{1}})
+            factors.push_back(rational(coefficient));
+        if (!isOne(inverseDerivativeScale))
+            factors.push_back(inverseDerivativeScale);
+        factors.push_back(std::move(atom));
+        primitives.push_back(factors.size() == 1
+            ? std::move(factors.front())
+            : call(builtins, BuiltinId::Multiply, std::move(factors)));
+    }
+
+    if (primitives.empty())
+        return integer(0);
+    Expr result = primitives.size() == 1
+        ? std::move(primitives.front())
+        : call(builtins, BuiltinId::Add, std::move(primitives));
+    return result;
 }
 
 [[nodiscard]] std::optional<Expr> integrateStandardUnary(
@@ -3647,6 +4237,17 @@ struct RationalFunctionForm final {
             expression, variable, builtins, mathematics, angles))
         return *polynomial;
 
+    if (auto normalizedRational = normalizeRationalFunction(
+            expression, variable, builtins, mathematics, angles);
+        normalizedRational && *normalizedRational != expression) {
+        if (auto rationalQuadratic = tryRationalLowDegree(
+                *normalizedRational, variable, builtins, mathematics, angles))
+            return *rationalQuadratic;
+        if (auto rationalFactored = tryRationalFactored(
+                *normalizedRational, variable, builtins, mathematics, angles))
+            return *rationalFactored;
+    }
+
     if (auto rationalQuadratic = tryRationalLowDegree(
             expression, variable, builtins, mathematics, angles))
         return *rationalQuadratic;
@@ -3769,10 +4370,15 @@ struct RationalFunctionForm final {
                         a[1], variable, builtins, mathematics, angles);
                     if (!containsVariable(denominatorDerivative, variable)
                         && provablyNonZero(denominatorDerivative, builtins, mathematics)) {
+                        Expr logArgument = a[1];
+                        if (const auto affine = toRationalPolynomial(
+                                a[1], variable, builtins, PolynomialConversionOptions{2, 16});
+                            affine && affine->degree() == 1)
+                            logArgument = polynomialToExpandedExpr(*affine, variable, builtins);
                         return multiply(builtins, mathematics, angles, {
                             a[0],
                             divide(builtins, mathematics, angles,
-                                call(builtins, BuiltinId::Log, {a[1]}),
+                                call(builtins, BuiltinId::Log, {std::move(logArgument)}),
                                 std::move(denominatorDerivative))});
                     }
                 }
@@ -3809,10 +4415,6 @@ struct RationalFunctionForm final {
             expression, variable, builtins, mathematics, angles))
         return *elliptic;
 
-    if (auto hypergeometric2F1 = integrateBinomialPower2F1(
-            expression, variable, builtins, mathematics, angles))
-        return *hypergeometric2F1;
-
     if (auto hypergeometric = integrateExponentialMonomial1F1(
             expression, variable, builtins, mathematics, angles))
         return *hypergeometric;
@@ -3841,6 +4443,16 @@ struct RationalFunctionForm final {
             expression, variable, builtins, mathematics, angles))
         return *shifted;
 
+    // 同一argumentの高次sin/cos整数冪は有限Fourier和へ厳密還元できる。
+    // 汎用reverse-chain / Weierstrass / parts探索より先に処理し、
+    // 明らかに有限なfamilyで候補探索コストを払わない。平方とsin*cosは既存のcompact解を優先する。
+    if (auto expansion = mathematics::expandTrigMonomial(expression, builtins, 256);
+        expansion && expansion->totalDegree >= 3) {
+        if (auto result = integrateTrigFourierExpansion(
+                std::move(*expansion), variable, builtins, mathematics, angles))
+            return *result;
+    }
+
     if (auto reverse = tryReverseChainRule(
             expression, variable, builtins, mathematics, angles))
         return *reverse;
@@ -3865,12 +4477,20 @@ struct RationalFunctionForm final {
     // sin[u]^m cos[u]^nを有限Fourier和へ落として既存の線形積分規則へ再投入する。
     // 積分器は大きな出力を明示的に要求された場合に限り256次まで展開する。
     // FullSimplify側の既定64次上限は維持し、通常の簡約で128項級の式爆発を起こさない。
-    if (const auto reduced = mathematics::reduceTrigMonomial(expression, builtins, 256)) {
-        Expr result = integrateCore(
-            simplify(*reduced, builtins, mathematics, angles),
-            variable, builtins, mathematics, angles, depth + 1);
-        if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
-            return result;
+    if (auto expansion = mathematics::expandTrigMonomial(expression, builtins, 256)) {
+        if (auto result = integrateTrigFourierExpansion(
+                std::move(*expansion), variable, builtins, mathematics, angles))
+            return *result;
+
+        // 非線形argument等で共通duを定数として抜けない場合は，従来どおり
+        // Fourier式を汎用integratorへ戻す。Fresnel等への後続変換能力を失わない。
+        if (const auto reduced = mathematics::reduceTrigMonomial(expression, builtins, 256)) {
+            Expr result = integrateCore(
+                simplify(*reduced, builtins, mathematics, angles),
+                variable, builtins, mathematics, angles, depth + 1);
+            if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
+                return result;
+        }
     }
 
     // 異なる引数の一次sin/cos積は上のmonomial規則では扱えない。
@@ -3882,6 +4502,27 @@ struct RationalFunctionForm final {
         if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
             return result;
     }
+
+    // 一般binomial 2F1はexactだが，atan/asinや単純reverse-chainより表現が重い。
+    // したがって特殊化されたelementary substitutionをすべて試した後のfallbackに置く。
+    // algebraic Root/Log全分解よりはcompactなので，該当するbinomial familyでは2F1を優先する。
+    if (auto hypergeometric2F1 = integrateBinomialPower2F1(
+            expression, variable, builtins, mathematics, angles))
+        return *hypergeometric2F1;
+
+    // 高次有理因子のHermite reduction / algebraic-log分解はexactだが，
+    // elementary/2F1より表現が重い最終fallbackである。通常の有理部分分数では
+    // 一次・二次因子だけを先に処理し，次数3以上はここまで閉じなかった場合だけ展開する。
+    if (auto normalizedRational = normalizeRationalFunction(
+            expression, variable, builtins, mathematics, angles);
+        normalizedRational) {
+        if (auto rationalAlgebraic = tryRationalFactored(
+                *normalizedRational, variable, builtins, mathematics, angles, true))
+            return *rationalAlgebraic;
+    }
+    if (auto rationalAlgebraic = tryRationalFactored(
+            expression, variable, builtins, mathematics, angles, true))
+        return *rationalAlgebraic;
 
     return unresolved(original, variable, builtins);
 }
@@ -4226,6 +4867,16 @@ struct RationalFunctionForm final {
     if (isLogLogPrimitiveAtUnitEndpoint(primitive, variable, endpoint, direction, builtins))
         return call(builtins, BuiltinId::Digamma, {integer(1)});
 
+    if (const auto endpointValue = exactRealRational(endpoint);
+        endpointValue && endpointValue->isZero()
+        && (isHead(primitive, builtins, BuiltinId::SineIntegralSi)
+            || isHead(primitive, builtins, BuiltinId::FresnelC)
+            || isHead(primitive, builtins, BuiltinId::FresnelS))
+        && primitive.asCall().arguments.size() == 1
+        && primitive.asCall().arguments[0].isSymbol()
+        && primitive.asCall().arguments[0].asSymbol().sameIdentity(variable))
+        return integer(0);
+
     if (isInfinityExpr(endpoint, infinity) || isNegativeInfinityExpr(endpoint, builtins, infinity))
         return limitExpression(
             primitive, variable, endpoint, LimitDirection::TwoSided,
@@ -4330,6 +4981,700 @@ namespace {
     return false;
 }
 
+
+[[nodiscard]] bool isExactZeroExpr(const Expr& expression) {
+    return expression.isNumber() && expression.asNumber().isZero();
+}
+
+[[nodiscard]] bool isExactOneExpr(const Expr& expression) {
+    return expression.isNumber() && expression.asNumber().isReal()
+        && expression.asNumber().asReal() == numeric::RealNumber{BigInt{1}};
+}
+
+[[nodiscard]] bool proveGreaterThan(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AssumptionSet& assumptions) {
+    return mathematics::KnowledgeContext{builtins, mathematics, assumptions}.prove(
+        mathematics::relation(mathematics::RelationKind::Greater, lhs, rhs))
+        == mathematics::TruthValue::True;
+}
+
+[[nodiscard]] std::optional<Expr> variablePowerExponent(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (expression.isSymbol() && expression.asSymbol().sameIdentity(variable))
+        return integer(1);
+    if (isHead(expression, builtins, BuiltinId::Power)
+        && expression.asCall().arguments.size() == 2
+        && expression.asCall().arguments[0].isSymbol()
+        && expression.asCall().arguments[0].asSymbol().sameIdentity(variable)
+        && !containsVariable(expression.asCall().arguments[1], variable))
+        return expression.asCall().arguments[1];
+    return std::nullopt;
+}
+
+struct GammaKernelMatch final {
+    Expr outside;
+    Expr nu;
+    Rational mu;
+    Expr scale;
+};
+
+[[nodiscard]] std::optional<GammaKernelMatch> matchPositiveHalfLineGammaKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    FactorSplit outer = splitConstantFactor(
+        expression, variable, builtins, mathematics, angles);
+
+    std::vector<Expr> factors;
+    if (isHead(outer.dependent, builtins, BuiltinId::Multiply))
+        factors.assign(
+            outer.dependent.asCall().arguments.begin(),
+            outer.dependent.asCall().arguments.end());
+    else
+        factors.push_back(outer.dependent);
+
+    const Expr* exponential = nullptr;
+    std::optional<Expr> monomialExponent;
+    for (const Expr& factor : factors) {
+        if (isHead(factor, builtins, BuiltinId::Exp)
+            && factor.asCall().arguments.size() == 1) {
+            if (exponential)
+                return std::nullopt;
+            exponential = &factor;
+            continue;
+        }
+        if (isOne(factor))
+            continue;
+        if (monomialExponent)
+            return std::nullopt;
+        monomialExponent = variablePowerExponent(factor, variable, builtins);
+        if (!monomialExponent)
+            return std::nullopt;
+    }
+    if (!exponential)
+        return std::nullopt;
+
+    const Expr& exponent = exponential->asCall().arguments[0];
+    FactorSplit exponentSplit = splitConstantFactor(
+        exponent, variable, builtins, mathematics, angles);
+    auto muExpr = variablePowerExponent(exponentSplit.dependent, variable, builtins);
+    if (!muExpr)
+        return std::nullopt;
+    const auto mu = exactRealRational(*muExpr);
+    if (!mu || !(*mu > Rational{BigInt{0}}))
+        return std::nullopt;
+
+    Expr scale = simplify(
+        negate(builtins, mathematics, angles, exponentSplit.constant),
+        builtins, mathematics, angles);
+    Expr nu = simplify(
+        add(builtins, mathematics, angles,
+            {monomialExponent ? *monomialExponent : integer(0), integer(1)}),
+        builtins, mathematics, angles);
+    return GammaKernelMatch{std::move(outer.constant), std::move(nu), *mu, std::move(scale)};
+}
+
+[[nodiscard]] std::optional<std::pair<Expr, Expr>> matchEulerBetaKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Multiply)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const Expr oneMinusX = simplify(
+        subtract(builtins, mathematics, angles, integer(1), Expr{variable}),
+        builtins, mathematics, angles);
+    std::optional<Expr> a;
+    std::optional<Expr> b;
+    for (const Expr& factor : expression.asCall().arguments) {
+        if (!isHead(factor, builtins, BuiltinId::Power)
+            || factor.asCall().arguments.size() != 2
+            || containsVariable(factor.asCall().arguments[1], variable))
+            return std::nullopt;
+        const auto& args = factor.asCall().arguments;
+        Expr parameter = simplify(
+            add(builtins, mathematics, angles, {args[1], integer(1)}),
+            builtins, mathematics, angles);
+        if (args[0].isSymbol() && args[0].asSymbol().sameIdentity(variable))
+            a = std::move(parameter);
+        else if (simplify(args[0], builtins, mathematics, angles) == oneMinusX)
+            b = std::move(parameter);
+        else
+            return std::nullopt;
+    }
+    if (!a || !b)
+        return std::nullopt;
+    return std::pair<Expr, Expr>{std::move(*a), std::move(*b)};
+}
+
+[[nodiscard]] bool isVariableSquareExpr(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Power)
+        || expression.asCall().arguments.size() != 2)
+        return false;
+    const auto& args = expression.asCall().arguments;
+    return args[0].isSymbol() && args[0].asSymbol().sameIdentity(variable)
+        && args[1].isNumber() && args[1].asNumber().isReal()
+        && args[1].asNumber().asReal() == numeric::RealNumber{BigInt{2}};
+}
+
+[[nodiscard]] std::optional<Expr> squaredParameter(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Power)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& args = expression.asCall().arguments;
+    if (containsVariable(args[0], variable)
+        || !args[1].isNumber() || !args[1].asNumber().isReal()
+        || !(args[1].asNumber().asReal() == numeric::RealNumber{BigInt{2}}))
+        return std::nullopt;
+    return args[0];
+}
+
+[[nodiscard]] std::optional<Expr> symmetricCircleParameter(
+    const Expr& radicand,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(radicand, builtins, BuiltinId::Subtract)
+        || radicand.asCall().arguments.size() != 2
+        || !isVariableSquareExpr(radicand.asCall().arguments[1], variable, builtins))
+        return std::nullopt;
+    return squaredParameter(radicand.asCall().arguments[0], variable, builtins);
+}
+
+[[nodiscard]] std::optional<Expr> cauchyScaleParameter(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2
+        || !isExactOneExpr(expression.asCall().arguments[0]))
+        return std::nullopt;
+    const Expr& denominator = expression.asCall().arguments[1];
+    if (!isHead(denominator, builtins, BuiltinId::Add)
+        || denominator.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& terms = denominator.asCall().arguments;
+    if (isVariableSquareExpr(terms[0], variable, builtins))
+        return squaredParameter(terms[1], variable, builtins);
+    if (isVariableSquareExpr(terms[1], variable, builtins))
+        return squaredParameter(terms[0], variable, builtins);
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> zetaMellinParameter(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& args = expression.asCall().arguments;
+    const auto exponent = variablePowerExponent(args[0], variable, builtins);
+    if (!exponent)
+        return std::nullopt;
+    if (!isHead(args[1], builtins, BuiltinId::Subtract)
+        || args[1].asCall().arguments.size() != 2
+        || !isExactOneExpr(args[1].asCall().arguments[1]))
+        return std::nullopt;
+    const Expr& exponential = args[1].asCall().arguments[0];
+    if (!isHead(exponential, builtins, BuiltinId::Exp)
+        || exponential.asCall().arguments.size() != 1
+        || !(exponential.asCall().arguments[0].isSymbol()
+            && exponential.asCall().arguments[0].asSymbol().sameIdentity(variable)))
+        return std::nullopt;
+    return simplify(add(builtins, mathematics, angles, {*exponent, integer(1)}),
+        builtins, mathematics, angles);
+}
+
+struct BetaReflectionKernel final {
+    Expr a;
+    Rational q;
+};
+
+[[nodiscard]] std::optional<BetaReflectionKernel> betaReflectionKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& args = expression.asCall().arguments;
+
+    Expr numeratorExponent = integer(0);
+    if (!isExactOneExpr(args[0])) {
+        auto exponent = variablePowerExponent(args[0], variable, builtins);
+        if (!exponent)
+            return std::nullopt;
+        numeratorExponent = std::move(*exponent);
+    }
+
+    if (!isHead(args[1], builtins, BuiltinId::Add)
+        || args[1].asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& denominatorTerms = args[1].asCall().arguments;
+    const Expr* variablePower = nullptr;
+    if (isExactOneExpr(denominatorTerms[0]))
+        variablePower = &denominatorTerms[1];
+    else if (isExactOneExpr(denominatorTerms[1]))
+        variablePower = &denominatorTerms[0];
+    if (!variablePower)
+        return std::nullopt;
+
+    auto qExpr = variablePowerExponent(*variablePower, variable, builtins);
+    if (!qExpr)
+        return std::nullopt;
+    const auto q = exactRealRational(*qExpr);
+    if (!q || !(*q > Rational{BigInt{0}}))
+        return std::nullopt;
+
+    Expr a = simplify(add(builtins, mathematics, angles, {
+        std::move(numeratorExponent), integer(1)}), builtins, mathematics, angles);
+    return BetaReflectionKernel{std::move(a), *q};
+}
+
+struct UnitPoleKernel final {
+    Expr pole;
+    bool negated = false;
+};
+
+[[nodiscard]] std::optional<UnitPoleKernel> unitPoleKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2
+        || !isExactOneExpr(expression.asCall().arguments[0]))
+        return std::nullopt;
+    const Expr& denominator = expression.asCall().arguments[1];
+    if (!isHead(denominator, builtins, BuiltinId::Subtract)
+        || denominator.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& terms = denominator.asCall().arguments;
+    if (terms[0].isSymbol() && terms[0].asSymbol().sameIdentity(variable)
+        && !containsVariable(terms[1], variable))
+        return UnitPoleKernel{terms[1], false};
+    if (terms[1].isSymbol() && terms[1].asSymbol().sameIdentity(variable)
+        && !containsVariable(terms[0], variable))
+        return UnitPoleKernel{terms[0], true};
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> fermiMellinParameter(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& args = expression.asCall().arguments;
+    const auto exponent = variablePowerExponent(args[0], variable, builtins);
+    if (!exponent)
+        return std::nullopt;
+    if (!isHead(args[1], builtins, BuiltinId::Add)
+        || args[1].asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& denominatorTerms = args[1].asCall().arguments;
+    const Expr* exponential = nullptr;
+    if (isExactOneExpr(denominatorTerms[0]))
+        exponential = &denominatorTerms[1];
+    else if (isExactOneExpr(denominatorTerms[1]))
+        exponential = &denominatorTerms[0];
+    if (!exponential || !isHead(*exponential, builtins, BuiltinId::Exp)
+        || exponential->asCall().arguments.size() != 1
+        || !(exponential->asCall().arguments[0].isSymbol()
+            && exponential->asCall().arguments[0].asSymbol().sameIdentity(variable)))
+        return std::nullopt;
+    return simplify(add(builtins, mathematics, angles, {*exponent, integer(1)}),
+        builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<std::pair<Expr, Expr>> frullaniScales(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2
+        || !(expression.asCall().arguments[1].isSymbol()
+            && expression.asCall().arguments[1].asSymbol().sameIdentity(variable)))
+        return std::nullopt;
+    const Expr& numerator = expression.asCall().arguments[0];
+    if (!isHead(numerator, builtins, BuiltinId::Subtract)
+        || numerator.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto scaleOf = [&](const Expr& term) -> std::optional<Expr> {
+        if (!isHead(term, builtins, BuiltinId::Exp)
+            || term.asCall().arguments.size() != 1)
+            return std::nullopt;
+        FactorSplit split = splitConstantFactor(
+            term.asCall().arguments[0], variable, builtins, mathematics, angles);
+        if (!(split.dependent.isSymbol()
+            && split.dependent.asSymbol().sameIdentity(variable)))
+            return std::nullopt;
+        return simplify(negate(builtins, mathematics, angles, split.constant),
+            builtins, mathematics, angles);
+    };
+    auto first = scaleOf(numerator.asCall().arguments[0]);
+    auto second = scaleOf(numerator.asCall().arguments[1]);
+    if (!first || !second)
+        return std::nullopt;
+    return std::pair<Expr, Expr>{std::move(*first), std::move(*second)};
+}
+
+struct LogMomentKernel final {
+    Expr exponent;
+    std::uint64_t logPower = 0;
+};
+
+[[nodiscard]] std::optional<LogMomentKernel> logMomentKernel(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    auto logPowerOf = [&](const Expr& factor) -> std::optional<std::uint64_t> {
+        if (isHead(factor, builtins, BuiltinId::Log)
+            && factor.asCall().arguments.size() == 1
+            && factor.asCall().arguments[0].isSymbol()
+            && factor.asCall().arguments[0].asSymbol().sameIdentity(variable))
+            return 1;
+        if (!isHead(factor, builtins, BuiltinId::Power)
+            || factor.asCall().arguments.size() != 2
+            || !isHead(factor.asCall().arguments[0], builtins, BuiltinId::Log)
+            || factor.asCall().arguments[0].asCall().arguments.size() != 1
+            || !factor.asCall().arguments[0].asCall().arguments[0].isSymbol()
+            || !factor.asCall().arguments[0].asCall().arguments[0].asSymbol().sameIdentity(variable))
+            return std::nullopt;
+        const auto power = exactRealRational(factor.asCall().arguments[1]);
+        if (!power || !power->isInteger() || !(*power >= Rational{BigInt{1}}))
+            return std::nullopt;
+        return numeric::tryToUint64(power->numerator());
+    };
+
+    if (auto m = logPowerOf(expression))
+        return LogMomentKernel{integer(0), *m};
+    if (!isHead(expression, builtins, BuiltinId::Multiply)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto& factors = expression.asCall().arguments;
+    for (std::size_t logIndex = 0; logIndex < 2; ++logIndex) {
+        auto m = logPowerOf(factors[logIndex]);
+        if (!m)
+            continue;
+        auto exponent = variablePowerExponent(factors[1 - logIndex], variable, builtins);
+        if (exponent)
+            return LogMomentKernel{std::move(*exponent), *m};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Rational> reciprocalSqrtOneMinusPower(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2
+        || !isExactOneExpr(expression.asCall().arguments[0]))
+        return std::nullopt;
+    const Expr& denominator = expression.asCall().arguments[1];
+    if (!isHead(denominator, builtins, BuiltinId::Sqrt)
+        || denominator.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const Expr& radicand = denominator.asCall().arguments[0];
+    if (!isHead(radicand, builtins, BuiltinId::Subtract)
+        || radicand.asCall().arguments.size() != 2
+        || !isExactOneExpr(radicand.asCall().arguments[0]))
+        return std::nullopt;
+    auto qExpr = variablePowerExponent(radicand.asCall().arguments[1], variable, builtins);
+    if (!qExpr)
+        return std::nullopt;
+    auto q = exactRealRational(*qExpr);
+    if (!q || !(*q > Rational{BigInt{0}}))
+        return std::nullopt;
+    return q;
+}
+
+[[nodiscard]] Expr gammaExactKernelValue(
+    const Expr& argument,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    if (const auto value = exactRealRational(argument)) {
+        if (*value == Rational{BigInt{1}})
+            return integer(1);
+        if (*value == Rational{BigInt{1}, BigInt{2}})
+            return call(builtins, BuiltinId::Sqrt, {pi(mathematics)});
+    }
+    return call(builtins, BuiltinId::Gamma, {argument});
+}
+
+[[nodiscard]] std::optional<Expr> tryAssumptionAwareDefiniteIntegral(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const Expr& lower,
+    const Expr& upper,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const expression::Symbol& infinitySymbol,
+    const mathematics::AssumptionSet& assumptions) {
+    const simplification::SimplificationContext context{
+        builtins, mathematics, angles, assumptions};
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+
+    const bool zeroToPositiveInfinity = isExactZeroExpr(lower)
+        && isInfinityExpr(upper, infinitySymbol);
+    const bool wholeReal = isNegativeInfinityExpr(lower, builtins, infinitySymbol)
+        && isInfinityExpr(upper, infinitySymbol);
+
+    // DLMF 25.5.1: Mellin representation of zeta, Re(s)>1.
+    if (zeroToPositiveInfinity) {
+        if (auto s = zetaMellinParameter(
+                expression, variable, builtins, mathematics, angles)) {
+            if (proveGreaterThan(*s, integer(1), builtins, mathematics, assumptions))
+                return simplification::Simplifier{}.simplify(
+                    multiply(builtins, mathematics, angles, {
+                        gammaExactKernelValue(*s, builtins, mathematics),
+                        call(builtins, BuiltinId::Zeta, {*s})}), context);
+        }
+
+        // DLMF 25.5.3.  The product (1-2^(1-s)) zeta[s] has a removable
+        // singularity at s=1, so keep that point as an explicit exact branch.
+        if (auto s = fermiMellinParameter(
+                expression, variable, builtins, mathematics, angles)) {
+            if (proveGreaterThan(*s, integer(0), builtins, mathematics, assumptions)) {
+                Expr generic = multiply(builtins, mathematics, angles, {
+                    gammaExactKernelValue(*s, builtins, mathematics),
+                    subtract(builtins, mathematics, angles, integer(1),
+                        power(builtins, mathematics, angles, integer(2),
+                            subtract(builtins, mathematics, angles, integer(1), *s))),
+                    call(builtins, BuiltinId::Zeta, {*s})});
+                return call(builtins, BuiltinId::Cases, {
+                    call(builtins, BuiltinId::CaseBranch, {
+                        call(builtins, BuiltinId::Log, {integer(2)}),
+                        call(builtins, BuiltinId::Equal, {*s, integer(1)})}),
+                    call(builtins, BuiltinId::CaseBranch, {
+                        std::move(generic),
+                        call(builtins, BuiltinId::NotEqual, {*s, integer(1)})})});
+            }
+        }
+
+        // Euler beta integral after t=x^q:
+        // int_0^inf x^(a-1)/(1+x^q) dx = Pi/(q sin(Pi a/q)), 0<a<q.
+        if (auto kernel = betaReflectionKernel(
+                expression, variable, builtins, mathematics, angles)) {
+            const Expr q = rational(kernel->q);
+            if (proveGreaterThan(kernel->a, integer(0), builtins, mathematics, assumptions)
+                && proveGreaterThan(q, kernel->a, builtins, mathematics, assumptions)) {
+                Expr ratio = simplify(
+                    divide(builtins, mathematics, angles, kernel->a, q),
+                    builtins, mathematics, angles);
+                Expr phase = call(builtins, BuiltinId::UnitApplied, {
+                    multiply(builtins, mathematics, angles, {pi(mathematics), ratio}),
+                    Expr{std::string{"Rad"}}});
+                return divide(builtins, mathematics, angles, pi(mathematics),
+                    multiply(builtins, mathematics, angles, {
+                        q, call(builtins, BuiltinId::Sin, {std::move(phase)})}));
+            }
+        }
+
+        // Frullani: int_0^inf (exp(-a x)-exp(-b x))/x dx = log(b/a), a,b>0.
+        if (auto scales = frullaniScales(
+                expression, variable, builtins, mathematics, angles)) {
+            if (proveGreaterThan(scales->first, integer(0), builtins, mathematics, assumptions)
+                && proveGreaterThan(scales->second, integer(0), builtins, mathematics, assumptions))
+                return call(builtins, BuiltinId::Log, {
+                    divide(builtins, mathematics, angles, scales->second, scales->first)});
+        }
+    }
+
+    // A single symbolic pole outside a finite real interval is safe.  Using the
+    // positive endpoint ratio avoids principal-Log branch constants on the negative side.
+    if (!isInfinityExpr(lower, infinitySymbol)
+        && !isInfinityExpr(upper, infinitySymbol)
+        && !isNegativeInfinityExpr(lower, builtins, infinitySymbol)
+        && proveGreaterThan(upper, lower, builtins, mathematics, assumptions)) {
+        if (auto pole = unitPoleKernel(expression, variable, builtins)) {
+            const bool below = proveGreaterThan(
+                lower, pole->pole, builtins, mathematics, assumptions);
+            const bool above = proveGreaterThan(
+                pole->pole, upper, builtins, mathematics, assumptions);
+            if (below || above) {
+                Expr ratio = divide(builtins, mathematics, angles,
+                    subtract(builtins, mathematics, angles, upper, pole->pole),
+                    subtract(builtins, mathematics, angles, lower, pole->pole));
+                Expr result = call(builtins, BuiltinId::Log, {
+                    simplify(std::move(ratio), builtins, mathematics, angles)});
+                if (pole->negated)
+                    result = negate(builtins, mathematics, angles, std::move(result));
+                return simplification::Simplifier{}.simplify(std::move(result), context);
+            }
+        }
+    }
+
+    // Cauchy kernel on the whole real axis.
+    if (wholeReal) {
+        if (auto scale = cauchyScaleParameter(expression, variable, builtins)) {
+            if (proveGreaterThan(*scale, integer(0), builtins, mathematics, assumptions))
+                return divide(builtins, mathematics, angles, pi(mathematics), *scale);
+        }
+    }
+
+    // Semicircle / arcsine kernels on [-a,a], a>0.  These are endpoint-improper
+    // but convergent; matching the exact radicand avoids relying on generic endpoint safety.
+    if (isHead(lower, builtins, BuiltinId::Negate)
+        && lower.asCall().arguments.size() == 1
+        && upper == lower.asCall().arguments[0]
+        && proveGreaterThan(upper, integer(0), builtins, mathematics, assumptions)) {
+        const Expr* radicand = nullptr;
+        bool reciprocalSqrt = false;
+        if (isHead(expression, builtins, BuiltinId::Sqrt)
+            && expression.asCall().arguments.size() == 1)
+            radicand = &expression.asCall().arguments[0];
+        else if (isHead(expression, builtins, BuiltinId::Divide)
+            && expression.asCall().arguments.size() == 2
+            && isExactOneExpr(expression.asCall().arguments[0])
+            && isHead(expression.asCall().arguments[1], builtins, BuiltinId::Sqrt)
+            && expression.asCall().arguments[1].asCall().arguments.size() == 1) {
+            reciprocalSqrt = true;
+            radicand = &expression.asCall().arguments[1].asCall().arguments[0];
+        }
+        if (radicand) {
+            if (auto scale = symmetricCircleParameter(*radicand, variable, builtins);
+                scale && *scale == upper) {
+                if (reciprocalSqrt)
+                    return pi(mathematics);
+                return divide(builtins, mathematics, angles,
+                    multiply(builtins, mathematics, angles, {
+                        pi(mathematics), power(builtins, mathematics, angles, *scale, integer(2))}),
+                    integer(2));
+            }
+        }
+    }
+
+    // DLMF 5.9.1: int_0^inf exp(-z x^mu) x^(nu-1) dx
+    // = Gamma(nu/mu)/(mu z^(nu/mu)), for mu>0, Re(nu)>0, Re(z)>0.
+    if (zeroToPositiveInfinity || wholeReal) {
+        if (auto gammaKernel = matchPositiveHalfLineGammaKernel(
+                expression, variable, builtins, mathematics, angles)) {
+            if (proveGreaterThan(gammaKernel->nu, integer(0), builtins, mathematics, assumptions)
+                && proveGreaterThan(gammaKernel->scale, integer(0), builtins, mathematics, assumptions)) {
+                Expr ratio = simplification::Simplifier{}.simplify(
+                    divide(builtins, mathematics, angles,
+                        gammaKernel->nu, rational(gammaKernel->mu)), context);
+                Expr scalePower = isExactOneExpr(gammaKernel->scale)
+                    ? integer(1)
+                    : power(builtins, mathematics, angles, gammaKernel->scale, ratio);
+                Expr denominator = multiply(builtins, mathematics, angles, {
+                    rational(gammaKernel->mu), std::move(scalePower)});
+                Expr result = multiply(builtins, mathematics, angles, {
+                    gammaKernel->outside,
+                    divide(builtins, mathematics, angles,
+                        gammaExactKernelValue(ratio, builtins, mathematics), denominator)});
+
+                if (wholeReal) {
+                    // exp(-a x^m) is even for positive even integer m.  General
+                    // x^(nu-1) still needs branch/parity analysis on the negative half-line,
+                    // so the whole-line shortcut remains restricted to nu=1.
+                    if (!(gammaKernel->nu == integer(1))
+                        || !gammaKernel->mu.isInteger()
+                        || !(gammaKernel->mu > Rational{BigInt{0}})
+                        || !(gammaKernel->mu.numerator() % BigInt{2}).isZero())
+                        return std::nullopt;
+                    result = multiply(builtins, mathematics, angles, {integer(2), result});
+                }
+                return simplification::Simplifier{}.simplify(std::move(result), context);
+            }
+        }
+    }
+
+    // Log moments on [0,1]: d^m/da^m int_0^1 x^a dx
+    // = (-1)^m m!/(a+1)^(m+1), for a>-1.
+    if (isExactZeroExpr(lower) && isExactOneExpr(upper)) {
+        if (auto moment = logMomentKernel(expression, variable, builtins)) {
+            if (moment->logPower <= 64
+                && proveGreaterThan(moment->exponent, integer(-1),
+                    builtins, mathematics, assumptions)) {
+                BigInt factorial{1};
+                for (std::uint64_t k = 2; k <= moment->logPower; ++k)
+                    factorial *= BigInt::fromUnsigned(k);
+                if (moment->logPower % 2 != 0)
+                    factorial = -factorial;
+                Expr next = simplify(add(builtins, mathematics, angles, {
+                    moment->exponent, integer(1)}), builtins, mathematics, angles);
+                return simplification::Simplifier{}.simplify(
+                    divide(builtins, mathematics, angles,
+                        Expr{Number{factorial}},
+                        power(builtins, mathematics, angles, next,
+                            integer(static_cast<std::int64_t>(moment->logPower + 1)))),
+                    context);
+            }
+        }
+
+        // t=x^q maps the endpoint algebraic singularity to Euler's beta integral.
+        if (auto q = reciprocalSqrtOneMinusPower(expression, variable, builtins)) {
+            Expr qExpr = rational(*q);
+            Expr inverseQ = rational(Rational{BigInt{1}} / *q);
+            return simplification::Simplifier{}.simplify(
+                divide(builtins, mathematics, angles,
+                    call(builtins, BuiltinId::Beta, {
+                        inverseQ, rational(Rational{BigInt{1}, BigInt{2}})}),
+                    qExpr), context);
+        }
+    }
+
+    // Euler beta integral on [0,1].
+    if (isExactZeroExpr(lower) && isExactOneExpr(upper)) {
+        if (auto betaKernel = matchEulerBetaKernel(
+                expression, variable, builtins, mathematics, angles)) {
+            if (proveGreaterThan(betaKernel->first, integer(0), builtins, mathematics, assumptions)
+                && proveGreaterThan(betaKernel->second, integer(0), builtins, mathematics, assumptions))
+                return call(builtins, BuiltinId::Beta,
+                    {std::move(betaKernel->first), std::move(betaKernel->second)});
+        }
+    }
+
+    // int_0^a x^n dx = a^(n+1)/(n+1), for a>0 and n>-1.
+    if (isExactZeroExpr(lower) && !isInfinityExpr(upper, infinitySymbol)) {
+        if (auto exponent = variablePowerExponent(expression, variable, builtins)) {
+            Expr next = simplification::Simplifier{}.simplify(
+                add(builtins, mathematics, angles, {*exponent, integer(1)}), context);
+            if (proveGreaterThan(upper, integer(0), builtins, mathematics, assumptions)
+                && proveGreaterThan(*exponent, integer(-1), builtins, mathematics, assumptions)) {
+                Expr numerator = isExactOneExpr(upper)
+                    ? integer(1)
+                    : power(builtins, mathematics, angles, upper, next);
+                return simplification::Simplifier{}.simplify(
+                    divide(builtins, mathematics, angles, std::move(numerator), next), context);
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 [[nodiscard]] bool unresolvedNeedsDomainInformation(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -4411,6 +5756,11 @@ Expr integrateExpression(
     const simplification::SimplificationContext context{
         builtins, mathematics, angles, assumptions};
     const Expr prepared = simplification::Simplifier{}.simplify(expression, context);
+    if (auto known = tryAssumptionAwareDefiniteIntegral(
+            prepared, variable, lower, upper, builtins, mathematics, angles,
+            infinitySymbol, assumptions))
+        return *known;
+
     Expr primitive = integrateCore(prepared, variable, builtins, mathematics, angles, 0);
     primitive = simplification::Simplifier{}.simplify(primitive, context);
     if (isHead(primitive, builtins, BuiltinId::SymbolicIntegral)) {

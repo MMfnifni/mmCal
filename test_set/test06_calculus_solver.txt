@@ -27,6 +27,13 @@ integrate[x^2,{x,0,1}]=>1/3
 integrate[E^x cos[x],x]=>(cos[x]+sin[x])exp[x]/2
 D[integrate[f[x],x],x]=>f[x]
 
+# @session
+# Held symbolic operators resolve explicit history references.
+D[E^x cos[x],x]=>cos[x]exp[x]-exp[x]sin[x]
+integrate[Out[1],x]=>(cos[x]+sin[x])exp[x]/2-(sin[x]-cos[x])exp[x]/2
+integrate[In[1],x]=>(cos[x]+sin[x])exp[x]/2-(sin[x]-cos[x])exp[x]/2
+
+# @session
 diff[3,1]=>TypeError
 diff[x^2,x]=>TypeError
 nintegrate[1/x,{x,-1,1},8]=>DomainError
@@ -170,7 +177,29 @@ solve[tan[x]==1,x,Real]==>{x == Pi/4+Pi k where k in Integer}
 solve[sin[2x+1]==0,x,Real]==>{x == -(1-Pi k)/2 where k in Integer}
 solve[sin[x]==1,x,Real]==>{x == Pi/2+2Pi k where k in Integer}
 solve[sin[x]==2,x,Real]==>{}
+solve[sin[x]==x,x,Real]==>{x == 0}
 solve[sin[x^2]==0,x,Real]==>UnresolvedSolutionSet[x]
+
+# Real affine exponential / principal self-power Lambert W reductions.
+solve[2^x==x,x,Real]==>{}
+solve[(4/3)^x==x,x,Real]==>{x == -lambertw[-log[4/3]]/log[4/3], x == -lambertw[-1, -log[4/3]]/log[4/3]}
+solve[(1/2)^x==x,x,Real]==>{x == -lambertw[-log[1/2]]/log[1/2]}
+solve[exp[x]==x+2,x,Real]==>{x == -lambertw[-exp[-2]]-2, x == -lambertw[-1, -exp[-2]]-2}
+solve[x^x==1,x,Real]==>{x == 1}
+solve[x^x==2,x,Real]==>{x == exp[lambertw[log[2]]]}
+solve[x^x==-1,x,Real]==>{x == -1}
+solve[x^x==1/4,x,Real]==>UnresolvedSolutionSet[x]
+
+# Real absolute-value relations. Equality stays unresolved without an explicit Real domain.
+solve[abs[x]<2,x]==>{x in Real if x > -2 && x < 2}
+solve[abs[x-1]>=3,x]==>{x in Real if x <= -2, x in Real if x >= 4}
+solve[abs[2x-1]<=3,x]==>{x in Real if x >= -1 && x <= 2}
+solve[abs[x]==2,x,Real]==>{x == 2, x == -2}
+solve[abs[x]==-2,x,Real]==>{}
+solve[abs[x]!=2,x,Real]==>{x in Real if x != 2 && x != -2}
+solve[abs[x]==2,x]==>UnresolvedSolutionSet[x]
+solve[abs[1/x]>=0,x]==>All if x != 0
+solve[abs[log[x]]>=0,x]==>All if x != 0
 
 # Unreleased canonical Gaussian / real algebraic Root.
 integrate[exp[-x^2],x]==>erf[x]sqrt[Pi]/2
@@ -196,6 +225,9 @@ root[{2,0,3,0,1},1,Complex]==>root[{2, 0, 1}, 1, Complex]
 root[{-2,0,1},2]+root[{-3,0,0,1},1]==>root[{1, -36, 12, -6, -6, 0, 1}, 2]
 solve[(x^2-2)*(x^2-3)==0,x,Real]==>{x == root[{-3, 0, 1}, 1], x == root[{-2, 0, 1}, 1], x == root[{-2, 0, 1}, 2], x == root[{-3, 0, 1}, 2]}
 solve[x^5-x+1==0,x]==>{x == root[{1, -1, 0, 0, 0, 1}, 1, Complex], x == root[{1, -1, 0, 0, 0, 1}, 2, Complex], x == root[{1, -1, 0, 0, 0, 1}, 3, Complex], x == root[{1, -1, 0, 0, 0, 1}, 4, Complex], x == root[{1, -1, 0, 0, 0, 1}, 5, Complex]}
+solve[x^6-3x^5-x^4+2x^3+2x^2-2x-1==0,x]==>{x == root[{-1, -2, 2, 2, -1, -3, 1}, 1, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 2, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 3, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 4, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 5, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 6, Complex]}
+solve[(x^3-x-1)*(x^3+x+1)==0,x]==>{x == root[{1, 1, 0, 1}, 1, Complex], x == root[{-1, -1, 0, 1}, 1, Complex], x == root[{1, 1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 3, Complex], x == root[{1, 1, 0, 1}, 3, Complex]}
+solve[x^16+x+1==0,x]==>{x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 1, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 2, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 3, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 4, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 5, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 6, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 7, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 8, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 9, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 10, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 11, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 12, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 13, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 14, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 15, Complex], x == root[{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 16, Complex]}
 integrate[x^n,x]==>x^(n+1)/(n+1)
 integrate[log[log[x]],x]==>x log[log[x]]-li[x]
 integrate[li[x],x]==>x li[x]-Ei[2log[x]]
@@ -219,7 +251,31 @@ lambertw[0] ==> 0
 lambertw[E] ==> 1
 lambertw[-1/E] ==> -1
 lambertw[-1,-1/E] ==> -1
-D[lambertw[x],x] ==> cases[lambertw[x]/(x*(1+lambertw[x])) if x != 0; 1 if x == 0]
+D[lambertw[x],x] ==> exp[-lambertw[x]]/(1+lambertw[x])
+solve[exp[x]==x,x,Real] ==> {}
+solve[log[x]==x,x,Real] ==> {}
+solve[x+log[x]==0,x,Real] ==> {x == lambertw[1]}
+solve[exp[x]+x==0,x,Real] ==> {x == -lambertw[1]}
+solve[exp[x]==x+1,x,Real] ==> {x == 0}
+solve[exp[x]-x+5==0,x,Real] ==> {}
+solve[exp[x]==x+2,x,Real] ==> {x == -lambertw[-exp[-2]]-2, x == -lambertw[-1, -exp[-2]]-2}
+solve[erf[x]==0,x,Real] ==> {x == 0}
+solve[erf[x]==1,x,Real] ==> {}
+solve[erfc[x]==1,x,Real] ==> {x == 0}
+solve[erfc[x]==0,x,Real] ==> {}
+solve[erfc[x]==2,x,Real] ==> {}
+solve[erf[x^2-1]==0,x,Real] ==> {x == 1, x == -1}
+solve[sqrt[x]==2,x] ==> {x == 4}
+solve[sqrt[x]==-2,x] ==> {}
+solve[sqrt[x]==I,x] ==> {x == -1}
+solve[sqrt[x+1]==x-1,x] ==> {x == 3}
+solve[cbrt[x]==2,x] ==> {x == 8}
+solve[cbrt[x+1]==x-1,x] ==> {x == root[{-2, 2, -3, 1}, 1]}
 N[lambertw[1],20] ==> 0.5671432904097838730
 N[lambertw[-1,-1/10],20] ==> -3.5771520639572972184
 N[solve[1.1^x==x^2,x,Real],20] ==> {x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.716830168405222740}
+
+
+# Bivariate zero-dimensional polynomial systems may retry the alternate lex projection.
+N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y}],10] ==> {{x == -0.7746228995+0.0I, y == -1.264927127+0.0I}, {x == 0.0, y == 1.0}, {x == 1.185885346+0.0I, y == -1.551233076+0.0I}, {x == 2.360409337+0.0I, y == -2.563499998+0.0I}, {x == 3.228328216+0.0I, y == 3.37966020+0.0I}}
+N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y},Real],10] ==> {{x == -0.7746228995, y == -1.264927127}, {x == 0.0, y == 1.0}, {x == 1.185885346, y == -1.551233076}, {x == 2.360409337, y == -2.563499998}, {x == 3.228328216, y == 3.37966020}}

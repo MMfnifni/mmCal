@@ -53,6 +53,7 @@ enum class RealRangeRule {
     Positive,
     NonNegative,
     OpenMinusOneToOne,
+    OpenZeroToTwo,
     ClosedMinusOneToOne,
     OneToInfinity
 };
@@ -204,6 +205,11 @@ private:
     void setRealInverseKnowledge(
         FunctionId id,
         FunctionId inverse,
+        bool globallyInjective,
+        RealMonotonicity monotonicity,
+        RealRangeRule rangeRule);
+    void setRealBehaviorKnowledge(
+        FunctionId id,
         bool globallyInjective,
         RealMonotonicity monotonicity,
         RealRangeRule rangeRule);

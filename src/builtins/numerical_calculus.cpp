@@ -9,6 +9,7 @@
 #include "approximation/real_interval.hpp"
 #include "error/error_message.hpp"
 #include "evaluation/iterator_spec.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
@@ -357,8 +358,6 @@ struct NewtonCotesRule final {
 }
 
 [[nodiscard]] Rational decimalTolerance(std::size_t digits) {
-    if (digits > 100000)
-        error::throwCalcError(error::CalcErrorType::Overflow, "Requested decimal precision is too large");
     std::string denominator = "1";
     denominator.append(digits + 2, '0');
     return Rational{BigInt{1}, BigInt::parse(denominator)};
@@ -369,6 +368,14 @@ struct NewtonCotesRule final {
     if (growth > std::numeric_limits<std::size_t>::max() - current)
         error::throwCalcError(error::CalcErrorType::Overflow, "Numerical precision is too large");
     return current + growth;
+}
+
+[[nodiscard]] bool exceedsLocalGuardBudget(
+    std::size_t guardDigits,
+    std::size_t requestedDigits) noexcept {
+    constexpr std::size_t extraGuardDigits = 256;
+    return guardDigits > extraGuardDigits
+        && guardDigits - extraGuardDigits > requestedDigits;
 }
 
 } // namespace
@@ -417,6 +424,7 @@ Expr evaluateNumericDerivative(
         : defaultDigits;
     if (digits == 0)
         error::throwCalcError(error::CalcErrorType::Type, "diff precision must be a positive integer");
+    evaluation::checkEvaluationRequestedPrecisionDigits(digits);
 
     const expression::Symbol variable = arguments[1].asSymbol();
     const Expr derivative = symbolic::differentiateExpression(
@@ -431,6 +439,7 @@ Expr evaluateNumericDerivative(
     CertifiedEvaluator evaluator{registry, mathematics, angles};
     approximation::ApproximationContext context{digits};
     for (;;) {
+        evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::CertifiedRefinement);
         try {
             const std::size_t bits = context.workingBinaryBits();
             const auto information = evaluator.enclose(
@@ -483,6 +492,7 @@ Expr evaluateNumericIntegral(
         error::throwCalcError(
             error::CalcErrorType::Type,
             "nintegrate precision must be a positive integer");
+    evaluation::checkEvaluationRequestedPrecisionDigits(digits);
 
     const expression::Symbol variable = iterator->variable;
     const Expr lowerExpression = iterator->lower;
@@ -496,6 +506,7 @@ Expr evaluateNumericIntegral(
     CertifiedEvaluator evaluator{registry, mathematics, angles};
     approximation::ApproximationContext context{digits};
     for (;;) {
+        evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::CertifiedRefinement);
         const std::size_t bits = context.workingBinaryBits();
         try {
             const auto lowerValue = evaluator.enclose(lowerExpression, bits);
@@ -512,7 +523,7 @@ Expr evaluateNumericIntegral(
         }
         catch (const approximation::PrecisionInsufficient&) {
             context.setGuardDigits(nextGuardDigits(context.guardDigits()));
-            if (context.guardDigits() > digits + 256)
+            if (exceedsLocalGuardBudget(context.guardDigits(), digits))
                 error::throwCalcError(
                     error::CalcErrorType::Evaluation,
                     "nintegrate could not certify real finite bounds");
@@ -582,6 +593,7 @@ Expr evaluateNumericIntegral(
     // これによりnを増やすたび全点を再評価する無駄を避ける。
     const Rational tolerance = decimalTolerance(digits);
     for (;;) {
+        evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::CertifiedRefinement);
         const std::size_t bits = context.workingBinaryBits();
         try {
             const Rational lower{BigInt{0}};
@@ -643,7 +655,7 @@ Expr evaluateNumericIntegral(
         }
 
         context.setGuardDigits(nextGuardDigits(context.guardDigits()));
-        if (context.guardDigits() > digits + 256)
+        if (exceedsLocalGuardBudget(context.guardDigits(), digits))
             error::throwCalcError(
                 error::CalcErrorType::Evaluation,
                 "nintegrate could not certify the requested decimal precision");

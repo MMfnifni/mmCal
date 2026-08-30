@@ -409,7 +409,7 @@ mmCal を使用する hosted service は，その事実を説明できる。
 - `Official mmCal API`
 - mmCal Project 公式 hosted service のように設計した site
 
-service は独自の domain と visual identity を使用すること。
+service は独自の 定義域 と visual identity を使用すること。
 
 ---
 
@@ -435,7 +435,7 @@ service は独自の domain と visual identity を使用すること。
 
 ---
 
-# Part III — 名称，logo，domain，表示
+# Part III — 名称，logo，定義域，表示
 
 ## 19. Product・organization 名
 
@@ -464,9 +464,9 @@ service は独自の domain と visual identity を使用すること。
 
 ---
 
-## 20. Domain，social account，organization handle
+## 20. 定義域，social account，organization handle
 
-書面による許可なく，全体として mmCal 公式と誤認される可能性の高い domain，organization name，account handle を登録・使用してはならない。
+書面による許可なく，全体として mmCal 公式と誤認される可能性の高い 定義域，organization name，account handle を登録・使用してはならない。
 
 通常許可を要する例:
 
@@ -477,13 +477,13 @@ service は独自の domain と visual identity を使用すること。
 - `@official_mmcal`
 - upstream ではない者が app-store publisher 名を `mmCal Project` とする
 
-第三者 domain の下で明確に独立性が分かる説明的使用は原則として可能です。
+第三者 定義域 の下で明確に独立性が分かる説明的使用は原則として可能です。
 
 - `acme.example/products/mmcal-adapter`
 - `docs.acme.example/mmcal-integration`
 - `mmcal.acme.example` — Acme の integration page であることが明白な場合
 
-迷う場合は，registrable domain には自分の brand を使用し，`mmCal` は path，subtitle，description に使用してください。
+迷う場合は，registrable 定義域 には自分の brand を使用し，`mmCal` は path，subtitle，description に使用してください。
 
 ---
 
@@ -630,7 +630,7 @@ upstream version を正確に参照できる。
 6. mmCal Marks を使った certification，accreditation，authorized-partner program を作る
 7. mmCal Mark 自体を主要 branding/value とする merchandise を商用販売する
 8. mmCal Mark を主要 event name とする commercial event を運営する
-9. mmCal 公式と誤認される可能性の高い domain/account を運営する
+9. mmCal 公式と誤認される可能性の高い 定義域/account を運営する
 10. official affiliation が曖昧で，通常の説明・disclaimer では解消できない使用
 
 許可には，具体的な使用方法に応じて追加条件を付す場合がある。
@@ -676,7 +676,7 @@ mmCal Project は，不必要な対立よりも修正を優先する。
 - independence disclaimer を追加
 - 公式 logo を第三者独自 icon に変更
 - app-store title を変更
-- domain / account 表示を修正
+- 定義域 / account 表示を修正
 - endorsement claim を訂正
 
 この方針は権利放棄を意味するものではない。

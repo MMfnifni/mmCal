@@ -4,6 +4,8 @@
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "mathematics/angle.hpp"
+#include "solver/real_function_analysis.hpp"
 #include "test_framework.hpp"
 
 #include <string>
@@ -14,6 +16,25 @@ namespace {
 
 [[nodiscard]] std::string eval(kernel::KernelSession& session, std::string_view source) {
     return formatting::formatExpr(session.evaluate(source));
+}
+
+
+[[nodiscard]] std::string intervalText(const solver::RealDomainInterval& interval) {
+    std::string result = interval.lowerInclusive ? "[" : "(";
+    result += interval.lower ? formatting::formatExpr(*interval.lower) : "-Infinity";
+    result += ", ";
+    result += interval.upper ? formatting::formatExpr(*interval.upper) : "Infinity";
+    result += interval.upperInclusive ? "]" : ")";
+    return result;
+}
+
+[[nodiscard]] std::string rangeText(const solver::RealValueRange& range) {
+    std::string result = range.lowerInclusive ? "[" : "(";
+    result += formatting::formatExpr(range.lower);
+    result += ", ";
+    result += formatting::formatExpr(range.upper);
+    result += range.upperInclusive ? "]" : ")";
+    return result;
 }
 
 [[nodiscard]] const evaluation::EvaluationDiagnostic* findDiagnostic(
@@ -76,6 +97,12 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "Ci has the same two-sided real directed infinity at zero");
     tests.expectEqual(eval(session, "limit[Ci[x],x,Infinity]"), std::string{"0"},
         "Ci tends to zero along the positive real axis");
+    tests.expectEqual(eval(session, "limit[Si[x],x,Infinity]"), std::string{"Pi/2"},
+        "Si positive-infinity limit uses the exact DLMF constant");
+    tests.expectEqual(eval(session, "limit[fresnelc[x],x,Infinity]"), std::string{"1/2"},
+        "Fresnel C positive-infinity limit is exact");
+    tests.expectEqual(eval(session, "limit[fresnels[x],x,Infinity]"), std::string{"1/2"},
+        "Fresnel S positive-infinity limit is exact");
     tests.expectEqual(eval(session, "limit[Ci[x],x,-Infinity]"), std::string{"I Pi"},
         "principal Ci retains its branch-cut offset I Pi at negative infinity");
     tests.expectEqual(eval(session, "limit[li[x],x,0]"), std::string{"0"},
@@ -115,6 +142,51 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[exp[-x^2],{x,-Infinity,Infinity}]"),
         std::string{"sqrt[Pi]"},
         "two-sided Gaussian integral closes exactly through erf infinity limits");
+    tests.expectEqual(eval(session, "integrate[sin[x]/x,{x,0,Infinity}]"),
+        std::string{"Pi/2"},
+        "Dirichlet integral closes through the exact Si infinity limit");
+    tests.expectEqual(eval(session, "integrate[cos[Pi*x^2/2],{x,0,Infinity}]"),
+        std::string{"1/2"},
+        "Fresnel cosine integral closes through the exact endpoint limit");
+    tests.expectEqual(eval(session, "integrate[sin[Pi*x^2/2],{x,0,Infinity}]"),
+        std::string{"1/2"},
+        "Fresnel sine integral closes through the exact endpoint limit");
+    tests.expectEqual(eval(session, "integrate[exp[-a*x],{x,0,Infinity},a>0]"),
+        std::string{"1/a"},
+        "assumption-aware Gamma kernels prove the positive exponential scale before reducing");
+    tests.expectEqual(eval(session, "integrate[exp[-a*x^2],{x,-Infinity,Infinity},a>0]"),
+        std::string{"sqrt[Pi]/sqrt[a]"},
+        "assumption-aware Gaussian whole-line integral preserves the positive scale condition");
+    tests.expectEqual(eval(session, "integrate[x^(s-1)*exp[-x],{x,0,Infinity},s>0]"),
+        std::string{"gamma[s]"},
+        "DLMF Gamma integral family closes under a proved positive parameter");
+    tests.expectEqual(eval(session, "integrate[x^(a-1)*(1-x)^(b-1),{x,0,1},{a>0,b>0}]"),
+        std::string{"beta[a, b]"},
+        "Euler Beta integral uses both endpoint convergence assumptions");
+    tests.expectEqual(eval(session, "integrate[1/(1+x^4),{x,0,Infinity}]"),
+        std::string{"Pi/(2sqrt[2])"},
+        "Beta reflection after t=x^q evaluates reciprocal quartic improper integrals");
+    tests.expectEqual(eval(session, "integrate[x/(1+x^4),{x,0,Infinity}]"),
+        std::string{"Pi/4"},
+        "generalized Beta reflection handles monomial numerators");
+    tests.expectEqual(eval(session, "integrate[log[x]^2,{x,0,1}]"),
+        std::string{"2"},
+        "log moments on the unit interval use exact parameter differentiation");
+    tests.expectEqual(eval(session, "integrate[x^2*log[x],{x,0,1}]"),
+        std::string{"-1/9"},
+        "weighted log moments preserve exact endpoint convergence");
+    tests.expectEqual(eval(session, "integrate[1/sqrt[1-x^4],{x,0,1}]"),
+        std::string{"beta[1/4, 1/2]/4"},
+        "endpoint algebraic singularities reduce to Euler Beta after t=x^q");
+    tests.expectEqual(eval(session, "integrate[x^n,{x,0,a},{a>0,n>-1}]"),
+        std::string{"a^(n+1)/(n+1)"},
+        "parameterized power definite integration consumes the exact n>-1 convergence condition");
+    tests.expectEqual(eval(session, "integrate[1/(x-a),{x,0,1},{a<0}]"),
+        std::string{"log[-(1-a)/a]"},
+        "symbolic poles proved below a finite interval are integrated without branch ambiguity");
+    tests.expectEqual(eval(session, "integrate[1/(x-a),{x,0,1},{a>1}]"),
+        std::string{"log[-(1-a)/a]"},
+        "symbolic poles proved above a finite interval use the same positive endpoint ratio");
 
     const std::string internalPole = eval(session, "integrate[1/(x-2),{x,1,Infinity}]");
     tests.expect(internalPole.find("integrate[") == 0,
@@ -137,6 +209,24 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "Solve combines constant-base exponential inversion with affine polynomial solving");
     tests.expectEqual(eval(session, "solve[log[x]==2,x,Real]"), std::string{"{x == exp[2]}"},
         "Solve reverses real Log through Exp without losing its natural domain");
+    tests.expectEqual(eval(session, "solve[exp[x]==x,x,Real]"), std::string{"{}"},
+        "real Exp has no fixed point because exp[u] is strictly above u");
+    tests.expectEqual(eval(session, "solve[exp[x+1]==x+1,x,Real]"), std::string{"{}"},
+        "real Exp fixed-point exclusion applies to a proved-real composite argument");
+    tests.expectEqual(eval(session, "solve[log[x]==x,x,Real]"), std::string{"{}"},
+        "principal real Log has no fixed point");
+    tests.expectEqual(eval(session, "solve[x+log[x]==0,x,Real]"),
+        std::string{"{x == lambertw[1]}"},
+        "Log plus its real argument normalizes to the Lambert W normal form");
+    tests.expectEqual(eval(session, "solve[exp[x]+x==0,x,Real]"),
+        std::string{"{x == -lambertw[1]}"},
+        "Exp plus its real argument normalizes through a negated Lambert W target");
+    tests.expectEqual(eval(session, "solve[x+1+log[x+1]==0,x,Real]"),
+        std::string{"{x == lambertw[1]-1}"},
+        "Lambert self-relation normalization composes with affine target solving");
+    tests.expectEqual(eval(session, "solve[exp[x+1]+x+1==0,x,Real]"),
+        std::string{"{x == -(1+lambertw[1])}"},
+        "negated Lambert self-relation normalization composes with affine targets");
     tests.expectEqual(eval(session, "solve[ln[x]==2,x,Real]"), std::string{"{x == exp[2]}"},
         "Solve-safe normalization makes ln share canonical log semantics");
     tests.expectEqual(eval(session, "solve[log2[x]==3,x,Real]"), std::string{"{x == 8}"},
@@ -160,6 +250,249 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[exp[x]==a,x,Real]"),
         std::string{"{x == log[a] if a in Real && a > 0}"},
         "symbolic inverse solution retains the real range condition");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==1,x,Real]"),
+        std::string{"{x == lambertw[1]}"},
+        "canonical u Exp[u] equations normalize directly to Lambert W");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==a,x,Real]"),
+        std::string{"{x == lambertw[a] if a in Real && a >= -1/E, x == lambertw[-1, a] if a in Real && a > -1/E && a < 0}"},
+        "symbolic Lambert normal form preserves both exact real branch conditions");
+    tests.expectEqual(eval(session, "solve[exp[-x]==x,x,Real]"),
+        std::string{"{x == lambertw[1]}"},
+        "negative exponential fixed points normalize through u Exp[u]==1");
+    tests.expectEqual(eval(session, "solve[lambertw[x]==1,x]"),
+        std::string{"{x == E}"},
+        "principal Lambert W inversion uses w Exp[w] on its proved real range");
+    tests.expectEqual(eval(session, "solve[cosh[x]==2,x,Real]"),
+        std::string{"{x == acosh[2], x == -acosh[2]}"},
+        "real cosh inversion returns both even branches");
+    tests.expectEqual(eval(session, "solve[cosh[x]==1,x,Real]"),
+        std::string{"{x == 0}"},
+        "real cosh inversion coalesces the two branches at its minimum");
+    tests.expectEqual(eval(session, "solve[erf[x]==0,x,Real]"),
+        std::string{"{x == 0}"},
+        "real erf uses strict monotonicity to certify its unique zero");
+    tests.expectEqual(eval(session, "solve[erf[x^2-1]==0,x,Real]"),
+        std::string{"{x == 1, x == -1}"},
+        "real erf zero knowledge composes with exact polynomial solving");
+    tests.expectEqual(eval(session, "solve[erf[x^2+1]==0,x,Real]"),
+        std::string{"{}"},
+        "real erf zero knowledge can certify that a composite equation has no solution");
+    {
+        const expression::Expr xExpression = session.evaluate("x");
+        const auto* infinity = session.symbolRegistry().find("Infinity");
+        tests.expect(infinity != nullptr,
+            "Real function analysis requires the registered Infinity sentinel");
+        if (infinity && xExpression.isSymbol()) {
+            const expression::Symbol x = xExpression.asSymbol();
+            const auto analyze = [&](std::string_view source) {
+                return solver::analyzeRealFunction(
+                    session.evaluate(source), x,
+                    session.builtinRegistry(), session.mathRegistry(),
+                    mathematics::defaultAngleSemantics(), infinity->symbol);
+            };
+
+            const auto logarithm = analyze("log[x]");
+            tests.expect(logarithm.domainComplete && logarithm.domain.size() == 1,
+                "Real function analysis finds the complete positive domain of principal Log");
+            if (logarithm.domainComplete && logarithm.domain.size() == 1)
+                tests.expectEqual(intervalText(logarithm.domain.front()), std::string{"(0, Infinity)"},
+                    "principal Log real domain is the positive half-line");
+            tests.expect(logarithm.pieces.size() == 1
+                    && logarithm.pieces.front().monotonicity
+                        == solver::RealIntervalMonotonicity::Increasing,
+                "principal Log is certified increasing on its real domain");
+            if (logarithm.pieces.size() == 1 && logarithm.pieces.front().range)
+                tests.expectEqual(rangeText(*logarithm.pieces.front().range),
+                    std::string{"(-Infinity, Infinity)"},
+                    "principal Log endpoint limits certify its full real range");
+
+            const auto squareRoot = analyze("sqrt[x]");
+            tests.expect(squareRoot.domainComplete && squareRoot.domain.size() == 1,
+                "Real function analysis finds the complete principal square-root domain");
+            if (squareRoot.domainComplete && squareRoot.domain.size() == 1)
+                tests.expectEqual(intervalText(squareRoot.domain.front()), std::string{"[0, Infinity)"},
+                    "principal square-root real domain includes zero");
+            tests.expect(squareRoot.pieces.size() == 1
+                    && squareRoot.pieces.front().range.has_value(),
+                "principal square-root range is certified from endpoint limits and monotonicity");
+            if (squareRoot.pieces.size() == 1 && squareRoot.pieces.front().range)
+                tests.expectEqual(rangeText(*squareRoot.pieces.front().range),
+                    std::string{"[0, Infinity)"},
+                    "principal square-root range follows from endpoint limits and monotonicity");
+
+            const auto inverseHyperbolic = analyze("atanh[x]");
+            tests.expect(inverseHyperbolic.domainComplete && inverseHyperbolic.domain.size() == 1,
+                "Real function analysis respects the principal atanh interval");
+            if (inverseHyperbolic.domainComplete && inverseHyperbolic.domain.size() == 1)
+                tests.expectEqual(intervalText(inverseHyperbolic.domain.front()),
+                    std::string{"(-1, 1)"},
+                    "principal atanh real domain is open at both branch points");
+            tests.expect(inverseHyperbolic.pieces.size() == 1
+                    && inverseHyperbolic.pieces.front().range.has_value(),
+                "principal atanh range is certified from branch-point limits");
+            if (inverseHyperbolic.pieces.size() == 1 && inverseHyperbolic.pieces.front().range)
+                tests.expectEqual(rangeText(*inverseHyperbolic.pieces.front().range),
+                    std::string{"(-Infinity, Infinity)"},
+                    "principal atanh endpoint limits certify its full real range");
+
+            const auto rational = analyze("1/(x^2-1)");
+            tests.expect(rational.domainComplete && rational.domain.size() == 3,
+                "rational real domain is split at every exact pole");
+            if (rational.domainComplete && rational.domain.size() == 3) {
+                tests.expectEqual(intervalText(rational.domain[0]),
+                    std::string{"(-Infinity, -1)"},
+                    "rational domain keeps the left connected component");
+                tests.expectEqual(intervalText(rational.domain[1]),
+                    std::string{"(-1, 1)"},
+                    "rational domain keeps the middle connected component");
+                tests.expectEqual(intervalText(rational.domain[2]),
+                    std::string{"(1, Infinity)"},
+                    "rational domain keeps the right connected component");
+            }
+
+            const auto logarithmicResidual = analyze("log[x]-x+1");
+            tests.expect(logarithmicResidual.domainComplete
+                    && logarithmicResidual.pieces.size() == 2,
+                "critical-point partition splits a half-line real domain exactly");
+            if (logarithmicResidual.pieces.size() == 2) {
+                tests.expectEqual(intervalText(logarithmicResidual.pieces[0].domain),
+                    std::string{"(0, 1]"},
+                    "logarithmic residual first monotone piece ends at its exact critical point");
+                tests.expectEqual(intervalText(logarithmicResidual.pieces[1].domain),
+                    std::string{"[1, Infinity)"},
+                    "logarithmic residual second monotone piece starts at its exact critical point");
+                tests.expect(logarithmicResidual.pieces[0].monotonicity
+                        == solver::RealIntervalMonotonicity::Increasing
+                        && logarithmicResidual.pieces[1].monotonicity
+                            == solver::RealIntervalMonotonicity::Decreasing,
+                    "rational derivative sign charts certify monotonicity on critical-point pieces");
+            }
+        }
+    }
+
+    tests.expectEqual(eval(session, "solve[log[x]-x-1==0,x,Real]"),
+        std::string{"{}"},
+        "interval endpoint bounds prove nonexistence on a half-line real domain");
+    tests.expectEqual(eval(session, "solve[log[x]-x+1==0,x,Real]"),
+        std::string{"{x == 1}"},
+        "domain decomposition plus a unique exact extremum closes a principal-log equation");
+    tests.expectEqual(eval(session, "solve[log[x]-2x+2==0,x,Real]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "interval analysis stays unresolved when another exact root cannot be represented");
+
+    tests.expectEqual(eval(session, "solve[sin[x]==x,x,Real]"),
+        std::string{"{x == 0}"},
+        "non-strict derivative plus a countable zero set proves strict monotonicity");
+    tests.expectEqual(eval(session, "solve[x==sin[x],x,Real]"),
+        std::string{"{x == 0}"},
+        "non-strict strictness proof is invariant under relation orientation");
+
+    tests.expectEqual(eval(session, "solve[abs[x]<2,x]"),
+        std::string{"{x in Real if x > -2 && x < 2}"},
+        "absolute-value strict inequality reduces to an exact real polynomial sign chart");
+    tests.expectEqual(eval(session, "solve[abs[x-1]>=3,x]"),
+        std::string{"{x in Real if x <= -2, x in Real if x >= 4}"},
+        "absolute-value exterior inequality preserves both connected components");
+    tests.expectEqual(eval(session, "solve[abs[2x-1]<=3,x]"),
+        std::string{"{x in Real if x >= -1 && x <= 2}"},
+        "affine absolute-value inequality reuses polynomial interval solving");
+    tests.expectEqual(eval(session, "solve[abs[x]==2,x,Real]"),
+        std::string{"{x == 2, x == -2}"},
+        "real absolute-value equality splits into its two exact target equations");
+    tests.expectEqual(eval(session, "solve[abs[x]==-2,x,Real]"),
+        std::string{"{}"},
+        "negative absolute-value target is proved impossible over Real");
+    tests.expectEqual(eval(session, "solve[abs[x]!=2,x,Real]"),
+        std::string{"{x in Real if x != 2 && x != -2}"},
+        "real absolute-value disequality excludes both exact target points");
+    tests.expectEqual(eval(session, "solve[abs[x]==2,x]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "absolute-value equality does not collapse the default Complex locus to two real points");
+    tests.expectEqual(eval(session, "solve[abs[1/x]>=0,x]"),
+        std::string{"All if x != 0"},
+        "absolute-value range proof preserves a rational argument domain hole");
+    tests.expectEqual(eval(session, "solve[abs[log[x]]>=0,x]"),
+        std::string{"All if x != 0"},
+        "absolute-value range proof preserves principal logarithm definedness");
+
+    tests.expectEqual(eval(session, "solve[exp[x]+x^2+1==0,x,Real]"),
+        std::string{"{}"},
+        "Real equation prover excludes a globally positive residual without root search");
+    tests.expectEqual(eval(session, "solve[cosh[x]+x^4==0,x,Real]"),
+        std::string{"{}"},
+        "Real equation prover combines nonnegative even powers with a positive function range");
+    tests.expectEqual(eval(session, "solve[x+exp[x]-1==0,x,Real]"),
+        std::string{"{x == 0}"},
+        "strict monotonicity plus an exact anchor proves a unique real root");
+    tests.expectEqual(eval(session, "solve[x+erf[x]==0,x,Real]"),
+        std::string{"{x == 0}"},
+        "MathRegistry monotonicity facts participate in exact uniqueness proofs");
+    tests.expectEqual(eval(session, "solve[exp[x]==x+1,x,Real]"),
+        std::string{"{x == 0}"},
+        "strict convexity and an exact global minimum prove a tangent unique root");
+    tests.expectEqual(eval(session, "solve[exp[x]-x+5==0,x,Real]"),
+        std::string{"{}"},
+        "strict convexity and a positive exact minimum prove real nonexistence");
+    tests.expectEqual(eval(session, "solve[erf[x]==1,x,Real]"),
+        std::string{"{}"},
+        "open real function range proves that an endpoint target has no finite solution");
+    tests.expectEqual(eval(session, "solve[erfc[x]==1,x,Real]"),
+        std::string{"{x == 0}"},
+        "global injectivity plus an exact anchor closes an inverse-free real equation");
+    tests.expectEqual(eval(session, "solve[erfc[x]==0,x,Real]"),
+        std::string{"{}"},
+        "open complementary-error-function range excludes its limiting endpoint");
+    tests.expectEqual(eval(session, "solve[erfc[x]==2,x,Real]"),
+        std::string{"{}"},
+        "open complementary-error-function range excludes its opposite limiting endpoint");
+    tests.expectEqual(eval(session, "solve[exp[x]==x+2,x,Real]"),
+        std::string{"{x == -lambertw[-exp[-2]]-2, x == -lambertw[-1, -exp[-2]]-2}"},
+        "affine exponential equations close through both real Lambert W branches");
+    tests.expectEqual(eval(session, "solve[2^x==x,x,Real]"),
+        std::string{"{}"},
+        "constant-base affine exponential equations prove branch-point nonexistence exactly");
+    tests.expectEqual(eval(session, "solve[(4/3)^x==x,x,Real]"),
+        std::string{"{x == -lambertw[-log[4/3]]/log[4/3], x == -lambertw[-1, -log[4/3]]/log[4/3]}"},
+        "constant-base affine exponential equations preserve both real Lambert branches");
+    tests.expectEqual(eval(session, "solve[(1/2)^x==x,x,Real]"),
+        std::string{"{x == -lambertw[-log[1/2]]/log[1/2]}"},
+        "constant bases below one produce the unique positive real Lambert branch");
+    tests.expectEqual(eval(session, "solve[x^x==1,x,Real]"),
+        std::string{"{x == 1}"},
+        "principal self-power equation closes exactly at the unit target");
+    tests.expectEqual(eval(session, "solve[x^x==2,x,Real]"),
+        std::string{"{x == exp[lambertw[log[2]]]}"},
+        "principal self-power target above one closes through Lambert W");
+    tests.expectEqual(eval(session, "solve[x^x==-1,x,Real]"),
+        std::string{"{x == -1}"},
+        "principal self-power keeps the unique negative unit target");
+    tests.expectEqual(eval(session, "solve[x^x==1/4,x,Real]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "self-power targets inside the unit interval remain unresolved when negative integer roots may occur");
+    tests.expectEqual(eval(session, "solve[erf[x]==1/2,x,Real]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "uniqueness without an exact representable root remains unresolved");
+    tests.expectEqual(eval(session, "solve[exp[x]-x+5==0,x,Complex]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "real nonexistence proofs do not leak into the complex solve domain");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==2,x]"),
+        std::string{"{x == 4}"},
+        "principal square-root equations invert through an exact squared candidate");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==-2,x]"),
+        std::string{"{}"},
+        "principal square-root inversion rejects the negative real image");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==I,x]"),
+        std::string{"{x == -1}"},
+        "principal square-root inversion accepts the positive imaginary boundary image");
+    tests.expectEqual(eval(session, "solve[sqrt[x+1]==x-1,x]"),
+        std::string{"{x == 3}"},
+        "square-root candidate filtering removes roots introduced by squaring");
+    tests.expectEqual(eval(session, "solve[cbrt[x]==2,x]"),
+        std::string{"{x == 8}"},
+        "real cube-root equations invert through an exact cubed candidate");
+    tests.expectEqual(eval(session, "solve[cbrt[x+1]==x-1,x]"),
+        std::string{"{x == root[{-2, 2, -3, 1}, 1]}"},
+        "real cube-root equations keep only the exact real transformed root");
 
     tests.expectEqual(eval(session, "solve[x^2==4,Real]"), std::string{"{x == 2, x == -2}"},
         "solve[equation,Real] infers a unique unknown without treating Real as the variable");
@@ -205,12 +538,54 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[lambertw[-1,-1/10],20]"),
         std::string{"-3.5771520639572972184"},
         "Lambert W lower real branch has certified numerical evaluation");
+    tests.expectEqual(eval(session, "N[lambertw[1+I],20]"),
+        std::string{"0.65696606923043640587+0.32545033941341502999I"},
+        "Lambert W principal branch has a certified complex backend");
+    tests.expectEqual(eval(session, "N[lambertw[2,1],20]"),
+        std::string{"-2.4015851048680028842+10.776299516115070898I"},
+        "Lambert W accepts certified positive complex branch indices");
+    tests.expectEqual(eval(session, "N[lambertw[-3,1],20]"),
+        std::string{"-2.8535817554090378072-17.113535539412145913I"},
+        "Lambert W accepts certified negative complex branch indices");
+    tests.expectEqual(eval(session, "N[lambertw[2,1+I],20]"),
+        std::string{"-2.1208839379437137158+11.600137110774577828I"},
+        "Lambert W preserves explicit branch selection for complex input");
+    tests.expectEqual(eval(session, "N[lambertw[-1/E+I/10^8],20]"),
+        std::string{"-0.99983512787429915685+0.00016485400656056139308I"},
+        "Lambert W principal branch certifies the upper side of the -1/e branch point");
+    tests.expectEqual(eval(session, "N[lambertw[-1/E-I/10^8],20]"),
+        std::string{"-0.99983512787429915685-0.00016485400656056139308I"},
+        "Lambert W principal branch certifies the lower side of the -1/e branch point");
+    tests.expectEqual(eval(session, "N[lambertw[-1,-1/E+I/10^8],20]"),
+        std::string{"-1.0001648721257003724-0.00016489025031827418034I"},
+        "Lambert W branch -1 follows the local branch above the -1/e cut");
+    tests.expectEqual(eval(session, "N[lambertw[1,-1/E-I/10^8],20]"),
+        std::string{"-1.0001648721257003724+0.00016489025031827418034I"},
+        "Lambert W branch +1 follows the symmetric local branch below the -1/e cut");
+    tests.expectEqual(eval(session, "N[lambertw[-1,-1/E-I/10^8],20]"),
+        std::string{"-3.0888430122347265671-7.4614892575256769112I"},
+        "Lambert W branch -1 does not misconnect to the local branch below the cut");
+    tests.expectEqual(eval(session, "N[lambertw[-1/E+1/10^12],20]"),
+        std::string{"-0.99999766835783058882"},
+        "Lambert W principal real branch uses the local branch-point backend to the right of -1/e");
+    tests.expectEqual(eval(session, "N[lambertw[-1,-1/E+1/10^12],20]"),
+        std::string{"-1.0000023316457937869"},
+        "Lambert W lower real branch uses the local branch-point backend to the right of -1/e");
     tests.expectEqual(eval(session, "N[solve[1.1^x==x^2,x,Real],20]"),
         std::string{"{x == -0.95548727594562198165, x == 1.0513800237472769374, x == 95.716830168405222740}"},
         "N approximates numerically closed SolutionSet binding values while preserving variables");
     tests.expectEqual(eval(session, "D[lambertw[x],x]"),
-        std::string{"cases[lambertw[x]/(x*(1+lambertw[x])) if x != 0; 1 if x == 0]"},
-        "Lambert W principal derivative preserves its removable value at zero");
+        std::string{"exp[-lambertw[x]]/(1+lambertw[x])"},
+        "Lambert W derivative uses the DLMF form regular at the principal zero");
+    tests.expectEqual(eval(session, "D[lambertw[x],{x,2}]"),
+        std::string{"(-2-lambertw[x])exp[-2lambertw[x]]/(1+lambertw[x])^3"},
+        "Lambert W repeated derivatives use the exact DLMF polynomial recurrence");
+    tests.expectEqual(eval(session, "D[polylog[3,x],{x,3}]"),
+        std::string{"cases[(x/(1-x)+3log[1-x]+2polylog[2, x])/x^3 if x != 0; 2/9 if x == 0]"},
+        "polylog repeated derivatives close directly while preserving the removable value at zero");
+    tests.expectEqual(eval(session, "D[exp[-x^2],{x,4}]"),
+        std::string{"(16x^4-48x^2+12)exp[-x^2]"},
+        "repeated derivatives of quadratic exponentials retain a collected polynomial factor");
 
     tests.expectEqual(eval(session, "solve[ellipticF[x,0]==2,x]"), std::string{"{x == 2}"},
         "Solve consumes exact ellipticF degeneration before polynomial solving");
@@ -290,9 +665,24 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[x^5-x+1==0,x]"),
         std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1, Complex], x == root[{1, -1, 0, 0, 0, 1}, 2, Complex], x == root[{1, -1, 0, 0, 0, 1}, 3, Complex], x == root[{1, -1, 0, 0, 0, 1}, 4, Complex], x == root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
         "Complex Solve falls back to certified complex Root isolation for unresolved rational polynomials");
+    tests.expectEqual(eval(session,
+        "solve[x^6-3x^5-x^4+2x^3+2x^2-2x-1==0,x]"),
+        std::string{"{x == root[{-1, -2, 2, 2, -1, -3, 1}, 1, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 2, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 3, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 4, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 5, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 6, Complex]}"},
+        "Complex Solve proves irreducibility from intersected modular factor-degree constraints");
+    tests.expectEqual(eval(session,
+        "solve[(x^3-x-1)*(x^3+x+1)==0,x]"),
+        std::string{"{x == root[{1, 1, 0, 1}, 1, Complex], x == root[{-1, -1, 0, 1}, 1, Complex], x == root[{1, 1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 3, Complex], x == root[{1, 1, 0, 1}, 3, Complex]}"},
+        "Complex Solve batch-canonicalizes reducible all-root isolation to minimal factors");
     tests.expectEqual(eval(session, "N[root[{1,0,1},2,Complex],30]"),
         std::string{"1.0I"},
         "complex Root refinement certifies an exact imaginary algebraic root");
+    (void)eval(session, "root[{-2,0,0,0,0,0,0,0,1},1,Complex]");
+    tests.expectEqual(eval(session, "N[Out[-1],30]"),
+        std::string{"0.0-1.09050773266525765920701065576I"},
+        "complex Root numerical evaluation reuses the cached isolating disk from exact evaluation");
+    tests.expectEqual(eval(session, "N[root[{-2,0,0,0,0,0,0,0,0,0,1},1,Complex],30]"),
+        std::string{"-0.331196214043795628507030588621-1.01931713553736126627822937193I"},
+        "complex Root isolation remains stable for sparse symmetric degree-ten polynomials");
     tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
         std::string{"2"},
         "bounded AlgebraicNumber arithmetic re-identifies an exact rational product");

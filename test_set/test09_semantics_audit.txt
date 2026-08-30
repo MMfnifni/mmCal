@@ -30,7 +30,12 @@ N[sin[x]+Pi,20] ==> 3.1415926535897932385+sin[x]
 N[True,20] ==> True
 N[Infinity,20] ==> Infinity
 N[lambertw[-1,-1/2],30] ==> lambertw[-1, -1/2]
-N[lambertw[2,1],30] ==> lambertw[2, 1]
+N[lambertw[2,1],30] ==> -2.40158510486800288417413977468+10.7762995161150708984971033464I
+N[lambertw[-1/E+I/10^8],20] ==> -0.99983512787429915685+0.00016485400656056139308I
+N[lambertw[-1/E-I/10^8],20] ==> -0.99983512787429915685-0.00016485400656056139308I
+N[lambertw[-1,-1/E+I/10^8],20] ==> -1.0001648721257003724-0.00016489025031827418034I
+N[lambertw[1,-1/E-I/10^8],20] ==> -1.0001648721257003724+0.00016489025031827418034I
+N[lambertw[-1,-1/E-I/10^8],20] ==> -3.0888430122347265671-7.4614892575256769112I
 
 # ============================================================================
 # Former file: test27_audit.txt
@@ -48,7 +53,7 @@ cases[1 if x>0;2 if x<=0]==>cases[1 if x > 0; 2 if x <= 0]
 simplify[cases[1/x if x!=0;0 if x==0],x!=0]==>1/x
 N[cases[Pi if x!=0;E if x==0],20]==>cases[3.1415926535897932385 if x != 0; 2.7182818284590452354 if x == 0]
 D[cases[x^2 if a>0;sin[x] if a<=0],x]==>cases[2x if a > 0; cos[x] if a <= 0]
-D[cases[x^2 if x>0;sin[x] if x<=0],x]==>D[cases[x^2 if x > 0; sin[x] if x <= 0], x]
+D[cases[x^2 if x>0;sin[x] if x<=0],x]==>cases[2x if x > 0; cos[x] if x < 0; D[cases[x^2 if x > 0; sin[x] if x <= 0], x] if x == 0]
 integrate[cases[x if a>0;x^2 if a<=0],x]==>cases[x^2/2 if a > 0; x^3/3 if a <= 0]
 integrate[cases[x if x>0;x^2 if x<=0],x]==>integrate[cases[x if x > 0; x^2 if x <= 0], x]
 limit[cases[sin[x]/x if a>0;(1-cos[x])/x^2 if a<=0],x,0]==>cases[1 if a > 0; 1/2 if a <= 0]
@@ -118,7 +123,12 @@ solve[{x+y==3,x y==2},{x,y}]==>{{x == 1,y == 2},{x == 2,y == 1}}
 solve[{x-y==0,y-z==0,z^2==1},{x,y,z}]==>{{x == 1,y == 1,z == 1},{x == -1,y == -1,z == -1}}
 solve[{x+y==1,x+y==2},{x,y}]==>{}
 solve[{x^2==2,y-x==0},{x,y}]==>{{x == sqrt[2],y == sqrt[2]},{x == -sqrt[2],y == -sqrt[2]}}
-solve[{x y==0},{x,y}]==>UnresolvedSolutionSet[x,y]
+solve[{x y==0},{x,y}]==>{x == 0 where y in Complex, y == 0 where x in Complex}
+solve[{x y==1},{x,y},Real]==>{y == 1/x where x in Real if x != 0}
+solve[{x^2+y^2==1},{x,y},Real]==>{y == sqrt[1-x^2] where x in Real if x >= -1 && x <= 1, y == -sqrt[1-x^2] where x in Real if x >= -1 && x <= 1}
+solve[{y^2-x==0},{x,y},Real]==>{y == sqrt[x] where x in Real if x >= 0, y == -sqrt[x] where x in Real if x >= 0}
+solve[{z-x-y==0,x^2+y^2==1},{x,y,z},Real]==>{{y == sqrt[1-x^2],z == x+sqrt[1-x^2]} where x in Real if x >= -1 && x <= 1,{y == -sqrt[1-x^2],z == x-sqrt[1-x^2]} where x in Real if x >= -1 && x <= 1}
+solve[{z==x+y,x*y==1},{x,y,z},Real]==>{{y == 1/x,z == x+1/x} where x in Real if x != 0}
 solve[x^5-x-1==0,x]==>{x == root[{-1,-1,0,0,0,1},1,Complex],x == root[{-1,-1,0,0,0,1},2,Complex],x == root[{-1,-1,0,0,0,1},3,Complex],x == root[{-1,-1,0,0,0,1},4,Complex],x == root[{-1,-1,0,0,0,1},5,Complex]}
 
 # Phase 5 complex digamma/trigamma certification and recurrence identities
@@ -139,21 +149,22 @@ trigamma[-1]=>DomainError
 
 # bounded-work boundaries must stay classified as backend limits, not invented values
 N[Ei[96],20]=>5.1831746110039680653e39
-N[Ei[97],20]==>Ei[97]
+N[Ei[97],20]=>13942532424263388810000000000000000000000.0
 N[Si[96],20]=>1.5725687465291300355
-N[Si[97],20]==>Si[97]
+N[Si[97],20]=>1.5802915860056074271
 N[Ci[96],20]=>0.010263050345143993865
-N[Ci[97],20]==>Ci[97]
+N[Ci[97],20]=>0.0040109142844998040983
 N[polylog[2,49/50],20]=>1.5457997120314656097
-N[polylog[2,99/100],20]==>polylog[2,99/100]
+N[polylog[2,99/100],20]==>1.5886254480763753270
 N[hypergeometric1F1[1/2,5/4,160],20]=>>3.4978276269386186e67
-N[hypergeometric1F1[1/2,5/4,161],20]==>hypergeometric1F1[1/2,5/4,161]
+N[hypergeometric1F1[1/2,5/4,161],20]=>94636147547763363460000000000000000000000000000000000000000000000000.0
 N[hypergeometric2F1[1/2,1/3,5/4,9/10],20]=>1.2540597304760187485
-N[hypergeometric2F1[1/2,1/3,5/4,19/20],20]==>hypergeometric2F1[1/2,1/3,5/4,19/20]
+N[hypergeometric2F1[1/2,1/3,5/4,19/20],20]==>1.3068052887857217891
+N[hypergeometric2F1[1/2,1/3,5/4,1],20]==>1.4908745724194916165
 N[ellipticF[1/2,9/10],20]=>0.51976394243782869496
-N[ellipticF[1/2,19/20],20]==>ellipticF[1/2,19/20]
-N[zeta[1/2],20]==>zeta[1/2]
-N[zeta[1/2+I],20]==>zeta[1/2+I]
+N[ellipticF[1/2,19/20],20]=>0.52099294480389383536
+N[zeta[1/2],20]==>-1.4603545088095868129
+N[zeta[1/2+I],20]==>0.14393642707718906032-0.72209974353167308913I
 
 # ============================================================================
 # Former file: test28_semantic_hardening.txt

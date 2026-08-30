@@ -180,15 +180,6 @@ Expr evaluateZeros(std::span<const Expr> arguments) {
     return Expr::integerArray({rows, cols}, std::vector<BigInt>(count, BigInt{0}));
 }
 
-Expr evaluateMatrixGet(std::span<const Expr> arguments) {
-    const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "mget");
-    const std::size_t row = detail::requireSize(arguments[1], "mget");
-    const std::size_t col = detail::requireSize(arguments[2], "mget");
-    if (row >= matrix.shape[0] || col >= matrix.shape[1])
-        error::throwCalcError(error::CalcErrorType::Domain, "mget index is out of range");
-    return matrix.element(row * matrix.shape[1] + col);
-}
-
 Expr evaluateRows(std::span<const Expr> arguments) {
     const ArrayExpr& matrix = detail::requireMatrix(arguments[0], "rows");
     return detail::sizeExpr(matrix.shape[0]);
@@ -248,15 +239,6 @@ Expr evaluateVectorScale(
     if (arguments[1].isArray() || arguments[1].isString() || arguments[1].isBoolean())
         error::throwCalcError(error::CalcErrorType::Type, "vscalar scale must be a scalar expression");
     return scaleVector(detail::requireVector(arguments[0], "vscalar"), arguments[1], registry, mathematics, angles);
-}
-
-Expr evaluateVectorDot(
-    std::span<const Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    return dot(detail::requireVector(arguments[0], "vdot"), detail::requireVector(arguments[1], "vdot"),
-        registry, mathematics, angles);
 }
 
 Expr evaluateVectorCross(

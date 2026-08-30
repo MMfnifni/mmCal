@@ -2,7 +2,7 @@
 
 このディレクトリは，mmCal の public CLI を介して exact arithmetic，symbolic evaluation，certified numerical evaluation，calculus，special functions，matrix/statistics，definedness/error semantics を横断確認するブラックボックステスト集合である。
 
-テストファイルは従来の34本から10本へ整理した。元の2012ケースは削除せず保持し，2026-08のcertified numerical auditで重要だった17ケースを追加して，現在は合計2029ケースである。
+テストファイルは従来の34本から10本へ整理した。元の2012ケースは削除せず保持し，2026-08のcertified numerical auditとperformance/capability監査で重要だった34ケースを追加して，現在は合計2046ケースである。
 
 ## 実行方法
 
@@ -31,13 +31,13 @@ py cli_automation_tests.py --exe "..\..\build\x64\Release\mmCal.exe"
 | `test02_legacy_errors.txt` | 旧error/exception回帰 | 165 |
 | `test03_language_runtime.txt` | core syntax，angle mode，numeric lexer，history，iteration，variables | 161 |
 | `test04_exact_arithmetic_algebra.txt` | BigInt/Rational，exact complex/algebraic，number theory，number fields，cyclotomic FFT | 224 |
-| `test05_approximation_certification.txt` | `N`，Precision/Accuracy，explain，InformationEnclosure，branch/backend audit | 163 |
+| `test05_approximation_certification.txt` | `N`，Precision/Accuracy，explain，InformationEnclosure，branch/backend audit | 164 |
 | `test06_calculus_solver.txt` | symbolic/numerical calculus，Solve，Lambert W | 175 |
-| `test07_special_functions.txt` | gamma系，hypergeometric，elliptic，polylog等 | 108 |
-| `test08_boundary_errors.txt` | 詳細なdomain/boundary/error message contract | 82 |
-| `test09_semantics_audit.txt` | semantic coherence，definedness-preserving simplification，横断audit | 173 |
+| `test07_special_functions.txt` | gamma系，hypergeometric，elliptic，polylog等 | 119 |
+| `test08_boundary_errors.txt` | 詳細なdomain/boundary/error message contract | 86 |
+| `test09_semantics_audit.txt` | semantic coherence，definedness-preserving simplification，横断audit | 174 |
 
-合計は2029ケースである。
+合計は2046ケースである。
 
 ## `# @session` と隔離性
 

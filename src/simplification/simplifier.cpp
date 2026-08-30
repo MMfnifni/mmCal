@@ -1099,6 +1099,13 @@ struct PositiveIntegerPower final {
                 && isHead(arguments[0], context.builtins, BuiltinId::Sqrt)
                 && arguments[0].asCall().arguments.size() == 1)
                 return arguments[0].asCall().arguments.front();
+            // real cbrtは実軸全体で一価なcubeの逆函数なので、引数がRealと証明済みなら
+            // (cbrt[z])^3=z。未証明の複素zへ拡張するとcbrtのdomain holeを消すため行わない。
+            if (*exponent == Rational{BigInt{3}}
+                && isHead(arguments[0], context.builtins, BuiltinId::Cbrt)
+                && arguments[0].asCall().arguments.size() == 1
+                && knowledge.facts(arguments[0].asCall().arguments.front()).isProvablyReal())
+                return arguments[0].asCall().arguments.front();
         }
         return expression;
 
@@ -1734,7 +1741,6 @@ struct PositiveIntegerPower final {
     case BuiltinId::Reshape:
     case BuiltinId::Identity:
     case BuiltinId::Zeros:
-    case BuiltinId::MatrixGet:
     case BuiltinId::Trace:
     case BuiltinId::Rows:
     case BuiltinId::Cols:
@@ -1742,7 +1748,6 @@ struct PositiveIntegerPower final {
     case BuiltinId::VectorAdd:
     case BuiltinId::VectorSubtract:
     case BuiltinId::VectorScale:
-    case BuiltinId::VectorDot:
     case BuiltinId::VectorCross:
     case BuiltinId::VectorNorm:
     case BuiltinId::VectorManhattan:
