@@ -112,10 +112,10 @@ mmCal --batch < expressions.txt
 - `--angle rad`: Radians. This is the default
 - `--angle grad`: Gradians
 - `--eval expr`: Evaluate one expression and write only its value to standard output
-- `--batch` (compatibility alias: `--bach`): Evaluate standard input one line at a time in one session.
+- `--batch`: Evaluate standard input one line at a time in one session.
 - `--help`, `-h`: Show concise startup usage. Use commands such as `:help sin` after startup for function details
 
-`--eval` and `--batch` (`--bach`) are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
+`--eval` and `--batch` are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
 
 On Linux and similar systems, mmCal can be built from source using CMake 3.20 or later with GCC or Clang.
 

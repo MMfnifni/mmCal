@@ -51,13 +51,9 @@ void runKernelSessionTests(TestRunner& tests) {
     }
     {
         const std::array<std::string_view, 1> canonical{"--batch"};
-        const std::array<std::string_view, 1> compatibility{"--bach"};
         tests.expect(
             cli::parseStartupOptions(canonical).inputMode == cli::InputMode::Batch,
             "CLI: --batch selects line-oriented automation mode");
-        tests.expect(
-            cli::parseStartupOptions(compatibility).inputMode == cli::InputMode::Batch,
-            "CLI: --bach remains a compatibility alias for --batch");
     }
     tests.expectThrows<std::invalid_argument>([] {
         const std::array<std::string_view, 3> arguments{"--batch", "--eval", "1"};
