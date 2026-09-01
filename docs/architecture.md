@@ -98,7 +98,7 @@ Builtin属性，Hold規則，iterator，代入，ユーザー函数，履歴参�
 
 ### `cli`
 
-標準入出力，`:fix`, `:status`, 起動時引数，console titleを担当する。`:fix`は表示だけを変え，KernelのExprや履歴を書き換えない。対話loopと`--eval` / `--batch`自動処理経路を分離し，自動処理ではstdoutを値，stderrをdiagnosticに限定する。終了codeの分類は`cli::ExitCode`へ固定する。`--bach`は`--batch`の互換aliasであり，別modeを実装しない。
+標準入出力，`:fix`, `:layout`, `:status`, 起動時引数，console titleを担当する。`:fix`は数値表示だけ，`:layout`は対話REPLの組版だけを変え，KernelのExprや履歴を書き換えない。canonical `formatExpr()`は1行表現の正本として維持し，TTY向けの構造整形はCLI presentation layerで分離する。対話loopと`--eval` / `--batch`自動処理経路を分離し，自動処理ではstdoutを値，stderrをdiagnosticに限定する。終了codeの分類は`cli::ExitCode`へ固定する。
 
 ## 数学知識の共有
 

@@ -21,6 +21,7 @@
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/polynomial.hpp"
 #include "symbolic/substitution.hpp"
+#include "symbolic/series.hpp"
 
 #include <algorithm>
 #include <array>
@@ -5710,6 +5711,11 @@ IntegrationResult integrateExpressionDetailed(
     const simplification::SimplificationContext context{
         builtins, mathematics, angles, assumptions};
     const Expr prepared = simplification::Simplifier{}.simplify(expression, context);
+    if (const auto series = parseSeriesData(prepared, builtins)) {
+        if (auto primitive = integrateSeriesExpression(
+                *series, variable, builtins, mathematics, angles))
+            return IntegrationResult{std::move(*primitive), IntegrationDisposition::Solved};
+    }
     Expr primitive = integrateCore(prepared, variable, builtins, mathematics, angles, 0);
 
     // rule採用後のprimitiveだけをcanonical化する。derivative-backをruntime gateへ

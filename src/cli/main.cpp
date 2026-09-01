@@ -3,6 +3,7 @@
 #include "approximation/certification_error.hpp"
 #include "approximation/certified_evaluator.hpp"
 #include "cli/repl_help.hpp"
+#include "cli/repl_layout.hpp"
 #include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
@@ -23,6 +24,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/ioctl.h>
+#endif
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -35,6 +39,7 @@ namespace {
 
 struct DisplaySettings final {
     std::optional<std::size_t> fixedDigits;
+    mmcal::cli::OutputLayout layout = mmcal::cli::OutputLayout::Auto;
 };
 
 mmcal::evaluation::EvaluationCancellationToken consoleCancellation;
@@ -124,7 +129,9 @@ void updateConsoleTitle(
     const mmcal::kernel::KernelSession& session,
     const DisplaySettings& settings) {
     setConsoleTitle(
-        "mmCal " MMCAL_VERSION_STRING " - " + angleModeName(session) + " - " + displayModeName(settings));
+        "mmCal " MMCAL_VERSION_STRING " - " + angleModeName(session) + " - "
+        + displayModeName(settings) + " - Layout("
+        + std::string{mmcal::cli::outputLayoutName(settings.layout)} + ")");
 }
 
 [[nodiscard]] std::size_t nextGuardDigits(std::size_t current) {
@@ -269,15 +276,81 @@ void updateConsoleTitle(
     return expression;
 }
 
-[[nodiscard]] std::string formatForDisplay(
+[[nodiscard]] mmcal::expression::Expr displayExpression(
     const mmcal::expression::Expr& expression,
     const mmcal::kernel::KernelSession& session,
     const DisplaySettings& settings) {
     if (!settings.fixedDigits)
-        return mmcal::formatting::formatExpr(expression);
-    return mmcal::formatting::trimRedundantFractionalZeros(
-        mmcal::formatting::formatExpr(
-            fixedApproximation(expression, *settings.fixedDigits, session)));
+        return expression;
+    return fixedApproximation(expression, *settings.fixedDigits, session);
+}
+
+[[nodiscard]] std::string formatForAutomatedDisplay(
+    const mmcal::expression::Expr& expression,
+    const mmcal::kernel::KernelSession& session,
+    const DisplaySettings& settings) {
+    const auto displayed = displayExpression(expression, session, settings);
+    std::string text = mmcal::formatting::formatExpr(displayed);
+    if (settings.fixedDigits)
+        text = mmcal::formatting::trimRedundantFractionalZeros(text);
+    return text;
+}
+
+[[nodiscard]] bool consoleOutputIsTerminal() noexcept {
+#if defined(_WIN32)
+    DWORD mode = 0;
+    return ::GetConsoleMode(::GetStdHandle(STD_OUTPUT_HANDLE), &mode) != FALSE;
+#elif defined(__linux__) || defined(__APPLE__)
+    return ::isatty(STDOUT_FILENO) != 0;
+#else
+    return false;
+#endif
+}
+
+[[nodiscard]] std::size_t consoleWidth() noexcept {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (::GetConsoleScreenBufferInfo(::GetStdHandle(STD_OUTPUT_HANDLE), &info))
+        return static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1);
+#elif defined(__linux__) || defined(__APPLE__)
+    winsize size{};
+    if (::isatty(STDOUT_FILENO) && ::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0
+        && size.ws_col != 0)
+        return size.ws_col;
+#endif
+    return 100;
+}
+
+[[nodiscard]] std::string formatForInteractiveDisplay(
+    const mmcal::expression::Expr& expression,
+    const mmcal::kernel::KernelSession& session,
+    const DisplaySettings& settings,
+    std::size_t prefixWidth) {
+    const auto displayed = displayExpression(expression, session, settings);
+    const std::size_t width = consoleWidth();
+    const std::size_t available = width > prefixWidth ? width - prefixWidth : width;
+    const auto layout = settings.layout == mmcal::cli::OutputLayout::Auto
+            && !consoleOutputIsTerminal()
+        ? mmcal::cli::OutputLayout::Single
+        : settings.layout;
+    std::string text = mmcal::cli::formatReplExpression(displayed, layout, available);
+    if (settings.fixedDigits)
+        text = mmcal::formatting::trimRedundantFractionalZeros(text);
+    return text;
+}
+
+void printInteractiveResult(
+    std::ostream& output,
+    std::string_view prefix,
+    std::string_view formatted) {
+    output << prefix;
+    const std::string continuation(prefix.size(), ' ');
+    for (const char character : formatted) {
+        output.put(character);
+        if (character == '\n')
+            output << continuation;
+    }
+    output << '\n';
 }
 
 [[nodiscard]] std::string_view trim(std::string_view text) noexcept {
@@ -330,6 +403,42 @@ void updateConsoleTitle(
     return true;
 }
 
+[[nodiscard]] bool handleLayoutCommand(
+    std::string_view line,
+    DisplaySettings& settings,
+    const mmcal::kernel::KernelSession& session,
+    std::ostream& output) {
+    line = trim(line);
+    if (!line.starts_with(":layout"))
+        return false;
+    if (line.size() > 7 && line[7] != ' ' && line[7] != '\t')
+        return false;
+
+    const std::string_view argument = trim(line.substr(7));
+    if (argument.empty()) {
+        output << "Layout: " << mmcal::cli::outputLayoutName(settings.layout) << '\n';
+        return true;
+    }
+    if (argument == "auto")
+        settings.layout = mmcal::cli::OutputLayout::Auto;
+    else if (argument == "single")
+        settings.layout = mmcal::cli::OutputLayout::Single;
+    else if (argument == "multi")
+        settings.layout = mmcal::cli::OutputLayout::Multi;
+    else {
+        output << "Usage: :layout <auto|single|multi>\n";
+        return true;
+    }
+    output << "Layout: " << mmcal::cli::outputLayoutName(settings.layout) << '\n';
+    updateConsoleTitle(session, settings);
+    return true;
+}
+
+[[nodiscard]] bool isExitCommand(std::string_view line) noexcept {
+    line = trim(line);
+    return line == ":quit" || line == ":exit";
+}
+
 [[nodiscard]] bool handleStatusCommand(
     std::string_view line,
     const mmcal::kernel::KernelSession& session,
@@ -340,6 +449,7 @@ void updateConsoleTitle(
 
     output << "Angle: " << angleModeName(session) << '\n'
            << "Display: " << displayModeName(settings) << '\n'
+           << "Layout: " << mmcal::cli::outputLayoutName(settings.layout) << '\n'
            << "Evaluation: Exact-first\n"
            << "Definitions: "
            << session.environment().size() + session.userFunctions().size() << '\n'
@@ -398,6 +508,9 @@ struct AutomatedLineResult final {
         || handleStatusCommand(line, session, settings, output))
         return {};
 
+    if (isExitCommand(line))
+        return {cli::ExitCode::Success, true};
+
     const std::string_view commandLine = trim(line);
     if (!commandLine.empty() && commandLine.front() == ':') {
         diagnostics << "Unknown command\n";
@@ -414,7 +527,7 @@ struct AutomatedLineResult final {
         }
 
         printDiagnostics(session, diagnostics);
-        output << formatForDisplay(result, session, settings) << '\n';
+        output << formatForAutomatedDisplay(result, session, settings) << '\n';
         return {};
     }
     catch (const error::CalcError& exception) {
@@ -484,6 +597,8 @@ int main(int argc, char* argv[]) {
 
     DisplaySettings displaySettings;
     displaySettings.fixedDigits = startup.fixedDigits;
+    if (startup.outputLayout)
+        displaySettings.layout = *startup.outputLayout;
 
     if (startup.inputMode != cli::InputMode::Interactive)
         return runAutomated(startup, session, displaySettings);
@@ -506,8 +621,12 @@ int main(int argc, char* argv[]) {
 
         if (cli::handleReplHelpCommand(line, session.builtinRegistry(), std::cout)
             || handleFixCommand(line, displaySettings, session, std::cout, true)
+            || handleLayoutCommand(line, displaySettings, session, std::cout)
             || handleStatusCommand(line, session, displaySettings, std::cout))
             continue;
+        if (isExitCommand(line))
+            break;
+
         const std::string_view commandLine = trim(line);
         if (!commandLine.empty() && commandLine.front() == ':') {
             std::cout << "Unknown command\n";
@@ -532,8 +651,11 @@ int main(int argc, char* argv[]) {
                               << formatting::formatExpr(*diagnostic.previousExpression) << ')';
                 std::cout << '\n';
             }
-            std::cout << "Out[" << inputNumber << "]> "
-                      << formatForDisplay(result, session, displaySettings) << '\n';
+            const std::string prefix = "Out[" + std::to_string(inputNumber) + "]> ";
+            printInteractiveResult(
+                std::cout, prefix,
+                formatForInteractiveDisplay(
+                    result, session, displaySettings, prefix.size()));
             updateConsoleTitle(session, displaySettings);
         }
         catch (const error::CalcError& exception) {

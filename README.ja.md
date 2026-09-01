@@ -3,7 +3,7 @@
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**開発対象: v1.5.4**
+**最新リリース: v1.5.4**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -17,7 +17,7 @@ mmCalculator（以下mmCal）は，研究・設計・製造などの技術用途
 - 過去の計算結果を用いた連続計算
 - 変数およびユーザー定義函数
 - 複素数，ベクトル，行列
-- 展開・因数分解・簡約・微分・積分・極限・方程式求解
+- 展開・因数分解・簡約・Taylor/Laurent/Puiseux/対数級数展開・微分・積分・極限・方程式求解
 - 任意精度の数値近似，特殊函数，統計，信号処理
 
 鈍重なシステムとは違い，本ツールは：
@@ -72,9 +72,9 @@ Out[13]> {1, 2, 3, 4, 5, 6, 7}
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
 
-## v1.5.4 開発中
+## v1.5.4
 
-v1.5.4では，新函数を増やすこと自体よりも，既存のexact-first基盤を**より完全に，より一貫して，性能の崖なく使える状態へ仕上げること**を主眼としている。
+v1.5.4は，新函数を増やすこと自体よりも，既存のexact-first基盤を**より完全に，より一貫して，性能の崖なく使える状態へ仕上げること**を主眼とした。
 
 主な変更点:
 
@@ -87,7 +87,7 @@ v1.5.4では，新函数を増やすこと自体よりも，既存のexact-first
 - **線形代数・資源管理**: `conditionNumber` / `pseudoInverse` / `leastSquares`，exact modular `det` / `solveLinear`，共通`EvaluationBudget`，協調的な計算取消しを追加
 - **検証・CLI**: certification境界fuzzer，performance-cliff監査，意味論fuzzerを拡張し，`--batch`と全callable函数を対象にした`:help` catalogを整備
 
-詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)の**v1.5.4 — Unreleased**を参照。READMEとReferenceは原則として現在仕様を記述し，旧版固有の変更説明はCHANGELOGへ集約する。
+詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)の**v1.5.4**を参照。現在開発中の変更は`Unreleased`へ記録する。READMEとReferenceは原則として現在仕様を記述し，旧版固有の変更説明はCHANGELOGへ集約する。
 
 ## 1. まず使う
 
@@ -99,6 +99,7 @@ Windowsでは`mmCal.exe`を起動するだけ。
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --layout multi
 mmCal --eval "factor[x^2-1]"
 mmCal --batch < expressions.txt
 ```
@@ -107,11 +108,12 @@ mmCal --batch < expressions.txt
 - `--angle deg`: 角度指定のない三角函数を度として扱う
 - `--angle rad`: ラジアン。既定値
 - `--angle grad`: グラード
+- `--layout auto|single|multi`: 通常REPLの表示組版。既定`auto`はTTY上でArray/List/`cases`/解集合を構造的に改行し，pipe/redirect時は1行へ退避する
 - `--eval expr`: 1式だけ評価し，値だけを標準出力へ出す
-- `--batch`（互換alias: `--bach`）: 標準入力を1行1式として同一sessionで順に評価する。
+- `--batch`: 標準入力を1行1式として同一sessionで順に評価する。
 - `--help`, `-h`: 短い起動usageを表示する。函数の詳細は起動後に`:help sin`等で確認する
 
-`--eval` / `--batch`（`--bach`）は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。batch modeはerror後も次行を処理し，発生した最大の終了codeを返す。
+`--eval` / `--batch`は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。batch modeはerror後も次行を処理し，発生した最大の終了codeを返す。
 
 Linux等ではCMake 3.20以上とGCCまたはClangを用いてソースからビルドできる。
 
@@ -125,7 +127,7 @@ CMake生成のMSVC buildでは`MMCAL_PARALLEL_COMPILE=ON`が既定であり，co
 ## 2. 「正確な値」と「小数表示」は別物
 
 `0.1`も最初から二進浮動小数へ変換せず，exactな`1/10`として扱う。
-巨大整数・有理数・根号を含む代数的表現・複素数・記号式も可能な限りexactな形を保ち，展開・因数分解・簡約・微分・積分・極限・方程式求解などを同じ式体系上で処理する。
+巨大整数・有理数・根号を含む代数的表現・複素数・記号式も可能な限りexactな形を保ち，展開・因数分解・簡約・級数展開・微分・積分・極限・方程式求解などを同じ式体系上で処理する。
 
 ```text
 In [1]> 1/3
@@ -439,6 +441,8 @@ integrate[log[1-x]/x,x] -> -polylog[2, x]
 limit[sin[x]/x,x,0]       -> 1
 limit[1/x,x,0,1]          -> Infinity
 limit[1/x,x,0,-1]         -> -Infinity
+limit[x*Ei[x],x,0,1]       -> 0
+limit[Ei[x]-log[x],x,0,1] -> -digamma[1]
 ```
 
 ### 方程式・不等式
@@ -479,6 +483,8 @@ bounded exact algebraic equalityとReal orderingも実装済みである。
 
 完全な解集合を保証できない場合，都合のよい1解だけを返さない。
 未解決であることをWarningと結果で示す。
+
+finite `SolutionSet`は`at[solutions,i]`で0始まりのbranch選択ができ，条件・自由変数・multiplicity・domainを保持した1-branch `SolutionSet`を返す。`at[solutions,i,x]`は指定変数のbinding右辺だけを取り出す。`toNormal[solutions]`はSolutionSet構造を保持したまま，各binding内部のSeriesData等の対応済み特殊表現を再帰的に通常形へ戻す。
 
 ## 8. Array・行列・ベクトル・統計
 
@@ -632,7 +638,11 @@ fft[{1,2,3,4}]
 
 ifft[fft[{1,2,3,4}]]
 -> {1, 2, 3, 4}
+```
 
+exactな2冪長FFTはforwardのradix-2表現を維持しつつ，現在のdegree budget内（16～128点）のinverseではFFT由来のroot-of-unity式を円分体座標へ再埋込みして往復時の式爆発を抑える。
+
+```text
 convolve[{1,2},{3,4}]
 -> {3, 10, 8}
 ```
@@ -672,15 +682,21 @@ WARN: integrate could not fully prove the symbolic antiderivative or definite in
 :help constants
 :fix 16
 :fix off
+:layout
+:layout single
+:layout multi
 :status
+:quit
+:exit
 ```
 
 `:help 函数名`はBuiltinRegistryの函数名・alias・引数個数を正本とし，全callable builtinに個別の説明，明示的な入力規則，一つ以上の例を表示する。`integrate` / `root` / `qrDecomposition` / `svd` / `solve`等の複数形式を持つ函数では，各形式と追加note・複数例も示す。`:help Pi`と`:help constants`は保護された定数，定義域，角度単位symbolを扱う。未知名が明確な近傍topicを持つ場合は，`sdv` -> `svd`，`qr` -> `qrDecomposition`のように候補を提示する。
 `:help functions`は利用可能なcanonical名とcallable aliasを一覧する。
-`:help` / `:fix` / `:status`は評価式ではないため`In[n]`を進めず，履歴にも入らない。
+`:help` / `:fix` / `:layout` / `:status` / `:quit` / `:exit`は評価式ではないため`In[n]`を進めず，履歴にも入らない。
 `:fix n`は小数点以下最大`n`桁へ丸めて**表示するだけ**で，保存されている値や`precision` / `accuracy`の意味は変更しない。
-`:status`では現在の角度，表示形式，定義数，履歴数などを確認できる。
-コンソールタイトルにも角度と表示形式を補助表示する。
+`:layout auto|single|multi`は通常REPLだけの組版を切り替える。`single`はcanonical 1行，`multi`は構造的複数行，`auto`は端末幅と式構造から選択する。`--eval` / `--batch`の出力契約は変更しない。
+`:status`では現在の角度，表示形式，layout，定義数，履歴数などを確認できる。`:quit`と`:exit`は`Exit[]`のCLI互換aliasとして現在のsessionを終了する。
+コンソールタイトルにも角度・表示形式・layoutを補助表示する。
 
 Parserはtoken数，AST node数，入れ子深さ，演算子鎖，数値literal桁数，函数引数数，Array要素数を独立に制限する。上限超過は`ResourceLimitError`であり，OSのstack overflowや曖昧な`InternalError`にはしない。
 
@@ -723,7 +739,7 @@ D N In Out Exit Clear Defs UnDef
 
 ## 15. テスト・制作環境
 
-現在の開発treeでは，内部回帰テスト **2954 / 2954**，ブラックボックステスト **2127 / 2127** の通過を確認している。
+現在の開発treeでは，内部回帰テスト **3220 / 3220**，ブラックボックステスト **2328 / 2328** の通過を確認している。
 exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
 さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法閾値 sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 

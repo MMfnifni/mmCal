@@ -979,6 +979,13 @@ std::string formatExpr(const expression::Expr& expression, unsigned radix) {
     return output;
 }
 
+std::string formatAssumptions(
+    const mathematics::AssumptionSet& assumptions,
+    unsigned radix) {
+    std::string output;
+    appendConditions(output, assumptions, radix);
+    return output;
+}
 
 std::string trimRedundantFractionalZeros(std::string_view text) {
     std::string output;

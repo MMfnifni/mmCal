@@ -1,6 +1,7 @@
 // 解集合表現の回帰テスト
 #include "solution_set_tests.hpp"
 
+#include "builtins/array.hpp"
 #include "evaluation/builtin_registry.hpp"
 #include "expression/expr.hpp"
 #include "mathematics/assumption_set.hpp"
@@ -13,8 +14,10 @@
 #include "mathematics/angle.hpp"
 #include "mathematics/math_registry.hpp"
 #include "symbols/symbol_table.hpp"
+#include "symbolic/series.hpp"
 #include "test_framework.hpp"
 
+#include <array>
 #include <stdexcept>
 
 namespace mmcal::tests {
@@ -81,6 +84,33 @@ void runSolutionSetTests(TestRunner& tests) {
             && conditionalBranch.branches().front().conditions.size() == 1,
         "SolutionSet: a branch preserves mathematical side conditions");
 
+    const auto k = symbols.intern("k");
+    const solver::SolutionBranch metadataBranch{
+        {SolutionBinding{x, Expr{a}}},
+        nonZeroA,
+        std::size_t{2},
+        {SolverVariable{k, NumericDomain::Integer}},
+        NumericDomain::Real};
+    const auto metadataSet = solver::SolutionSet::finite(
+        {SolverVariable{x, NumericDomain::Real}}, {metadataBranch});
+    const std::array<Expr, 2> branchSelection{
+        Expr::solutionSet(metadataSet), integer(0)};
+    const Expr selectedBranch = builtins::evaluateArrayGet(branchSelection);
+    tests.expect(
+        selectedBranch.isSolutionSet()
+            && selectedBranch.asSolutionSet().kind() == solver::SolutionSetKind::Finite
+            && selectedBranch.asSolutionSet().variables().size() == 1
+            && selectedBranch.asSolutionSet().variables().front().domain == NumericDomain::Real
+            && selectedBranch.asSolutionSet().branches().size() == 1
+            && selectedBranch.asSolutionSet().branches().front() == metadataBranch,
+        "at: selecting a SolutionSet branch preserves branch metadata and variable domains");
+
+    const std::array<Expr, 3> bindingSelection{
+        Expr::solutionSet(metadataSet), integer(0), Expr{x}};
+    tests.expect(
+        builtins::evaluateArrayGet(bindingSelection) == Expr{a},
+        "at: selecting a SolutionSet binding returns its right-hand-side expression");
+
     const auto allReal = solver::SolutionSet::universal(
         {SolverVariable{x, NumericDomain::Real}});
     tests.expect(
@@ -111,6 +141,34 @@ void runSolutionSetTests(TestRunner& tests) {
 
     const auto math = mathematics::MathRegistry::defaults(symbols, builtins);
     const auto& angles = mathematics::defaultAngleSemantics();
+
+    symbolic::SeriesData bindingSeries{
+        a, integer(0), {integer(1), integer(1)}, 0, 2, 1, {}};
+    const solver::SolutionBranch normalizableBranch{
+        {SolutionBinding{x, symbolic::makeSeriesData(bindingSeries, builtins)}},
+        nonZeroA, std::size_t{2}, {SolverVariable{k, NumericDomain::Integer}}, NumericDomain::Real};
+    const auto normalizableSet = solver::SolutionSet::finite(
+        {SolverVariable{x, NumericDomain::Real}}, {normalizableBranch});
+    const Expr normalizedSolutions = symbolic::toNormalExpression(
+        Expr::solutionSet(normalizableSet), builtins, math, angles);
+    tests.expect(
+        normalizedSolutions.isSolutionSet()
+            && normalizedSolutions.asSolutionSet().kind() == solver::SolutionSetKind::Finite
+            && normalizedSolutions.asSolutionSet().variables().size() == 1
+            && normalizedSolutions.asSolutionSet().variables().front()
+                == normalizableSet.variables().front()
+            && normalizedSolutions.asSolutionSet().branches().size() == 1
+            && normalizedSolutions.asSolutionSet().branches().front().conditions == nonZeroA
+            && normalizedSolutions.asSolutionSet().branches().front().multiplicity == std::optional<std::size_t>{2}
+            && normalizedSolutions.asSolutionSet().branches().front().freeVariables
+                == std::vector<SolverVariable>{{k, NumericDomain::Integer}}
+            && normalizedSolutions.asSolutionSet().branches().front().bindingsCertifiedDomain
+                == std::optional<NumericDomain>{NumericDomain::Real},
+        "toNormal: SolutionSet conversion preserves branch metadata and solver domains");
+    tests.expectEqual(
+        formatting::formatExpr(normalizedSolutions),
+        std::string{"{x == a+1 where k in Integer if a != 0 (multiplicity 2)}"},
+        "toNormal: SolutionSet conversion recursively normalizes binding values");
 
     const Expr quadraticEquation = Expr::call(
         builtins.symbol(evaluation::BuiltinId::Equal),

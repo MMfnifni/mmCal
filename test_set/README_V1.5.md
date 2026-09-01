@@ -2,7 +2,7 @@
 
 このディレクトリは，mmCal の public CLI を介して exact arithmetic，symbolic evaluation，certified numerical evaluation，calculus，special functions，matrix/statistics，definedness/error semantics を横断確認するブラックボックステスト集合である。
 
-テストファイルは従来の34本から10本へ整理した。元の2012ケースは削除せず保持し，2026-08のcertified numerical auditとperformance/capability監査で重要だった34ケースを追加して，現在は合計2046ケースである。
+テストファイルは10本へ整理しており，現在は合計2328ケースである。certified numerical audit，performance/capability監査，微積分・仮定推論，exact FFT等で見つかった回帰を継続して追加する。
 
 ## 実行方法
 
@@ -20,7 +20,7 @@ CLI自動処理contractは，通常の対話protocolとは別に検証する。
 py cli_automation_tests.py --exe "..\..\build\x64\Release\mmCal.exe"
 ```
 
-このtestは `--eval`，`--batch`，`--bach` 互換alias，stdout/stderr分離，終了code，batchのsession保持とerror後継続，巨大Parser入力が `ResourceLimitError` で安全に停止することを確認する。
+このtestは `--eval`，`--batch`，stdout/stderr分離，終了code，batchのsession保持とerror後継続，巨大Parser入力が `ResourceLimitError` で安全に停止することを確認する。
 
 ## ファイル構成
 
@@ -30,14 +30,14 @@ py cli_automation_tests.py --exe "..\..\build\x64\Release\mmCal.exe"
 | `test01_legacy_numeric.txt` | statistics，matrix/linear algebra | 353 |
 | `test02_legacy_errors.txt` | 旧error/exception回帰 | 165 |
 | `test03_language_runtime.txt` | core syntax，angle mode，numeric lexer，history，iteration，variables | 161 |
-| `test04_exact_arithmetic_algebra.txt` | BigInt/Rational，exact complex/algebraic，number theory，number fields，cyclotomic FFT | 224 |
-| `test05_approximation_certification.txt` | `N`，Precision/Accuracy，explain，InformationEnclosure，branch/backend audit | 164 |
-| `test06_calculus_solver.txt` | symbolic/numerical calculus，Solve，Lambert W | 175 |
-| `test07_special_functions.txt` | gamma系，hypergeometric，elliptic，polylog等 | 119 |
+| `test04_exact_arithmetic_algebra.txt` | BigInt/Rational，exact complex/algebraic，number theory，number fields，cyclotomic FFT | 225 |
+| `test05_approximation_certification.txt` | `N`，Precision/Accuracy，explain，InformationEnclosure，branch/backend audit | 170 |
+| `test06_calculus_solver.txt` | symbolic/numerical calculus，Solve，Lambert W，Series / toNormal | 401 |
+| `test07_special_functions.txt` | gamma系，hypergeometric，elliptic，polylog等 | 139 |
 | `test08_boundary_errors.txt` | 詳細なdomain/boundary/error message contract | 86 |
-| `test09_semantics_audit.txt` | semantic coherence，definedness-preserving simplification，横断audit | 174 |
+| `test09_semantics_audit.txt` | semantic coherence，definedness-preserving simplification，横断audit | 203 |
 
-合計は2046ケースである。
+合計は2328ケースである。
 
 ## `# @session` と隔離性
 
@@ -109,13 +109,13 @@ py tester.py --exe "..\..\build\x64\Release\mmCal.exe" test05_approximation_cert
 
 | 新ファイル | 統合した旧ファイル |
 |---|---|
-| `test00_legacy_scalar.txt` | `test0_display_fix`，`test1_Syntax`，`test2_real`，`test3_complex` |
-| `test01_legacy_numeric.txt` | `test4_statistics`，`test5_matrix` |
-| `test02_legacy_errors.txt` | `test6_error` |
-| `test03_language_runtime.txt` | `test0_v1_5_core`，`test10_angleMode`，`test14_numeric_lexer_boundaries`，`test17_history_relative`，`test19_iteration`，`test7_vars` |
-| `test04_exact_arithmetic_algebra.txt` | `test11_exact_integer_rational`，`test12_exact_symbolic_complex`，`test20_number_theory`，`test21_algebraic_comparison`，`test22_number_field_interning`，`test25_algebraic_expression_bridge`，`test26_cyclotomic_fft` |
-| `test05_approximation_certification.txt` | `test13_exact_approximation`，`test18_explain`，`test30_n_precision_audit`，`test31_n_refinement_audit`，`test32_real_complex_backend_audit` |
-| `test06_calculus_solver.txt` | `test8_calculus`，`test16_exact_calculus_solver`，`test23_exponential_lambert_solve` |
-| `test07_special_functions.txt` | `test9_special_func` |
-| `test08_boundary_errors.txt` | `test15_boundary_errors_detailed` |
-| `test09_semantics_audit.txt` | `test24_semantic_coherence`，`test27_audit`，`test28_semantic_hardening`，`test29_simplifier_domain_audit` |
+| `test00_legacy_scalar.txt` | 425 |
+| `test01_legacy_numeric.txt` | 353 |
+| `test02_legacy_errors.txt` | 165 |
+| `test03_language_runtime.txt` | 161 |
+| `test04_exact_arithmetic_algebra.txt` | 225 |
+| `test05_approximation_certification.txt` | 170 |
+| `test06_calculus_solver.txt` | 238 |
+| `test07_special_functions.txt` | 139 |
+| `test08_boundary_errors.txt` | 86 |
+| `test09_semantics_audit.txt` | 202 |

@@ -35,22 +35,12 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
-[[nodiscard]] expression::Expr evaluateVectorNorm(
-    std::span<const expression::Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateVectorManhattan(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateVectorEuclidean(
-    std::span<const expression::Expr> arguments,
-    const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles);
-[[nodiscard]] expression::Expr evaluateVectorNormalize(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
@@ -76,6 +66,36 @@ namespace mmcal::builtins {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateVectorSum(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateGradient(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateDivergence(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateCurl(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateLaplacian(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateJacobian(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateHessian(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,

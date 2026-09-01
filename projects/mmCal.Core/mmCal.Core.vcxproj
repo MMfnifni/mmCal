@@ -220,6 +220,7 @@
     <ClInclude Include="..\..\src\builtins\discrete_math.hpp" />
     <ClInclude Include="..\..\src\builtins\elementary_utilities.hpp" />
     <ClInclude Include="..\..\src\symbolic\differentiation.hpp" />
+    <ClInclude Include="..\..\src\symbolic\series.hpp" />
     <ClInclude Include="..\..\src\symbolic\integration.hpp" />
     <ClInclude Include="..\..\src\symbolic\limit.hpp" />
     <ClInclude Include="..\..\src\symbolic\substitution.hpp" />
@@ -350,6 +351,7 @@
     <ClCompile Include="..\..\src\builtins\discrete_math.cpp" />
     <ClCompile Include="..\..\src\builtins\elementary_utilities.cpp" />
     <ClCompile Include="..\..\src\symbolic\differentiation.cpp" />
+    <ClCompile Include="..\..\src\symbolic\series.cpp" />
     <ClCompile Include="..\..\src\symbolic\integration.cpp" />
     <ClCompile Include="..\..\src\symbolic\limit.cpp" />
     <ClCompile Include="..\..\src\symbolic\substitution.cpp" />

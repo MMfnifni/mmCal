@@ -27,6 +27,9 @@ public:
     [[nodiscard]] std::vector<numeric::Rational> multiply(
         std::span<const numeric::Rational> lhs,
         std::span<const numeric::Rational> rhs) const;
+    [[nodiscard]] std::vector<numeric::Rational> multiplyByPower(
+        std::span<const numeric::Rational> value,
+        std::size_t exponent) const;
 
     // a+b I をQ(zeta_n)へexactに埋め込む。imaginary!=0なら4|nを要求する。
     [[nodiscard]] std::optional<std::vector<numeric::Rational>> embedGaussianRational(

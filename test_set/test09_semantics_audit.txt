@@ -54,6 +54,10 @@ simplify[cases[1/x if x!=0;0 if x==0],x!=0]==>1/x
 N[cases[Pi if x!=0;E if x==0],20]==>cases[3.1415926535897932385 if x != 0; 2.7182818284590452354 if x == 0]
 D[cases[x^2 if a>0;sin[x] if a<=0],x]==>cases[2x if a > 0; cos[x] if a <= 0]
 D[cases[x^2 if x>0;sin[x] if x<=0],x]==>cases[2x if x > 0; cos[x] if x < 0; D[cases[x^2 if x > 0; sin[x] if x <= 0], x] if x == 0]
+D[cases[x if x>0;-x if x<0;0],x]==>cases[1 if x > 0; -1 if x < 0; D[cases[x if x > 0; -x if x < 0; 0], x]]
+simplify[sqrt[x^2],x>1]==>x
+fullSimplify[1/(1-x)-1/(1-x),x<1]==>0
+simplify[sqrt[x^2],2-3x>5]==>-x
 integrate[cases[x if a>0;x^2 if a<=0],x]==>cases[x^2/2 if a > 0; x^3/3 if a <= 0]
 integrate[cases[x if x>0;x^2 if x<=0],x]==>integrate[cases[x if x > 0; x^2 if x <= 0], x]
 limit[cases[sin[x]/x if a>0;(1-cos[x])/x^2 if a<=0],x,0]==>cases[1 if a > 0; 1/2 if a <= 0]
@@ -232,3 +236,22 @@ simplify[zeta[x]-zeta[x],x!=1]==>0
 # FullSimplify must not create an uglier Fourier candidate merely to preserve the same hole.
 fullSimplify[sin[1/x]^2+cos[1/x]^2]==>cos[1/x]^2+sin[1/x]^2
 fullSimplify[sin[1/x]^2+cos[1/x]^2,x!=0]==>1
+
+# Explicit simplify may flatten exact rational linear combinations, but must preserve domain holes.
+simplify[2(a+b)-2(a-b)-4b]==>0
+simplify[2(log[x]-log[x])]==>2(log[x]-log[x])
+simplify[2(log[x]-log[x]),x>0]==>0
+
+# Finite SolutionSet branch and binding access are zero-based.
+at[solve[x^2==1,x],0]==>{x == 1}
+at[solve[x^2==1,x],1,x]==>-1
+at[solve[{x+y==3,x*y==2},{x,y}],1,x]==>2
+at[solve[{x+y==3,x*y==2},{x,y}],1,y]==>1
+at[solve[{x*y==1},{x,y},Real],0]==>{y == 1/x where x in Real if x != 0}
+at[solve[{x*y==1},{x,y},Real],0,y]==>1/x
+at[solve[sin[x]==0,x,Real],0]==>{x == Pi k where k in Integer}
+at[solve[x^2==1,x],2]==>DomainError: at index is out of range
+at[solve[x==x,x],0]==>TypeError: at can index only a finite solution set
+at[solve[x^2==1,x],0,y]==>DomainError: at binding selector is not a solver variable
+at[solve[x^2==1,x],0,1]==>TypeError: at solution binding selector must be a symbol
+toNormal[solve[x^2==1,x]]==>{x == 1, x == -1}

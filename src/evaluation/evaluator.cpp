@@ -17,6 +17,7 @@
 #include "simplification/simplifier.hpp"
 #include "simplification/expression_cost.hpp"
 #include "solver/solution_set.hpp"
+#include "symbolic/series.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1717,6 +1718,19 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                 || solutions.kind() == solver::SolutionSetKind::Conditional)
                 transformed = transformed.withAdditionalConditions(solutions.conditions());
             return expression::Expr::solutionSet(std::move(transformed));
+        }
+
+        // SeriesDataの指数格子metadataは構造情報なのでexact整数のまま保持する。
+        // centerと係数だけへNを作用させ，変換後もparseSeriesData可能な形を維持する。
+        if (const auto series = symbolic::parseSeriesData(current, registry_)) {
+            symbolic::SeriesData transformed = *series;
+            transformed.center = approximate(transformed.center, false);
+            for (expression::Expr& coefficient : transformed.coefficients)
+                coefficient = approximate(coefficient, false);
+            for (auto& layer : transformed.logarithmicCoefficients)
+                for (expression::Expr& coefficient : layer)
+                    coefficient = approximate(coefficient, false);
+            return symbolic::makeSeriesData(std::move(transformed), registry_);
         }
 
         // casesは条件をexactのまま保持し，各branchの値だけへNを作用させる。

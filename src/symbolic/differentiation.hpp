@@ -19,6 +19,14 @@ namespace mmcal::symbolic {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 
+// D[..., {x,n}]の各段で生じる入れ子の加減算を，exactな有理係数の
+// 線形結合としてだけ平坦化する。一般expandは行わず，積やbranch構造は保つ。
+[[nodiscard]] expression::Expr canonicalizeDerivativeOutput(
+    const expression::Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
 // 高階微分を閉形式で構成できる既知family用のfast path。
 // 現在はdirect-variable Polylogを扱い，非該当ならnulloptを返す。
 [[nodiscard]] std::optional<expression::Expr> differentiateKnownRepeatedExpression(

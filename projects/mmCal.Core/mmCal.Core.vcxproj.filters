@@ -396,6 +396,9 @@
     <ClInclude Include="..\..\src\symbolic\differentiation.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\series.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\symbolic\integration.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
@@ -754,6 +757,9 @@
       <Filter>src\builtins</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\symbolic\differentiation.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\series.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\symbolic\integration.cpp">

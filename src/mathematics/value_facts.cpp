@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -154,6 +155,334 @@ using numeric::Number;
     return expression.isNumber() && expression.asNumber().isZero();
 }
 
+struct RationalAffineForm final {
+    std::optional<expression::Symbol> variable;
+    numeric::Rational coefficient{BigInt{0}};
+    numeric::Rational constant{BigInt{0}};
+};
+
+[[nodiscard]] std::optional<RationalAffineForm> rationalAffineForm(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics,
+    std::size_t depth = 0) {
+    if (depth > 32)
+        return std::nullopt;
+
+    if (expression.isNumber()) {
+        if (!expression.asNumber().isReal())
+            return std::nullopt;
+        return RationalAffineForm{
+            std::nullopt,
+            numeric::Rational{BigInt{0}},
+            expression.asNumber().asReal().toRational()};
+    }
+
+    if (expression.isSymbol()) {
+        if (mathematics.findConstant(expression.asSymbol()))
+            return std::nullopt;
+        return RationalAffineForm{
+            expression.asSymbol(),
+            numeric::Rational{BigInt{1}},
+            numeric::Rational{BigInt{0}}};
+    }
+
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    const auto combine = [](RationalAffineForm lhs, const RationalAffineForm& rhs)
+        -> std::optional<RationalAffineForm> {
+        if (lhs.variable && rhs.variable
+            && !lhs.variable->sameIdentity(*rhs.variable))
+            return std::nullopt;
+        if (!lhs.variable && rhs.variable)
+            lhs.variable = rhs.variable;
+        lhs.coefficient += rhs.coefficient;
+        lhs.constant += rhs.constant;
+        if (lhs.coefficient.isZero())
+            lhs.variable.reset();
+        return lhs;
+    };
+
+    switch (definition->id) {
+    case BuiltinId::Add: {
+        RationalAffineForm result;
+        for (const Expr& argument : arguments) {
+            const auto term = rationalAffineForm(
+                argument, builtins, mathematics, depth + 1);
+            if (!term)
+                return std::nullopt;
+            const auto combined = combine(std::move(result), *term);
+            if (!combined)
+                return std::nullopt;
+            result = *combined;
+        }
+        return result;
+    }
+    case BuiltinId::Subtract:
+        if (arguments.size() == 2) {
+            auto lhs = rationalAffineForm(arguments[0], builtins, mathematics, depth + 1);
+            auto rhs = rationalAffineForm(arguments[1], builtins, mathematics, depth + 1);
+            if (!lhs || !rhs)
+                return std::nullopt;
+            rhs->coefficient = -rhs->coefficient;
+            rhs->constant = -rhs->constant;
+            return combine(std::move(*lhs), *rhs);
+        }
+        return std::nullopt;
+    case BuiltinId::Negate:
+        if (arguments.size() == 1) {
+            auto value = rationalAffineForm(arguments[0], builtins, mathematics, depth + 1);
+            if (!value)
+                return std::nullopt;
+            value->coefficient = -value->coefficient;
+            value->constant = -value->constant;
+            return value;
+        }
+        return std::nullopt;
+    case BuiltinId::Multiply: {
+        RationalAffineForm result{
+            std::nullopt, numeric::Rational{BigInt{0}}, numeric::Rational{BigInt{1}}};
+        bool variableFactorSeen = false;
+        for (const Expr& argument : arguments) {
+            const auto factor = rationalAffineForm(
+                argument, builtins, mathematics, depth + 1);
+            if (!factor)
+                return std::nullopt;
+            if (factor->variable) {
+                if (variableFactorSeen)
+                    return std::nullopt;
+                variableFactorSeen = true;
+                result.variable = factor->variable;
+                result.coefficient = result.constant * factor->coefficient;
+                result.constant *= factor->constant;
+            }
+            else {
+                result.coefficient *= factor->constant;
+                result.constant *= factor->constant;
+            }
+        }
+        if (result.coefficient.isZero())
+            result.variable.reset();
+        return result;
+    }
+    case BuiltinId::Divide:
+        if (arguments.size() == 2) {
+            auto numerator = rationalAffineForm(
+                arguments[0], builtins, mathematics, depth + 1);
+            const auto denominator = rationalAffineForm(
+                arguments[1], builtins, mathematics, depth + 1);
+            if (!numerator || !denominator || denominator->variable
+                || denominator->constant.isZero())
+                return std::nullopt;
+            numerator->coefficient /= denominator->constant;
+            numerator->constant /= denominator->constant;
+            if (numerator->coefficient.isZero())
+                numerator->variable.reset();
+            return numerator;
+        }
+        return std::nullopt;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] RelationKind reverseOrderedRelation(RelationKind relation) noexcept {
+    switch (relation) {
+    case RelationKind::Less: return RelationKind::Greater;
+    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
+    case RelationKind::Greater: return RelationKind::Less;
+    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
+    case RelationKind::Equal:
+    case RelationKind::NotEqual:
+        return relation;
+    }
+    return relation;
+}
+
+struct RationalBound final {
+    numeric::Rational value;
+    bool inclusive = false;
+};
+
+[[nodiscard]] RealSign refineSign(RealSign current, RealSign inferred) noexcept {
+    if (inferred == RealSign::Unknown || current == inferred)
+        return current;
+    if (current == RealSign::Unknown)
+        return inferred;
+    if (current == RealSign::NonNegative && inferred == RealSign::Positive)
+        return RealSign::Positive;
+    if (current == RealSign::NonPositive && inferred == RealSign::Negative)
+        return RealSign::Negative;
+    if (current == RealSign::NonZero
+        && (inferred == RealSign::Positive || inferred == RealSign::Negative))
+        return inferred;
+    if (inferred == RealSign::NonZero
+        && (current == RealSign::Positive || current == RealSign::Negative))
+        return current;
+    if (current == RealSign::Positive && inferred == RealSign::NonNegative)
+        return current;
+    if (current == RealSign::Negative && inferred == RealSign::NonPositive)
+        return current;
+    if (current == RealSign::Zero
+        && (inferred == RealSign::NonNegative || inferred == RealSign::NonPositive))
+        return current;
+    if (inferred == RealSign::Zero
+        && (current == RealSign::NonNegative || current == RealSign::NonPositive))
+        return inferred;
+    return current;
+}
+
+[[nodiscard]] ValueFacts applyAffineAssumptions(
+    const Expr& expression,
+    ValueFacts facts,
+    const AssumptionSet& assumptions,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics) {
+    const auto target = rationalAffineForm(expression, builtins, mathematics);
+    if (!target || !target->variable || target->coefficient.isZero())
+        return facts;
+
+    std::optional<RationalBound> lower;
+    std::optional<RationalBound> upper;
+    std::vector<numeric::Rational> exclusions;
+    bool realOrderedKnowledge = false;
+
+    const auto updateLower = [&](RationalBound candidate) {
+        if (!lower || candidate.value > lower->value) {
+            lower = std::move(candidate);
+            return;
+        }
+        if (candidate.value == lower->value)
+            lower->inclusive = lower->inclusive && candidate.inclusive;
+    };
+    const auto updateUpper = [&](RationalBound candidate) {
+        if (!upper || candidate.value < upper->value) {
+            upper = std::move(candidate);
+            return;
+        }
+        if (candidate.value == upper->value)
+            upper->inclusive = upper->inclusive && candidate.inclusive;
+    };
+
+    for (const Predicate& predicate : assumptions.predicates()) {
+        const auto* relationPredicate = std::get_if<RelationPredicate>(&predicate);
+        if (!relationPredicate)
+            continue;
+        const auto lhs = rationalAffineForm(
+            relationPredicate->lhs, builtins, mathematics);
+        const auto rhs = rationalAffineForm(
+            relationPredicate->rhs, builtins, mathematics);
+        if (!lhs || !rhs)
+            continue;
+
+        RationalAffineForm difference = *lhs;
+        RationalAffineForm negatedRight = *rhs;
+        negatedRight.coefficient = -negatedRight.coefficient;
+        negatedRight.constant = -negatedRight.constant;
+        if (difference.variable && negatedRight.variable
+            && !difference.variable->sameIdentity(*negatedRight.variable))
+            continue;
+        if (!difference.variable && negatedRight.variable)
+            difference.variable = negatedRight.variable;
+        difference.coefficient += negatedRight.coefficient;
+        difference.constant += negatedRight.constant;
+        if (!difference.variable || difference.coefficient.isZero()
+            || !difference.variable->sameIdentity(*target->variable))
+            continue;
+
+        RelationKind relation = relationPredicate->relation;
+        if (difference.coefficient < numeric::Rational{BigInt{0}})
+            relation = reverseOrderedRelation(relation);
+        const numeric::Rational boundary = -difference.constant / difference.coefficient;
+
+        switch (relation) {
+        case RelationKind::Less:
+            updateUpper(RationalBound{boundary, false});
+            realOrderedKnowledge = true;
+            break;
+        case RelationKind::LessEqual:
+            updateUpper(RationalBound{boundary, true});
+            realOrderedKnowledge = true;
+            break;
+        case RelationKind::Greater:
+            updateLower(RationalBound{boundary, false});
+            realOrderedKnowledge = true;
+            break;
+        case RelationKind::GreaterEqual:
+            updateLower(RationalBound{boundary, true});
+            realOrderedKnowledge = true;
+            break;
+        case RelationKind::Equal:
+            updateLower(RationalBound{boundary, true});
+            updateUpper(RationalBound{boundary, true});
+            realOrderedKnowledge = true;
+            break;
+        case RelationKind::NotEqual:
+            exclusions.push_back(boundary);
+            break;
+        }
+    }
+
+    if (realOrderedKnowledge && !facts.provablyNonReal) {
+        if (facts.domain == NumericDomain::Unknown || facts.domain == NumericDomain::Complex)
+            facts.domain = NumericDomain::Real;
+        facts.provablyNonReal = false;
+    }
+    if (!facts.isProvablyReal())
+        return facts;
+
+    numeric::Rational coefficient = target->coefficient;
+    numeric::Rational constant = target->constant;
+    bool negateResult = false;
+    if (coefficient < numeric::Rational{BigInt{0}}) {
+        coefficient = -coefficient;
+        constant = -constant;
+        negateResult = true;
+    }
+    const numeric::Rational zeroAt = -constant / coefficient;
+    const bool zeroExcluded = std::find(
+        exclusions.begin(), exclusions.end(), zeroAt) != exclusions.end();
+
+    RealSign inferred = RealSign::Unknown;
+    if (lower) {
+        if (lower->value > zeroAt)
+            inferred = RealSign::Positive;
+        else if (lower->value == zeroAt)
+            inferred = lower->inclusive ? RealSign::NonNegative : RealSign::Positive;
+    }
+    if (inferred == RealSign::Unknown && upper) {
+        if (upper->value < zeroAt)
+            inferred = RealSign::Negative;
+        else if (upper->value == zeroAt)
+            inferred = upper->inclusive ? RealSign::NonPositive : RealSign::Negative;
+    }
+    if (lower && upper && lower->value == upper->value
+        && lower->inclusive && upper->inclusive) {
+        if (lower->value == zeroAt)
+            inferred = RealSign::Zero;
+        else
+            inferred = lower->value > zeroAt ? RealSign::Positive : RealSign::Negative;
+    }
+    if (zeroExcluded) {
+        if (inferred == RealSign::NonNegative)
+            inferred = RealSign::Positive;
+        else if (inferred == RealSign::NonPositive)
+            inferred = RealSign::Negative;
+        else if (inferred == RealSign::Unknown)
+            inferred = RealSign::NonZero;
+    }
+    if (negateResult)
+        inferred = negateSign(inferred);
+
+    facts.sign = refineSign(facts.sign, inferred);
+    return facts;
+}
+
 [[nodiscard]] RealSign signFromRelation(
     RelationKind relation,
     bool expressionOnLeft) noexcept {
@@ -183,7 +512,9 @@ using numeric::Number;
 [[nodiscard]] ValueFacts applyAssumptions(
     const Expr& expression,
     ValueFacts facts,
-    const AssumptionSet* assumptions) {
+    const AssumptionSet* assumptions,
+    const evaluation::BuiltinRegistry& builtins,
+    const MathRegistry& mathematics) {
     if (!assumptions)
         return facts;
 
@@ -242,7 +573,7 @@ using numeric::Number;
         facts.provablyNonReal = false;
     }
 
-    return facts;
+    return applyAffineAssumptions(expression, facts, *assumptions, builtins, mathematics);
 }
 
 [[nodiscard]] ValueFacts sqrtFacts(const ValueFacts& input) {
@@ -1018,6 +1349,14 @@ using numeric::Number;
     case BuiltinId::VectorReflect:
     case BuiltinId::VectorReflectAxis:
     case BuiltinId::VectorSum:
+    case BuiltinId::VectorInner:
+    case BuiltinId::VectorOuter:
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:
     case BuiltinId::Map:
@@ -1049,6 +1388,10 @@ using numeric::Number;
     case BuiltinId::Clear:
     case BuiltinId::Definitions:
     case BuiltinId::Undefine:
+    case BuiltinId::Series:
+    case BuiltinId::SeriesData:
+    case BuiltinId::Normal:
+    case BuiltinId::ToNormal:
     case BuiltinId::AngleMode:
         return {};
     }
@@ -1143,7 +1486,8 @@ ValueFacts inferValueFactsImpl(
             break;
         }
 
-        result = applyAssumptions(current.expression, result, assumptions);
+        result = applyAssumptions(
+            current.expression, result, assumptions, builtins, mathematics);
         facts.emplace(current.expression.identity(), result);
     }
 

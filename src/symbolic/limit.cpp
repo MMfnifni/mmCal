@@ -11,6 +11,7 @@
 #include "simplification/simplifier.hpp"
 #include "symbolic/differentiation.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/series.hpp"
 #include "symbolic/substitution.hpp"
 
 #include <cstddef>
@@ -175,6 +176,49 @@ constexpr std::size_t maximumLHopitalSteps = 12;
     if (!expression.isNumber() || !expression.asNumber().isReal())
         return std::nullopt;
     return expression.asNumber().asReal().toRational();
+}
+
+[[nodiscard]] std::optional<Expr> finiteLimitFromLocalSeries(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const Expr& point,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    constexpr std::size_t kSeriesOrder = 6;
+    auto expanded = seriesExpression(
+        expression, variable, point, kSeriesOrder,
+        builtins, mathematics, angles, assumptions);
+    if (!expanded) return std::nullopt;
+    auto data = parseSeriesData(*expanded, builtins);
+    if (!data || data->exponentDenominator == 0)
+        return std::nullopt;
+
+    for (std::size_t i = 0; i < data->coefficients.size(); ++i) {
+        const std::int64_t exponentNumerator =
+            data->minimumExponent + static_cast<std::int64_t>(i);
+        const bool ordinaryNonZero = !isZero(data->coefficients[i]);
+        bool logarithmicNonZero = false;
+        for (const auto& layer : data->logarithmicCoefficients) {
+            if (!isZero(layer[i])) {
+                logarithmicNonZero = true;
+                break;
+            }
+        }
+        if (!ordinaryNonZero && !logarithmicNonZero)
+            continue;
+        if (exponentNumerator < 0)
+            return std::nullopt;
+        if (exponentNumerator == 0 && logarithmicNonZero)
+            return std::nullopt;
+        if (exponentNumerator == 0 && ordinaryNonZero)
+            return fullSimplify(
+                data->coefficients[i], builtins, mathematics, angles, assumptions);
+        if (exponentNumerator > 0)
+            return integer(0);
+    }
+    return integer(0);
 }
 
 [[nodiscard]] bool domainConditionsHold(
@@ -480,29 +524,33 @@ struct LocalPolynomialBehavior final {
         if (outer && (outer->id == BuiltinId::Add || outer->id == BuiltinId::Subtract)) {
             std::vector<Expr> values;
             values.reserve(arguments.size());
+            bool decomposable = true;
             bool positiveInfinitySeen = false;
             bool negativeInfinitySeen = false;
             for (const Expr& argument : arguments) {
                 Expr value = limitCore(argument, variable, point, direction,
                     builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
-                if (isHead(value, builtins, BuiltinId::Limit))
-                    return unresolved(expression, variable, point, direction, builtins);
+                if (isHead(value, builtins, BuiltinId::Limit)) {
+                    decomposable = false;
+                    break;
+                }
                 if (outer->id == BuiltinId::Subtract && values.size() == 1)
                     value = negate(std::move(value), builtins, mathematics, angles, assumptions);
                 positiveInfinitySeen |= isInfinity(value, infinity);
                 negativeInfinitySeen |= isNegativeInfinity(value, builtins, infinity);
                 values.push_back(std::move(value));
             }
-            if (positiveInfinitySeen && negativeInfinitySeen)
-                return unresolved(expression, variable, point, direction, builtins);
-            if (positiveInfinitySeen)
-                return Expr{infinity};
-            if (negativeInfinitySeen)
-                return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
-            const BuiltinId combinedId = outer->id == BuiltinId::Subtract
-                ? BuiltinId::Add : outer->id;
-            return simplify(call(builtins, combinedId, std::move(values)),
-                builtins, mathematics, angles, assumptions);
+            if (decomposable && !(positiveInfinitySeen && negativeInfinitySeen)) {
+                if (positiveInfinitySeen)
+                    return Expr{infinity};
+                if (negativeInfinitySeen)
+                    return negate(Expr{infinity}, builtins, mathematics, angles, assumptions);
+                const BuiltinId combinedId = outer->id == BuiltinId::Subtract
+                    ? BuiltinId::Add : outer->id;
+                return simplify(call(builtins, combinedId, std::move(values)),
+                    builtins, mathematics, angles, assumptions);
+            }
+            // 未解決項やInfinity-Infinityは，後段の局所Seriesで相殺を調べる余地を残す。
         }
         if (outer && outer->id == BuiltinId::Divide && arguments.size() == 2) {
             Expr numerator = limitCore(arguments[0], variable, point, direction,
@@ -752,6 +800,15 @@ struct LocalPolynomialBehavior final {
                 }
             }
         }
+    }
+
+    // 既存の個別規則で決まらない有限点極限だけを，局所Seriesの先頭項で補完する。
+    // 発散項やlog^kの定数次数が残る場合は推測せず，従来kernelへ処理を戻す。
+    if (!isInfinity(point, infinity) && !isNegativeInfinity(point, builtins, infinity)) {
+        if (auto seriesLimit = finiteLimitFromLocalSeries(
+                expression, variable, point,
+                builtins, mathematics, angles, assumptions))
+            return *seriesLimit;
     }
 
     Expr rawSubstituted = substituteSymbol(expression, variable, point);

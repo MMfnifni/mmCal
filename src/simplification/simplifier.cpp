@@ -1758,6 +1758,14 @@ struct PositiveIntegerPower final {
     case BuiltinId::VectorReflect:
     case BuiltinId::VectorReflectAxis:
     case BuiltinId::VectorSum:
+    case BuiltinId::VectorInner:
+    case BuiltinId::VectorOuter:
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian:
     case BuiltinId::Factorial:
     case BuiltinId::Derivative:
     case BuiltinId::SymbolicIntegral:
@@ -1901,6 +1909,10 @@ struct PositiveIntegerPower final {
     case BuiltinId::Definitions:
     case BuiltinId::Undefine:
     case BuiltinId::AngleMode:
+    case BuiltinId::Series:
+    case BuiltinId::SeriesData:
+    case BuiltinId::Normal:
+    case BuiltinId::ToNormal:
     case BuiltinId::UnitApplied:
         return expression;
     }
@@ -1996,6 +2008,168 @@ struct PositiveIntegerPower final {
 }
 
 } // namespace
+
+namespace {
+
+struct ExplicitLinearTerm final {
+    Rational coefficient{BigInt{0}};
+    Expr atom{Number{BigInt{1}}};
+};
+
+[[nodiscard]] bool isAdditiveForExplicitLinearCombination(
+    const Expr& expression,
+    const SimplificationContext& context,
+    BuiltinId* id = nullptr) {
+    if (!expression.isCall()) return false;
+    const auto* definition = context.builtins.find(expression.asCall().head);
+    if (!definition) return false;
+    if (id) *id = definition->id;
+    return definition->id == BuiltinId::Add
+        || definition->id == BuiltinId::Subtract
+        || definition->id == BuiltinId::Negate;
+}
+
+void collectExplicitLinearTerms(
+    const Expr& expression,
+    Rational coefficient,
+    std::vector<ExplicitLinearTerm>& terms,
+    const SimplificationContext& context,
+    std::size_t depth = 0) {
+    if (depth > 256) {
+        terms.push_back(ExplicitLinearTerm{std::move(coefficient), expression});
+        return;
+    }
+
+    BuiltinId id = BuiltinId::Add;
+    if (isAdditiveForExplicitLinearCombination(expression, context, &id)) {
+        const auto& arguments = expression.asCall().arguments;
+        if (id == BuiltinId::Add) {
+            for (const Expr& argument : arguments)
+                collectExplicitLinearTerms(
+                    argument, coefficient, terms, context, depth + 1);
+            return;
+        }
+        if (id == BuiltinId::Subtract && arguments.size() == 2) {
+            collectExplicitLinearTerms(
+                arguments[0], coefficient, terms, context, depth + 1);
+            collectExplicitLinearTerms(
+                arguments[1], -coefficient, terms, context, depth + 1);
+            return;
+        }
+        if (id == BuiltinId::Negate && arguments.size() == 1) {
+            collectExplicitLinearTerms(
+                arguments[0], -coefficient, terms, context, depth + 1);
+            return;
+        }
+    }
+
+    if (expression.isCall()) {
+        const auto* definition = context.builtins.find(expression.asCall().head);
+        if (definition && definition->id == BuiltinId::Multiply) {
+            Rational scalar{BigInt{1}};
+            std::vector<Expr> nonNumeric;
+            nonNumeric.reserve(expression.asCall().arguments.size());
+            for (const Expr& factor : expression.asCall().arguments) {
+                if (factor.isNumber() && factor.asNumber().isReal()) {
+                    scalar *= factor.asNumber().asReal().toRational();
+                    continue;
+                }
+                nonNumeric.push_back(factor);
+            }
+            coefficient *= scalar;
+            if (nonNumeric.empty()) {
+                terms.push_back(ExplicitLinearTerm{
+                    std::move(coefficient), Expr{Number{BigInt{1}}}});
+                return;
+            }
+            if (nonNumeric.size() == 1
+                && isAdditiveForExplicitLinearCombination(nonNumeric.front(), context)) {
+                collectExplicitLinearTerms(
+                    nonNumeric.front(), coefficient, terms, context, depth + 1);
+                return;
+            }
+            Expr atom = nonNumeric.size() == 1
+                ? nonNumeric.front()
+                : Expr::call(
+                    context.builtins.symbol(BuiltinId::Multiply),
+                    std::move(nonNumeric));
+            terms.push_back(ExplicitLinearTerm{std::move(coefficient), std::move(atom)});
+            return;
+        }
+    }
+
+    terms.push_back(ExplicitLinearTerm{std::move(coefficient), expression});
+}
+
+[[nodiscard]] Expr buildExplicitLinearTerm(
+    const Rational& coefficient,
+    const Expr& atom,
+    const SimplificationContext& context) {
+    if (coefficient == Rational{BigInt{1}})
+        return atom;
+    if (coefficient == Rational{BigInt{-1}})
+        return Expr::call(
+            context.builtins.symbol(BuiltinId::Negate), {atom});
+    if (atom.isNumber() && atom.asNumber().isReal()
+        && atom.asNumber().asReal().toRational() == Rational{BigInt{1}})
+        return Expr{Number{coefficient}};
+    return Expr::call(
+        context.builtins.symbol(BuiltinId::Multiply),
+        {Expr{Number{coefficient}}, atom});
+}
+
+} // namespace
+
+Expr simplifyExplicitLinearCombination(
+    const Expr& expression,
+    const SimplificationContext& context) {
+    Expr simplified = Simplifier{}.simplify(expression, context);
+    if (!isAdditiveForExplicitLinearCombination(simplified, context))
+        return simplified;
+
+    std::vector<ExplicitLinearTerm> terms;
+    terms.reserve(32);
+    collectExplicitLinearTerms(
+        simplified, Rational{BigInt{1}}, terms, context);
+    if (terms.size() < 2)
+        return simplified;
+
+    struct Group final {
+        Expr atom;
+        Rational sum{BigInt{0}};
+    };
+    std::vector<Group> groups;
+    groups.reserve(terms.size());
+    for (const auto& term : terms) {
+        auto iterator = std::find_if(
+            groups.begin(), groups.end(),
+            [&](const Group& group) { return group.atom == term.atom; });
+        if (iterator == groups.end())
+            groups.push_back(Group{term.atom, term.coefficient});
+        else
+            iterator->sum += term.coefficient;
+    }
+
+    // 0への相殺は定義域を消し得る。明示前提込みでatomのdefinednessを証明できない
+    // groupが一つでもあれば，通常simplifyの結果をそのまま返す。
+    for (const Group& group : groups)
+        if (group.sum.isZero() && !provablyDefined(group.atom, context))
+            return simplified;
+
+    std::vector<Expr> rebuilt;
+    rebuilt.reserve(groups.size());
+    for (const Group& group : groups) {
+        if (group.sum.isZero())
+            continue;
+        rebuilt.push_back(buildExplicitLinearTerm(group.sum, group.atom, context));
+    }
+    if (rebuilt.empty())
+        return Expr{Number{BigInt{0}}};
+    Expr result = rebuilt.size() == 1
+        ? std::move(rebuilt.front())
+        : Expr::call(context.builtins.symbol(BuiltinId::Add), std::move(rebuilt));
+    return Simplifier{}.simplify(result, context);
+}
 
 Expr Simplifier::simplify(
     const Expr& expression,

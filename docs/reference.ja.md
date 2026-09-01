@@ -1390,13 +1390,16 @@ diag[A]
 trace[A]
 ```
 
-indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。
+indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。さらにfinite `SolutionSet`にも同じ0始まりindexを使える。`at[solutions,i]`は第`i` branchだけを含む`SolutionSet`を返し，branchの条件，自由変数，multiplicity，solver変数domainを保持する。`at[solutions,i,x]`は第`i` branchにおける`x`のbinding右辺だけを返す。後者は条件metadataを返さないため，条件付き解を後段へ渡す場合は2引数版を使う。`Conditional` / `Universal` / `Unresolved`集合はexplicit branch indexを一意に定義できないため対象外である。
 
 ```text
 dimensions[{{1,2,3},{4,5,6}}] -> {2, 3}
 arrayRank[{{1,2},{3,4}}] -> 2
 at[{{1,2},{3,4}},1] -> {3, 4}
 at[{{1,2},{3,4}},1,0] -> 3
+at[solve[x^2==1,x],0] -> {x == 1}
+at[solve[x^2==1,x],1,x] -> -1
+at[solve[{x+y==3,x*y==2},{x,y}],1,y] -> 1
 reshape[{1,2,3,4},{2,2}] -> {{1, 2}, {3, 4}}
 ```
 
@@ -1651,6 +1654,225 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 ```
 
 `Power`のdefinednessはexact Rational指数まで区別する。正の非整数Rational指数ではbase=0を許す一方，負のRational指数はbase非零を要求する。`zeta[s]`は一般に「definedness不明」とせず，唯一の極 `s=1`を` s != 1 `として扱える。
+
+## 22.1 `series` / `normal` / `toNormal`（v1.5.5 WIP）
+
+```text
+series[expr,{x,a,n}]
+series[expr,{x,a,n},assumptions]
+normal[seriesExpr]
+toNormal[expr]
+```
+
+`series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，finite/conditional `SolutionSet`のbinding右辺も再帰変換し，集合構造，branch条件，自由変数，multiplicity，domain metadataは保持する。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。TPSA基盤で定数，展開変数，和，差，積，除算，整数冪，`exp` / `log` / `sin` / `cos` / `sinh` / `cosh`，`tan/cot/sec/csc`，`tanh/coth/sech/csch`，`expm1/log1p`，`sinc/cosc/tanc`，`sinhc/tanhc/expc`，`log2/log10`，principal `sqrt` / exact有理冪を合成し，Taylor，有限principal partを持つLaurent，およびexact有理指数格子を持つPuiseux展開へ対応する。`log2/log10`は一般の`log[base,x] = log[x]/log[base]`として有限点および`+Infinity`のlog層へ接続する。analytic函数は高階`D`の反復ではなく係数漸化式で処理する。異なるPuiseux分母はLCM格子へexactに再配置する。記号的な先頭係数を逆数化する場合は非零性を証明できるときだけ展開し，principal `log`は展開中心が正の実数または非実数であることを証明できる場合に限る。direct trigは現在の角度modeと明示`Rad` / `Deg` / `Grad`を尊重する。分岐点上の非整数有理冪は，現在正の先頭係数を持つsimple zero/pole，または既にbranchを明示したPuiseux式に限定する。`sqrt[x^2]`のような高重複零点や負向きのprincipal branchを一意に証明できない形は推測せず未評価にする。
+
+展開中心には`Infinity`も指定できる。ここで`Infinity`は複素無限遠一般ではなく実軸の`+Infinity`を意味し，内部では`t=1/x`として`t->0+`の局所展開へ写す。したがって`seriesData[x,Infinity,...]`の指数`r`は`(1/x)^r`，log係数層は`log[1/x]^k`を表す。例えば`series[1/(x+1),{x,Infinity,4}]`は`x^-1-x^-2+x^-3-x^-4+O[x^-5]`に対応し，`normal` / `toNormal`は`(1/x)^(-m)`のような中間形を残さず通常の`x`冪へ戻す。`D`では`dt/dx=-t^2`，`integrate`では`dx=-t^-2 dt`を係数演算へ反映し，`1/x`項の積分は`-log[1/x]`としてlog層へ閉じる。ただし打切り剰余がちょうど`O(1/x)`の場合，積分後の未知剰余がlog型になり得て現在の`O(t^r)`metadataだけでは表せないため未評価へ戻す。初期対応は有理函数，多項式成長，`exp[1/x]`，Puiseux冪，`log[1/x]`等である。`sin[x]`の無限振動，`exp[x]`のessential growth，直接の`log[x]`等は別のasymptotic providerを必要とするため未評価に保つ。
+
+実軸`+Infinity`専用のlogarithmic asymptotic providerも備える。`A(x)~c(1/x)^r`の先頭係数`c`が正と証明できる場合に限り，`log[A(x)]`を`log[c]+r log[1/x]+log[1+h]`へ分解して既存TPSA/log層へ合成する。したがって`series[log[x],{x,Infinity,n}]`，`log[2x]`，`log[x+1]`，`log[x^2+1]`，`log[sqrt[x]+1]`，さらに`log[x]^k`や`log[x]/x^m`を同じ`SeriesData`で扱える。内部log基底は引き続き`log[1/x]`だが，`normal` / `toNormal`は実軸`+Infinity`の方向情報を使って通常の`log[x]`へ戻す。`1/log[x]`のようにlogの負冪を必要とするtransseries，先頭係数が負または複素でprincipal branchを追加判断する必要がある形は未評価に保つ。`sin[x]`の無限振動や`exp[x]`のessential growthも対象外である。
+
+```text
+series[log[x+1],{x,Infinity,4}]
+-> seriesData[x, Infinity, {0, 1, -1/2, 1/3, -1/4}, 0, 5, 1, {{-1, 0, 0, 0, 0}}]
+
+normal[series[log[x+1],{x,Infinity,3}]]
+-> x^(-1)-x^(-2)/2+x^(-3)/3+log[x]
+
+series[1/log[x],{x,Infinity,3}]
+-> series[1/log[x], {x, Infinity, 3}]
+```
+
+特殊函数の局所Seriesはprimitive-composition方式で接続する。函数ごとの高階導函数表を持たず，既知の一階導函数を既存TPSAで展開し，係数積分して定数項へ元函数の中心値を戻す。`erf` / `Si` / `Ei` / `Ci`，`erfc` / `fresnelc` / `fresnels`，`li`，principal `asin` / `acos` / `atan`，`lambertw`の正則中心展開を接続している。`li`は`li'(z)=1/log[z]`を用い，逆三角函数は`asin'(z)=(1-z^2)^(-1/2)`，`acos'(z)=-(1-z^2)^(-1/2)`，`atan'(z)=1/(1+z^2)`をTPSAへ通す。`erfc`は`erfc[z]=1-erf[z]`と同じGaussian kernelを符号反転して共有し，Fresnel C/SはDLMF 7.2.7–7.2.8の`cos[Pi z^2/2]` / `sin[Pi z^2/2]`をTPSAへ通す。0まわりの係数はDLMF 7.6.1，7.6.4，7.6.6および6.6.5と一致する。`SeriesData`は`log(x-center)^k`の係数層も持ち，`Ei` / `Ci`の0における対数特異点もDLMF 6.6.1 / 6.6.6の局所級数としてexactに保持する。`log[x]`自身，`x log[x]`，`log[x]^k`，Puiseux因子との積，および`x^-1 log[x]^k`の積分も同じ表現で閉じる。さらに原点で引数が`A(t)=c t^r(1+h)`，`0<r<=1`，`c>0`と証明できる場合は`log A=log c+r log t+log(1+h)`へ分解し，`log` / `Ei` / `Ci`をTaylor/Puiseux零点へ合成する。principal branchの巻き数を変え得る`r>1`，負または複素の先頭係数は推測せず未評価にする。DLMF 6.2のprincipal cut上を正則中心とする要求も従来どおり未評価にする。`li`はprincipal `li(z)=Ei(Log(z))`の局所枝を推測しないため，現段階ではDLMF 6.2.8に沿う`x>1`を証明できる実中心，または非実中心だけを正則中心として扱う。`z=0`，`z=1`，`0<z<1`の実中心，負実軸中心は未評価に保つ。`asin` / `acos`はDLMF 4.23のprincipal cutを避け，実中心では`-1<a<1`を証明できる場合，または非実中心と証明できる場合だけTaylor/Puiseux合成を行う。`atan`は実中心，実部が非零と証明できる複素中心，または虚軸上で`-1<Im(a)<1`を証明できる中心を許可し，`±I`とそこから外側のprincipal cutは未評価にする。逆三角函数の戻り値はsessionのangle modeに従うため，Series係数にもRadian/Degree/Gradianの出力scaleを反映する。一方，`Si` / `Ci` / Fresnel C/Sの定義核は常にRadianであり，sessionの角度modeには依存しない。Lambert WはDLMF 4.13.4の導函数多項式`p_n(W)`を整数係数漸化式で生成し，正則中心の局所Taylor係数を既存TPSA/Puiseuxへ合成する。principal `W_0`は正則中心では`(-Infinity,-1/E]`をcutとして避け，明示整数branch `k!=0`は`(-Infinity,0]`を避ける。分岐点`z=-1/E`ではDLMF 4.13.9_1–4.13.9_2の`s=sqrt[E z+1]`展開を用い，exact中心`z=-1/E`における`W_0`と`W_-1`をsquare-root Puiseux級数として扱う。`d_n`は偶数次の有理係数と奇数次の`有理数*sqrt[2]`へ分離してexact漸化式で生成し，一般algebraic simplifierを係数生成ループへ持ち込まない。principal側は正の先頭係数からprincipal `sqrt`を証明できる方向だけを採用し，`W_-1`は同じ局所変数の符号を反転して反対sheetを選ぶ。他のbranch，cutへ向かう負の先頭方向，`sqrt[x^2]`を生む高重複接触は推測せず未評価に保つ。`gamma` / `lgamma`も同じ局所基盤へ接続している。DLMF 5.7の`log Gamma(1+z)`および半整数基底の係数を既存TPSAへ合成し，`Gamma(z+1)=z Gamma(z)`の対数微分を使ってexact整数・半整数中心へ移送する。係数生成中に`gamma`そのものを高階微分せず，`lgamma`も一度Gamma級数を作ってから`log`するのではなく局所対数増分を直接構成するため，高次での巨大な相殺式を避ける。`gamma`は正則な対応中心から複素方向やPuiseux引数へ合成できる。一方，現行`lgamma[x]`は実軸上の`log[abs[gamma[x]]]`であり複素`LogGamma`ではないため，Seriesでも実係数の局所方向だけを扱う。非正整数のGamma極，現基底でexact係数を構成できない`1/3`等の一般有理中心，複素方向の`lgamma`は未評価に保つ。`digamma` / `trigamma`も同じ局所基盤を使う。DLMF 5.7.4に一致する`digamma`係数は同じlog-Gamma係数を1階微分して生成し，`trigamma`はさらに1階微分するため，係数表を重複して持たない。基底中心1・1/2からexact整数・半整数中心への移送は`psi(z+1)=psi(z)+1/z`と`psi1(z+1)=psi1(z)-1/z^2`をSeries演算で適用する。正則な対応中心では複素方向とPuiseux引数へ合成できるが，非正整数極と現基底でexact係数を構成できない一般有理中心は未評価に保つ。`polylog[s,z]`の原点局所展開はDLMF 25.12.10の定義級数から直接構成する。order `s`が展開変数に依存しなければsymbolicでもよく，係数`n^(-s)`をexact expressionとして保持したままTPSA/Puiseux引数へ合成する。原点では`Li_s(z)=z+O[z^2]`の単純零点をvaluationへ公開するため，積・商やLaurent inversionにも接続できる。正整数orderでは非零正則中心にも対応する。`D^n Li_s(z)=z^(-n) sum_k s(n,k) Li_(s-k)(z)`をsigned Stirling数で直接Taylor係数化し，非正整数orderへ到達した項は`Li_0(z)=z/(1-z)`およびEulerian多項式`Li_{-m}(z)=z A_m(z)/(1-z)^(m+1)`へexact還元する。そのため高階導函数表を持たず，負order `polylog` headも係数へ残さない。principal cut `[1,Infinity)`を避けるため，実中心は`a<1`を証明できる場合，複素中心は非実と証明できる場合だけ展開する。`0<a<1`かつ正整数orderなら定義級数から`Li_s(a)>0`であることもSeries内部の非零証明として利用し，`1/polylog[s,a+x]`や負整数冪を安全にinverseへ接続する。非整数orderの非零中心，cut上の中心，正則性を証明できないsymbolic中心は未評価に保つ。特殊函数・逆三角函数・Lambert W・Gamma/psi系・polylogの既知valuationも積・商やLaurent inversionへ接続する。
+
+```text
+series[log[x],{x,0,4}]
+-> seriesData[x, 0, {0, 0, 0, 0, 0}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[Ei[x],{x,0,4}]
+-> seriesData[x, 0, {-digamma[1], 1, 1/4, 1/18, 1/96}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[Ci[x],{x,0,6}]
+-> seriesData[x, 0, {-digamma[1], 0, -1/4, 0, 1/96, 0, -1/4320}, 0, 7, 1, {{1, 0, 0, 0, 0, 0, 0}}]
+
+series[log[2*x],{x,0,4}]
+-> seriesData[x, 0, {log[2], 0, 0, 0, 0}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[log[sqrt[x]],{x,0,4}]
+-> seriesData[x, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, 9, 2, {{1/2, 0, 0, 0, 0, 0, 0, 0, 0}}]
+
+series[log[x^2],{x,0,4}]
+-> series[log[x^2], {x, 0, 4}]
+```
+
+```text
+series[lgamma[1+x],{x,0,5}]
+-> seriesData[x, 0, {digamma[1], Pi^2/12, -zeta[3]/3, Pi^4/360, -zeta[5]/5}, 1, 6, 1]
+
+series[gamma[1/2+x],{x,0,2}]
+-> seriesData[x, 0, {sqrt[Pi], (digamma[1]-2log[2])sqrt[Pi], (Pi^2/2+(digamma[1]-2log[2])^2)sqrt[Pi]/2}, 0, 3, 1]
+
+series[gamma[x],{x,0,3}]
+-> series[gamma[x], {x, 0, 3}]
+
+series[lgamma[1+I*x],{x,0,3}]
+-> series[lgamma[I x+1], {x, 0, 3}]
+
+series[digamma[1+x],{x,0,5}]
+-> seriesData[x, 0, {digamma[1], Pi^2/6, -zeta[3], Pi^4/90, -zeta[5], zeta[6]}, 0, 6, 1]
+
+series[trigamma[1/2+x],{x,0,3}]
+-> seriesData[x, 0, {Pi^2/2, -14zeta[3], Pi^4/2, -124zeta[5]}, 0, 4, 1]
+
+series[polylog[2,x],{x,0,6}]
+-> seriesData[x, 0, {1, 1/4, 1/9, 1/16, 1/25, 1/36}, 1, 7, 1]
+
+series[polylog[a,sqrt[x]],{x,0,2}]
+-> seriesData[x, 0, {1, 2^(-a), 3^(-a), 4^(-a)}, 1, 5, 2]
+
+series[polylog[2,1/2+x],{x,0,3}]
+-> seriesData[x, 0, {polylog[2, 1/2], -2log[1/2], 2(1+log[1/2]), 4(-1-2log[1/2])/3}, 0, 4, 1]
+
+series[1/polylog[2,1/2+x],{x,0,2}]
+-> seriesData[x, 0, {1/polylog[2, 1/2], 2log[1/2]/polylog[2, 1/2]^2, -(2(1+log[1/2])/polylog[2, 1/2]-4log[1/2]^2/polylog[2, 1/2]^2)/polylog[2, 1/2]}, 0, 3, 1]
+```
+
+```text
+series[(1+x)^3,{x,0,5}]
+-> seriesData[x, 0, {1, 3, 3, 1, 0, 0}, 0, 6, 1]
+
+normal[%]
+-> x^3+3x^2+3x+1
+```
+
+```text
+series[1/(1-x),{x,0,4}]
+-> seriesData[x, 0, {1, 1, 1, 1, 1}, 0, 5, 1]
+
+series[1/x,{x,0,3}]
+-> seriesData[x, 0, {1, 0, 0, 0, 0}, -1, 4, 1]
+
+normal[%]
+-> x^(-1)
+```
+
+```text
+toNormal[{series[(1+x)^2,{x,0,3}],series[log[x],{x,0,2}]}]
+-> {x^2+2x+1, log[x]}
+
+normal[{series[(1+x)^2,{x,0,3}]}]
+-> {seriesData[x, 0, {1, 2, 1, 0}, 0, 4, 1]}
+```
+
+`SolutionSet`内部でもbindingだけを再帰変換し，解集合metadataは保持する。低コスト初等函数は既存TPSAへ正規化して展開する。
+
+```text
+series[tan[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 1/3, 0, 2/15}, 1, 6, 1]
+
+series[log2[x],{x,Infinity,3}]
+-> seriesData[x, Infinity, {0, 0, 0, 0}, 0, 4, 1, {{-1/log[2], 0, 0, 0}}]
+```
+
+`toNormal`は再帰変換であり，変換後の式へ再度適用しても結果は変わらない。`SolutionSet`ではbinding右辺だけを変換し，条件・自由変数・multiplicity・domainは変更しない。将来，通常形へ落とす特殊構造が増えた場合も同じfrontendへ追加できる。
+
+
+```text
+series[exp[x],{x,0,5}]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24, 1/120}, 0, 6, 1]
+
+series[1/sin[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 1/6, 0, 7/360, 0, 31/15120}, -1, 6, 1]
+
+series[log[x],{x,I,3}]
+-> seriesData[x, I, {I Pi/2, -I, 1/2, I/3}, 0, 4, 1]
+
+series[sqrt[1+x],{x,0,6}]
+-> seriesData[x, 0, {1, 1/2, -1/8, 1/16, -5/128, 7/256, -21/1024}, 0, 7, 1]
+
+series[(1+x)^(3/2),{x,0,6}]
+-> seriesData[x, 0, {1, 3/2, 3/8, -1/16, 3/128, -3/256, 7/1024}, 0, 7, 1]
+```
+
+```text
+series[sqrt[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 1, 11, 2]
+
+series[sqrt[x]*(1+x),{x,0,4}]
+-> seriesData[x, 0, {1, 0, 1, 0, 0, 0, 0, 0}, 1, 9, 2]
+
+series[exp[sqrt[x]],{x,0,3}]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24, 1/120, 1/720}, 0, 7, 2]
+```
+
+```text
+series[erf[x],{x,0,7}]
+-> seriesData[x, 0, {2/sqrt[Pi], 0, -2/sqrt[Pi]/3, 0, 1/(5sqrt[Pi]), 0, -1/(3sqrt[Pi])/7}, 1, 8, 1]
+
+series[Si[x],{x,0,7}]
+-> seriesData[x, 0, {1, 0, -1/18, 0, 1/600, 0, -1/35280}, 1, 8, 1]
+
+series[Ei[1+x],{x,0,4}]
+-> seriesData[x, 0, {Ei[1], E, 0, E/6, -E/12}, 0, 5, 1]
+
+series[Ci[1+x],{x,0,4}]
+-> seriesData[x, 0, {Ci[1], cos[1 Rad], (-cos[1 Rad]-sin[1 Rad])/2, (cos[1 Rad]/2+sin[1 Rad])/3, (-cos[1 Rad]/2-5sin[1 Rad]/6)/4}, 0, 5, 1]
+
+series[erfc[x],{x,0,5}]
+-> seriesData[x, 0, {1, -2/sqrt[Pi], 0, 2/(3sqrt[Pi]), 0, -1/sqrt[Pi]/5}, 0, 6, 1]
+
+series[fresnelc[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 0, 0, -Pi^2/40}, 1, 6, 1]
+
+series[fresnels[x],{x,0,7}]
+-> seriesData[x, 0, {Pi/6, 0, 0, 0, -Pi Pi^2/336}, 3, 8, 1]
+
+series[li[2+x],{x,0,2}]
+-> seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2}, 0, 3, 1]
+
+series[li[a+x],{x,0,2},a>1]
+-> seriesData[x, 0, {li[a], 1/log[a], -1/(a log[a]^2)/2}, 0, 3, 1]
+
+series[asin[x],{x,0,7}]
+-> seriesData[x, 0, {1, 0, 1/6, 0, 3/40, 0, 5/112}, 1, 8, 1]
+
+series[atan[1+I+x],{x,0,3}]
+-> seriesData[x, 0, {atan[1+I], 1/5-2I/5, -1/25+7I/25, -1/375-68I/375}, 0, 4, 1]
+
+series[asin[a+x],{x,0,2},-1<a<1]
+-> seriesData[x, 0, {asin[a], (1-a^2)^(-1/2), a*(1-a^2)^(-1/2)/(2(1-a^2))}, 0, 3, 1]
+
+series[lambertw[x],{x,0,7}]
+-> seriesData[x, 0, {1, -1, 3/2, -8/3, 125/24, -54/5, 16807/720}, 1, 8, 1]
+
+series[lambertw[E+x],{x,0,4}]
+-> seriesData[x, 0, {1, exp[-1]/2, -3*exp[-2]/16, 19*exp[-3]/192, -185*exp[-4]/3072}, 0, 5, 1]
+
+series[1/lambertw[x],{x,0,5}]
+-> seriesData[x, 0, {1, 1, -1/2, 2/3, -9/8, 32/15, -625/144}, -1, 6, 1]
+
+series[lambertw[-1/E+x],{x,0,3}]
+-> seriesData[x, 0, {-1, sqrt[2]sqrt[E], -2*E/3, 11*E sqrt[2]sqrt[E]/36, -43*exp[2]/135, 769*exp[2]sqrt[2]sqrt[E]/4320, -1768*E exp[2]/8505}, 0, 7, 2]
+
+series[lambertw[-1,-1/E+x],{x,0,3}]
+-> seriesData[x, 0, {-1, -sqrt[2]sqrt[E], -2*E/3, -11*E sqrt[2]sqrt[E]/36, -43*exp[2]/135, -769*exp[2]sqrt[2]sqrt[E]/4320, -1768*E exp[2]/8505}, 0, 7, 2]
+```
+
+通常REPLの複数行／自動layoutでは，例えば`series[sqrt[x]*(1+x),{x,0,4}]`を`x^(1/2) + x^(3/2) + O[x^(9/2)]`と表示する。`single`およびmachine-facing出力では`seriesData[...]`を保持する。
+
+`series[log[x],{x,-1,n}]`のようなprincipal branchの分岐切断上を中心とする要求や，`series[sqrt[x^2],{x,0,n}]`のように単一のprincipal局所branchへ安全に落とせない要求は未評価のまま保持する。
+
+`SeriesData`は展開変数自身について`D` / `integrate`で直接係数演算できる。通常係数だけでなく各`log(x-center)^k`層も積の微分則・部分積分漸化式で処理する。したがってTaylor/Laurent/Puiseux指数格子を保ったまま，`D[log[x]^k]`や`integrate[x^-1 log[x]^k,x]`もSeriesData内で閉じる。
+
+```text
+D[series[exp[x],{x,0,5}],x]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24}, 0, 5, 1]
+
+integrate[series[sqrt[x],{x,0,4}],x]
+-> seriesData[x, 0, {2/3, 0, 0, 0, 0, 0, 0, 0}, 3, 11, 2]
+```
+
+`x^(-1)`項の積分はlog係数層へ移り，例えば`integrate[series[1/x,{x,0,4}],x]`は`log[x]`を表すSeriesDataを返す。`x^-1 log[x]^k`も`log[x]^(k+1)/(k+1)`へexactに移る。
+
+`seriesData[variable,center,coefficients,minExponent,orderNumerator,exponentDenominator]`が従来の内部表現である。対数項を持つ場合だけ7引数目`logarithmicCoefficientLayers`を追加し，layer `k`は`log(x-center)^(k+1)`へ掛かる同一指数格子の係数列として解釈する。対数層が空なら6引数canonicalを維持する。通常利用では`series` / `normal`を使う。各係数の指数は`(minExponent+i)/exponentDenominator`，剰余次数は`orderNumerator/exponentDenominator`である。
 
 ---
 
@@ -2100,6 +2322,21 @@ limit[sin[1/x],x,0,1]
 limit[x sin[1/x],x,0]
 -> 0
 
+limit[x*Ei[x],x,0,1]
+-> 0
+
+limit[sqrt[x]*log[x],x,0,1]
+-> 0
+
+limit[Ei[x]-log[x],x,0,1]
+-> -digamma[1]
+
+limit[Ci[x]-log[x],x,0,1]
+-> -digamma[1]
+
+limit[log[2*x]-log[x],x,0,1]
+-> log[2]
+
 limit[Ei[x],x,0]
 -> -Infinity
 
@@ -2136,7 +2373,7 @@ limit[li[x],x,-Infinity]
 
 `Ei` / `Ci` / `li`は主値分岐として扱う。実軸上では`Ei[x]`は`x -> 0`で`-Infinity`，`x -> -Infinity`で0へ収束する。`Ci[x]`は`x -> 0`で`-Infinity`，正の無限遠で0へ収束する一方，負の実軸は分岐切断上にあるため`x -> -Infinity`では分岐オフセットを保持して`I Pi`へ収束する。`li[x]`は原点で0へ収束する。負の実軸方向で`x -> -Infinity`とした場合は現行の方向表現では実数の`-Infinity`へ潰さず，方向未定の複素無限大`ComplexInfinity`を返す。
 
-0/0型では既存`D`を使った反復l'Hopitalを安全弁付きで利用する。Rational functionの局所zero/極次数や無限遠次数比較はexactに処理する。`sin` / `cos` / `tan`について，実引数が一側または無限遠で`+/-Infinity`へ走ることをexactに証明できた場合は，周期振動により単一の極限値が存在しないことも証明済みとして`Indeterminate`を返す。有限点の二側極限では片側の無限振動だけでも不存在を確定できる。さらに，実Rational functionを引数に取る`sin` / `cos`は実軸上で絶対値1以下であることを使い，`x sin[1/x] -> 0`等の2因子積をsqueeze theoremでexactに閉じる。未解決二側極限を主値等へ潰すことはしない。
+0/0型では既存`D`を使った反復l'Hopitalを安全弁付きで利用する。Rational functionの局所zero/極次数や無限遠次数比較はexactに処理する。これらの個別規則で決まらない有限点では，対応可能な場合に限って局所`SeriesData`を補助backendとして使い，先頭の非零項から有限定数または0を証明する。`Ei[x]-log[x]`等の`Infinity-Infinity`相殺もこの経路で扱う。負冪や定数次数の`log^k`が残る場合は発散方向を推測せず未評価へ戻すため，Series backendは既存limit kernelの置換ではない。`sin` / `cos` / `tan`について，実引数が一側または無限遠で`+/-Infinity`へ走ることをexactに証明できた場合は，周期振動により単一の極限値が存在しないことも証明済みとして`Indeterminate`を返す。有限点の二側極限では片側の無限振動だけでも不存在を確定できる。さらに，実Rational functionを引数に取る`sin` / `cos`は実軸上で絶対値1以下であることを使い，`x sin[1/x] -> 0`等の2因子積をsqueeze theoremでexactに閉じる。未解決二側極限を主値等へ潰すことはしない。
 
 ```text
 limit[1/x,x,0]
@@ -2754,10 +2991,12 @@ canonical函数:
 madd
 vadd vsub vscalar
 vcross
+inner outer
 vproject vangle
 vmanhattan veuclidean
 vreflect vreflect_axis
 vsum
+grad divergence curl laplacian jacobian hessian
 ```
 
 互換alias:
@@ -2768,11 +3007,27 @@ rank mrank       -> matrixRank
 mget             -> at
 vnorm vlength    -> norm
 vnormalize vunit -> normalize
-vdistance        -> veuclidean
+vdistance distance -> veuclidean
+cross              -> vcross
+projection         -> vproject
+gradient           -> grad
 singularValueDecomposition -> svd
 ```
 
-aliasは別算法を持たず，同じ`BuiltinId`へ束ねる。`vadd`等のcanonical vector helperは互換名ではなく，それ自体が公開APIである。
+aliasは別算法を持たず，同じ`BuiltinId`へ束ねる。`vadd`等のcanonical vector helperは互換名ではなく，それ自体が公開APIである。`dot`は従来どおりbilinear contraction，`inner[a,b]`は第1引数を共役するHermitian内積であり，`norm[v]`は後者と整合する。`projection[a,b]` / `vproject[a,b]`は`b inner[b,a]/inner[b,b]`を用いる。
+
+ベクトル解析はCartesian座標を明示して使う。
+
+```text
+grad[f,{x,y,z}]
+divergence[{P,Q,R},{x,y,z}]
+curl[{P,Q,R},{x,y,z}]
+laplacian[f,{x,y,z}]
+jacobian[{f1,f2,...},{x1,x2,...}]
+hessian[f,{x1,x2,...}]
+```
+
+座標指定は重複のないsymbolからなるrank-1 Arrayでなければならない。`curl`は3次元Cartesian field専用である。曲線座標系のscale factorやmetricは暗黙に仮定しない。
 
 ---
 
@@ -2798,7 +3053,7 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-exact入力では2冪長FFTはradix-2 Cooley–Tukeyを使う。5点以上の非2冪長で入力をexact Rational/Gaussian Rationalまたは同一cyclotomic quotientの式として証明付きで写せる場合は，`Q[t]/Phi_n(t)`のRational power-basis座標上でexact変換する。Gaussian Rational入力では必要に応じconductorを`lcm(n,4)`へ拡張して`I`を同じcyclotomic fieldへ埋め込む。これにより`ifft[fft[v]]`のroot-of-unity恒等式をgeneric Simplifierへ再証明させずexactに閉じられる。cyclotomic degreeが現在のbudget 64を超える場合，またはsymbolic入力をfield座標へ証明できない場合は従来のgeneric exact DFTへ切り替える。通常の`fft[...]`は引き続きexact-firstであり，machine `double`へ暗黙変換しない。
+exact入力では2冪長FFTはradix-2 Cooley–Tukeyを使い，forwardの公開表現も従来どおり保持する。現在のdegree budget内（16～128点）の2冪長`ifft`では，入力にFFT由来のroot-of-unity式が含まれる場合だけ，その式を`Q[t]/Phi_n(t)`のRational power-basis座標へ再埋込みしてradix-2 inverseを行う。2冪円分体では`Phi_(2^m)(t)=t^(2^(m-1))+1`を利用し，twiddle乗算を係数shiftと符号反転で処理するため，`ifft[fft[v]]`の巨大なsymbolic展開を避けられる。純粋な数値spectrumや再埋込みを証明できない式は従来経路へ戻る。5点以上の非2冪長では，入力をexact Rational/Gaussian Rationalまたは同一cyclotomic quotientの式として証明付きで写せる場合に同じ`Q[t]/Phi_n(t)`座標上でexact変換する。Gaussian Rational入力では必要に応じconductorを`lcm(n,4)`へ拡張して`I`を同じcyclotomic fieldへ埋め込む。cyclotomic degreeが現在のbudget 64を超える場合，またはsymbolic入力をfield座標へ証明できない場合は従来のgeneric exact DFTへ切り替える。通常の`fft[...]`は引き続きexact-firstであり，machine `double`へ暗黙変換しない。
 
 `N[fft[v],p]`では`N`が第1引数を先にexact展開せず，要求精度`p`をFFTへ伝播する。FFT側は`ComplexInterval`/BigFloat端点で直接butterflyを行い，各出力成分が要求桁へ一意に丸められることを証明してから`DecimalApproximation`を返す。近似入力を含む`fft[v]`ではCertifiedEnclosureとInformationEnclosureを別々に同じ変換へ通し，相殺で隠れたguard桁を復活させない。例えば5桁入力同士の差が入力情報より小さい成分は，高精度な微小値として露出せず0中心の低Precision値として保持する。
 
@@ -2942,25 +3197,25 @@ mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりa
 
 # 30. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名270個 / sourceから呼出可能な名前251個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名274個 / sourceから呼出可能な名前254個**。内部headはsource-callable数に含めない。
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
 Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt, cases,
 ceil, choice, cis, collect, cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman,
-cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
+cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
+det, dft, diag, digamma, diff, dimensions, distance, divergence, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, groebnerBasis, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
-integrate, inverse, iqr, isprime, kurtp, kurts, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
+gamma, gcd, geomean, grad, gradient, groebnerBasis, harmmean, hessian, hypot, ibeta, identity, if, ifft, im, imag, inner,
+integrate, inverse, iqr, isprime, jacobian, kurtp, kurts, laplacian, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
-polynomialReduce, pow, precision, prod, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, toNormal, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
+outer, polynomialReduce, pow, precision, prod, projection, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
 qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
-sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
+sec, sech, series, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
@@ -3050,7 +3305,7 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 - 一般parametric linear system
 - `hilbert`（旧仕様の名称再確認）
 - 工学函数，財務函数，単位変換
-- 旧colon command `:defs`, `:unset`, `:undef` 等（函数版`Defs[]/UnDef[]`は実装済み）。`:angle`は`angleMode[]`へ置換し，frontend commandとして`:help` / `:fix` / `:status`を実装済み
+- 旧colon command `:defs`, `:unset`, `:undef` 等（函数版`Defs[]/UnDef[]`は実装済み）。`:angle`は`angleMode[]`へ置換し，frontend commandとして`:help` / `:fix` / `:layout` / `:status`を実装済み
 - `for`, `plot`
 - general Machine/double evaluation mode
 
@@ -3068,15 +3323,19 @@ CLIはKernelの数学状態とfrontendの表示状態を分離する。起動時
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --layout multi
 mmCal --eval "expand[(x+1)^3]"
 mmCal --batch < expressions.txt
 ```
 
 - `--fix n`: 起動時の小数表示桁数上限。内部値は変更せず，末尾の不要な0は省略する
 - `--angle deg|rad|grad`: 起動時の既定角度
+- `--layout auto|single|multi`: 通常REPLだけの出力組版。非対話modeとは併用できない
 - `--eval expr`: 1式だけを非対話評価する
 - `--batch`: 標準入力を1行1式として同じsessionで非対話評価する。
 - `--help`, `-h`: 使用法を表示
+
+`--layout`は対話表示専用であり，`--eval` / `--batch`との同時指定は引数errorになる。既定`auto`はTTYでは端末幅と式構造からArray/List/`cases`/解集合の改行を選び，pipe/redirect時はcanonical 1行表示へ退避する。`single`は常に1行，`multi`は対象構造を複数行へ展開する。KernelのExpr，履歴，`formatExpr()`のcanonical表現は変更しない。
 
 非対話modeはbanner，prompt，`Out[...]` label，終了挨拶を出さない。成功値だけをstdout，Warning / Errorをstderrへ出す。終了codeは成功`0`，引数error`2`，`SyntaxError` / `ResourceLimitError`は`3`，評価errorは`4`，`InternalError`は`5`である。batchは行単位error後も続行し，最大codeをprocessの終了codeとする。`--eval`と`--batch`は同時指定できない。
 
@@ -3091,7 +3350,7 @@ Out[1]> 1/3
 
 - 1行ごとにparse/evaluate
 - promptは`In [n]>` / `Out[n]>`で固定し，余分な空白を入れない
-- 終了は`Exit[]`に一本化。裸の`exit` / `quit`特別扱いはない
+- 数学函数としての終了は`Exit[]`。CLI互換commandとして`:quit` / `:exit`も受け付ける。裸の`exit` / `quit`は特別扱いしない
 - `Clear[]`: user definitionsと全履歴を消し，次の入力番号を1へ戻す
 - `Defs[]`, `UnDef[...]`: user definitionsの確認・削除
 - 計算履歴 `@`, `%`, `%%`, ... および正負添字を持つ再評価型`In [n]`, snapshot型`Out[n]`
@@ -3132,26 +3391,68 @@ Out[2]> 1/3
 
 数値としてcertifyできる式全体は表示時だけ近似する。自由変数を含むsymbolic expressionはexact表記を維持する。
 
-## 34.3 `:status`
+## 34.3 `:layout` — 対話REPLの組版
+
+```text
+:layout
+Layout: Auto
+
+:layout single
+Layout: Single
+
+:layout multi
+Layout: Multi
+```
+
+`:layout`は通常REPLの**表示上の組版だけ**を切り替える。`single`は既存のcanonical 1行表現をそのまま使う。`multi`はArray/List/`cases`/有限・条件付き解集合を構造的に改行する。`auto`はTTY上で端末幅と式構造から選択し，stdoutがpipe/redirectなら1行表示へ退避する。式の内部表現，`Out[n]`，再parse可能なcanonical formatter，自動処理出力には影響しない。
+
+例えば`multi`では，
+
+```text
+Out[1]> {
+          {1, 2},
+          {3, 4}
+        }
+
+Out[2]> cases[
+          x^2 if x >= 0;
+          -x if x < 0;
+          0
+        ]
+```
+
+`:layout`だけなら現在modeを表示する。
+
+## 34.4 `:status`
 
 ```text
 :status
 Angle: Rad
 Display: Exact
+Layout: Auto
 Evaluation: Exact-first
 Definitions: 0
 History: 0
 ```
 
-`:status`も履歴へ入らないCLI commandである。数学状態の変更は`angleMode[...]`等のKernel函数，frontendの照会・presentation状態変更は`:help` / `:fix`等のCLI command，という境界を維持する。
+`:status`も履歴へ入らないCLI commandである。数学状態の変更は`angleMode[...]`等のKernel函数，frontendの照会・presentation状態変更は`:help` / `:fix` / `:layout`等のCLI command，という境界を維持する。
 
-## 34.4 console title
+## 34.5 `:quit` / `:exit`
+
+```text
+:quit
+:exit
+```
+
+どちらも現在のCLI sessionを正常終了する互換commandであり，式としての`Exit[]`と同じ目的を持つ。parse/evaluateや履歴追加は行わない。裸の`quit` / `exit`は通常の入力として扱い，特別な終了commandにはしない。`--batch`でも認識し，その行で正常終了する。
+
+## 34.6 console title
 
 タイトルは補助情報として，例えば次の形式に更新する。
 
 ```text
-mmCal 1.5.0 - Rad - Exact
-mmCal 1.5.0 - Deg - Fixed(16)
+mmCal <version> - Rad - Exact - Layout(Auto)
+mmCal <version> - Deg - Fixed(16) - Layout(Multi)
 ```
 
 - Windows: `SetConsoleTitleA`
@@ -3160,7 +3461,7 @@ mmCal 1.5.0 - Deg - Fixed(16)
 
 タイトル変更失敗は計算Errorにしない。状態確認の正本は`:status`であり，terminalがtitleを上書きしても意味論には影響しない。
 
-## 34.5 canonical formatter
+## 34.7 canonical formatter
 
 通常`Out[n]`はAST dumpではなく，再parse可能なcompact数学表記とする。
 
@@ -3179,7 +3480,7 @@ A-B+C
 - 数字同士など曖昧になる場合は空白ではなく明示`*`を使う
 - precedence/associativityを守り，format → parse → formatで意味が変わらないことを回帰テストする
 
-内部構造を見せるdebug/full-form表示は，通常formatterとは将来別機能に分離する。
+canonical formatterは1行serialization契約の正本として維持する。対話REPLの`:layout`組版はこれとは別のpresentation layerであり，canonical表現を変更しない。内部構造を見せるdebug/full-form表示も通常formatterとは将来別機能に分離する。
 
 ---
 

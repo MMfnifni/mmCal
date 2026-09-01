@@ -11,6 +11,7 @@
 #include "symbolic/algebraic_number.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -479,6 +480,29 @@ Expr evaluateDivide(
         error::throwCalcError(error::CalcErrorType::Domain, "Division by zero");
     if (isExactOne(denominator))
         return numerator;
+
+    if (numerator.isArray() || denominator.isArray()) {
+        if (!numerator.isArray() || denominator.isArray())
+            arrayArithmeticError(
+                "Array division is scalar-only; only array/scalar is supported");
+
+        const auto& array = numerator.asArray();
+        if (array.hasExactNumberStorage() && denominator.isNumber()) {
+            std::vector<Number> values;
+            values.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i)
+                values.push_back(array.exactNumber(i) / denominator.asNumber());
+            return numberArray(array.shape, std::move(values));
+        }
+
+        std::vector<Expr> elements;
+        elements.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const std::array<Expr, 2> pair{array.element(i), denominator};
+            elements.push_back(evaluateDivide(pair, registry));
+        }
+        return Expr::array(array.shape, std::move(elements));
+    }
     if (numerator.isNumber() && denominator.isNumber())
         return numberExpr(numerator.asNumber() / denominator.asNumber());
     if (const auto algebraic = algebraicBinary(

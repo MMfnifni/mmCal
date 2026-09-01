@@ -158,6 +158,51 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         "reflection about an axis vector is exact");
     tests.expectEqual(eval(session, "vsum[{1,2,3}]"), std::string{"6"},
         "vector element sum shares exact aggregation semantics");
+    tests.expectEqual(eval(session, "{1,2}/2"), std::string{"{1/2, 1}"},
+        "Array division supports scalar scaling without introducing elementwise Array division");
+    tests.expect(evalError(session, "2/{1,2}").type() == error::CalcErrorType::Type,
+        "scalar-by-Array division remains undefined");
+    tests.expectEqual(eval(session, "inner[{1,I},{1,I}]"), std::string{"2"},
+        "inner is Hermitian and conjugates its first vector argument");
+    tests.expectEqual(eval(session, "outer[{1,2},{3,4,5}]"),
+        std::string{"{{3, 4, 5}, {6, 8, 10}}"},
+        "outer constructs the bilinear rank-one matrix exactly");
+    tests.expectEqual(eval(session, "distance[{1,I},{2,0}]"), std::string{"sqrt[2]"},
+        "distance routes vector distance through the Hermitian norm");
+    tests.expectEqual(eval(session, "projection[{1,I},{1,0}]"), std::string{"{1, 0}"},
+        "projection uses the Hermitian projection convention for complex vectors");
+    tests.expectEqual(eval(session, "vproject[{1,I},{1,0}]"), std::string{"{1, 0}"},
+        "legacy vproject routes to the canonical Hermitian projection");
+    tests.expectEqual(eval(session, "vmanhattan[{1,I},{2,0}]"), std::string{"2"},
+        "Manhattan distance extends naturally to complex components through abs");
+
+    tests.expectEqual(eval(session, "grad[x^2+y^2+z^2,{x,y,z}]"),
+        std::string{"{2x, 2y, 2z}"},
+        "grad computes a Cartesian gradient over explicit coordinate symbols");
+    tests.expectEqual(eval(session, "divergence[{x^2,y^2,z^2},{x,y,z}]"),
+        std::string{"2x+2y+2z"},
+        "divergence contracts field components with matching Cartesian partial derivatives");
+    tests.expectEqual(eval(session, "curl[{y*z,z*x,x*y},{x,y,z}]"),
+        std::string{"{0, 0, 0}"},
+        "curl computes the exact three-dimensional Cartesian rotation");
+    tests.expectEqual(eval(session, "laplacian[x^2+y^2+z^2,{x,y,z}]"), std::string{"6"},
+        "laplacian sums exact second Cartesian partial derivatives");
+    tests.expectEqual(eval(session, "jacobian[{x*y,sin[z]},{x,y,z}]"),
+        std::string{"{{y, x, 0}, {0, 0, cos[z]}}"},
+        "jacobian returns one derivative row per vector-field component");
+    tests.expectEqual(eval(session, "hessian[x^2+x*y+y^2,{x,y}]"),
+        std::string{"{{2, 1}, {1, 2}}"},
+        "hessian returns the exact square second-derivative matrix");
+    tests.expectEqual(eval(session, "divergence[grad[x^2+y^2+z^2,{x,y,z}],{x,y,z}]"),
+        std::string{"6"},
+        "vector-calculus operators materialize nested held operators without evaluating coordinates");
+    tests.expectEqual(eval(session, "curl[grad[x*y*z,{x,y,z}],{x,y,z}]"),
+        std::string{"{0, 0, 0}"},
+        "curl of an exact gradient reduces to zero");
+    tests.expect(evalError(session, "curl[{x,y},{x,y}]").type() == error::CalcErrorType::Domain,
+        "curl rejects non-three-dimensional Cartesian fields");
+    tests.expect(evalError(session, "grad[x^2,{x,x}]").type() == error::CalcErrorType::Domain,
+        "vector-calculus coordinate lists require distinct symbols");
 
     // stable elementary/cardinal functions remain explicit until certified evaluation.
     tests.expectEqual(eval(session, "expm1[0]"), std::string{"0"},

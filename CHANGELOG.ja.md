@@ -1,8 +1,27 @@
 # Changelog
 
-## Unreleased
+## v1.5.5 — Unreleased
 
-ﾏﾀﾞﾅｲﾖ
+### Series・漸近展開
+
+- `SeriesData` / TPSAを核とする`series[...]`を追加した。exact Taylor / Laurent / Puiseux展開とlogarithmic係数層を同一表現で扱い，`D` / `integrate` / `normal`へ直接接続する。初等函数に加え，`erf` / `erfc` / `Si` / `Ei` / `Ci` / `li` / Fresnel函数，principal逆三角函数，Lambert W，`gamma` / `lgamma` / `digamma` / `trigamma`，`polylog`の対応可能な局所展開を係数漸化式とDLMFの公式からexactに構成する。`tan/cot/sec/csc`，双曲線系，`expm1/log1p`，cardinal函数，`log2/log10`も既存TPSAへの正規化で接続した。
+- `series[expr,{x,Infinity,n}]`を追加した。`Infinity`は実軸の`+Infinity`として`t=1/x`の局所展開へ写し，有理函数，多項式成長，reciprocal composition，Puiseux，logarithmic asymptoticsを既存Series演算で扱う。正の先頭方向を証明できる`log[A(x)]`は`log[c]+r log[1/x]+log[1+h]`へ分解する。振動型，essential growth，logの負冪を要するtransseries等は推測せず未評価に保つ。
+- 既存`limit`で決まらない有限点に限り，局所Seriesの先頭項と特異項相殺を利用する限定fallbackを追加した。`toNormal[expr]`はlist / array / call内の`SeriesData`を再帰的に通常形へ戻し，finite / conditional `SolutionSet`ではbinding右辺だけを変換して条件，自由変数，multiplicity，domainを保持する。
+- `N[SeriesData]`が指数格子metadataまで有限precision化して後続の`normal` / `D`を壊す問題を修正した。係数とcenterだけを近似し，`minimumExponent` / `orderNumerator` / `exponentDenominator`はexact integerとして保持する。
+- `+Infinity`展開で`1/(1/t)`等の未整理reciprocalがvaluationへ入り，`tan[1/x]`，`sec[1/x]`，`cot[1/x]`，`csc[1/x]`等が誤って`Division by zero`になる問題を修正した。局所変数への置換直後だけ安全なreciprocal正規化を行い，global Simplifierの意味論は変更しない。
+
+### Array・Vector・ベクトル解析
+
+- `Array / scalar`をelementwise scalar scalingとして追加した。`scalar / Array`と`Array / Array`は線形代数上の意味を暗黙に仮定せず，引き続き拒否する。
+- Vector APIへ`inner[a,b]`，`outer[a,b]`，`distance[a,b]`，`projection[a,b]`を追加した。`dot`は従来どおりbilinear contractionを維持し，`inner`は第一引数を共役するHermitian内積とする。`norm`はこのHermitian意味論と整合し，`vdistance` / `veuclidean` / `vproject`はcanonical kernelへ接続した。`vmanhattan`も成分差の`abs`の総和としてcomplex成分を扱う。
+- Cartesian座標の微分演算子として`grad`，`divergence`，`curl`，`laplacian`，`jacobian`，`hessian`を追加した。座標変数を明示し，既存のexact symbolic `D` kernelを再利用する。`curl`は3次元に限定し，円筒・球座標のscale factor等は暗黙に推測しない。演算子同士の合成も評価できる。
+- `at`をfinite `SolutionSet`へ拡張した。`at[solutions,i]`は0始まりで1 branchだけを含む`SolutionSet`を返し，条件，自由変数，multiplicity，solver変数domainを保持する。`at[solutions,i,x]`は指定symbolのbinding右辺を取得する。非finite集合，範囲外index，未binding変数は明示的に拒否する。
+
+### 記号計算・CLI・FFT
+
+- `D[cases[...]]`が明示default枝の境界へ偽の導函数値を与える場合を修正し，高階`D`の加減算をcompactに正規化した。`simplify` / `fullSimplify`のexact有理係数線形結合と有理affine仮定推論も拡張した。
+- REPLへ`:quit` / `:exit`と対話表示用`:layout`を追加した。
+- 現在のdegree budget内の2冪exact `ifft[fft[v]]`で，FFT由来のroot-of-unity式を円分体座標へ再埋込みし，forward表現を維持したままinverseの式爆発を抑えた。
 
 ## v1.5.4 -2026-08-31
 

@@ -14,4 +14,10 @@ public:
         const SimplificationContext& context) const;
 };
 
+// 利用者が明示的にsimplify/fullSimplifyを要求した場合だけ使う強めの後処理。
+// exact有理係数の線形結合を平坦化し，同一項を結合する。自動簡約の契約には混ぜない。
+[[nodiscard]] expression::Expr simplifyExplicitLinearCombination(
+    const expression::Expr& expression,
+    const SimplificationContext& context);
+
 } // namespace mmcal::simplification

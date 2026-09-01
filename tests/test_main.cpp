@@ -47,6 +47,7 @@
 #include "symbols/symbol_registry_tests.hpp"
 #include "symbols/symbol_table_tests.hpp"
 #include "symbolic/differentiation_tests.hpp"
+#include "symbolic/series_tests.hpp"
 #include "test_framework.hpp"
 
 #include <exception>
@@ -95,6 +96,7 @@ int main() {
         mmcal::tests::runExactTrigonometryTests(tests);
         mmcal::tests::runExactTranscendentalTests(tests);
         mmcal::tests::runDifferentiationTests(tests);
+        mmcal::tests::runSeriesTests(tests);
         mmcal::tests::runEnvironmentTests(tests);
         mmcal::tests::runUserFunctionRegistryTests(tests);
         mmcal::tests::runEvaluatorTests(tests);

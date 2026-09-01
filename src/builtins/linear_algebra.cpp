@@ -134,35 +134,63 @@ using numeric::Number;
     return sumTerms(std::move(terms), registry, mathematics, angles);
 }
 
+[[nodiscard]] Expr conjugateValue(
+    const Expr& value,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (value.isNumber())
+        return Expr{value.asNumber().conjugate()};
+    if (value.isDecimalApproximation())
+        return value;
+    if (value.isComplexDecimalApproximation()) {
+        const auto& complex = value.asComplexDecimalApproximation();
+        return Expr{numeric::ComplexDecimalApproximation::fromComponents(
+            complex.real(), complex.imaginary().negated(),
+            complex.realExactlyZero(), complex.imaginaryExactlyZero())};
+    }
+    const mathematics::ValueFacts facts = mathematics::inferValueFacts(
+        value, registry, mathematics);
+    if (facts.isProvablyReal())
+        return value;
+    return exact::call(BuiltinId::Conj, {value}, registry, mathematics, angles);
+}
+
+[[nodiscard]] Expr hermitianInner(
+    const ArrayExpr& lhs,
+    const ArrayExpr& rhs,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (lhs.size() != rhs.size())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "inner requires vectors with the same length");
+    if (lhs.empty())
+        return integer(0);
+
+    if (allNumbers(lhs) && allNumbers(rhs)) {
+        Number sum{BigInt{0}};
+        for (std::size_t i = 0; i < lhs.size(); ++i)
+            sum += lhs.exactNumber(i).conjugate() * rhs.exactNumber(i);
+        return Expr{std::move(sum)};
+    }
+
+    std::vector<Expr> terms;
+    terms.reserve(lhs.size());
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        terms.push_back(productTerm(
+            conjugateValue(lhs.element(i), registry, mathematics, angles),
+            rhs.element(i), registry, mathematics, angles));
+    return sumTerms(std::move(terms), registry, mathematics, angles);
+}
+
 [[nodiscard]] Expr hermitianNorm(
     const ArrayExpr& vector,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (vector.empty())
-        return integer(0);
-
-    if (allNumbers(vector)) {
-        Number sum{BigInt{0}};
-        for (std::size_t i = 0; i < vector.size(); ++i) {
-            const Number element = vector.exactNumber(i);
-            sum += element.conjugate() * element;
-        }
-        return exact::sqrt(Expr{std::move(sum)}, registry, mathematics, angles);
-    }
-
-    std::vector<Expr> terms;
-    terms.reserve(vector.size());
-    for (std::size_t i = 0; i < vector.size(); ++i) {
-        const Expr element = vector.element(i);
-        const mathematics::ValueFacts facts = mathematics::inferValueFacts(
-            element, registry, mathematics);
-        Expr conjugate = facts.isProvablyReal()
-            ? element
-            : exact::call(BuiltinId::Conj, {element}, registry, mathematics, angles);
-        terms.push_back(productTerm(conjugate, element, registry, mathematics, angles));
-    }
-    return exact::sqrt(sumTerms(std::move(terms), registry, mathematics, angles),
+    return exact::sqrt(
+        hermitianInner(vector, vector, registry, mathematics, angles),
         registry, mathematics, angles);
 }
 
@@ -461,29 +489,11 @@ Expr evaluateConjugateTranspose(
     if (array.rank() != 1 && array.rank() != 2)
         detail::arrayTypeError("conjugateTranspose supports rank-1 or rank-2 arrays");
 
-    const auto conjugated = [&](const Expr& value) -> Expr {
-        if (value.isNumber())
-            return Expr{value.asNumber().conjugate()};
-        if (value.isDecimalApproximation())
-            return value;
-        if (value.isComplexDecimalApproximation()) {
-            const auto& complex = value.asComplexDecimalApproximation();
-            return Expr{numeric::ComplexDecimalApproximation::fromComponents(
-                complex.real(), complex.imaginary().negated(),
-                complex.realExactlyZero(), complex.imaginaryExactlyZero())};
-        }
-        const mathematics::ValueFacts facts = mathematics::inferValueFacts(
-            value, registry, mathematics);
-        if (facts.isProvablyReal())
-            return value;
-        return exact::call(BuiltinId::Conj, {value}, registry, mathematics, angles);
-    };
-
     if (array.rank() == 1) {
         std::vector<Expr> output;
         output.reserve(array.size());
         for (std::size_t i = 0; i < array.size(); ++i)
-            output.push_back(conjugated(array.element(i)));
+            output.push_back(conjugateValue(array.element(i), registry, mathematics, angles));
         return Expr::array(array.shape, std::move(output));
     }
 
@@ -492,7 +502,7 @@ Expr evaluateConjugateTranspose(
     output.reserve(matrix.size());
     for (std::size_t column = 0; column < matrix.columns(); ++column)
         for (std::size_t row = 0; row < matrix.rows(); ++row)
-            output.push_back(conjugated(matrix(row, column)));
+            output.push_back(conjugateValue(matrix(row, column), registry, mathematics, angles));
     return Expr::array({matrix.columns(), matrix.rows()}, std::move(output));
 }
 
@@ -611,6 +621,96 @@ Expr evaluateDot(
     if (lhs.rank() == 1 || rhs.rank() == 1)
         return Expr::array({lhs.rank() == 1 ? rhsColumns : lhsRows}, std::move(output));
     return Expr::array({lhsRows, rhsColumns}, std::move(output));
+}
+
+Expr evaluateInner(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& lhs = detail::requireVector(arguments[0], "inner");
+    const ArrayExpr& rhs = detail::requireVector(arguments[1], "inner");
+    return hermitianInner(lhs, rhs, registry, mathematics, angles);
+}
+
+Expr evaluateOuter(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& lhs = detail::requireVector(arguments[0], "outer");
+    const ArrayExpr& rhs = detail::requireVector(arguments[1], "outer");
+    const std::size_t shape[] = {lhs.size(), rhs.size()};
+    const std::size_t count = expression::arrayElementCount(shape);
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::DenseArrayElement, count);
+
+    if (allNumbers(lhs) && allNumbers(rhs)) {
+        std::vector<Number> output;
+        output.reserve(count);
+        for (std::size_t i = 0; i < lhs.size(); ++i)
+            for (std::size_t j = 0; j < rhs.size(); ++j)
+                output.push_back(lhs.exactNumber(i) * rhs.exactNumber(j));
+        return Expr::numberArray({lhs.size(), rhs.size()}, std::move(output));
+    }
+
+    std::vector<Expr> output;
+    output.reserve(count);
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        for (std::size_t j = 0; j < rhs.size(); ++j)
+            output.push_back(productTerm(
+                lhs.element(i), rhs.element(j), registry, mathematics, angles));
+    return Expr::array({lhs.size(), rhs.size()}, std::move(output));
+}
+
+Expr evaluateDistance(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& lhs = detail::requireVector(arguments[0], "distance");
+    const ArrayExpr& rhs = detail::requireVector(arguments[1], "distance");
+    if (lhs.size() != rhs.size())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "distance requires vectors with the same length");
+
+    std::vector<Expr> difference;
+    difference.reserve(lhs.size());
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        difference.push_back(exact::subtract(
+            lhs.element(i), rhs.element(i), registry, mathematics, angles));
+    Expr vector = Expr::array({lhs.size()}, std::move(difference));
+    return hermitianNorm(vector.asArray(), registry, mathematics, angles);
+}
+
+Expr evaluateProjection(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vector = detail::requireVector(arguments[0], "projection");
+    const ArrayExpr& onto = detail::requireVector(arguments[1], "projection");
+    if (vector.size() != onto.size())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "projection requires vectors with the same length");
+
+    const Expr denominator = hermitianInner(onto, onto, registry, mathematics, angles);
+    if (denominator.isNumber() && denominator.asNumber().isZero())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "projection requires a nonzero direction vector");
+    if (!provablyNonZero(denominator, registry, mathematics))
+        return Expr::call(registry.symbol(BuiltinId::VectorProject),
+            {arguments[0], arguments[1]});
+
+    const Expr factor = exact::divide(
+        hermitianInner(onto, vector, registry, mathematics, angles),
+        denominator, registry, mathematics, angles);
+    std::vector<Expr> output;
+    output.reserve(onto.size());
+    for (std::size_t i = 0; i < onto.size(); ++i)
+        output.push_back(productTerm(
+            onto.element(i), factor, registry, mathematics, angles));
+    return Expr::array(onto.shape, std::move(output));
 }
 
 Expr evaluateDeterminant(

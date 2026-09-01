@@ -78,9 +78,9 @@ def main():
     require(code == 0 and stderr == "", "--help must succeed without diagnostics")
     require(
         stdout
-        == "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>]\n"
+        == "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>] [--layout <auto|single|multi>]\n"
         "       mmCal [options] --eval <expression>\n"
-        "       mmCal [options] --batch    (alias: --bach)\n"
+        "       mmCal [options] --batch\n"
         "Interactive help: :help [function]\n",
         "--help is no longer the concise startup summary",
     )
@@ -124,6 +124,21 @@ def main():
     clean_stdout(stdout)
     require(code == 2 and stdout == "", "argument failure must use exit code 2")
     require(stderr.startswith("Argument error:"), "argument failure was not sent to stderr")
+    checked += 1
+
+    code, stdout, stderr = run(executable, ["--bach"])
+    clean_stdout(stdout)
+    require(code == 2 and stdout == "", "removed --bach alias must be rejected")
+    require(stderr.startswith("Argument error:"), "removed --bach alias must report an argument error")
+    checked += 1
+
+    code, stdout, stderr = run(executable, ["--layout", "multi", "--batch"])
+    clean_stdout(stdout)
+    require(code == 2 and stdout == "", "--layout must not alter automation output modes")
+    require(
+        stderr.startswith("Argument error:") and "only available in interactive mode" in stderr,
+        "--layout automation rejection must be explicit",
+    )
     checked += 1
 
     payload = "x:=2\nx^3\n1+\n4\n"
@@ -171,6 +186,16 @@ def main():
         "5\n",
         ":help sin output changed or it consumed In[1]",
     )
+    checked += 1
+
+    code, stdout, stderr = run(executable, ["--batch"], ":quit\n2+3\n")
+    clean_stdout(stdout)
+    require((code, stdout, stderr) == (0, "", ""), ":quit must stop a batch session cleanly")
+    checked += 1
+
+    code, stdout, stderr = run(executable, ["--batch"], ":exit\n2+3\n")
+    clean_stdout(stdout)
+    require((code, stdout, stderr) == (0, "", ""), ":exit must alias :quit")
     checked += 1
 
     code, stdout, stderr = run(executable, ["--batch"], ":help ln\n:help noSuchFunction\n")

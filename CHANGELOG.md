@@ -1,8 +1,27 @@
 # Changelog
 
-## Unreleased
+## v1.5.5 — Unreleased
 
-Not yet.
+### Series and asymptotics
+
+- Added `series[...]` on a `SeriesData` / TPSA core. Exact Taylor, Laurent, Puiseux, and logarithmic coefficient layers share one representation and connect directly to `D`, `integrate`, and `normal`. In addition to elementary functions, supported local providers cover `erf` / `erfc` / `Si` / `Ei` / `Ci` / `li`, Fresnel functions, principal inverse trigonometric functions, Lambert W, `gamma` / `lgamma` / `digamma` / `trigamma`, and supported `polylog` neighborhoods using exact coefficient recurrences and DLMF formulas. `tan/cot/sec/csc`, hyperbolic variants, `expm1/log1p`, cardinal functions, and `log2/log10` lower into the same TPSA algebra.
+- Added `series[expr,{x,Infinity,n}]`, where `Infinity` denotes real `+Infinity` and is mapped to the local variable `t=1/x`. Rational functions, polynomial growth, reciprocal composition, Puiseux terms, and logarithmic asymptotics reuse the existing Series algebra. When a positive leading direction is proved, `log[A(x)]` is factored as `log[c]+r log[1/x]+log[1+h]`. Oscillatory forms, essential growth, negative logarithmic powers, and other transseries that need a richer representation remain unevaluated rather than guessed.
+- Added a limited finite-point `limit` fallback that uses local Series only when the existing limit kernel is unresolved, including exact cancellation of singular terms. `toNormal[expr]` recursively normalizes `SeriesData` inside lists, arrays, and calls; for finite and conditional `SolutionSet` values it transforms only binding right-hand sides while preserving conditions, free variables, multiplicity, and domains.
+- Fixed `N[SeriesData]` incorrectly approximating structural exponent-grid metadata and thereby breaking later `normal` / `D`. Only coefficients and the center are approximated; `minimumExponent`, `orderNumerator`, and `exponentDenominator` remain exact integers.
+- Fixed false `Division by zero` failures in positive-infinity reciprocal composition such as `tan[1/x]`, `sec[1/x]`, `cot[1/x]`, and `csc[1/x]`. Reciprocal normalization is restricted to the local-variable substitution path and does not change global Simplifier semantics.
+
+### Arrays, vectors, and vector calculus
+
+- Added `Array / scalar` as elementwise scalar scaling. `scalar / Array` and `Array / Array` remain rejected rather than silently acquiring elementwise division semantics.
+- Added `inner[a,b]`, `outer[a,b]`, `distance[a,b]`, and `projection[a,b]`. `dot` remains a bilinear contraction, while `inner` is Hermitian and conjugates its first argument. `norm` remains consistent with the Hermitian convention; `vdistance` / `veuclidean` / `vproject` route to the canonical kernels. `vmanhattan` now naturally supports complex components as a sum of component magnitudes.
+- Added Cartesian `grad`, `divergence`, `curl`, `laplacian`, `jacobian`, and `hessian`. Coordinates are explicit and the operators reuse the existing exact symbolic `D` kernel. `curl` is restricted to three dimensions; cylindrical or spherical scale factors are not inferred implicitly. Nested vector-calculus operators can be evaluated compositionally.
+- Extended `at` to finite `SolutionSet` values. `at[solutions,i]` uses zero-based indexing and returns a one-branch `SolutionSet` while preserving conditions, free variables, multiplicity, and solver-variable domains. `at[solutions,i,x]` extracts the requested binding right-hand side. Non-finite sets, out-of-range indices, and unbound variables are rejected explicitly.
+
+### Symbolic evaluation, CLI, and FFT
+
+- Fixed `D[cases[...]]` so explicit default branches do not invent derivative values at boundaries, compacted additive output from higher derivatives, and extended exact-rational linear-combination and rational-affine assumption handling in `simplify` / `fullSimplify`.
+- Added REPL `:quit` / `:exit` commands and interactive `:layout` composition.
+- For power-of-two exact `ifft[fft[v]]` within the current degree budget, FFT-generated root-of-unity expressions are re-embedded into cyclotomic coordinates to reduce inverse-expression growth without changing the forward representation.
 
 ## v1.5.4 - 2026-08-31
 

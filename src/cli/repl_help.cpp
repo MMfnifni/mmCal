@@ -88,6 +88,29 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "limit[x sin[1/x], x, 0]  ->  0\n"
         "limit[1/x, x, 0, 1]  ->  Infinity\n"
         "limit[li[x], {x, 1, 1}]  ->  -Infinity"),
+    HELP_NOTE(Series,
+        "Constructs a truncated exact local power series.",
+        "series[expression, {variable, center, order}]\n"
+        "series[expression, {variable, center, order}, assumptions]",
+        "expression: Held while the expansion variable is locally bound.\n"
+        "variable: The expansion symbol.\n"
+        "center: The exact expansion point.\n"
+        "order: A non-negative integer; terms through that power are retained.",
+        "The TPSA backend covers Taylor/Laurent/Puiseux/logarithmic Series, selected special functions, low-cost trigonometric/hyperbolic/stable-elementary rewrites, and real +Infinity through the reciprocal local variable. Unsupported branches or transseries remain unevaluated rather than being guessed.",
+        "series[(1+x)^3, {x, 0, 5}]\n"
+        "normal[series[(1+x)^3, {x, 0, 5}]]  ->  x^3+3x^2+3x+1"),
+    HELP_NOTE(Normal,
+        "Removes the order term from a structured series and returns its truncated expression.",
+        "normal[expression]",
+        "expression: A series result or another expression.",
+        "For non-series input, normal returns the value unchanged. Series coefficients remain exact.",
+        "normal[series[(1+x)^3, {x, 0, 5}]]  ->  x^3+3x^2+3x+1"),
+    HELP_NOTE(ToNormal,
+        "Recursively converts supported structured objects to ordinary expressions.",
+        "toNormal[expression]",
+        "expression: Any evaluated expression; nested supported objects are converted recursively.",
+        "SeriesData objects are normalized recursively inside calls, lists, arrays, and SolutionSet binding values. Solution conditions, free variables, multiplicity, and domains are preserved; unsupported structures remain unchanged.",
+        "toNormal[{series[(1+x)^2, {x, 0, 3}], series[log[x], {x, 0, 2}]}]  ->  {x^2+2x+1, log[x]}"),
 
     HELP(Floor,
         "Returns the greatest integer not greater than a real value.",
@@ -795,13 +818,19 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "value: An array or general brace, including a ragged brace.",
         "length[{{1, 2}, {3}}]  ->  2"),
     HELP_NOTE(ArrayGet,
-        "Extracts an element or prefix slice with zero-based indices.",
-        "at[array, index1, index2, ...]",
+        "Extracts an array element/slice or a finite SolutionSet branch with zero-based indices.",
+        "at[array, index1, index2, ...]\n"
+        "at[solutions, branchIndex]\n"
+        "at[solutions, branchIndex, symbol]",
         "array: A dense array or general brace.\n"
-        "indices: One or more zero-based integers within the corresponding dimensions.",
-        "A prefix shorter than the array rank returns the remaining subarray.",
-        "at[{{1, 2}, {3, 4}}, 1]  ->  {3, 4}\n"
-        "at[{{1, 2}, {3, 4}}, 1, 0]  ->  3"),
+        "indices: One or more zero-based integers within the corresponding dimensions.\n"
+        "solutions: A finite SolutionSet returned by solve.\n"
+        "branchIndex: A zero-based explicit solution-branch index.\n"
+        "symbol: A solved variable whose binding value is requested.",
+        "Array prefixes return the remaining subarray. SolutionSet branch selection preserves branch conditions, free variables, multiplicity, and solver-variable domains; the three-argument form returns only the selected binding value.",
+        "at[{{1, 2}, {3, 4}}, 1, 0]  ->  3\n"
+        "at[solve[x^2 == 1, x], 0]  ->  {x == 1}\n"
+        "at[solve[{x+y == 3, x*y == 2}, {x,y}], 1, y]  ->  1"),
     HELP_NOTE(Reshape,
         "Changes array dimensions while preserving row-major element order.",
         "reshape[array, {d1, d2, ...}]",
@@ -870,9 +899,9 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "norm[{3, 4}]  ->  5\n"
         "norm[{3+4I}]  ->  5"),
     HELP(VectorManhattan,
-        "Computes Manhattan (L1) distance between two real vectors.",
+        "Computes Manhattan (L1) distance as the sum of component magnitudes.",
         "vmanhattan[a, b]",
-        "a, b: Equal-length rank-1 real arrays.",
+        "a, b: Equal-length rank-1 real or complex arrays.",
         "vmanhattan[{1, 2}, {4, 6}]  ->  7"),
     HELP(VectorEuclidean,
         "Computes Euclidean distance between two vectors.",
@@ -884,10 +913,11 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "normalize[vector]",
         "vector: A nonzero rank-1 real or complex array.",
         "normalize[{3, 4}]  ->  {3/5, 4/5}"),
-    HELP(VectorProject,
+    HELP_NOTE(VectorProject,
         "Projects the first vector onto the direction of the second.",
         "vproject[vector, onto]",
-        "vector, onto: Equal-length rank-1 arrays; onto must be nonzero.",
+        "vector, onto: Equal-length rank-1 real or complex arrays; onto must be nonzero.",
+        "Projection uses the Hermitian inner product inner[onto, vector]/inner[onto, onto]. The alias projection[...] is equivalent.",
         "vproject[{1, 2}, {0, 1}]  ->  {0, 2}"),
     HELP(VectorAngle,
         "Computes the angle between two nonzero vectors.",
@@ -909,6 +939,53 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "vsum[vector]",
         "vector: A rank-1 array.",
         "vsum[{1, 2, 3}]  ->  6"),
+    HELP_NOTE(VectorInner,
+        "Computes the Hermitian inner product of two vectors.",
+        "inner[a, b]",
+        "a, b: Equal-length rank-1 real or complex arrays.",
+        "The first argument is conjugated: inner[a,b] = sum(conj[a_i] b_i). dot[a,b] remains a bilinear contraction.",
+        "inner[{1, I}, {1, I}]  ->  2"),
+    HELP(VectorOuter,
+        "Computes the bilinear outer product of two vectors.",
+        "outer[a, b]",
+        "a, b: Rank-1 arrays.",
+        "outer[{1, 2}, {3, 4}]  ->  {{3, 4}, {6, 8}}"),
+    HELP(Gradient,
+        "Computes the gradient of a scalar field in Cartesian coordinates.",
+        "grad[field, {x1, x2, ...}]",
+        "field: A scalar symbolic expression.\n"
+        "variables: A nonempty rank-1 array of distinct coordinate symbols.",
+        "grad[x^2+y^2, {x, y}]  ->  {2x, 2y}"),
+    HELP(Divergence,
+        "Computes the divergence of a vector field in Cartesian coordinates.",
+        "divergence[field, {x1, x2, ...}]",
+        "field: A rank-1 array with one component per coordinate.\n"
+        "variables: A nonempty rank-1 array of distinct coordinate symbols.",
+        "divergence[{x, y, z}, {x, y, z}]  ->  3"),
+    HELP(Curl,
+        "Computes the three-dimensional curl of a vector field in Cartesian coordinates.",
+        "curl[field, {x, y, z}]",
+        "field: A rank-1 array of exactly three components.\n"
+        "variables: Exactly three distinct coordinate symbols.",
+        "curl[{0, 0, x*y}, {x, y, z}]  ->  {x, -y, 0}"),
+    HELP(Laplacian,
+        "Computes the scalar Laplacian in Cartesian coordinates.",
+        "laplacian[field, {x1, x2, ...}]",
+        "field: A scalar symbolic expression.\n"
+        "variables: A nonempty rank-1 array of distinct coordinate symbols.",
+        "laplacian[x^2+y^2+z^2, {x, y, z}]  ->  6"),
+    HELP(Jacobian,
+        "Computes the Jacobian matrix of a vector field.",
+        "jacobian[field, {x1, x2, ...}]",
+        "field: A rank-1 array of component expressions.\n"
+        "variables: A nonempty rank-1 array of distinct coordinate symbols.",
+        "jacobian[{x*y, x+y}, {x, y}]  ->  {{y, x}, {1, 1}}"),
+    HELP(Hessian,
+        "Computes the Hessian matrix of a scalar field.",
+        "hessian[field, {x1, x2, ...}]",
+        "field: A scalar symbolic expression.\n"
+        "variables: A nonempty rank-1 array of distinct coordinate symbols.",
+        "hessian[x^2+x*y+y^2, {x, y}]  ->  {{2, 1}, {1, 2}}"),
 
     HELP(Expm1,
         "Computes exp[x]-1 with certified stability near zero.",
@@ -1820,7 +1897,9 @@ void printReplHelpSummary(std::ostream& output) {
         << "  :help functions            list built-in function names\n"
         << "  :help constants            list predefined symbols\n"
         << "  :fix <0..1000>|off         set fixed display digits\n"
+        << "  :layout <auto|single|multi> set interactive output layout\n"
         << "  :status                    show session status\n"
+        << "  :quit, :exit               leave the current session\n"
         << "  Exit[]                     leave the calculator\n";
 }
 
@@ -1945,8 +2024,19 @@ bool handleReplHelpCommand(
         output << "Usage: :fix <0..1000>|off\n";
         return true;
     }
+    if (requested == ":layout" || requested == "layout") {
+        output << "Usage: :layout <auto|single|multi>\n"
+               << "Modes: auto (terminal-aware), single (canonical one-line), "
+                  "multi (structured multi-line)\n";
+        return true;
+    }
     if (requested == ":status" || requested == "status") {
         output << "Usage: :status\n";
+        return true;
+    }
+    if (requested == ":quit" || requested == "quit"
+        || requested == ":exit" || requested == "exit") {
+        output << "Usage: :quit\nAlias: :exit\n";
         return true;
     }
     if (const ConstantHelpEntry* constant = findConstantHelp(requested)) {

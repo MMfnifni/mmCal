@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mathematics/angle.hpp"
+#include "cli/output_layout.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -31,6 +32,7 @@ enum class ExitCode : int {
 struct StartupOptions final {
     std::optional<std::size_t> fixedDigits;
     std::optional<mathematics::AngleUnit> angleUnit;
+    std::optional<OutputLayout> outputLayout;
     InputMode inputMode = InputMode::Interactive;
     std::optional<std::string> expression;
     bool showHelp = false;
@@ -43,6 +45,14 @@ struct StartupOptions final {
         || result.ptr != text.data() + text.size() || digits > 1000)
         throw std::invalid_argument("--fix expects an integer from 0 to 1000");
     return digits;
+}
+
+
+[[nodiscard]] inline OutputLayout parseOutputLayoutOption(std::string_view text) {
+    if (text == "auto") return OutputLayout::Auto;
+    if (text == "single") return OutputLayout::Single;
+    if (text == "multi") return OutputLayout::Multi;
+    throw std::invalid_argument("--layout expects auto, single, or multi");
 }
 
 [[nodiscard]] inline StartupOptions parseStartupOptions(
@@ -67,6 +77,13 @@ struct StartupOptions final {
             if (++index >= arguments.size())
                 throw std::invalid_argument("--fix requires a value");
             options.fixedDigits = parseFixedDigitsOption(arguments[index]);
+            continue;
+        }
+
+        if (argument == "--layout") {
+            if (++index >= arguments.size())
+                throw std::invalid_argument("--layout requires auto, single, or multi");
+            options.outputLayout = parseOutputLayoutOption(arguments[index]);
             continue;
         }
 
@@ -96,6 +113,9 @@ struct StartupOptions final {
         throw std::invalid_argument("Unknown command-line option: " + std::string{argument});
     }
 
+    if (options.outputLayout && options.inputMode != InputMode::Interactive)
+        throw std::invalid_argument("--layout is only available in interactive mode");
+
     return options;
 }
 
@@ -109,7 +129,7 @@ struct StartupOptions final {
 
 inline void printUsage(std::ostream& output) {
     output
-        << "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>]\n"
+        << "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>] [--layout <auto|single|multi>]\n"
         << "       mmCal [options] --eval <expression>\n"
         << "       mmCal [options] --batch\n"
         << "Interactive help: :help [function]\n";

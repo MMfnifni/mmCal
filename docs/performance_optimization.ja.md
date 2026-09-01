@@ -439,6 +439,12 @@ GCC Release / LTO offの専用`--exact-cyclotomic-fft 5`代表値：
 
 `tester.py --timings`では`test5_matrix.txt`が約1.46 sから約0.38 sへ低下した。
 
+## 2冪inverseの円分体再埋込み — 採用
+
+2冪長のforward FFTは既存radix-2表現の方が読みやすいため変更しない。一方，16点以上の`ifft[fft[v]]`ではradix-2が生成した`cis[rational Pi]`，Rational scale，`sqrt[2]`等を同じ`Q(zeta_n)`のpower-basis座標へ再認識し，inverseだけを座標上で実行する。純粋な数値spectrumやmembershipを証明できない式には適用せず，従来経路へfallbackする。
+
+2冪では`Phi_(2^m)(t)=t^(2^(m-1))+1`なので，`multiplyByPower()`は一般多項式積を使わず係数shiftと符号反転で`t^k`倍を処理する。forward出力は16点で旧実装とbyte-for-byte一致し，GCC RelWithDebInfoの統合確認ではexact round-tripが16点約0.01 s，32点約0.08 s，64点約0.37 s，128点約6.1 sで元vectorへ完全復元した。128点はなお重いが，旧generic Exprの式爆発は解消している。
+
 ## mixed-radix常設化 — 保留
 
 現在の非2冪cyclotomic transform本体は座標上のdirect O(n^2) DFTである。21点でもround-trip約34 msで，今回の主問題だったgeneric Expr explosionは既に解消した。mixed-radix Cooley–Tukeyやprime長Rader/Bluesteinをexact quotient座標へ追加することは可能だが，実装複雑度を増やす前により大きい対応長でcrossoverを測る。
@@ -782,7 +788,7 @@ FLINT等にはexact Rational matrixのminimal-polynomial 計算基盤があり�
 | `test8_calculus.txt`                |    46 |  約173 ms |
 | `test22_number_field_interning.txt` |     1 |  約152 ms |
 
-`test16`はintegration / high-degree Solve / algebraic Root constructionが主なstress集合であり，`test5_matrix`は名称に反して小Matrix演算よりexact FFT/DFTの非2冪round-tripが大きな比率を占める。特に7点・12点・16点周辺のexact `ifft[fft[...]]`は今後のperformance候補として残す。`test9`では`N[ibeta[1/3,2/3,1/4],20]`と`N[gamma[1/3],20]`が相対的に重い。
+`test16`はintegration / high-degree Solve / algebraic Root constructionが主なstress集合であり，`test5_matrix`は名称に反して小Matrix演算よりexact FFT/DFTのround-tripが大きな比率を占めていた。非2冪はcyclotomic quotient，16点以上の2冪inverseは円分体再埋込みで主要な式爆発を解消した。今後は128点超の2冪と，より大きい非2冪長でcrossoverを再測定する。`test9`では`N[ibeta[1/3,2/3,1/4],20]`と`N[gamma[1/3],20]`が相対的に重い。
 
 このtimingはtest correctnessのPASS/FAIL判定には使わず，optimization対象を選ぶためのprofiling signalとしてのみ利用する。
 
@@ -986,7 +992,7 @@ mmCal.Benchmarks --special-functions 1
 5. Toom-4 / higher Toom crossover，さらに巨大な整数ではFFT/NTT multiplication
 6. Lehmer GCD
 7. `log`のbit-burst / AGM 計算基盤
-8. exact Cyclotomic FFTのmixed-radix / prime-length高速化。でquotient 計算基盤自体は実装済みであり，今後は対応長拡大時のcrossoverを実測して判断する
+8. exact Cyclotomic FFTのmixed-radix / prime-length高速化と，128点超の2冪専用backend拡張。既存quotient計算基盤のcrossoverを実測してから判断する
 
 Arrayについては，単一flat packed vectorを棄却し，immutable paged backing + stride viewを採用した。approximate Matrix algorithmは既存の専用連続working bufferを維持し，persistent Array storageと無理に統合しない。BigUInt SBOは今回明示的に見送る。
 

@@ -120,7 +120,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="version.h" />
+    <ClInclude Include="src\cli\output_layout.hpp" />
     <ClInclude Include="src\cli\repl_help.hpp" />
+    <ClInclude Include="src\cli\repl_layout.hpp" />
     <ClInclude Include="src\cli\startup_options.hpp" />
   </ItemGroup>
   <ItemGroup>

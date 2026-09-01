@@ -95,6 +95,18 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "ifft[fft[{1+I,2-I,3+2I,4-3I}]]"),
         std::string{"{1+I, 2-I, 3+2I, 4-3I}"},
         "exact radix-2 FFT round trip is lossless");
+    tests.expectEqual(eval(session,
+        "ifft[fft[{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}]]"),
+        std::string{"{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}"},
+        "power-of-two cyclotomic inverse closes a sixteen-point exact round trip");
+    tests.expectEqual(eval(session,
+        "ifft[fft[{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32}]]"),
+        std::string{"{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}"},
+        "power-of-two cyclotomic inverse closes a thirty-two-point exact round trip");
+    tests.expectEqual(eval(session,
+        "ifft[fft[{1+I,2-I,3+2I,4-3I,1+I,2-I,3+2I,4-3I,1+I,2-I,3+2I,4-3I,1+I,2-I,3+2I,4-3I}]]"),
+        std::string{"{1+I, 2-I, 3+2I, 4-3I, 1+I, 2-I, 3+2I, 4-3I, 1+I, 2-I, 3+2I, 4-3I, 1+I, 2-I, 3+2I, 4-3I}"},
+        "power-of-two cyclotomic inverse preserves Gaussian-rational inputs");
     tests.expectEqual(eval(session, "fft[{1,2,3}]"), eval(session, "dft[{1,2,3}]"),
         "non-power-of-two FFT falls back to exact DFT");
     tests.expectEqual(eval(session, "ifft[fft[{1,2,3,4,5}]]"),

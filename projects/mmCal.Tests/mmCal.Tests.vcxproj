@@ -89,6 +89,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(SolutionDir)build\internal\symbols\$(ProjectName)\$(Platform)\$(Configuration)\$(TargetName).pdb</ProgramDatabaseFile>
+      <StackReserveSize Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">16777216</StackReserveSize>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
@@ -153,6 +154,7 @@
     <ClInclude Include="..\..\tests\approximation\certified_complex_transcendental_tests.hpp" />
     <ClInclude Include="..\..\tests\simplification\simplifier_tests.hpp" />
     <ClInclude Include="..\..\tests\symbolic\differentiation_tests.hpp" />
+    <ClInclude Include="..\..\tests\symbolic\series_tests.hpp" />
     <ClInclude Include="..\..\tests\builtins\linear_algebra_tests.hpp" />
     <ClInclude Include="..\..\tests\builtins\numerical_calculus_tests.hpp" />
     <ClInclude Include="..\..\tests\builtins\aggregate_array_elementary_tests.hpp" />
@@ -204,6 +206,7 @@
     <ClCompile Include="..\..\tests\approximation\certified_complex_transcendental_tests.cpp" />
     <ClCompile Include="..\..\tests\simplification\simplifier_tests.cpp" />
     <ClCompile Include="..\..\tests\symbolic\differentiation_tests.cpp" />
+    <ClCompile Include="..\..\tests\symbolic\series_tests.cpp" />
     <ClCompile Include="..\..\tests\builtins\linear_algebra_tests.cpp" />
     <ClCompile Include="..\..\tests\builtins\numerical_calculus_tests.cpp" />
     <ClCompile Include="..\..\tests\builtins\aggregate_array_elementary_tests.cpp" />

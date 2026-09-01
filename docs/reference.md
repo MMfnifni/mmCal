@@ -1365,13 +1365,16 @@ diag[A]
 trace[A]
 ```
 
-Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar.
+Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar. Finite `SolutionSet` values use the same zero-based convention. `at[solutions,i]` returns a one-branch `SolutionSet`, preserving branch conditions, free variables, multiplicity, and solver-variable domains. `at[solutions,i,x]` returns only the right-hand side bound to `x` in that branch. Because that three-argument form does not carry condition metadata, use the two-argument branch form when conditional information must be preserved. `Conditional`, `Universal`, and `Unresolved` sets are not indexable because they do not define one unambiguous explicit branch sequence.
 
 ```text
 dimensions[{{1,2,3},{4,5,6}}] -> {2, 3}
 arrayRank[{{1,2},{3,4}}] -> 2
 at[{{1,2},{3,4}},1] -> {3, 4}
 at[{{1,2},{3,4}},1,0] -> 3
+at[solve[x^2==1,x],0] -> {x == 1}
+at[solve[x^2==1,x],1,x] -> -1
+at[solve[{x+y==3,x*y==2},{x,y}],1,y] -> 1
 reshape[{1,2,3,4},{2,2}] -> {{1, 2}, {3, 4}}
 ```
 
@@ -1626,6 +1629,225 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 ```
 
 `Power` definedness distinguishes exact Rational exponents: a positive non-integer Rational exponent permits a zero base where the evaluator defines it, while a negative Rational exponent retains a nonzero-base requirement. `zeta[s]` is not treated as globally unknown for definedness; its sole pole is represented by the finite condition `s != 1`.
+
+## 22.1 `series` / `normal` / `toNormal` (v1.5.5 WIP)
+
+```text
+series[expr,{x,a,n}]
+series[expr,{x,a,n},assumptions]
+normal[seriesExpr]
+toNormal[expr]
+```
+
+`series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists, arrays, and calls, and now also recurses into binding right-hand sides of finite and conditional `SolutionSet` objects while preserving set structure, branch conditions, free variables, multiplicity, and domain metadata. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`. The TPSA kernel composes exact constants, the expansion variable, sums, differences, products, division, integer powers, `exp` / `log` / `sin` / `cos` / `sinh` / `cosh`, `tan/cot/sec/csc`, `tanh/coth/sech/csch`, `expm1/log1p`, `sinc/cosc/tanc`, `sinhc/tanhc/expc`, `log2/log10`, and principal `sqrt` / exact rational powers, supporting Taylor series, Laurent series with a finite principal part, and Puiseux series on an exact rational exponent grid. `log2/log10` lower through the general `log[base,x] = log[x]/log[base]` form for both finite logarithmic Series and the `+Infinity` logarithmic layers. Different Puiseux denominators are re-embedded into an exact LCM grid. Analytic functions compose through coefficient recurrences rather than repeated higher differentiation. A symbolic leading coefficient is inverted only when nonzero status is proved, while principal `log` is expanded only at a proved positive-real or nonreal regular center. Direct trigonometric series honor the current angle mode and explicit `Rad` / `Deg` / `Grad`. At a branch point, non-integer rational powers are restricted to a positive leading coefficient with a simple zero/pole, or to an already branched Puiseux expression. Higher-multiplicity cases such as `sqrt[x^2]` and uncertified negative leading directions remain unevaluated rather than selecting a branch by guesswork.
+
+`Infinity` is also accepted as an expansion center. Here `Infinity` means real `+Infinity`, not a general point on the Riemann sphere; internally the expansion is mapped to `t->0+` with `t=1/x`. Therefore exponent `r` in `seriesData[x,Infinity,...]` denotes `(1/x)^r`, and logarithmic layers denote `log[1/x]^k`. For example, `series[1/(x+1),{x,Infinity,4}]` represents `x^-1-x^-2+x^-3-x^-4+O[x^-5]`. `normal` / `toNormal` emit ordinary powers of `x` rather than leaving intermediate forms such as `(1/x)^(-m)`. `D` incorporates `dt/dx=-t^2`, while `integrate` uses `dx=-t^-2 dt`; integrating an explicit `1/x` term therefore closes into the logarithmic layer as `-log[1/x]`. If the truncation remainder is exactly `O(1/x)`, integration is left unevaluated because the unknown remainder can generate a logarithm that the current `O(t^r)` metadata cannot describe. The initial scope includes rational functions, polynomial growth, `exp[1/x]`, Puiseux powers, and `log[1/x]`. Oscillatory `sin[x]`, essential growth `exp[x]`, and direct `log[x]` require dedicated asymptotic providers and remain unevaluated.
+
+A logarithmic asymptotic provider is also available specifically for real `+Infinity`. When the leading form can be proved to be `A(x)~c(1/x)^r` with positive `c`, `log[A(x)]` is factored as `log[c]+r log[1/x]+log[1+h]` and composed through the existing TPSA/logarithmic layers. This supports `series[log[x],{x,Infinity,n}]`, `log[2x]`, `log[x+1]`, `log[x^2+1]`, `log[sqrt[x]+1]`, powers of `log[x]`, and products such as `log[x]/x^m` in the same `SeriesData` representation. The internal logarithmic basis remains `log[1/x]`, but `normal` / `toNormal` use the known positive-infinity direction to emit ordinary `log[x]`. Transseries requiring negative logarithmic powers such as `1/log[x]`, and negative or complex leading directions that need an additional principal-branch decision, remain unevaluated. Oscillatory `sin[x]` and essential growth `exp[x]` remain outside this provider.
+
+```text
+series[log[x+1],{x,Infinity,4}]
+-> seriesData[x, Infinity, {0, 1, -1/2, 1/3, -1/4}, 0, 5, 1, {{-1, 0, 0, 0, 0}}]
+
+normal[series[log[x+1],{x,Infinity,3}]]
+-> x^(-1)-x^(-2)/2+x^(-3)/3+log[x]
+
+series[1/log[x],{x,Infinity,3}]
+-> series[1/log[x], {x, Infinity, 3}]
+```
+
+Local special-function Series use a primitive-composition provider. Rather than storing higher-derivative tables per function, mmCal expands the known first-derivative kernel with the existing TPSA machinery, integrates the coefficients, and restores the function value at the center as the constant term. Supported local providers include `erf` / `Si` / `Ei` / `Ci`, `erfc` / `fresnelc` / `fresnels`, `li`, regular-center principal `asin` / `acos` / `atan`, and regular-center `lambertw`. `li` uses `li'(z)=1/log[z]`; inverse trigonometric Series use `asin'(z)=(1-z^2)^(-1/2)`, `acos'(z)=-(1-z^2)^(-1/2)`, and `atan'(z)=1/(1+z^2)` through the same TPSA machinery. `erfc` shares the Gaussian kernel with the complementary sign implied by `erfc[z]=1-erf[z]`; Fresnel C/S pass the DLMF 7.2.7–7.2.8 kernels `cos[Pi z^2/2]` / `sin[Pi z^2/2]` through TPSA. Zero-centered coefficients agree with DLMF 7.6.1, 7.6.4, 7.6.6, and 6.6.5. `SeriesData` also carries coefficient layers for powers of `log(x-center)`, so the logarithmic singularities of `Ei` / `Ci` at zero are now retained exactly using the local DLMF 6.6.1 / 6.6.6 series. The same representation closes over `log[x]`, `x log[x]`, powers of the local logarithm, products with Puiseux factors, and integration of `x^-1 log[x]^k`. For origin-centered composition, if an argument can be certified as `A(t)=c t^r(1+h)` with `0<r<=1` and `c>0`, mmCal factors `log A=log c+r log t+log(1+h)` and composes `log` / `Ei` / `Ci` through Taylor/Puiseux zeros. Cases that can change the principal winding, such as `r>1`, or negative/complex leading coefficients remain unevaluated rather than choosing a branch. Centers on the principal cut described in DLMF 6.2 also remain unevaluated. For principal `li(z)=Ei(Log(z))`, the provider deliberately accepts only proved real centers `x>1` as in DLMF 6.2.8, or provably nonreal centers. Real centers at `0`, `1`, `0<x<1`, and on the negative real axis remain unevaluated rather than inventing a two-sided principal neighborhood. `asin` / `acos` accept real centers only when `-1<a<1` is provable, or centers provably off the real-axis cuts. `atan` accepts real centers, complex centers with provably nonzero real part, and imaginary-axis centers provably between `-I` and `I`; its branch points and the outward principal cuts remain unevaluated. Inverse-trigonometric return values follow the session angle mode, so their Series coefficients include the Radian/Degree/Gradian output scale. By contrast, the defining kernels of `Si` / `Ci` / Fresnel C/S are intrinsically radian-based and do not depend on session angle mode. Lambert W regular-center expansion generates the integer-coefficient derivative polynomials `p_n(W)` from DLMF 4.13.4 and composes regular-center Taylor coefficients through the existing TPSA/Puiseux kernel. At regular centers principal `W_0` avoids the cut `(-Infinity,-1/E]`, while explicit integer branches `k!=0` avoid `(-Infinity,0]`. At the branch point `z=-1/E`, the DLMF 4.13.9_1–4.13.9_2 expansion in `s=sqrt[E z+1]` represents exact-center `z=-1/E` expansions of `W_0` and `W_-1` on a square-root Puiseux grid. The `d_n` recurrence is evaluated as rational even terms and rational-times-`sqrt[2]` odd terms, avoiding general algebraic simplification inside the coefficient-generation loop. The principal sheet is selected only when the leading direction certifies the principal square root; `W_-1` uses the opposite sign of the same local variable. Other branches, directions entering the cut, and higher-multiplicity contacts that would require choosing a value for `sqrt[x^2]` remain unevaluated. `gamma` / `lgamma` use the same local framework. It composes the DLMF 5.7 coefficients for `log Gamma(1+z)` and the half-integer base through the existing TPSA machinery, then transports them to exact integer and half-integer centers using the logarithmic derivative of `Gamma(z+1)=z Gamma(z)`. It does not obtain coefficients by repeated higher derivatives. In particular, `lgamma` builds the local logarithmic increment directly rather than first constructing a Gamma Series and taking its logarithm, avoiding large cancellation expressions at higher orders. `gamma` can compose regular supported centers through complex local directions and Puiseux arguments. Since mmCal's current `lgamma[x]` means real-axis `log[abs[gamma[x]]]`, not complex `LogGamma`, its Series provider accepts only real-coefficient local directions. Gamma poles at non-positive integers, unsupported exact centers such as `1/3`, and complex-direction `lgamma` remain unevaluated. `digamma` / `trigamma` use the same local basis. Digamma coefficients matching DLMF 5.7.4 are obtained by differentiating the same log-Gamma coefficients once; trigamma differentiates them a second time, so no duplicate coefficient table is maintained. Transport from the base centers 1 and 1/2 to exact integer and half-integer centers uses `psi(z+1)=psi(z)+1/z` and `psi1(z+1)=psi1(z)-1/z^2` directly in Series arithmetic. Supported regular centers compose through complex directions and Puiseux arguments, while non-positive integer poles and exact centers without the current coefficient basis remain unevaluated. Origin-centered `polylog[s,z]` is constructed directly from the defining DLMF 25.12.10 power series. When the order `s` does not depend on the expansion variable it may remain symbolic; coefficients `n^(-s)` are preserved as exact expressions while TPSA/Puiseux arguments are composed. The simple zero `Li_s(z)=z+O[z^2]` at the origin is exposed to valuation, so products, quotients, and Laurent inversion compose naturally. Positive-integer orders also support nonzero regular centers. It forms Taylor coefficients directly from `D^n Li_s(z)=z^(-n) sum_k s(n,k) Li_(s-k)(z)` using signed Stirling numbers. Terms reaching nonpositive integer order are reduced exactly with `Li_0(z)=z/(1-z)` and the Eulerian-polynomial identity `Li_{-m}(z)=z A_m(z)/(1-z)^(m+1)`, avoiding both higher-derivative tables and negative-order `polylog` heads in the result. Real centers are accepted only when `a<1` is proved, while provably nonreal centers are also allowed, keeping the principal cut `[1,Infinity)` excluded. For positive-integer order with proved `0<a<1`, positivity of the defining series also supplies nonzero evidence to reciprocal and negative-integer-power inversion. Noninteger orders at nonzero centers, cut centers, and symbolic centers whose regularity cannot be proved remain unevaluated. Known valuations for special functions, inverse trigonometric functions, Lambert W, the supported Gamma/psi family, and polylog are exposed to product, quotient, and Laurent inversion composition.
+
+```text
+series[log[x],{x,0,4}]
+-> seriesData[x, 0, {0, 0, 0, 0, 0}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[Ei[x],{x,0,4}]
+-> seriesData[x, 0, {-digamma[1], 1, 1/4, 1/18, 1/96}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[Ci[x],{x,0,6}]
+-> seriesData[x, 0, {-digamma[1], 0, -1/4, 0, 1/96, 0, -1/4320}, 0, 7, 1, {{1, 0, 0, 0, 0, 0, 0}}]
+
+series[log[2*x],{x,0,4}]
+-> seriesData[x, 0, {log[2], 0, 0, 0, 0}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
+
+series[log[sqrt[x]],{x,0,4}]
+-> seriesData[x, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, 9, 2, {{1/2, 0, 0, 0, 0, 0, 0, 0, 0}}]
+
+series[log[x^2],{x,0,4}]
+-> series[log[x^2], {x, 0, 4}]
+```
+
+```text
+series[lgamma[1+x],{x,0,5}]
+-> seriesData[x, 0, {digamma[1], Pi^2/12, -zeta[3]/3, Pi^4/360, -zeta[5]/5}, 1, 6, 1]
+
+series[gamma[1/2+x],{x,0,2}]
+-> seriesData[x, 0, {sqrt[Pi], (digamma[1]-2log[2])sqrt[Pi], (Pi^2/2+(digamma[1]-2log[2])^2)sqrt[Pi]/2}, 0, 3, 1]
+
+series[gamma[x],{x,0,3}]
+-> series[gamma[x], {x, 0, 3}]
+
+series[lgamma[1+I*x],{x,0,3}]
+-> series[lgamma[I x+1], {x, 0, 3}]
+
+series[digamma[1+x],{x,0,5}]
+-> seriesData[x, 0, {digamma[1], Pi^2/6, -zeta[3], Pi^4/90, -zeta[5], zeta[6]}, 0, 6, 1]
+
+series[trigamma[1/2+x],{x,0,3}]
+-> seriesData[x, 0, {Pi^2/2, -14zeta[3], Pi^4/2, -124zeta[5]}, 0, 4, 1]
+
+series[polylog[2,x],{x,0,6}]
+-> seriesData[x, 0, {1, 1/4, 1/9, 1/16, 1/25, 1/36}, 1, 7, 1]
+
+series[polylog[a,sqrt[x]],{x,0,2}]
+-> seriesData[x, 0, {1, 2^(-a), 3^(-a), 4^(-a)}, 1, 5, 2]
+
+series[polylog[2,1/2+x],{x,0,3}]
+-> seriesData[x, 0, {polylog[2, 1/2], -2log[1/2], 2(1+log[1/2]), 4(-1-2log[1/2])/3}, 0, 4, 1]
+
+series[1/polylog[2,1/2+x],{x,0,2}]
+-> seriesData[x, 0, {1/polylog[2, 1/2], 2log[1/2]/polylog[2, 1/2]^2, -(2(1+log[1/2])/polylog[2, 1/2]-4log[1/2]^2/polylog[2, 1/2]^2)/polylog[2, 1/2]}, 0, 3, 1]
+```
+
+```text
+series[(1+x)^3,{x,0,5}]
+-> seriesData[x, 0, {1, 3, 3, 1, 0, 0}, 0, 6, 1]
+
+normal[%]
+-> x^3+3x^2+3x+1
+```
+
+```text
+series[1/(1-x),{x,0,4}]
+-> seriesData[x, 0, {1, 1, 1, 1, 1}, 0, 5, 1]
+
+series[1/x,{x,0,3}]
+-> seriesData[x, 0, {1, 0, 0, 0, 0}, -1, 4, 1]
+
+normal[%]
+-> x^(-1)
+```
+
+```text
+toNormal[{series[(1+x)^2,{x,0,3}],series[log[x],{x,0,2}]}]
+-> {x^2+2x+1, log[x]}
+
+normal[{series[(1+x)^2,{x,0,3}]}]
+-> {seriesData[x, 0, {1, 2, 1, 0}, 0, 4, 1]}
+```
+
+Inside `SolutionSet`, only bindings are recursively normalized while solution metadata is retained. Low-cost elementary functions are lowered to the existing TPSA algebra rather than acquiring independent coefficient tables.
+
+```text
+series[tan[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 1/3, 0, 2/15}, 1, 6, 1]
+
+series[log2[x],{x,Infinity,3}]
+-> seriesData[x, Infinity, {0, 0, 0, 0}, 0, 4, 1, {{-1/log[2], 0, 0, 0}}]
+```
+
+`toNormal` is recursive and idempotent for converted objects. For `SolutionSet`, only binding right-hand sides are normalized; conditions, free variables, multiplicity, and domains are preserved. Additional structured representations can be added to the same frontend in the future.
+
+
+```text
+series[exp[x],{x,0,5}]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24, 1/120}, 0, 6, 1]
+
+series[1/sin[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 1/6, 0, 7/360, 0, 31/15120}, -1, 6, 1]
+
+series[log[x],{x,I,3}]
+-> seriesData[x, I, {I Pi/2, -I, 1/2, I/3}, 0, 4, 1]
+
+series[sqrt[1+x],{x,0,6}]
+-> seriesData[x, 0, {1, 1/2, -1/8, 1/16, -5/128, 7/256, -21/1024}, 0, 7, 1]
+
+series[(1+x)^(3/2),{x,0,6}]
+-> seriesData[x, 0, {1, 3/2, 3/8, -1/16, 3/128, -3/256, 7/1024}, 0, 7, 1]
+```
+
+```text
+series[sqrt[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 1, 11, 2]
+
+series[sqrt[x]*(1+x),{x,0,4}]
+-> seriesData[x, 0, {1, 0, 1, 0, 0, 0, 0, 0}, 1, 9, 2]
+
+series[exp[sqrt[x]],{x,0,3}]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24, 1/120, 1/720}, 0, 7, 2]
+```
+
+```text
+series[erf[x],{x,0,7}]
+-> seriesData[x, 0, {2/sqrt[Pi], 0, -2/sqrt[Pi]/3, 0, 1/(5sqrt[Pi]), 0, -1/(3sqrt[Pi])/7}, 1, 8, 1]
+
+series[Si[x],{x,0,7}]
+-> seriesData[x, 0, {1, 0, -1/18, 0, 1/600, 0, -1/35280}, 1, 8, 1]
+
+series[Ei[1+x],{x,0,4}]
+-> seriesData[x, 0, {Ei[1], E, 0, E/6, -E/12}, 0, 5, 1]
+
+series[Ci[1+x],{x,0,4}]
+-> seriesData[x, 0, {Ci[1], cos[1 Rad], (-cos[1 Rad]-sin[1 Rad])/2, (cos[1 Rad]/2+sin[1 Rad])/3, (-cos[1 Rad]/2-5sin[1 Rad]/6)/4}, 0, 5, 1]
+
+series[erfc[x],{x,0,5}]
+-> seriesData[x, 0, {1, -2/sqrt[Pi], 0, 2/(3sqrt[Pi]), 0, -1/sqrt[Pi]/5}, 0, 6, 1]
+
+series[fresnelc[x],{x,0,5}]
+-> seriesData[x, 0, {1, 0, 0, 0, -Pi^2/40}, 1, 6, 1]
+
+series[fresnels[x],{x,0,7}]
+-> seriesData[x, 0, {Pi/6, 0, 0, 0, -Pi Pi^2/336}, 3, 8, 1]
+
+series[li[2+x],{x,0,2}]
+-> seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2}, 0, 3, 1]
+
+series[li[a+x],{x,0,2},a>1]
+-> seriesData[x, 0, {li[a], 1/log[a], -1/(a log[a]^2)/2}, 0, 3, 1]
+
+series[asin[x],{x,0,7}]
+-> seriesData[x, 0, {1, 0, 1/6, 0, 3/40, 0, 5/112}, 1, 8, 1]
+
+series[atan[1+I+x],{x,0,3}]
+-> seriesData[x, 0, {atan[1+I], 1/5-2I/5, -1/25+7I/25, -1/375-68I/375}, 0, 4, 1]
+
+series[asin[a+x],{x,0,2},-1<a<1]
+-> seriesData[x, 0, {asin[a], (1-a^2)^(-1/2), a*(1-a^2)^(-1/2)/(2(1-a^2))}, 0, 3, 1]
+
+series[lambertw[x],{x,0,7}]
+-> seriesData[x, 0, {1, -1, 3/2, -8/3, 125/24, -54/5, 16807/720}, 1, 8, 1]
+
+series[lambertw[E+x],{x,0,4}]
+-> seriesData[x, 0, {1, exp[-1]/2, -3*exp[-2]/16, 19*exp[-3]/192, -185*exp[-4]/3072}, 0, 5, 1]
+
+series[1/lambertw[x],{x,0,5}]
+-> seriesData[x, 0, {1, 1, -1/2, 2/3, -9/8, 32/15, -625/144}, -1, 6, 1]
+
+series[lambertw[-1/E+x],{x,0,3}]
+-> seriesData[x, 0, {-1, sqrt[2]sqrt[E], -2*E/3, 11*E sqrt[2]sqrt[E]/36, -43*exp[2]/135, 769*exp[2]sqrt[2]sqrt[E]/4320, -1768*E exp[2]/8505}, 0, 7, 2]
+
+series[lambertw[-1,-1/E+x],{x,0,3}]
+-> seriesData[x, 0, {-1, -sqrt[2]sqrt[E], -2*E/3, -11*E sqrt[2]sqrt[E]/36, -43*exp[2]/135, -769*exp[2]sqrt[2]sqrt[E]/4320, -1768*E exp[2]/8505}, 0, 7, 2]
+```
+
+In interactive auto/multi layout, `series[sqrt[x]*(1+x),{x,0,4}]` is displayed as `x^(1/2) + x^(3/2) + O[x^(9/2)]`. `single` and machine-facing output retain canonical `seriesData[...]`.
+
+Requests centered on the principal-log branch cut, such as `series[log[x],{x,-1,n}]`, and requests such as `series[sqrt[x^2],{x,0,n}]` that cannot be certified as one principal local branch remain unevaluated.
+
+`SeriesData` supports direct coefficient arithmetic under `D` / `integrate` with respect to its expansion variable. Ordinary coefficients and every `log(x-center)^k` layer are transformed by the product rule and the exact integration recurrence, so Taylor/Laurent/Puiseux exponent grids remain intact while expressions such as `D[log[x]^k]` and `integrate[x^-1 log[x]^k,x]` stay inside SeriesData.
+
+```text
+D[series[exp[x],{x,0,5}],x]
+-> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24}, 0, 5, 1]
+
+integrate[series[sqrt[x],{x,0,4}],x]
+-> seriesData[x, 0, {2/3, 0, 0, 0, 0, 0, 0, 0}, 3, 11, 2]
+```
+
+Integrating an `x^(-1)` term moves it into a logarithmic layer; for example, `integrate[series[1/x,{x,0,4}],x]` returns SeriesData representing `log[x]`. Likewise `x^-1 log[x]^k` maps exactly to `log[x]^(k+1)/(k+1)`.
+
+`seriesData[variable,center,coefficients,minExponent,orderNumerator,exponentDenominator]` remains the ordinary internal representation. When logarithmic terms are present, a seventh argument `logarithmicCoefficientLayers` is appended; layer `k` is the coefficient sequence multiplying `log(x-center)^(k+1)` on the same exponent grid. If all log layers are zero, the six-argument canonical form is retained. Normal use should go through `series` / `normal`. Coefficient `i` has exponent `(minExponent+i)/exponentDenominator`, and the remainder order is `orderNumerator/exponentDenominator`.
 
 ---
 
@@ -2059,6 +2281,21 @@ limit[sin[1/x],x,0,1]
 limit[x sin[1/x],x,0]
 -> 0
 
+limit[x*Ei[x],x,0,1]
+-> 0
+
+limit[sqrt[x]*log[x],x,0,1]
+-> 0
+
+limit[Ei[x]-log[x],x,0,1]
+-> -digamma[1]
+
+limit[Ci[x]-log[x],x,0,1]
+-> -digamma[1]
+
+limit[log[2*x]-log[x],x,0,1]
+-> log[2]
+
 limit[Ei[x],x,0]
 -> -Infinity
 
@@ -2095,7 +2332,7 @@ limit[li[x],x,-Infinity]
 
 `Ei`, `Ci`, and `li` are interpreted on their principal branches. Along the real axis, `Ei[x]` tends to `-Infinity` at zero and to 0 as `x -> -Infinity`. `Ci[x]` tends to `-Infinity` at zero and to 0 at positive infinity, while the negative real axis lies on its branch cut and `Ci[x] -> I Pi` as `x -> -Infinity`. `li[x]` tends to 0 at the origin. For `li[x]` along the negative real axis as `x -> -Infinity`, the current direction representation does not collapse the unbounded complex value to real `-Infinity`; mmCal returns the direction-unspecified complex infinity `ComplexInfinity`.
 
-For indeterminate `0/0` forms, repeated l'Hôpital evaluation using the existing `D` implementation is available with safety limits. Local zero/pole orders of Rational functions and degree comparisons at infinity are handled exactly. For `sin` / `cos` / `tan`, when the real argument is proved to run to `+/-Infinity` on a one-sided approach or at infinity, periodic oscillation proves that no single limiting value exists and the result is `Indeterminate`; for a finite two-sided limit, oscillation on either side is already sufficient. The engine also uses the real bound `abs(sin[u]), abs(cos[u]) <= 1` for exact Rational-function arguments to close two-factor squeeze cases such as `x sin[1/x] -> 0`. Unresolved two-sided limits are not collapsed into principal values or other guessed results.
+For indeterminate `0/0` forms, repeated l'Hôpital evaluation using the existing `D` implementation is available with safety limits. Local zero/pole orders of Rational functions and degree comparisons at infinity are handled exactly. For finite points that remain unresolved by these specialized rules, a supported local `SeriesData` may be used as a supplemental backend to prove a finite constant or zero from the leading nonzero term. This also resolves cancellations such as `Ei[x]-log[x]` that look like `Infinity-Infinity` termwise. Negative powers or constant-order `log^k` terms are kept unevaluated rather than guessing a divergence direction, so the Series path does not replace the existing limit kernel. For `sin` / `cos` / `tan`, when the real argument is proved to run to `+/-Infinity` on a one-sided approach or at infinity, periodic oscillation proves that no single limiting value exists and the result is `Indeterminate`; for a finite two-sided limit, oscillation on either side is already sufficient. The engine also uses the real bound `abs(sin[u]), abs(cos[u]) <= 1` for exact Rational-function arguments to close two-factor squeeze cases such as `x sin[1/x] -> 0`. Unresolved two-sided limits are not collapsed into principal values or other guessed results.
 
 ```text
 limit[1/x,x,0]
@@ -2684,10 +2921,12 @@ Canonical functions:
 madd
 vadd vsub vscalar
 vcross
+inner outer
 vproject vangle
 vmanhattan veuclidean
 vreflect vreflect_axis
 vsum
+grad divergence curl laplacian jacobian hessian
 ```
 
 Compatibility aliases:
@@ -2698,11 +2937,27 @@ rank mrank       -> matrixRank
 mget             -> at
 vnorm vlength    -> norm
 vnormalize vunit -> normalize
-vdistance        -> veuclidean
+vdistance distance -> veuclidean
+cross              -> vcross
+projection         -> vproject
+gradient           -> grad
 singularValueDecomposition -> svd
 ```
 
-Aliases have no separate algorithm; they resolve to the same `BuiltinId`. Canonical vector helpers such as `vadd` are public APIs in their own right, not compatibility names.
+Aliases have no separate algorithm; they resolve to the same `BuiltinId`. Canonical vector helpers such as `vadd` are public APIs in their own right, not compatibility names. `dot` remains a bilinear contraction, while `inner[a,b]` is the Hermitian inner product that conjugates its first argument and therefore matches `norm[v]`. `projection[a,b]` / `vproject[a,b]` uses `b inner[b,a]/inner[b,b]`.
+
+Vector-calculus operators use explicit Cartesian coordinates.
+
+```text
+grad[f,{x,y,z}]
+divergence[{P,Q,R},{x,y,z}]
+curl[{P,Q,R},{x,y,z}]
+laplacian[f,{x,y,z}]
+jacobian[{f1,f2,...},{x1,x2,...}]
+hessian[f,{x1,x2,...}]
+```
+
+The coordinate specification must be a rank-1 Array of distinct symbols. `curl` is restricted to three-dimensional Cartesian fields. No curvilinear scale factors or metric are assumed implicitly.
 
 ---
 
@@ -2728,7 +2983,7 @@ convolve[{1,2},{3,4}]
 -> {3,10,8}
 ```
 
-For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey. For non-power-of-two lengths of at least 5, inputs that can be certified as exact Rational/Gaussian Rational values or expressions in the same cyclotomic quotient are transformed in Rational power-basis coordinates of `Q[t]/Phi_n(t)`. Gaussian Rational inputs extend the conductor to `lcm(n,4)` when needed so that `I` lies in the same cyclotomic field. This lets exact `ifft[fft[v]]` close without asking the generic Simplifier to rediscover root-of-unity identities. If the current cyclotomic-degree budget of 64 is exceeded, or symbolic inputs cannot be proven to lie in the quotient field, the legacy generic exact DFT remains the fallback. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
+For exact inputs, power-of-two FFTs use radix-2 Cooley–Tukey and retain the existing public forward representation. For power-of-two `ifft` calls within the current degree budget (lengths 16–128), when the input contains FFT-generated root-of-unity structure, mmCal re-embeds that structure into Rational power-basis coordinates of `Q[t]/Phi_n(t)` and performs the radix-2 inverse there. For power-of-two cyclotomic fields, `Phi_(2^m)(t)=t^(2^(m-1))+1` reduces twiddle multiplication to coefficient shifts with sign changes, avoiding the huge symbolic expansion that previously appeared in `ifft[fft[v]]`. Purely numeric spectra or expressions whose membership cannot be proved fall back to the previous path. For non-power-of-two lengths of at least 5, inputs that can be certified as exact Rational/Gaussian Rational values or expressions in the same cyclotomic quotient are transformed in the same coordinate representation. Gaussian Rational inputs extend the conductor to `lcm(n,4)` when needed so that `I` lies in the same cyclotomic field. If the current cyclotomic-degree budget of 64 is exceeded, or symbolic inputs cannot be proven to lie in the quotient field, the legacy generic exact DFT remains the fallback. Ordinary `fft[...]` remains exact-first and never silently converts to machine `double`.
 
 `N[fft[v],p]` does not first expand the full exact Fourier expression. `N` propagates the requested precision into the FFT call, which performs butterflies directly on certified `ComplexInterval`/BigFloat endpoints and returns decimal components only after their requested rounding is proven unique. For approximate operands, CertifiedEnclosure and InformationEnclosure are transformed independently through the same FFT, so cancellation cannot resurrect hidden guard digits. A difference smaller than the information carried by finite-precision inputs therefore becomes a low-Precision zero-centered result rather than a high-precision tiny value.
 
@@ -2872,25 +3127,25 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 30. Current source-callable function list
 
-The current development tree contains **270 registered builtin/alias names / 251 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **274 registered builtin/alias names / 254 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
 Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
 arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt, cases,
 ceil, choice, cis, collect, cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman,
-cos, cosc, cosh, cot, coth, cov, csc, csch, csgn, cv,
-det, dft, diag, digamma, diff, dimensions, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
+cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
+det, dft, diag, digamma, diff, dimensions, distance, divergence, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
 Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
 expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, groebnerBasis, harmmean, hypot, ibeta, identity, if, ifft, im, imag,
-integrate, inverse, iqr, isprime, kurtp, kurts, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
+gamma, gcd, geomean, grad, gradient, groebnerBasis, harmmean, hessian, hypot, ibeta, identity, if, ifft, im, imag, inner,
+integrate, inverse, iqr, isprime, jacobian, kurtp, kurts, laplacian, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
 log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
 mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
-polynomialReduce, pow, precision, prod, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
+luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, toNormal, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
+outer, polynomialReduce, pow, precision, prod, projection, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
 qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
-sec, sech, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
+sec, sech, series, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
 singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
 totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
 vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
@@ -2980,7 +3235,7 @@ Representative items:
 - General parametric linear systems
 - `hilbert` (legacy naming/specification still to be confirmed)
 - Engineering functions, financial functions, and unit conversion
-- Legacy colon commands such as `:defs`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:help` / `:fix` / `:status` are frontend commands
+- Legacy colon commands such as `:defs`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:help` / `:fix` / `:layout` / `:status` are frontend commands
 - `for`, `plot`
 - General Machine/double evaluation mode
 
@@ -2998,15 +3253,19 @@ The CLI separates mathematical Kernel state from frontend presentation state. Th
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --layout multi
 mmCal --eval "expand[(x+1)^3]"
 mmCal --batch < expressions.txt
 ```
 
 - `--fix n`: Set the startup limit on decimal display digits. Internal values are unchanged and unnecessary trailing zeros are omitted
 - `--angle deg|rad|grad`: Set the default angle unit at startup
+- `--layout auto|single|multi`: Set interactive REPL composition only; it cannot be combined with non-interactive modes
 - `--eval expr`: Evaluate one expression non-interactively
 - `--batch`: Evaluate standard input one expression per line in one session.
 - `--help`, `-h`: Show usage
+
+`--layout` is presentation-only and cannot be combined with `--eval` or `--batch`. The default `auto` uses terminal width and expression structure on a TTY, but falls back to canonical one-line output through pipes or redirects. `single` always uses one line; `multi` structurally expands supported compound results. Kernel Expr values, history, and canonical `formatExpr()` output are unchanged.
 
 Automation modes emit no banner, prompt, `Out[...]` label, or farewell. Successful values go to stdout and warnings/errors to stderr. Exit codes are `0` for success, `2` for argument errors, `3` for `SyntaxError` / `ResourceLimitError`, `4` for evaluation errors, and `5` for `InternalError`. Batch processing continues after line errors and returns the greatest code observed. `--eval` and `--batch` are mutually exclusive.
 
@@ -3021,7 +3280,7 @@ Out[1]> 1/3
 
 - Parse/evaluate one line at a time
 - Prompts are fixed as `In [n]>` / `Out[n]>` with no extra spaces
-- Exit is unified under `Exit[]`; bare `exit` / `quit` receive no special treatment
+- `Exit[]` is the mathematical function for ending a session. CLI compatibility commands `:quit` / `:exit` are also accepted; bare `exit` / `quit` receive no special treatment
 - `Clear[]`: Remove user definitions and all history, resetting the next input number to 1
 - `Defs[]`, `UnDef[...]`: Inspect and remove user definitions
 - History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In [n]` and snapshot `Out[n]`
@@ -3062,26 +3321,68 @@ Out[2]> 1/3
 
 An entire expression that can be certified numerically is approximated only for display. Symbolic expressions containing free variables retain exact notation.
 
-## 34.3 `:status`
+## 34.3 `:layout` — interactive REPL composition
+
+```text
+:layout
+Layout: Auto
+
+:layout single
+Layout: Single
+
+:layout multi
+Layout: Multi
+```
+
+`:layout` changes **presentation composition only** in the ordinary REPL. `single` preserves the canonical one-line representation. `multi` structurally expands Arrays/Lists/`cases`/finite or conditional solution sets. `auto` chooses from terminal width and expression structure on a TTY, while pipe or redirect output falls back to one line. It does not alter the stored Expr, `Out[n]`, the reparsable canonical formatter, or automation output.
+
+For example, `multi` can display:
+
+```text
+Out[1]> {
+          {1, 2},
+          {3, 4}
+        }
+
+Out[2]> cases[
+          x^2 if x >= 0;
+          -x if x < 0;
+          0
+        ]
+```
+
+With no argument, `:layout` reports the current mode.
+
+## 34.4 `:status`
 
 ```text
 :status
 Angle: Rad
 Display: Exact
+Layout: Auto
 Evaluation: Exact-first
 Definitions: 0
 History: 0
 ```
 
-`:status` is also a CLI command and is not stored in history. The design boundary is maintained: mathematical state changes use Kernel functions such as `angleMode[...]`, while frontend queries and presentation changes use CLI commands such as `:help` and `:fix`.
+`:status` is also a CLI command and is not stored in history. The design boundary is maintained: mathematical state changes use Kernel functions such as `angleMode[...]`, while frontend queries and presentation changes use CLI commands such as `:help`, `:fix`, and `:layout`.
 
-## 34.4 Console title
+## 34.5 `:quit` / `:exit`
+
+```text
+:quit
+:exit
+```
+
+Both commands terminate the current CLI session successfully. They are compatibility commands with the same purpose as the expression-level `Exit[]`; they do not parse/evaluate an expression or consume history. Bare `quit` / `exit` are not special. `--batch` also recognizes these commands and stops successfully at that line.
+
+## 34.6 Console title
 
 As auxiliary information, the title is updated to forms such as:
 
 ```text
-mmCal 1.5.0 - Rad - Exact
-mmCal 1.5.0 - Deg - Fixed(16)
+mmCal <version> - Rad - Exact - Layout(Auto)
+mmCal <version> - Deg - Fixed(16) - Layout(Multi)
 ```
 
 - Windows: `SetConsoleTitleA`
@@ -3090,7 +3391,7 @@ mmCal 1.5.0 - Deg - Fixed(16)
 
 Failure to change the title is never treated as a calculation Error. `:status` is authoritative for state inspection; terminal software overriding the title has no effect on semantics.
 
-## 34.5 Canonical formatter
+## 34.7 Canonical formatter
 
 Ordinary `Out[n]` uses compact, reparsable mathematical notation rather than an AST dump.
 
@@ -3109,7 +3410,7 @@ A-B+C
 - When juxtaposition would be ambiguous, such as adjacent numeric tokens, use explicit `*` rather than whitespace
 - Preserve precedence and associativity, and regression-test that format → parse → format does not change meaning
 
-Debug/full-form display of internal structure is intended to remain separate from the normal formatter as a future feature.
+The canonical formatter remains the one-line serialization contract. Interactive `:layout` composition is a separate presentation layer and does not alter this representation. Debug/full-form display of internal structure remains a separate future feature.
 
 ---
 

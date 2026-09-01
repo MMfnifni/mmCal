@@ -13,6 +13,7 @@
 #include "expression/array_utils.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/substitution.hpp"
+#include "symbolic/series.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -1155,6 +1156,14 @@ using numeric::Rational;
     case BuiltinId::VectorReflect:
     case BuiltinId::VectorReflectAxis:
     case BuiltinId::VectorSum:
+    case BuiltinId::VectorInner:
+    case BuiltinId::VectorOuter:
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian:
     case BuiltinId::Transpose:
     case BuiltinId::MatrixAdd:
     case BuiltinId::MatrixMultiply:
@@ -1197,6 +1206,7 @@ using numeric::Rational;
             std::vector<Expr> boundaryConditions;
             branches.reserve(a.size());
             bool safe = true;
+            bool strictVariableConditionSeen = false;
             for (const Expr& branchExpression : a) {
                 if (!isHead(branchExpression, builtins, BuiltinId::CaseBranch)
                     || branchExpression.asCall().arguments.empty()
@@ -1220,10 +1230,9 @@ using numeric::Rational;
                             break;
                         }
 
-                        // Piecewise derivative is automatically valid only in the interior of
-                        // each region.  A closed boundary (<=/>=) needs a separate derivative
-                        // test using neighbouring branches; until that is proved, keep D[...]
-                        // explicitly at the boundary instead of inventing a value there.
+                        // casesの各枝をそのまま微分できるのは領域内部だけである。
+                        // <=/>=の閉境界では隣接枝との接続を別途証明する必要があるため，
+                        // 証明できない境界には値を捏造せずD[...]を明示的に残す。
                         if (conditionDefinition->id == BuiltinId::GreaterEqual
                             || conditionDefinition->id == BuiltinId::LessEqual) {
                             const auto& conditionArguments = branch[1].asCall().arguments;
@@ -1237,26 +1246,41 @@ using numeric::Rational;
                                 == boundaryConditions.end())
                                 boundaryConditions.push_back(std::move(boundary));
                         }
-                        else if (conditionDefinition->id != BuiltinId::Greater
-                            && conditionDefinition->id != BuiltinId::Less) {
-                            // Equal/NotEqual often encode a removable singularity (polylog,
-                            // cardinal functions).  Differentiating the isolated branch value
-                            // is not the derivative of the surrounding function.  Compound
-                            // predicates likewise require boundary analysis, so stay unresolved.
+                        else if (conditionDefinition->id == BuiltinId::Greater
+                            || conditionDefinition->id == BuiltinId::Less) {
+                            strictVariableConditionSeen = true;
+                        }
+                        else {
+                            // Equal/NotEqualはpolylogやcardinal函数の可除特異点を
+                            // 表すことがあり，孤立枝の値を微分しても周囲の函数の導函数には
+                            // ならない。複合条件も境界解析を要するため未評価のまま保持する。
                             safe = false;
                             break;
                         }
                     }
                 }
 
-                std::vector<Expr> branchArguments{
-                    derivativeCore(branch[0], variable, builtins, mathematics, angles)};
+                if (branch.size() == 1 && !boundaryConditions.empty()) {
+                    for (Expr& boundary : boundaryConditions)
+                        branches.push_back(caseBranch(
+                            builtins, unresolvedDerivative(expression, variable, builtins),
+                            std::move(boundary)));
+                    boundaryConditions.clear();
+                }
+
+                Expr branchDerivative = branch.size() == 1 && strictVariableConditionSeen
+                    ? unresolvedDerivative(expression, variable, builtins)
+                    : derivativeCore(branch[0], variable, builtins, mathematics, angles);
+                // x依存の狭義不等式の後にあるdefault枝にはその境界点が含まれ得る。
+                // そこでdefault値を直接微分すると，abs[x]型の非微分可能点へ偽の値を
+                // 与えるため，補集合を内部と境界へ分割できない場合はD[...]を保持する。
+                std::vector<Expr> branchArguments{std::move(branchDerivative)};
                 if (derivativeCondition)
                     branchArguments.push_back(std::move(*derivativeCondition));
                 branches.push_back(call(
                     builtins, BuiltinId::CaseBranch, std::move(branchArguments)));
             }
-            if (safe && branches.size() == a.size()) {
+            if (safe) {
                 for (Expr& boundary : boundaryConditions)
                     branches.push_back(caseBranch(
                         builtins, unresolvedDerivative(expression, variable, builtins),
@@ -1288,6 +1312,16 @@ using numeric::Rational;
     case BuiltinId::Definitions:
     case BuiltinId::Undefine:
     case BuiltinId::AngleMode:
+    case BuiltinId::Series:
+        break;
+    case BuiltinId::SeriesData:
+        if (const auto series = parseSeriesData(expression, builtins))
+            if (auto derivative = differentiateSeriesExpression(
+                    *series, variable, builtins, mathematics, angles))
+                return *derivative;
+        break;
+    case BuiltinId::Normal:
+    case BuiltinId::ToNormal:
     case BuiltinId::UnitApplied:
         break;
     }
@@ -1434,6 +1468,78 @@ using numeric::Rational;
         std::move(denominator));
 }
 
+[[nodiscard]] bool isAdditiveExpression(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    return isHead(expression, builtins, BuiltinId::Add)
+        || isHead(expression, builtins, BuiltinId::Subtract)
+        || isHead(expression, builtins, BuiltinId::Negate);
+}
+
+void appendDerivativeLinearTerms(
+    const Expr& expression,
+    Rational coefficient,
+    std::vector<Expr>& terms,
+    const evaluation::BuiltinRegistry& builtins,
+    std::size_t depth = 0) {
+    if (coefficient.isZero())
+        return;
+
+    if (depth <= 64 && isHead(expression, builtins, BuiltinId::Add)) {
+        for (const Expr& argument : expression.asCall().arguments)
+            appendDerivativeLinearTerms(
+                argument, coefficient, terms, builtins, depth + 1);
+        return;
+    }
+    if (depth <= 64 && isHead(expression, builtins, BuiltinId::Subtract)
+        && expression.asCall().arguments.size() == 2) {
+        appendDerivativeLinearTerms(
+            expression.asCall().arguments[0], coefficient, terms, builtins, depth + 1);
+        appendDerivativeLinearTerms(
+            expression.asCall().arguments[1], -coefficient, terms, builtins, depth + 1);
+        return;
+    }
+    if (depth <= 64 && isHead(expression, builtins, BuiltinId::Negate)
+        && expression.asCall().arguments.size() == 1) {
+        appendDerivativeLinearTerms(
+            expression.asCall().arguments[0], -coefficient, terms, builtins, depth + 1);
+        return;
+    }
+
+    // exactな有理scalarだけを加法子へ分配する。一般expandを呼ばず，
+    // 高階product ruleで生じる2(A-B)のような形だけを平坦化する。
+    if (depth <= 64 && isHead(expression, builtins, BuiltinId::Multiply)) {
+        Rational scalar = coefficient;
+        const Expr* additive = nullptr;
+        bool compatible = true;
+        for (const Expr& factor : expression.asCall().arguments) {
+            if (factor.isNumber() && factor.asNumber().isReal()) {
+                scalar *= factor.asNumber().asReal().toRational();
+                continue;
+            }
+            if (!additive && isAdditiveExpression(factor, builtins)) {
+                additive = &factor;
+                continue;
+            }
+            compatible = false;
+            break;
+        }
+        if (compatible && additive) {
+            appendDerivativeLinearTerms(
+                *additive, scalar, terms, builtins, depth + 1);
+            return;
+        }
+    }
+
+    if (coefficient == Rational{BigInt{1}})
+        terms.push_back(expression);
+    else if (coefficient == Rational{BigInt{-1}})
+        terms.push_back(negate(builtins, expression));
+    else
+        terms.push_back(multiply(builtins, {
+            Expr{Number{coefficient}}, expression}));
+}
+
 [[nodiscard]] std::optional<Expr> repeatedDirectPolylogDerivative(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -1510,6 +1616,25 @@ std::optional<Expr> differentiateKnownRepeatedExpression(
             expression, variable, order, builtins))
         return simplify(std::move(*polylog), builtins, mathematics, angles);
     return std::nullopt;
+}
+
+Expr canonicalizeDerivativeOutput(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isAdditiveExpression(expression, builtins))
+        return expression;
+
+    std::vector<Expr> terms;
+    appendDerivativeLinearTerms(
+        expression, Rational{BigInt{1}}, terms, builtins);
+    if (terms.empty())
+        return integer(0);
+    Expr flattened = terms.size() == 1
+        ? std::move(terms.front())
+        : add(builtins, std::move(terms));
+    return simplify(std::move(flattened), builtins, mathematics, angles);
 }
 
 Expr differentiateExpression(

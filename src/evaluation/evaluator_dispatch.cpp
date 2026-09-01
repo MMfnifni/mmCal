@@ -44,9 +44,11 @@
 #include "symbolic/differentiation.hpp"
 #include "symbolic/integration.hpp"
 #include "symbolic/limit.hpp"
+#include "symbolic/series.hpp"
 #include "numeric/integer_algorithms.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -413,6 +415,14 @@ void validateSolveVariable(
     case BuiltinId::VectorReflect:
     case BuiltinId::VectorReflectAxis:
     case BuiltinId::VectorSum:
+    case BuiltinId::VectorInner:
+    case BuiltinId::VectorOuter:
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian:
         return true;
     default:
         return false;
@@ -569,6 +579,17 @@ expression::Expr Evaluator::dispatchBuiltin(
 
         // DはHoldAllだが，明示的なIn/Out/%参照はhistory snapshotとして先に解決する。
         expression::Expr result = resolveHeldHistoryReferences(arguments[0]);
+        // series[...]は局所展開を表す一級数学objectなので，最上位に限り
+        // Dへ渡す前にSeriesDataへmaterializeする。一般のHoldAll契約は変えない。
+        if (registry_.isCallTo(result, BuiltinId::Series)) {
+            result = evaluate(result);
+        }
+        else if (registry_.isCallTo(result, BuiltinId::NumericalApproximation)) {
+            const auto& approximationArguments = result.asCall().arguments;
+            if (!approximationArguments.empty()
+                && registry_.isCallTo(approximationArguments[0], BuiltinId::Series))
+                result = evaluate(result);
+        }
         for (std::size_t i = 1; i < arguments.size(); ++i) {
             expression::Symbol variable;
             std::uint64_t order = 1;
@@ -615,6 +636,10 @@ expression::Expr Evaluator::dispatchBuiltin(
                 if (const auto normalized = symbolic::normalizeRationalExpression(
                         result, variable, registry_, mathematics_, angleSemantics_))
                     result = *normalized;
+
+                if (order > 1)
+                    result = symbolic::canonicalizeDerivativeOutput(
+                        result, registry_, mathematics_, angleSemantics_);
             }
         }
 
@@ -632,7 +657,11 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments.size() == 3)
             assumptions = mathematics::parseAssumptions(arguments[2], registry_, mathematics_);
 
-        const expression::Expr integrand = resolveHeldHistoryReferences(arguments[0]);
+        expression::Expr integrand = resolveHeldHistoryReferences(arguments[0]);
+        // integrateも一般にはHoldAll相当の入力を保つが，最上位series[...]だけは
+        // SeriesDataへmaterializeして係数積分へ渡す。
+        if (registry_.isCallTo(integrand, BuiltinId::Series))
+            integrand = evaluate(integrand);
         std::optional<expression::Expr> result;
         std::optional<symbolic::IntegrationDisposition> integrationDisposition;
         if (arguments[1].isSymbol()) {
@@ -745,6 +774,73 @@ expression::Expr Evaluator::dispatchBuiltin(
             emitWarning("limit::unevaluated",
                 "limit could not prove the requested limit; unevaluated limit[...] remains");
         return result;
+    }
+    case BuiltinId::Series: {
+        if (arguments.size() < 2 || arguments.size() > 3)
+            error::throwCalcError(error::CalcErrorType::Type,
+                "series expects series[expression, {variable, center, order}] with optional assumptions");
+
+        if (!arguments[1].isArray())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "series specification must be {variable, center, nonnegative integer order}");
+        const auto& spec = arguments[1].asArray();
+        if (spec.rank() != 1 || spec.size() != 3 || !spec.element(0).isSymbol())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "series specification must be {variable, center, nonnegative integer order}");
+        const expression::Expr orderExpression = spec.element(2);
+        if (!orderExpression.isNumber() || !orderExpression.asNumber().isReal()
+            || !orderExpression.asNumber().asReal().isInteger())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "series order must be a nonnegative integer");
+        const auto order = numeric::tryToUint64(
+            orderExpression.asNumber().asReal().asInteger());
+        if (!order)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "series order must be a nonnegative integer that fits in uint64");
+        if (*order > 1024)
+            error::throwCalcError(error::CalcErrorType::ResourceLimit,
+                "series order exceeds the current limit of 1024");
+
+        mathematics::AssumptionSet assumptions;
+        if (arguments.size() == 3)
+            assumptions = mathematics::parseAssumptions(arguments[2], registry_, mathematics_);
+
+        const expression::Expr held = resolveHeldHistoryReferences(arguments[0]);
+        if (auto result = symbolic::seriesExpression(
+                held, spec.element(0).asSymbol(), spec.element(1),
+                static_cast<std::size_t>(*order), registry_, mathematics_,
+                angleSemantics_, assumptions))
+            return *result;
+
+        emitWarning("series::unsupported",
+            "series could not construct a supported local expansion; the request remains unevaluated");
+        return expression::Expr::call(registry_.symbol(BuiltinId::Series),
+            std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+    }
+    case BuiltinId::SeriesData: {
+        expression::Expr value = expression::Expr::call(
+            registry_.symbol(BuiltinId::SeriesData),
+            std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+        if (!symbolic::parseSeriesData(value, registry_))
+            error::throwCalcError(error::CalcErrorType::Type,
+                "seriesData expects six arguments, optionally followed by logarithmic coefficient layers");
+        return value;
+    }
+    case BuiltinId::Normal: {
+        if (arguments.size() != 1)
+            error::throwCalcError(error::CalcErrorType::Type,
+                "normal expects one expression");
+        if (const auto series = symbolic::parseSeriesData(arguments.front(), registry_))
+            return symbolic::normalSeriesExpression(
+                *series, registry_, mathematics_, angleSemantics_);
+        return arguments.front();
+    }
+    case BuiltinId::ToNormal: {
+        if (arguments.size() != 1)
+            error::throwCalcError(error::CalcErrorType::Type,
+                "toNormal expects one expression");
+        return symbolic::toNormalExpression(
+            arguments.front(), registry_, mathematics_, angleSemantics_);
     }
     case BuiltinId::Floor:
         return builtins::evaluateFloor(arguments, registry_, mathematics_, angleSemantics_);
@@ -1144,6 +1240,56 @@ expression::Expr Evaluator::dispatchBuiltin(
         return builtins::evaluateVectorReflectAxis(arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::VectorSum:
         return builtins::evaluateVectorSum(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::VectorInner:
+        return builtins::evaluateInner(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::VectorOuter:
+        return builtins::evaluateOuter(arguments, registry_, mathematics_, angleSemantics_);
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian: {
+        expression::Expr field = resolveHeldHistoryReferences(arguments[0]);
+        const auto materializeVectorCalculus = [&](const expression::Expr& expression) {
+            if (!expression.isCall()) return expression;
+            const auto* nested = registry_.find(expression.asCall().head);
+            if (!nested) return expression;
+            switch (nested->id) {
+            case BuiltinId::Gradient:
+            case BuiltinId::Divergence:
+            case BuiltinId::Curl:
+            case BuiltinId::Laplacian:
+            case BuiltinId::Jacobian:
+            case BuiltinId::Hessian:
+                return evaluate(expression);
+            default:
+                return expression;
+            }
+        };
+        field = materializeVectorCalculus(field);
+        std::array<expression::Expr, 2> resolved{
+            std::move(field),
+            resolveHeldHistoryReferences(arguments[1])
+        };
+        switch (definition.id) {
+        case BuiltinId::Gradient:
+            return builtins::evaluateGradient(resolved, registry_, mathematics_, angleSemantics_);
+        case BuiltinId::Divergence:
+            return builtins::evaluateDivergence(resolved, registry_, mathematics_, angleSemantics_);
+        case BuiltinId::Curl:
+            return builtins::evaluateCurl(resolved, registry_, mathematics_, angleSemantics_);
+        case BuiltinId::Laplacian:
+            return builtins::evaluateLaplacian(resolved, registry_, mathematics_, angleSemantics_);
+        case BuiltinId::Jacobian:
+            return builtins::evaluateJacobian(resolved, registry_, mathematics_, angleSemantics_);
+        case BuiltinId::Hessian:
+            return builtins::evaluateHessian(resolved, registry_, mathematics_, angleSemantics_);
+        default:
+            break;
+        }
+        throw std::logic_error("Unknown vector-calculus builtin");
+    }
     case BuiltinId::Expm1:
     case BuiltinId::Log1p:
     case BuiltinId::Sinc:
@@ -1327,9 +1473,11 @@ expression::Expr Evaluator::dispatchBuiltin(
         simplification::SimplificationContext context{
             registry_, mathematics_, angleSemantics_, std::move(assumptions)};
         context.predefinedSymbols = &symbolRegistry_;
-        if (definition.id == BuiltinId::FullSimplify)
-            return simplification::fullSimplify(arguments.front(), context);
-        return simplification::Simplifier{}.simplify(arguments.front(), context);
+        if (definition.id == BuiltinId::FullSimplify) {
+            expression::Expr result = simplification::fullSimplify(arguments.front(), context);
+            return simplification::simplifyExplicitLinearCombination(result, context);
+        }
+        return simplification::simplifyExplicitLinearCombination(arguments.front(), context);
     }
     case BuiltinId::Expand:
         return symbolic::expandExpression(

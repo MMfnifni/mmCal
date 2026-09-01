@@ -79,6 +79,19 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "periodic tangent has no single real limit at positive infinity");
     tests.expectEqual(eval(session, "limit[x sin[1/x],x,0]"), std::string{"0"},
         "squeeze theorem closes a vanishing factor times bounded sine");
+    tests.expectEqual(eval(session, "limit[x*Ei[x],x,0,1]"), std::string{"0"},
+        "local Series proves a vanishing factor times logarithmic Ei at zero");
+    tests.expectEqual(eval(session, "limit[sqrt[x]*log[x],x,0,1]"), std::string{"0"},
+        "local Series proves a positive Puiseux power dominates log at zero");
+    tests.expectEqual(eval(session, "limit[Ei[x]-log[x],x,0,1]"), std::string{"-digamma[1]"},
+        "local Series resolves finite cancellation between Ei and log singularities");
+    tests.expectEqual(eval(session, "limit[Ci[x]-log[x],x,0,1]"), std::string{"-digamma[1]"},
+        "local Series resolves finite cancellation between Ci and log singularities");
+    tests.expectEqual(eval(session, "limit[log[2*x]-log[x],x,0,1]"), std::string{"log[2]"},
+        "local Series resolves logarithmic cancellation with a positive scale factor");
+    tests.expectEqual(eval(session, "limit[log[x]^2,x,0,1]"),
+        std::string{"limit[log[x]^2, x, 0, 1]"},
+        "Series fallback remains conservative when a constant-order logarithmic divergence remains");
     tests.expectEqual(eval(session, "limit[Ei[x],x,0,-1]"), std::string{"-Infinity"},
         "Ei approaches negative infinity from the real left at zero");
     tests.expectEqual(eval(session, "limit[Ei[x],x,0,1]"), std::string{"-Infinity"},
@@ -586,6 +599,9 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "D[exp[-x^2],{x,4}]"),
         std::string{"(16x^4-48x^2+12)exp[-x^2]"},
         "repeated derivatives of quadratic exponentials retain a collected polynomial factor");
+    tests.expectEqual(eval(session, "D[exp[x]*cos[x],{x,12}]"),
+        std::string{"-64cos[x]exp[x]"},
+        "repeated derivatives flatten exact linear combinations instead of accumulating nested product-rule terms");
 
     tests.expectEqual(eval(session, "solve[ellipticF[x,0]==2,x]"), std::string{"{x == 2}"},
         "Solve consumes exact ellipticF degeneration before polynomial solving");

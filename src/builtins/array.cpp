@@ -4,6 +4,7 @@
 #include "builtins/array_helpers.hpp"
 #include "error/error_message.hpp"
 #include "expression/array_utils.hpp"
+#include "solver/solution_set.hpp"
 
 #include <cstddef>
 #include <stdexcept>
@@ -67,6 +68,36 @@ Expr evaluateLength(std::span<const Expr> arguments) {
 }
 
 Expr evaluateArrayGet(std::span<const Expr> arguments) {
+    if (arguments.front().isSolutionSet()) {
+        const solver::SolutionSet& solutions = arguments.front().asSolutionSet();
+        if (solutions.kind() != solver::SolutionSetKind::Finite)
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "at requires a finite SolutionSet");
+        if (arguments.size() < 2 || arguments.size() > 3)
+            detail::arrayTypeError(
+                "at expects a branch index and optional binding symbol for SolutionSet");
+
+        const std::size_t index = detail::requireSize(arguments[1], "at");
+        if (index >= solutions.branches().size())
+            error::throwCalcError(error::CalcErrorType::Domain, "at index is out of range");
+
+        const solver::SolutionBranch& branch = solutions.branches()[index];
+        if (arguments.size() == 2) {
+            std::vector<solver::SolverVariable> variables(
+                solutions.variables().begin(), solutions.variables().end());
+            return Expr::solutionSet(solver::SolutionSet::finite(
+                std::move(variables), {branch}));
+        }
+
+        if (!arguments[2].isSymbol())
+            detail::arrayTypeError("at SolutionSet binding selector must be a symbol");
+        const expression::Symbol variable = arguments[2].asSymbol();
+        for (const solver::SolutionBinding& binding : branch.bindings)
+            if (binding.variable.sameIdentity(variable))
+                return binding.value;
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "at SolutionSet branch does not bind the requested symbol");
+    }
     if (arguments.front().isList()) {
         const auto& list = arguments.front().asList();
         const std::size_t index = detail::requireSize(arguments[1], "at");

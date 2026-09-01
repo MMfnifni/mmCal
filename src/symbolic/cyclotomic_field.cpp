@@ -184,6 +184,35 @@ std::vector<Rational> CyclotomicFieldContext::multiply(
     return multiplyReduced(lhs, rhs, reduction_);
 }
 
+std::vector<Rational> CyclotomicFieldContext::multiplyByPower(
+    std::span<const Rational> value,
+    std::size_t exponent) const {
+    if (value.size() != degree() || conductor_ == 0)
+        return {};
+
+    exponent %= conductor_;
+    // Phi_(2^m)(t)=t^(2^(m-1))+1。2冪円分体ではt^degree=-1なので，
+    // t^k倍は一般多項式積を使わず係数shiftと符号反転だけで処理できる。
+    if ((conductor_ & (conductor_ - 1)) == 0 && degree() * 2 == conductor_) {
+        const std::size_t fieldDegree = degree();
+        std::vector<Rational> result(fieldDegree);
+        for (std::size_t i = 0; i < fieldDegree; ++i) {
+            if (value[i].isZero())
+                continue;
+            const std::size_t power = i + exponent;
+            const std::size_t quotient = power / fieldDegree;
+            const std::size_t remainder = power % fieldDegree;
+            if ((quotient & 1U) == 0U)
+                result[remainder] += value[i];
+            else
+                result[remainder] -= value[i];
+        }
+        return result;
+    }
+
+    return multiply(value, power(exponent));
+}
+
 std::optional<std::vector<Rational>> CyclotomicFieldContext::embedGaussianRational(
     const Rational& real,
     const Rational& imaginary) const {

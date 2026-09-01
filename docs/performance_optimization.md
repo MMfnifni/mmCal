@@ -293,6 +293,12 @@ Representative GCC Release / LTO-off timings from `--exact-cyclotomic-fft 5`:
 
 `tester.py --timings` reduced `test5_matrix.txt` from about 1.46 s in the earlier algebraic-field audit to about 0.38 s after the quotient-field backend.
 
+## Power-of-two inverse re-embedding — adopted
+
+The existing radix-2 forward representation is retained because it is more readable. For `ifft[fft[v]]` at power-of-two lengths of 16 and above, however, the inverse path recognizes radix-2 output forms such as `cis[rational Pi]`, Rational scaling, and `sqrt[2]` inside the same `Q(zeta_n)` power basis, then executes only the inverse in cyclotomic coordinates. Purely numeric spectra and expressions whose field membership cannot be proved keep the previous fallback path.
+
+For power-of-two conductors, `Phi_(2^m)(t)=t^(2^(m-1))+1`, so `multiplyByPower()` implements multiplication by `t^k` with coefficient shifts and sign changes instead of generic polynomial multiplication. The 16-point forward output remains byte-for-byte identical to the previous implementation. In the integrated GCC RelWithDebInfo check, exact round trips closed to the original vector in about 0.01 s at 16 points, 0.08 s at 32, 0.37 s at 64, and 6.1 s at 128. The 128-point case remains relatively heavy, but the previous generic-Expr explosion is removed.
+
 ## Persistent mixed-radix plan — deferred
 
 The current non-power-of-two cyclotomic kernel is still a direct O(n^2) DFT over quotient coordinates. At 21 points the measured round trip is about 34 ms and the primary generic-expression explosion has already been removed. Mixed-radix Cooley–Tukey and exact Rader/Bluestein variants remain plausible, but should be added only after larger supported lengths demonstrate a crossover that justifies the extra implementation complexity.
@@ -639,7 +645,7 @@ Representative incremental-Krylov / GCC Release / LTO-off results for all 1652 b
 | `test8_calculus.txt` | 46 | ~173 ms |
 | `test22_number_field_interning.txt` | 1 | ~152 ms |
 
-`test16` is mainly a stress set for integration, high-degree Solve, and algebraic Root construction. Despite its name, much of the time in `test5_matrix` is in exact FFT/DFT non-power-of-two round trips rather than small matrix operations; exact `ifft[fft[...]]` around 7, 12, and related sizes remains a future performance target. In `test9`, `N[ibeta[1/3,2/3,1/4],20]` and `N[gamma[1/3],20]` stand out comparatively.
+`test16` is mainly a stress set for integration, high-degree Solve, and algebraic Root construction. Despite its name, much of the time in `test5_matrix` was historically spent in exact FFT/DFT round trips rather than small matrix operations. The main expression-explosion paths are now covered by the cyclotomic quotient for non-power-of-two sizes and by power-of-two inverse re-embedding from length 16 upward. Future profiling should focus on power-of-two sizes beyond 128 and larger supported non-power-of-two sizes. In `test9`, `N[ibeta[1/3,2/3,1/4],20]` and `N[gamma[1/3],20]` stand out comparatively.
 
 These timings never affect PASS/FAIL semantics; they are profiling signals used only to select optimization targets.
 
@@ -808,7 +814,7 @@ The `Expr::Node` typed-node refactor is adopted in v1.5.3. It was kept as a stan
 5. Measure Toom-4 / higher-Toom crossovers and consider FFT/NTT multiplication for still larger integers.
 6. Lehmer GCD.
 7. bit-burst / AGM logarithm backends.
-8. A Cyclotomic exact FFT backend. The `tester.py --timings` audit shows non-power-of-two exact FFT/iFFT round trips as a clear interactive black-box hotspot, so this priority should be revisited.
+8. Extend exact Cyclotomic FFT only where measurements justify it: mixed-radix / prime-length kernels for larger non-power-of-two sizes and a dedicated power-of-two backend beyond the current 128-point practical range.
 
 The naive flat packed-Array design is rejected; immutable paged backing plus stride views is adopted. Approximate Matrix algorithms keep their existing dedicated contiguous working buffers rather than forcing persistent Array storage and algorithm temporaries into one type. BigUInt SBO is explicitly deferred for now.
 

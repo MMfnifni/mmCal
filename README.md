@@ -5,7 +5,7 @@ An exact-first CLI calculator and compact CAS for engineering, research, and man
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Development target: v1.5.4**
+**Latest release: v1.5.4**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -19,7 +19,7 @@ While it can be used as a general-purpose calculator, it also provides:
 - Continuous calculations using previous results
 - Variables and user-defined functions
 - Complex numbers, vectors, and matrices
-- Expansion, factorization, simplification, differentiation, integration, limits, and equation solving
+- Expansion, factorization, simplification, Taylor/Laurent/Puiseux/logarithmic series expansion, differentiation, integration, limits, and equation solving
 - Arbitrary-precision numerical approximation, special functions, statistics, and signal processing
 
 Unlike heavyweight systems, this tool aims to be:
@@ -76,9 +76,9 @@ For function specifications and implementation details, see the [reference](docs
 
 `N` results retain certified enclosures rather than only display text. Certified decimal approximations can therefore participate in ordinary `+ - * /` together with exact Numbers; propagated uncertainty may reduce the reported accuracy, and an outer `N` never reconstructs digits that were not guaranteed by the input approximation.
 
-## v1.5.4 in development
+## v1.5.4
 
-v1.5.4 focuses less on adding isolated functions and more on making the existing exact-first foundations **more complete, more consistent, and less susceptible to performance cliffs**.
+v1.5.4 focused less on adding isolated functions and more on making the existing exact-first foundations **more complete, more consistent, and less susceptible to performance cliffs**.
 
 Major changes include:
 
@@ -91,7 +91,7 @@ Major changes include:
 - **Linear algebra and resource control**: `conditionNumber`, `pseudoInverse`, `leastSquares`, exact modular `det` / `solveLinear`, shared `EvaluationBudget`, and cooperative cancellation
 - **Validation and CLI**: expanded certification-boundary and performance-cliff fuzzing, broader semantic fuzzing, `--batch`, and a `:help` catalog covering every source-callable builtin
 
-See **v1.5.4 — Unreleased** in [`CHANGELOG.md`](CHANGELOG.md) for the detailed development history. README and Reference describe current behavior; release-by-release history is kept in the changelog.
+See **v1.5.4** in [`CHANGELOG.md`](CHANGELOG.md) for the release history. Current development changes are recorded under `Unreleased`. README and Reference describe current behavior; release-by-release history is kept in the changelog.
 
 ## 1. Getting started
 
@@ -103,6 +103,7 @@ The display precision and default angle unit can also be specified at startup.
 mmCal --fix 16 --angle deg
 mmCal --angle rad
 mmCal --angle grad --fix 8
+mmCal --layout multi
 mmCal --eval "factor[x^2-1]"
 mmCal --batch < expressions.txt
 ```
@@ -111,6 +112,7 @@ mmCal --batch < expressions.txt
 - `--angle deg`: Treat trigonometric inputs without an explicit angle unit as degrees
 - `--angle rad`: Radians. This is the default
 - `--angle grad`: Gradians
+- `--layout auto|single|multi`: Interactive REPL layout. The default `auto` structurally expands Arrays/Lists/`cases`/solution sets on a TTY and falls back to one-line output through pipes or redirects
 - `--eval expr`: Evaluate one expression and write only its value to standard output
 - `--batch`: Evaluate standard input one line at a time in one session.
 - `--help`, `-h`: Show concise startup usage. Use commands such as `:help sin` after startup for function details
@@ -129,7 +131,7 @@ For CMake-generated MSVC builds, `MMCAL_PARALLEL_COMPILE=ON` is the default and 
 ## 2. Exact values and decimal display are different things
 
 `0.1` is not immediately converted to a binary floating-point value; it is treated as the exact value `1/10`.
-Large integers, rational numbers, algebraic expressions containing radicals, complex numbers, and symbolic expressions are kept exact whenever possible. Expansion, factorization, simplification, differentiation, integration, limits, and equation solving all operate within the same expression system.
+Large integers, rational numbers, algebraic expressions containing radicals, complex numbers, and symbolic expressions are kept exact whenever possible. Expansion, factorization, simplification, series expansion, differentiation, integration, limits, and equation solving all operate within the same expression system.
 
 ```text
 In [1]> 1/3
@@ -439,6 +441,8 @@ mmCal does not invent general inverse special functions for `solve`; when branch
 limit[sin[x]/x,x,0]       -> 1
 limit[1/x,x,0,1]          -> Infinity
 limit[1/x,x,0,-1]         -> -Infinity
+limit[x*Ei[x],x,0,1]       -> 0
+limit[Ei[x]-log[x],x,0,1] -> -digamma[1]
 ```
 
 ### Equations and inequalities
@@ -473,6 +477,8 @@ Complex roots are represented by `root[{a0,...,an},k,Complex]`, using certified 
 
 When mmCal cannot guarantee a complete solution set, it does not return an arbitrary convenient solution as though it were complete.
 Instead, it reports the unresolved state using a Warning and the result representation.
+
+Finite `SolutionSet` values support zero-based branch selection with `at[solutions,i]`, which returns a one-branch `SolutionSet` while preserving conditions, free variables, multiplicity, and domains. `at[solutions,i,x]` extracts only the right-hand side bound to a requested variable. `toNormal[solutions]` preserves the SolutionSet structure while recursively normalizing supported special representations such as SeriesData inside binding values.
 
 ## 8. Arrays, matrices, vectors, and statistics
 
@@ -608,7 +614,11 @@ fft[{1,2,3,4}]
 
 ifft[fft[{1,2,3,4}]]
 -> {1, 2, 3, 4}
+```
 
+Exact power-of-two FFTs keep the existing readable radix-2 forward representation. For inverse round trips within the current degree budget (lengths 16–128), FFT-generated root-of-unity expressions are re-embedded into cyclotomic coordinates to avoid expression blow-up.
+
+```text
 convolve[{1,2},{3,4}]
 -> {3, 10, 8}
 ```
@@ -648,14 +658,20 @@ Unsupported regions will continue to be expanded. I'm working on it.
 :help constants
 :fix 16
 :fix off
+:layout
+:layout single
+:layout multi
 :status
+:quit
+:exit
 ```
 
 `:help function` derives the function name, aliases, and arity from `BuiltinRegistry`. Every callable builtin has a curated description, explicit input rules, and one or more examples; multi-form functions such as `integrate`, `root`, `qrDecomposition`, `svd`, and `solve` show each accepted form and additional notes. `:help Pi` and `:help constants` cover protected constants, domains, and angle-unit symbols. Unknown names offer a nearby topic when one is unambiguous, for example `sdv` -> `svd` and `qr` -> `qrDecomposition`.
 `:help functions` lists the available canonical names and callable aliases.
-`:help`, `:fix`, and `:status` are CLI commands rather than evaluated expressions, so they do not advance `In[n]` or enter history.
+`:help`, `:fix`, `:layout`, `:status`, `:quit`, and `:exit` are CLI commands rather than evaluated expressions, so they do not advance `In[n]` or enter history.
 `:fix n` only rounds the **display** to at most `n` digits after the decimal point; it does not change the stored value or the semantics of `precision` / `accuracy`.
-`:status` shows the current angle mode, display mode, number of definitions, history count, and similar state.
+`:layout auto|single|multi` changes only interactive REPL composition. `single` is canonical one-line output, `multi` is structured multi-line output, and `auto` chooses from terminal width and expression structure. `--eval` / `--batch` output contracts are unchanged.
+`:status` shows the current angle mode, display mode, layout, number of definitions, history count, and similar state. `:quit` and `:exit` are CLI compatibility aliases for ending the current session, equivalent in purpose to `Exit[]`.
 The console title also shows the angle and display mode as auxiliary information.
 
 The parser applies separate limits to token count, AST node count, nesting depth, operator-chain length, numeric-literal digits, function arguments, and Array elements. Exceeding one produces `ResourceLimitError` rather than an OS stack overflow or an ambiguous `InternalError`.
@@ -698,7 +714,7 @@ If mmCal is used in an academic publication or product, attribution beyond the B
 
 ## 15. Tests and development environment
 
-The current development tree has been verified with **2954 / 2954** internal regression tests and **2127 / 2127** black-box tests passing.
+The current development tree has been verified with **3220 / 3220** internal regression tests and **2328 / 2328** black-box tests passing.
 They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures. A separate `mmCal.Benchmarks` project provides fixed-seed randomized correctness checks, algorithm-threshold sweeps, and performance comparisons without mixing benchmark workloads into the ordinary test suite.
 
 Primary Windows development environment:

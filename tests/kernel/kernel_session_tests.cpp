@@ -2,6 +2,7 @@
 #include "kernel_session_tests.hpp"
 
 #include "cli/repl_help.hpp"
+#include "cli/repl_layout.hpp"
 #include "cli/startup_options.hpp"
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
@@ -55,6 +56,21 @@ void runKernelSessionTests(TestRunner& tests) {
             cli::parseStartupOptions(canonical).inputMode == cli::InputMode::Batch,
             "CLI: --batch selects line-oriented automation mode");
     }
+    {
+        const std::array<std::string_view, 2> arguments{"--layout", "multi"};
+        const cli::StartupOptions options = cli::parseStartupOptions(arguments);
+        tests.expect(
+            options.outputLayout == std::optional<cli::OutputLayout>{cli::OutputLayout::Multi},
+            "CLI: --layout selects interactive output layout");
+    }
+    tests.expectThrows<std::invalid_argument>([] {
+        const std::array<std::string_view, 3> arguments{"--layout", "multi", "--batch"};
+        static_cast<void>(cli::parseStartupOptions(arguments));
+    }, "CLI: --layout is rejected for automation modes");
+    tests.expectThrows<std::invalid_argument>([] {
+        const std::array<std::string_view, 1> arguments{"--bach"};
+        static_cast<void>(cli::parseStartupOptions(arguments));
+    }, "CLI: removed --bach alias is rejected");
     tests.expectThrows<std::invalid_argument>([] {
         const std::array<std::string_view, 3> arguments{"--batch", "--eval", "1"};
         static_cast<void>(cli::parseStartupOptions(arguments));
@@ -69,6 +85,53 @@ void runKernelSessionTests(TestRunner& tests) {
             && static_cast<int>(cli::ExitCode::Evaluation) == 4
             && static_cast<int>(cli::ExitCode::Internal) == 5,
         "CLI: automation exit-code contract is stable");
+
+    {
+        kernel::KernelSession layoutSession;
+        const expression::Expr matrix = layoutSession.evaluate("{{1,2},{3,4}}");
+        tests.expectEqual(
+            cli::formatReplExpression(matrix, cli::OutputLayout::Single, 100),
+            "{{1, 2}, {3, 4}}",
+            "CLI: single layout preserves canonical one-line formatting");
+        tests.expectEqual(
+            cli::formatReplExpression(matrix, cli::OutputLayout::Auto, 100),
+            "{\n  {1, 2},\n  {3, 4}\n}",
+            "CLI: auto layout expands matrices structurally");
+
+        const expression::Expr logarithmicSeries = layoutSession.evaluate(
+            "series[Ei[x],{x,0,3}]");
+        tests.expectEqual(
+            cli::formatReplExpression(
+                logarithmicSeries, cli::OutputLayout::Auto, 100),
+            "-digamma[1] + log[x] + x + 1/4*x^2 + 1/18*x^3 + O[x^4]",
+            "CLI: logarithmic SeriesData renders its log layer in human-readable form");
+
+        const expression::Expr puiseuxSeries = layoutSession.evaluate(
+            "series[sqrt[x],{x,0,2}]");
+        tests.expectEqual(
+            cli::formatReplExpression(
+                puiseuxSeries, cli::OutputLayout::Auto, 100),
+            "x^(1/2) + O[x^(5/2)]",
+            "CLI: SeriesData pretty rendering respects the Puiseux denominator");
+
+        const expression::Expr cases = layoutSession.evaluate(
+            "cases[x^2 if x>=0;-x if x<0;0]");
+        tests.expectEqual(
+            cli::formatReplExpression(cases, cli::OutputLayout::Auto, 100),
+            "cases[\n  x^2 if x >= 0;\n  -x if x < 0;\n  0\n]",
+            "CLI: auto layout expands cases by branch");
+
+
+        const expression::Expr numericalSolutions = layoutSession.evaluate(
+            "N[solve[x^3-1==0,x,Complex],10]");
+        const std::string solutionText = cli::formatReplExpression(
+            numericalSolutions, cli::OutputLayout::Multi, 100);
+        tests.expect(
+            solutionText.find("\n\n") == std::string::npos
+                && solutionText.starts_with("{\n  x == ")
+                && solutionText.ends_with("\n}"),
+            "CLI: multiline SolutionSet rendering has no synthetic blank lines");
+    }
 
     {
         kernel::KernelSession helpSession;
@@ -141,6 +204,21 @@ void runKernelSessionTests(TestRunner& tests) {
             "CLI: :help suggests a canonical decomposition name");
         tests.expectEqual(helpSession.historySize(), historyBefore,
             "CLI: constant and unknown help lookups do not consume history");
+        std::ostringstream layoutHelp;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help layout", helpSession.builtinRegistry(), layoutHelp)
+                && layoutHelp.str().find("auto|single|multi") != std::string::npos,
+            "CLI: :help documents interactive layout control");
+
+        std::ostringstream exitHelp;
+        tests.expect(
+            cli::handleReplHelpCommand(
+                ":help quit", helpSession.builtinRegistry(), exitHelp)
+                && exitHelp.str().find("Usage: :quit") != std::string::npos
+                && exitHelp.str().find("Alias: :exit") != std::string::npos,
+            "CLI: :help documents :quit and :exit compatibility commands");
+
         std::ostringstream notHelp;
         tests.expect(!cli::handleReplHelpCommand(
             ":helper", helpSession.builtinRegistry(), notHelp),
@@ -1452,6 +1530,30 @@ void runKernelSessionTests(TestRunner& tests) {
             "D[cases[x^2 if x>=0;-x if x<0],x]"),
         std::string{"cases[2x if x > 0; -1 if x < 0; D[cases[x^2 if x >= 0; -x if x < 0], x] if x == 0]"},
         "KernelSession: D does not assign a derivative at an unproved closed piecewise boundary");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "D[cases[x if x>0;-x if x<0;0],x]"),
+        std::string{"cases[1 if x > 0; -1 if x < 0; D[cases[x if x > 0; -x if x < 0; 0], x]]"},
+        "KernelSession: D does not differentiate an explicit default across strict piecewise boundaries");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "D[cases[x^2 if x>=0;0],x]"),
+        std::string{"cases[2x if x > 0; D[cases[x^2 if x >= 0; 0], x] if x == 0; 0]"},
+        "KernelSession: D places a closed-boundary guard before an explicit default branch");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "simplify[sqrt[x^2],x>1]"),
+        std::string{"x"},
+        "KernelSession: rational affine assumptions propagate a positive lower bound");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "fullSimplify[1/(1-x)-1/(1-x),x<1]"),
+        std::string{"0"},
+        "KernelSession: rational affine assumptions prove shifted denominators nonzero");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "simplify[sqrt[(2x-3)^2],x>2]"),
+        std::string{"2x-3"},
+        "KernelSession: rational affine assumptions propagate through scaled affine forms");
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "integrate[cases[x if a>0;x^2 if a<=0],x]"),

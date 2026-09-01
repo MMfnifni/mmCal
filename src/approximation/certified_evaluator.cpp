@@ -2402,11 +2402,23 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::VectorReflect:
     case BuiltinId::VectorReflectAxis:
     case BuiltinId::VectorSum:
+    case BuiltinId::VectorInner:
+    case BuiltinId::VectorOuter:
+    case BuiltinId::Gradient:
+    case BuiltinId::Divergence:
+    case BuiltinId::Curl:
+    case BuiltinId::Laplacian:
+    case BuiltinId::Jacobian:
+    case BuiltinId::Hessian:
     case BuiltinId::UnitApplied:
     case BuiltinId::Factorial:
     case BuiltinId::Derivative:
     case BuiltinId::SymbolicIntegral:
     case BuiltinId::Limit:
+    case BuiltinId::Series:
+    case BuiltinId::SeriesData:
+    case BuiltinId::Normal:
+    case BuiltinId::ToNormal:
     case BuiltinId::Floor:
     case BuiltinId::Ceil:
     case BuiltinId::Trunc:

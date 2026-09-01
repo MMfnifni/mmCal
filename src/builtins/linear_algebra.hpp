@@ -29,6 +29,26 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateInner(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateOuter(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateDistance(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateProjection(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateDeterminant(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,

@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
     <Filter Include="tests">
@@ -156,6 +156,9 @@
     <ClInclude Include="..\..\tests\symbolic\differentiation_tests.hpp">
       <Filter>tests\symbolic</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\tests\symbolic\series_tests.hpp">
+      <Filter>tests\symbolic</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\tests\builtins\linear_algebra_tests.hpp">
       <Filter>tests\builtins</Filter>
     </ClInclude>
@@ -303,6 +306,9 @@
       <Filter>tests\simplification</Filter>
     </ClCompile>
     <ClCompile Include="..\..\tests\symbolic\differentiation_tests.cpp">
+      <Filter>tests\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\symbolic\series_tests.cpp">
       <Filter>tests\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\tests\builtins\linear_algebra_tests.cpp">

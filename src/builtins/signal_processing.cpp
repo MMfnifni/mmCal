@@ -10,6 +10,7 @@
 #include "builtins/names.hpp"
 #include "error/error_message.hpp"
 #include "evaluation/evaluation_budget.hpp"
+#include "mathematics/exact_trigonometry.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
@@ -23,6 +24,7 @@
 #include <numeric>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -286,6 +288,50 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return result;
 }
 
+[[nodiscard]] std::vector<Rational> scaleCoordinates(
+    std::span<const Rational> value,
+    const Rational& scale) {
+    std::vector<Rational> result(value.begin(), value.end());
+    for (Rational& coefficient : result)
+        coefficient *= scale;
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<Rational>> exactRootOfUnityCoordinates(
+    const Expr& expression,
+    const symbolic::CyclotomicFieldContext& field,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto& call = expression.asCall();
+    const auto* definition = registry.find(call.head);
+    if (!definition || definition->id != BuiltinId::Cis || call.arguments.size() != 1)
+        return std::nullopt;
+
+    const auto angle = mathematics::extractExactAngle(
+        call.arguments[0], registry, mathematics, angles);
+    if (!angle)
+        return std::nullopt;
+
+    // generator=t=exp(-2 Pi I/n)。cis[theta]=t^kとなるexact整数kだけ受理する。
+    const Rational exponentRational = -angle->turns
+        * Rational{BigInt::fromUnsigned(field.conductor())};
+    if (!exponentRational.isInteger())
+        return std::nullopt;
+
+    const BigInt modulus = BigInt::fromUnsigned(field.conductor());
+    BigInt exponent = exponentRational.numerator() % modulus;
+    if (exponent.isNegative())
+        exponent += modulus;
+    const auto magnitude = numeric::tryToUint64(exponent);
+    if (!magnitude)
+        return std::nullopt;
+    const auto power = field.power(static_cast<std::size_t>(*magnitude));
+    return std::vector<Rational>(power.begin(), power.end());
+}
+
 [[nodiscard]] std::optional<std::vector<Rational>> powerCoordinates(
     const symbolic::CyclotomicFieldContext& field,
     std::vector<Rational> base,
@@ -302,18 +348,33 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     return result;
 }
 
+using CyclotomicCoordinateMemo =
+    std::unordered_map<const void*, std::optional<std::vector<Rational>>>;
+
 [[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinatesImpl(
     const Expr& expression,
     const symbolic::CyclotomicFieldContext& field,
     const Expr& generator,
     const evaluation::BuiltinRegistry& registry,
-    std::size_t& remainingNodes) {
-    if (remainingNodes == 0)
-        return std::nullopt;
-    --remainingNodes;
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t& remainingNodes,
+    CyclotomicCoordinateMemo& memo);
 
+[[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinatesUncached(
+    const Expr& expression,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t& remainingNodes,
+    CyclotomicCoordinateMemo& memo) {
     if (expression == generator)
         return std::vector<Rational>(field.power(1).begin(), field.power(1).end());
+    if (auto root = exactRootOfUnityCoordinates(
+            expression, field, registry, mathematics, angles))
+        return root;
 
     if (expression.isNumber()) {
         const Number& number = expression.asNumber();
@@ -332,7 +393,8 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         return std::nullopt;
     const auto child = [&](std::size_t index) {
         return cyclotomicCoordinatesImpl(
-            call.arguments[index], field, generator, registry, remainingNodes);
+            call.arguments[index], field, generator, registry, mathematics, angles,
+            remainingNodes, memo);
     };
 
     switch (definition->id) {
@@ -373,6 +435,32 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         }
         return result;
     }
+    case BuiltinId::Divide: {
+        if (call.arguments.size() != 2
+            || !call.arguments[1].isNumber()
+            || !call.arguments[1].asNumber().isReal())
+            return std::nullopt;
+        const Rational denominator = call.arguments[1].asNumber().asReal().toRational();
+        if (denominator.isZero())
+            return std::nullopt;
+        auto value = child(0);
+        return value
+            ? std::optional<std::vector<Rational>>{
+                scaleCoordinates(*value, Rational{BigInt{1}} / denominator)}
+            : std::nullopt;
+    }
+    case BuiltinId::Sqrt: {
+        if (call.arguments.size() != 1
+            || !call.arguments[0].isNumber()
+            || !call.arguments[0].asNumber().isReal()
+            || call.arguments[0].asNumber().asReal().toRational() != Rational{BigInt{2}}
+            || field.conductor() % 8 != 0)
+            return std::nullopt;
+        const std::size_t exponent = field.conductor() / 8;
+        const auto positive = field.power(exponent);
+        const auto negative = field.power(field.conductor() - exponent);
+        return addCoordinates(positive, negative);
+    }
     case BuiltinId::Power: {
         if (call.arguments.size() != 2
             || !call.arguments[1].isNumber()
@@ -395,14 +483,38 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     }
 }
 
+[[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinatesImpl(
+    const Expr& expression,
+    const symbolic::CyclotomicFieldContext& field,
+    const Expr& generator,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t& remainingNodes,
+    CyclotomicCoordinateMemo& memo) {
+    if (const auto iterator = memo.find(expression.identity()); iterator != memo.end())
+        return iterator->second;
+    if (remainingNodes == 0)
+        return std::nullopt;
+    --remainingNodes;
+
+    auto result = cyclotomicCoordinatesUncached(
+        expression, field, generator, registry, mathematics, angles, remainingNodes, memo);
+    memo.emplace(expression.identity(), result);
+    return result;
+}
+
 [[nodiscard]] std::optional<std::vector<Rational>> cyclotomicCoordinates(
     const Expr& expression,
     const symbolic::CyclotomicFieldContext& field,
     const Expr& generator,
-    const evaluation::BuiltinRegistry& registry) {
-    std::size_t remainingNodes = 256;
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    CyclotomicCoordinateMemo& memo) {
+    std::size_t remainingNodes = 2048;
     return cyclotomicCoordinatesImpl(
-        expression, field, generator, registry, remainingNodes);
+        expression, field, generator, registry, mathematics, angles, remainingNodes, memo);
 }
 
 [[nodiscard]] Expr cyclotomicPolynomialExpr(
@@ -472,11 +584,16 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     const std::vector<Expr>& input,
     const symbolic::CyclotomicFieldContext& field,
     const Expr& generator,
-    const evaluation::BuiltinRegistry& registry) {
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
     std::vector<std::vector<Rational>> values;
     values.reserve(input.size());
+    CyclotomicCoordinateMemo memo;
+    memo.reserve(input.size() * 16);
     for (const Expr& expression : input) {
-        auto coordinates = cyclotomicCoordinates(expression, field, generator, registry);
+        auto coordinates = cyclotomicCoordinates(
+            expression, field, generator, registry, mathematics, angles, memo);
         if (!coordinates)
             return std::nullopt;
         values.push_back(std::move(*coordinates));
@@ -495,6 +612,81 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
     if (created)
         cache.rememberCyclotomicField(conductor, created);
     return created;
+}
+
+[[nodiscard]] std::optional<std::vector<Expr>> exactPowerOfTwoCyclotomicInverse(
+    const std::vector<Expr>& input,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    FourierTransformCache& cache) {
+    const std::size_t n = input.size();
+    if (n < 16 || !isPowerOfTwo(n))
+        return std::nullopt;
+
+    // 純粋な数値spectrumは従来radix-2の方が簡潔である。fft由来のroot-of-unity式が
+    // 含まれる場合だけQ(zeta_n)へ再埋込みしてinverseの式爆発を避ける。
+    if (std::all_of(input.begin(), input.end(), [](const Expr& value) {
+            return value.isNumber();
+        }))
+        return std::nullopt;
+
+    auto field = cachedOrCreateCyclotomicField(n, cache);
+    if (!field || field->degree() * 2 != n)
+        return std::nullopt;
+    Expr generator = cyclotomicGeneratorExpr(*field, registry, mathematics, angles);
+    auto coordinates = coordinatesForField(
+        input, *field, generator, registry, mathematics, angles);
+    if (!coordinates)
+        return std::nullopt;
+
+    const std::size_t degree = field->degree();
+    std::vector<std::vector<Rational>> data(
+        n, std::vector<Rational>(degree));
+
+    // Expr版radix-2と同じbit-reversed iterative DIT。twiddleだけ円分体の
+    // t^k倍へ置き換え，2冪ではmultiplyByPower()が係数shiftだけで処理する。
+    for (std::size_t i = 0, j = 0; i < n; ++i) {
+        data[j] = std::move((*coordinates)[i]);
+        if (i + 1 == n)
+            break;
+        std::size_t bit = n >> 1;
+        while ((j & bit) != 0) {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+    }
+
+    for (std::size_t length = 2; length <= n; length <<= 1) {
+        const std::size_t half = length >> 1;
+        const std::size_t rootStep = n / length;
+        for (std::size_t block = 0; block < n; block += length) {
+            for (std::size_t j = 0; j < half; ++j) {
+                const std::size_t forwardExponent = rootStep * j;
+                const std::size_t inverseExponent = forwardExponent == 0
+                    ? 0 : n - forwardExponent;
+                auto odd = field->multiplyByPower(
+                    data[block + j + half], inverseExponent);
+                auto even = std::move(data[block + j]);
+                data[block + j] = addCoordinates(even, odd);
+                data[block + j + half] = addCoordinates(even, negateCoordinates(odd));
+            }
+        }
+        if (length == n)
+            break;
+    }
+
+    const Rational scale{BigInt{1}, sizeInteger(n)};
+    std::vector<Expr> output;
+    output.reserve(n);
+    for (auto& value : data) {
+        for (Rational& coefficient : value)
+            coefficient *= scale;
+        output.push_back(cyclotomicPolynomialExpr(
+            value, *field, generator, registry));
+    }
+    return output;
 }
 
 [[nodiscard]] std::optional<std::vector<Expr>> exactCyclotomicTransform(
@@ -542,7 +734,7 @@ void requireArity(std::span<const Expr> arguments, std::size_t expected, std::st
         Expr candidateGenerator = cyclotomicGeneratorExpr(
             *candidate, registry, mathematics, angles);
         auto candidateValues = coordinatesForField(
-            input, *candidate, candidateGenerator, registry);
+            input, *candidate, candidateGenerator, registry, mathematics, angles);
         if (!candidateValues)
             continue;
         cyclotomic = std::move(candidate);
@@ -1038,6 +1230,9 @@ Expr evaluateIfft(
         if (const auto result = evaluateApproximateIfft(
             arguments, registry, mathematics, angles, *context))
             return *result;
+    if (const auto powerOfTwo = exactPowerOfTwoCyclotomicInverse(
+            input, registry, mathematics, angles, cache))
+        return vectorExpr(*powerOfTwo);
     if (const auto cyclotomic = exactCyclotomicTransform(
             input, true, registry, mathematics, angles, cache))
         return vectorExpr(*cyclotomic);
