@@ -8,6 +8,7 @@
 #include "approximation/complex_interval.hpp"
 #include "approximation/real_interval.hpp"
 #include "error/error_message.hpp"
+#include "expression/exact_value.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "evaluation/evaluation_budget.hpp"
 #include "numeric/big_int.hpp"
@@ -22,14 +23,12 @@
 #include "simplification/simplifier.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cstddef>
 #include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -69,32 +68,7 @@ constexpr std::size_t newtonCotesDegree = 8;
     return lower < upper ? upper : lower;
 }
 
-[[nodiscard]] Rational power(Rational base, unsigned exponent) {
-    Rational result{BigInt{1}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result *= base;
-        exponent >>= 1U;
-        if (exponent != 0)
-            base *= base;
-    }
-    return result;
-}
 
-[[nodiscard]] std::optional<std::size_t> positiveSize(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal()
-        || !expression.asNumber().asReal().isInteger())
-        return std::nullopt;
-    const BigInt& value = expression.asNumber().asReal().asInteger();
-    if (value.isNegative() || value.isZero())
-        return std::nullopt;
-    const std::string text = value.toString();
-    std::size_t result = 0;
-    const auto converted = std::from_chars(text.data(), text.data() + text.size(), result);
-    if (converted.ec != std::errc{} || converted.ptr != text.data() + text.size())
-        return std::nullopt;
-    return result;
-}
 
 [[nodiscard]] Expr simplifyExpression(
     Expr expression,
@@ -311,7 +285,7 @@ struct NewtonCotesRule final {
     const Rational h = absRational(totalWidth) / n;
     const Rational panelCount = n / rationalFromSize(rule.degree);
     const Rational coefficient = panelCount
-        * power(h, static_cast<unsigned>(rule.degree + 2))
+        * numeric::pow(h, static_cast<std::uint64_t>(rule.degree + 2))
         * rule.absoluteRemainderIntegral
         / Rational{numeric::factorial(static_cast<std::uint64_t>(rule.degree + 1))};
 
@@ -420,7 +394,7 @@ Expr evaluateNumericDerivative(
             error::CalcErrorType::Type,
             "diff expects diff[expression, variable, point] with optional precision");
     const std::size_t digits = arguments.size() == 4
-        ? positiveSize(arguments[3]).value_or(0)
+        ? expression::exact::positiveSize(arguments[3]).value_or(0)
         : defaultDigits;
     if (digits == 0)
         error::throwCalcError(error::CalcErrorType::Type, "diff precision must be a positive integer");
@@ -486,7 +460,7 @@ Expr evaluateNumericIntegral(
             "nintegrate iterator must be {variable, lower, upper}");
 
     const std::size_t digits = arguments.size() == 3
-        ? positiveSize(arguments[2]).value_or(0)
+        ? expression::exact::positiveSize(arguments[2]).value_or(0)
         : defaultDigits;
     if (digits == 0)
         error::throwCalcError(

@@ -329,6 +329,61 @@ void runSimplifierTests(TestRunner& tests) {
         std::string{"x"},
         "Simplifier: Log[Exp[x]] -> x when x is provably real");
 
+    const auto expectPrincipalInverseComposition = [&](BuiltinId outer, BuiltinId inverse) {
+        tests.expectEqual(
+            formatting::formatExpr(simplifier.simplify(
+                call(builtins, outer, {call(builtins, inverse, {x})}),
+                context(builtins, math))),
+            std::string{"x"},
+            "Simplifier: principal inverse composition reduces in the safe direction");
+    };
+    expectPrincipalInverseComposition(BuiltinId::Sin, BuiltinId::Asin);
+    expectPrincipalInverseComposition(BuiltinId::Cos, BuiltinId::Acos);
+    expectPrincipalInverseComposition(BuiltinId::Sinh, BuiltinId::Asinh);
+    expectPrincipalInverseComposition(BuiltinId::Cosh, BuiltinId::Acosh);
+
+    const Expr tanAtan = call(builtins, BuiltinId::Tan, {
+        call(builtins, BuiltinId::Atan, {x})});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(tanAtan, context(builtins, math))),
+        std::string{"tan[atan[x]]"},
+        "Simplifier: Tan[Atan[x]] retains complex branch points without assumptions");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            tanAtan, context(builtins, math, real))),
+        std::string{"x"},
+        "Simplifier: Tan[Atan[x]] -> x for real x");
+
+    mathematics::AssumptionSet realAtanhDomain = real;
+    realAtanhDomain.add(mathematics::relation(
+        mathematics::RelationKind::NotEqual,
+        call(builtins, BuiltinId::Subtract, {integer(1), call(builtins, BuiltinId::Power, {x, integer(2)})}),
+        integer(0)));
+    const Expr tanhAtanh = call(builtins, BuiltinId::Tanh, {
+        call(builtins, BuiltinId::Atanh, {x})});
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(tanhAtanh, context(builtins, math))),
+        std::string{"tanh[atanh[x]]"},
+        "Simplifier: Tanh[Atanh[x]] retains +/-1 branch points without assumptions");
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            tanhAtanh, context(builtins, math, realAtanhDomain))),
+        std::string{"x"},
+        "Simplifier: Tanh[Atanh[x]] -> x when the inverse is provably defined");
+
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Asin, {call(builtins, BuiltinId::Sin, {x})}),
+            context(builtins, math))),
+        std::string{"asin[sin[x]]"},
+        "Simplifier: reverse principal inverse composition keeps periodic branch information");
+    const Expr complexInfinity{symbols.intern("ComplexInfinity")};
+    tests.expectEqual(
+        formatting::formatExpr(simplifier.simplify(
+            call(builtins, BuiltinId::Sin, {call(builtins, BuiltinId::Asin, {complexInfinity})}),
+            context(builtins, math))),
+        std::string{"sin[asin[ComplexInfinity]]"},
+        "Simplifier: principal inverse composition does not collapse special infinity");
 
     const Expr angle = integer(1);
     const Expr sinSquare = call(builtins, BuiltinId::Power, {

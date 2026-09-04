@@ -274,7 +274,21 @@ solve[erf[x^2-1]==0,x,Real] ==> {x == 1, x == -1}
 solve[sqrt[x]==2,x] ==> {x == 4}
 solve[sqrt[x]==-2,x] ==> {}
 solve[sqrt[x]==I,x] ==> {x == -1}
+solve[sqrt[x]==y,x] ==> {x == y^2 if re[y] > 0, x == y^2 if re[y] == 0 && im[y] >= 0}
+solve[sqrt[-x]==y,x] ==> {x == -y^2 if re[y] > 0, x == -y^2 if re[y] == 0 && im[y] >= 0}
+solve[sqrt[x]==-I,x] ==> {}
+solve[sqrt[x]==-2+3I,x] ==> {}
+solve[sqrt[x]==2-3I,x] ==> {x == (2-3I)^2}
 solve[sqrt[x+1]==x-1,x] ==> {x == 3}
+solve[log2[x]==y,x,Real] ==> {x == 2^y if y in Real}
+solve[log10[x]==y,x,Real] ==> {x == 10^y if y in Real}
+solve[asin[x]==Pi/2,x,Real] ==> {x == 1}
+solve[asin[x]==-Pi/2,x,Real] ==> {x == -1}
+solve[asin[x]==2,x,Real] ==> {}
+solve[acos[x]==Pi,x,Real] ==> {x == -1}
+solve[atan[x]==Pi/2,x,Real] ==> {}
+solve[atan[x]==Pi/4,x,Real] ==> {x == 1}
+solve[acosh[x]==y,x,Real] ==> {x == cosh[y] if y in Real && y >= 0}
 solve[cbrt[x]==2,x] ==> {x == 8}
 solve[cbrt[x+1]==x-1,x] ==> {x == root[{-2, 2, -3, 1}, 1]}
 N[lambertw[1],20] ==> 0.5671432904097838730
@@ -287,7 +301,7 @@ N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y}],10] ==> {{x == -0.7746228995+0.0I
 N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y},Real],10] ==> {{x == -0.7746228995, y == -1.264927127}, {x == 0.0, y == 1.0}, {x == 1.185885346, y == -1.551233076}, {x == 2.360409337, y == -2.563499998}, {x == 3.228328216, y == 3.37966020}}
 D[exp[x]*cos[x],{x,12}]==>-64cos[x]exp[x]
 
-# v1.5.5 SeriesData / TPSA stage 1.
+# v1.5.5 SeriesData / TPSA basic coverage.
 series[(1+x)^3,{x,0,5}] ==> seriesData[x, 0, {1, 3, 3, 1, 0, 0}, 0, 6, 1]
 normal[series[(1+x)^3,{x,0,5}]] ==> x^3+3x^2+3x+1
 series[(x+1)*(x-2),{x,1,3}] ==> seriesData[x, 1, {-2, 1, 1, 0}, 0, 4, 1]
@@ -319,7 +333,7 @@ D[series[x^(1/3),{x,0,4}],x] ==> seriesData[x, 0, {1/3, 0, 0, 0, 0, 0, 0, 0, 0, 
 integrate[series[exp[x],{x,0,5}],x] ==> seriesData[x, 0, {1, 1/2, 1/6, 1/24, 1/120, 1/720}, 1, 7, 1]
 integrate[series[sqrt[x],{x,0,4}],x] ==> seriesData[x, 0, {2/3, 0, 0, 0, 0, 0, 0, 0}, 3, 11, 2]
 integrate[series[1/sqrt[x],{x,0,3}],x] ==> seriesData[x, 0, {2, 0, 0, 0, 0, 0, 0, 0}, 1, 9, 2]
-# v1.5.5 SeriesData / TPSA Stage 7: 特殊函数primitive provider。
+# v1.5.5 SeriesData / TPSA: 特殊函数primitive provider。
 series[erf[x],{x,0,7}] ==> seriesData[x, 0, {2/sqrt[Pi], 0, -2/sqrt[Pi]/3, 0, 1/(5sqrt[Pi]), 0, -1/(3sqrt[Pi])/7}, 1, 8, 1]
 series[Si[x],{x,0,7}] ==> seriesData[x, 0, {1, 0, -1/18, 0, 1/600, 0, -1/35280}, 1, 8, 1]
 series[Ei[1+x],{x,0,4}] ==> seriesData[x, 0, {Ei[1], E, 0, E/6, -E/12}, 0, 5, 1]
@@ -334,7 +348,7 @@ series[fresnels[sqrt[x]],{x,0,4}] ==> seriesData[x, 0, {Pi/6, 0, 0, 0, -Pi Pi^2/
 series[1/Si[x],{x,0,5}] ==> seriesData[x, 0, {1, 0, 1/18, 0, 23/16200, 0, 209/14288400}, -1, 6, 1]
 series[Ei[x],{x,0,4}] ==> seriesData[x, 0, {-digamma[1], 1, 1/4, 1/18, 1/96}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
 series[Ci[-1+x],{x,0,3}] ==> series[Ci[x-1], {x, 0, 3}]
-# v1.5.5 SeriesData / TPSA Stage 17: 対数係数層。
+# v1.5.5 SeriesData / TPSA: 対数係数層。
 series[log[x],{x,0,4}] ==> seriesData[x, 0, {0, 0, 0, 0, 0}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
 normal[series[log[x],{x,0,4}]] ==> log[x]
 D[series[log[x],{x,0,4}],x] ==> seriesData[x, 0, {1, 0, 0, 0, 0}, -1, 4, 1]
@@ -353,14 +367,14 @@ series[Ci[2*x],{x,0,4}] ==> seriesData[x, 0, {-digamma[1]+log[2], 0, -1, 0, 1/6}
 series[log[sqrt[x]],{x,0,4}] ==> seriesData[x, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, 9, 2, {{1/2, 0, 0, 0, 0, 0, 0, 0, 0}}]
 series[log[x+x^2],{x,0,4}] ==> seriesData[x, 0, {0, 1, -1/2, 1/3, -1/4}, 0, 5, 1, {{1, 0, 0, 0, 0}}]
 series[log[x^2],{x,0,4}] ==> series[log[x^2], {x, 0, 4}]
-# v1.5.5 SeriesData / TPSA Stage 9: 対数積分li。
-series[li[2+x],{x,0,2}] ==> seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2}, 0, 3, 1]
+# v1.5.5 SeriesData / TPSA: 対数積分li。
+series[li[2+x],{x,0,2}] ==> seriesData[x, 0, {li[2], 1/log[2], -1/(4log[2]^2)}, 0, 3, 1]
 series[li[a+x],{x,0,2},a>1] ==> seriesData[x, 0, {li[a], 1/log[a], -1/(a log[a]^2)/2}, 0, 3, 1]
-series[li[2+sqrt[x]],{x,0,2}] ==> seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2, -(-1/(4log[2]^2)-1/(8log[2]))/log[2]/3, -(1/(16log[2]^2)+1/(24log[2])-(-1/(4log[2]^2)-1/(8log[2]))/(2log[2]))/log[2]/4}, 0, 5, 2]
+series[li[2+sqrt[x]],{x,0,2}] ==> seriesData[x, 0, {li[2], 1/log[2], -1/(4log[2]^2), (1/(4log[2]^3)+1/(8log[2]^2))/3, (-1/(24log[2]^2)-1/(8log[2]^3)-1/(8log[2]^4))/4}, 0, 5, 2]
 series[li[1+x],{x,0,3}] ==> series[li[x+1], {x, 0, 3}]
 series[li[x],{x,0,3}] ==> series[li[x], {x, 0, 3}]
 series[li[1/2+x],{x,0,3}] ==> series[li[x+1/2], {x, 0, 3}]
-# v1.5.5 SeriesData / TPSA Stage 10: 逆三角函数の正則中心展開。
+# v1.5.5 SeriesData / TPSA: 逆三角函数の正則中心展開。
 series[asin[x],{x,0,7}] ==> seriesData[x, 0, {1, 0, 1/6, 0, 3/40, 0, 5/112}, 1, 8, 1]
 series[acos[x],{x,0,6}] ==> seriesData[x, 0, {Pi/2, -1, 0, -1/6, 0, -3/40, 0}, 0, 7, 1]
 series[atan[x],{x,0,7}] ==> seriesData[x, 0, {1, 0, -1/3, 0, 1/5, 0, -1/7}, 1, 8, 1]
@@ -383,7 +397,7 @@ series[lambertw[-1/E+sqrt[x]],{x,0,2}] ==> seriesData[x, 0, {-1, sqrt[2]sqrt[E],
 series[lambertw[-1/E-x],{x,0,2}] ==> series[lambertw[-1/E-x], {x, 0, 2}]
 series[lambertw[-1,-1/10+x],{x,0,3}] ==> series[lambertw[-1, x-1/10], {x, 0, 3}]
 
-# v1.5.5 SeriesData / TPSA Stage 13: gamma/lgammaの正則整数・半整数中心展開。
+# v1.5.5 SeriesData / TPSA: gamma/lgammaの正則整数・半整数中心展開。
 series[gamma[1+x],{x,0,3}] ==> seriesData[x, 0, {1, digamma[1], (Pi^2/6+digamma[1]^2)/2, ((Pi^2/6+digamma[1]^2)digamma[1]/2+Pi^2digamma[1]/6-zeta[3])/3}, 0, 4, 1]
 series[lgamma[1+x],{x,0,5}] ==> seriesData[x, 0, {digamma[1], Pi^2/12, -zeta[3]/3, Pi^4/360, -zeta[5]/5}, 1, 6, 1]
 series[gamma[1/2+x],{x,0,2}] ==> seriesData[x, 0, {sqrt[Pi], (digamma[1]-2log[2])sqrt[Pi], (Pi^2/2+(digamma[1]-2log[2])^2)sqrt[Pi]/2}, 0, 3, 1]
@@ -391,7 +405,7 @@ series[lgamma[-1/2+x],{x,0,3}] ==> seriesData[x, 0, {log[2sqrt[Pi]], 2+digamma[1
 series[gamma[1+I*x],{x,0,2}] ==> seriesData[x, 0, {1, I digamma[1], (-Pi^2/6-digamma[1]^2)/2}, 0, 3, 1]
 series[gamma[x],{x,0,3}] ==> series[gamma[x], {x, 0, 3}]
 series[lgamma[1+I*x],{x,0,3}] ==> series[lgamma[I x+1], {x, 0, 3}]
-# v1.5.5 SeriesData / TPSA Stage 14: digamma/trigammaの正則整数・半整数中心展開。
+# v1.5.5 SeriesData / TPSA: digamma/trigammaの正則整数・半整数中心展開。
 series[digamma[1+x],{x,0,5}] ==> seriesData[x, 0, {digamma[1], Pi^2/6, -zeta[3], Pi^4/90, -zeta[5], zeta[6]}, 0, 6, 1]
 series[trigamma[1+x],{x,0,4}] ==> seriesData[x, 0, {Pi^2/6, -2zeta[3], Pi^4/30, -4zeta[5], 5zeta[6]}, 0, 5, 1]
 series[digamma[2+x],{x,0,3}] ==> seriesData[x, 0, {1+digamma[1], -1+Pi^2/6, 1-zeta[3], -1+Pi^4/90}, 0, 4, 1]
@@ -401,7 +415,7 @@ series[digamma[1+sqrt[x]],{x,0,2}] ==> seriesData[x, 0, {digamma[1], Pi^2/6, -ze
 series[trigamma[1+I*x],{x,0,2}] ==> seriesData[x, 0, {Pi^2/6, -2I zeta[3], -Pi^4/30}, 0, 3, 1]
 series[digamma[x],{x,0,3}] ==> series[digamma[x], {x, 0, 3}]
 series[digamma[1/3+x],{x,0,3}] ==> series[digamma[x+1/3], {x, 0, 3}]
-# v1.5.5 SeriesData / TPSA Stage 15: polylogの原点級数とPuiseux合成。
+# v1.5.5 SeriesData / TPSA: polylogの原点級数とPuiseux合成。
 series[polylog[2,x],{x,0,6}] ==> seriesData[x, 0, {1, 1/4, 1/9, 1/16, 1/25, 1/36}, 1, 7, 1]
 series[polylog[a,x],{x,0,4}] ==> seriesData[x, 0, {1, 2^(-a), 3^(-a), 4^(-a)}, 1, 5, 1]
 series[polylog[1/2,x],{x,0,4}] ==> seriesData[x, 0, {1, 2^(-1/2), 3^(-1/2), 4^(-1/2)}, 1, 5, 1]
@@ -421,7 +435,7 @@ series[polylog[1/2,1/2+x],{x,0,2}] ==> series[polylog[1/2, x+1/2], {x, 0, 2}]
 D[series[polylog[3,1/2+x],{x,0,3}],x] ==> seriesData[x, 0, {2polylog[2, 1/2], 4(-log[1/2]-polylog[2, 1/2]), 4(1+3log[1/2]+2polylog[2, 1/2])}, 0, 3, 1]
 series[polylog[x,x],{x,0,3}] ==> series[polylog[x, x], {x, 0, 3}]
 
-# v1.5.5 Stage 19: toNormal recursive structured normalization.
+# v1.5.5 toNormal recursive structured normalization.
 toNormal[series[(1+x)^2,{x,0,3}]] ==> x^2+2x+1
 toNormal[{series[(1+x)^2,{x,0,3}],series[log[x],{x,0,2}]}] ==> {x^2+2x+1, log[x]}
 toNormal[{{series[(1+x)^2,{x,0,3}]},{series[log[x],{x,0,2}]}}] ==> {{x^2+2x+1}, {log[x]}}
@@ -430,7 +444,7 @@ normal[{series[(1+x)^2,{x,0,3}]}] ==> {seriesData[x, 0, {1, 2, 1, 0}, 0, 4, 1]}
 toNormal[cases[seriesData[x,0,{1,2,1},0,3,1] if a>0;1 if a<=0]] ==> cases[x^2+2x+1 if a > 0; 1 if a <= 0]
 
 
-# v1.5.5 Stage 20: +Infinityをt=1/xへ写す局所Series。
+# v1.5.5 +Infinityをt=1/xへ写す局所Series。
 series[x,{x,Infinity,3}] ==> seriesData[x, Infinity, {1, 0, 0, 0, 0}, -1, 4, 1]
 series[1/(x+1),{x,Infinity,4}] ==> seriesData[x, Infinity, {1, -1, 1, -1}, 1, 5, 1]
 series[exp[1/x],{x,Infinity,4}] ==> seriesData[x, Infinity, {1, 1, 1/2, 1/6, 1/24}, 0, 5, 1]

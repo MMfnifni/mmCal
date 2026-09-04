@@ -203,6 +203,8 @@ simplify[sqrt[x^2],x>=0]==>x
 fullSimplify[(x^2-1)/(x-1),x!=1]==>x+1
 sqrt[x^2]==>sqrt[x^2]
 0^I==>Indeterminate
+{0,1}/0==>{Indeterminate, ComplexInfinity}
+{0,0}/0==>{Indeterminate, Indeterminate}
 exp[log[2]]==>2
 log[exp[2]]==>2
 sqrt[z]^2==>z

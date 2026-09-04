@@ -1,5 +1,6 @@
 // 丸め・剰余・整数演算
 #include "discrete_math.hpp"
+#include "expression/exact_value.hpp"
 
 #include "builtins/names.hpp"
 #include "approximation/certified_evaluator.hpp"
@@ -88,28 +89,10 @@ void requireArity(std::span<const Expr> arguments, std::size_t arity, std::strin
     return result.quotient;
 }
 
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
-}
-
 [[nodiscard]] Expr integerResult(BigInt value) {
     return Expr{Number{std::move(value)}};
 }
 
-[[nodiscard]] BigInt powerOfTenInteger(std::size_t exponent) {
-    BigInt result{1};
-    BigInt base{10};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result *= base;
-        exponent >>= 1U;
-        if (exponent != 0)
-            base *= base;
-    }
-    return result;
-}
 
 [[nodiscard]] std::int64_t requireSignedSmallInteger(
     const Expr& expression, std::string_view name, std::int64_t limit = 100'000) {
@@ -129,7 +112,7 @@ void requireArity(std::span<const Expr> arguments, std::size_t arity, std::strin
 
 [[nodiscard]] Rational roundDecimal(const Rational& value, std::int64_t digits) {
     const std::size_t magnitude = static_cast<std::size_t>(digits < 0 ? -digits : digits);
-    const BigInt scale = powerOfTenInteger(magnitude);
+    const BigInt scale = numeric::pow(BigInt{10}, static_cast<std::uint64_t>(magnitude));
     if (digits >= 0) {
         const Rational scaled = value * Rational{scale};
         return Rational{roundNearestEven(scaled), scale};
@@ -383,7 +366,7 @@ Expr evaluateFloor(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::floor);
-    const auto value = exactRealRational(arguments.front());
+    const auto value = expression::exact::realRational(arguments.front());
     if (!value) {
         if (arguments.front().isNumber())
             error::throwCalcError(error::CalcErrorType::Type, "floor requires a real argument");
@@ -402,7 +385,7 @@ Expr evaluateCeil(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::ceil);
-    const auto value = exactRealRational(arguments.front());
+    const auto value = expression::exact::realRational(arguments.front());
     if (!value) {
         if (arguments.front().isNumber())
             error::throwCalcError(error::CalcErrorType::Type, "ceil requires a real argument");
@@ -421,7 +404,7 @@ Expr evaluateTrunc(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::trunc);
-    const auto value = exactRealRational(arguments.front());
+    const auto value = expression::exact::realRational(arguments.front());
     if (!value) {
         if (arguments.front().isNumber())
             error::throwCalcError(error::CalcErrorType::Type, "trunc requires a real argument");
@@ -442,7 +425,7 @@ Expr evaluateRound(
     if (arguments.size() < 1 || arguments.size() > 2)
         error::throwCalcError(error::CalcErrorType::Type, "round expects 1 or 2 arguments");
     if (arguments.size() == 1) {
-        const auto value = exactRealRational(arguments.front());
+        const auto value = expression::exact::realRational(arguments.front());
         if (!value) {
             if (arguments.front().isNumber())
                 error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
@@ -456,7 +439,7 @@ Expr evaluateRound(
     }
 
     const std::int64_t digits = requireSignedSmallInteger(arguments[1], names::round);
-    if (const auto value = exactRealRational(arguments[0]))
+    if (const auto value = expression::exact::realRational(arguments[0]))
         return Expr{Number{roundDecimal(*value, digits)}};
     if (arguments[0].isNumber())
         error::throwCalcError(error::CalcErrorType::Type, "round requires a real argument");
@@ -472,7 +455,7 @@ Expr evaluateFrac(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::frac);
-    const auto value = exactRealRational(arguments.front());
+    const auto value = expression::exact::realRational(arguments.front());
     if (!value) {
         if (arguments.front().isNumber())
             error::throwCalcError(error::CalcErrorType::Type, "frac requires a real argument");
@@ -750,7 +733,7 @@ Expr evaluateNextPow2(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     requireArity(arguments, 1, names::nextPow2);
-    if (const auto exact = exactRealRational(arguments.front()))
+    if (const auto exact = expression::exact::realRational(arguments.front()))
         return integerResult(BigInt{nextPow2Exponent(*exact)});
     if (arguments.front().isNumber())
         error::throwCalcError(

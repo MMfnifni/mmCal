@@ -61,6 +61,20 @@ void runValueFactsTests(TestRunner& tests) {
     tests.expect(sinFacts.isProvablyReal(),
         "ValueFacts: sin maps a known real argument to real");
 
+    const auto acoshTwoFacts = mathematics::inferValueFacts(
+        session.evaluate("acosh[2]"), session.builtinRegistry(), session.mathRegistry());
+    tests.expect(acoshTwoFacts.domain == mathematics::NumericDomain::Real
+        && acoshTwoFacts.sign == mathematics::RealSign::Positive,
+        "ValueFacts: principal acosh is positive for exact real arguments above one");
+    const auto acosOneFacts = mathematics::inferValueFacts(
+        session.evaluate("acos[1]"), session.builtinRegistry(), session.mathRegistry());
+    tests.expect(acosOneFacts.sign == mathematics::RealSign::Zero,
+        "ValueFacts: principal acos is zero at its exact upper endpoint");
+    const auto asinNegativeFacts = mathematics::inferValueFacts(
+        session.evaluate("asin[-1/2]"), session.builtinRegistry(), session.mathRegistry());
+    tests.expect(asinNegativeFacts.sign == mathematics::RealSign::Negative,
+        "ValueFacts: principal asin preserves sign on its exact real interval");
+
     const auto x = session.evaluate("x");
     mathematics::AssumptionSet realX;
     realX.add(mathematics::elementOf(x, mathematics::NumericDomain::Real));

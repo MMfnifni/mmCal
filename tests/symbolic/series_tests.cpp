@@ -271,7 +271,7 @@ void runSeriesTests(TestRunner& tests) {
 
     tests.expectEqual(
         eval(session, "series[li[2+x],{x,0,2}]"),
-        std::string{"seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2}, 0, 3, 1]"},
+        std::string{"seriesData[x, 0, {li[2], 1/log[2], -1/(4log[2]^2)}, 0, 3, 1]"},
         "Series: principal li expands at a regular center above one through 1/log[z]");
 
     tests.expectEqual(
@@ -281,7 +281,7 @@ void runSeriesTests(TestRunner& tests) {
 
     tests.expectEqual(
         eval(session, "series[li[2+sqrt[x]],{x,0,2}]"),
-        std::string{"seriesData[x, 0, {li[2], 1/log[2], -1/(2log[2]^2)/2, -(-1/(4log[2]^2)-1/(8log[2]))/log[2]/3, -(1/(16log[2]^2)+1/(24log[2])-(-1/(4log[2]^2)-1/(8log[2]))/(2log[2]))/log[2]/4}, 0, 5, 2]"},
+        std::string{"seriesData[x, 0, {li[2], 1/log[2], -1/(4log[2]^2), (1/(4log[2]^3)+1/(8log[2]^2))/3, (-1/(24log[2]^2)-1/(8log[2]^3)-1/(8log[2]^4))/4}, 0, 5, 2]"},
         "Series: li composes over a Puiseux argument away from its cuts and singularity");
 
     tests.expectEqual(

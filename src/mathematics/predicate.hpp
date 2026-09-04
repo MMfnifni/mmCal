@@ -16,6 +16,19 @@ enum class RelationKind {
     GreaterEqual
 };
 
+[[nodiscard]] constexpr RelationKind reverseRelation(RelationKind relation) noexcept {
+    switch (relation) {
+    case RelationKind::Less: return RelationKind::Greater;
+    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
+    case RelationKind::Greater: return RelationKind::Less;
+    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
+    case RelationKind::Equal:
+    case RelationKind::NotEqual:
+        return relation;
+    }
+    return relation;
+}
+
 struct RelationPredicate final {
     RelationKind relation = RelationKind::Equal;
     expression::Expr lhs;

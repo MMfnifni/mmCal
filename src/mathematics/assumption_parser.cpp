@@ -3,6 +3,7 @@
 
 #include "error/error_message.hpp"
 #include "knowledge_context.hpp"
+#include "relation_builtin.hpp"
 
 #include <optional>
 #include <string_view>
@@ -24,17 +25,6 @@ using expression::Expr;
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<RelationKind> relationKind(BuiltinId id) noexcept {
-    switch (id) {
-    case BuiltinId::Equal: return RelationKind::Equal;
-    case BuiltinId::NotEqual: return RelationKind::NotEqual;
-    case BuiltinId::Less: return RelationKind::Less;
-    case BuiltinId::LessEqual: return RelationKind::LessEqual;
-    case BuiltinId::Greater: return RelationKind::Greater;
-    case BuiltinId::GreaterEqual: return RelationKind::GreaterEqual;
-    default: return std::nullopt;
-    }
-}
 
 void addChecked(
     Predicate predicate,
@@ -107,7 +97,7 @@ void appendAssumptions(
         return;
     }
 
-    if (const auto relation = relationKind(definition->id)) {
+    if (const auto relation = relationKindForBuiltin(definition->id)) {
         if (arguments.size() != 2)
             error::throwCalcError(
                 error::CalcErrorType::Type,

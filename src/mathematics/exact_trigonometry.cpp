@@ -1,5 +1,6 @@
 // 三角函数の特殊値
 #include "exact_trigonometry.hpp"
+#include "expression/exact_value.hpp"
 
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
@@ -25,12 +26,6 @@ using numeric::RealNumber;
 
 [[nodiscard]] Rational absRational(const Rational& value) {
     return value.numerator().isNegative() ? -value : value;
-}
-
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
 }
 
 [[nodiscard]] bool isHead(
@@ -78,17 +73,17 @@ using numeric::RealNumber;
         const Expr& value = explicitUnit->first;
         switch (explicitUnit->second) {
         case AngleUnit::Degree:
-            if (const auto numeric = exactRealRational(value))
+            if (const auto numeric = expression::exact::realRational(value))
                 return *numeric / rational(360);
             return std::nullopt;
 
         case AngleUnit::Gradian:
-            if (const auto numeric = exactRealRational(value))
+            if (const auto numeric = expression::exact::realRational(value))
                 return *numeric / rational(400);
             return std::nullopt;
 
         case AngleUnit::Radian:
-            if (const auto numeric = exactRealRational(value); numeric && numeric->isZero())
+            if (const auto numeric = expression::exact::realRational(value); numeric && numeric->isZero())
                 return rational(0);
             if (const auto piMultiple = extractRationalPiMultiple(value, builtins, mathematics))
                 return *piMultiple / rational(2);
@@ -122,7 +117,7 @@ using numeric::RealNumber;
         Rational scale = rational(1);
         std::optional<Rational> angle;
         for (const Expr& factor : expression.asCall().arguments) {
-            if (const auto numeric = exactRealRational(factor)) {
+            if (const auto numeric = expression::exact::realRational(factor)) {
                 scale *= *numeric;
                 continue;
             }
@@ -141,7 +136,7 @@ using numeric::RealNumber;
         if (arguments.size() != 2)
             return std::nullopt;
         auto numerator = extractExplicitAngleTurns(arguments[0], builtins, mathematics);
-        const auto denominator = exactRealRational(arguments[1]);
+        const auto denominator = expression::exact::realRational(arguments[1]);
         if (!numerator || !denominator || denominator->isZero())
             return std::nullopt;
         return *numerator / *denominator;
@@ -301,7 +296,7 @@ struct ScaledSqrt final {
         if (arguments.size() != 2)
             return std::nullopt;
         auto result = extractScaledSqrt(arguments[0], builtins);
-        const auto denominator = exactRealRational(arguments[1]);
+        const auto denominator = expression::exact::realRational(arguments[1]);
         if (!result || !denominator || denominator->isZero())
             return std::nullopt;
         result->scale /= *denominator;
@@ -312,7 +307,7 @@ struct ScaledSqrt final {
         Rational scale = rational(1);
         std::optional<ScaledSqrt> radical;
         for (const Expr& factor : expression.asCall().arguments) {
-            if (const auto numeric = exactRealRational(factor)) {
+            if (const auto numeric = expression::exact::realRational(factor)) {
                 scale *= *numeric;
                 continue;
             }
@@ -348,7 +343,7 @@ struct ScaledSqrt final {
     FunctionId function,
     const Expr& argument,
     const evaluation::BuiltinRegistry& builtins) {
-    if (const auto value = exactRealRational(argument)) {
+    if (const auto value = expression::exact::realRational(argument)) {
         if (function == FunctionId::Asin) {
             if (*value == rational(-1)) return rational(-1, 4);
             if (*value == rational(-1, 2)) return rational(-1, 12);
@@ -676,7 +671,7 @@ std::optional<Rational> extractRationalPiMultiple(
         Rational coefficient = rational(1);
         bool foundPi = false;
         for (const Expr& factor : expression.asCall().arguments) {
-            if (const auto numeric = exactRealRational(factor)) {
+            if (const auto numeric = expression::exact::realRational(factor)) {
                 coefficient *= *numeric;
                 continue;
             }
@@ -698,7 +693,7 @@ std::optional<Rational> extractRationalPiMultiple(
         if (arguments.size() != 2)
             return std::nullopt;
         auto numerator = extractRationalPiMultiple(arguments[0], builtins, mathematics);
-        const auto denominator = exactRealRational(arguments[1]);
+        const auto denominator = expression::exact::realRational(arguments[1]);
         if (!numerator || !denominator || denominator->isZero())
             return std::nullopt;
         return *numerator / *denominator;
@@ -720,17 +715,17 @@ std::optional<ExactAngle> extractExactAngle(
     // 明示単位が無い式はセッション既定単位として解釈する。
     switch (angleSemantics.defaultUnit()) {
     case AngleUnit::Degree:
-        if (const auto numeric = exactRealRational(expression))
+        if (const auto numeric = expression::exact::realRational(expression))
             return ExactAngle{*numeric / rational(360)};
         return std::nullopt;
 
     case AngleUnit::Gradian:
-        if (const auto numeric = exactRealRational(expression))
+        if (const auto numeric = expression::exact::realRational(expression))
             return ExactAngle{*numeric / rational(400)};
         return std::nullopt;
 
     case AngleUnit::Radian:
-        if (const auto numeric = exactRealRational(expression); numeric && numeric->isZero())
+        if (const auto numeric = expression::exact::realRational(expression); numeric && numeric->isZero())
             return ExactAngle{rational(0)};
         if (const auto piMultiple = extractRationalPiMultiple(expression, builtins, mathematics))
             return ExactAngle{*piMultiple / rational(2)};
@@ -794,8 +789,8 @@ std::optional<Expr> simplifyExactAtan2(
         || (x.isNumber() && !x.asNumber().isReal()))
         error::throwCalcError(error::CalcErrorType::Domain, "atan2 expects real arguments");
 
-    const auto yValue = exactRealRational(y);
-    const auto xValue = exactRealRational(x);
+    const auto yValue = expression::exact::realRational(y);
+    const auto xValue = expression::exact::realRational(x);
     if (!yValue || !xValue)
         return std::nullopt;
 

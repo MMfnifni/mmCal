@@ -1,9 +1,11 @@
 // 記号積分integrate
+#include "symbolic/cases.hpp"
 #include "integration.hpp"
 
 #include "approximation/certified_evaluator.hpp"
 #include "approximation/real_interval.hpp"
 #include "mathematics/definedness.hpp"
+#include "expression/exact_value.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "mathematics/trigonometric_polynomial.hpp"
 #include "mathematics/value_facts.hpp"
@@ -41,30 +43,16 @@ using approximation::CertifiedValue;
 using approximation::RealInterval;
 using evaluation::BuiltinId;
 using expression::Expr;
+using expression::exact::integer;
+using expression::exact::isOne;
+using expression::exact::isZero;
+using expression::exact::rational;
 using numeric::BigInt;
 using numeric::Number;
 using numeric::Rational;
 
 constexpr std::size_t maximumIntegrationDepth = 24;
 constexpr std::size_t maximumSubstitutionCandidates = 32;
-
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
-}
-
-[[nodiscard]] Expr rational(const Rational& value) {
-    return Expr{Number{value}};
-}
-
-[[nodiscard]] bool isZero(const Expr& expression) {
-    return expression.isNumber() && expression.asNumber().isZero();
-}
-
-[[nodiscard]] bool isOne(const Expr& expression) {
-    return expression.isNumber()
-        && expression.asNumber().isReal()
-        && expression.asNumber().asReal().toRational() == Rational{BigInt{1}};
-}
 
 [[nodiscard]] bool isHead(
     const Expr& expression,
@@ -94,21 +82,6 @@ constexpr std::size_t maximumSubstitutionCandidates = 32;
     return Expr::call(builtins.symbol(id), std::move(arguments));
 }
 
-[[nodiscard]] Expr caseBranch(
-    const evaluation::BuiltinRegistry& builtins,
-    Expr value,
-    std::optional<Expr> condition = std::nullopt) {
-    std::vector<Expr> arguments{std::move(value)};
-    if (condition)
-        arguments.push_back(std::move(*condition));
-    return call(builtins, BuiltinId::CaseBranch, std::move(arguments));
-}
-
-[[nodiscard]] Expr cases(
-    const evaluation::BuiltinRegistry& builtins,
-    std::vector<Expr> branches) {
-    return call(builtins, BuiltinId::Cases, std::move(branches));
-}
 
 [[nodiscard]] Expr simplify(
     Expr expression,
@@ -204,12 +177,6 @@ constexpr std::size_t maximumSubstitutionCandidates = 32;
     const Expr& expression,
     const expression::Symbol& variable) {
     return containsSymbol(expression, variable);
-}
-
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
 }
 
 [[nodiscard]] bool provablyNonZero(
@@ -338,7 +305,7 @@ struct FactorSplit final {
             lhs.asCall().arguments[0], rhs.asCall().arguments[0], variable,
             builtins, mathematics, angles);
         if (radicandRatio) {
-            const auto exactRatio = exactRealRational(*radicandRatio);
+            const auto exactRatio = expression::exact::realRational(*radicandRatio);
             if (exactRatio && *exactRatio > Rational{BigInt{0}}) {
                 return simplify(call(builtins, BuiltinId::Sqrt, {*radicandRatio}),
                     builtins, mathematics, angles);
@@ -457,7 +424,7 @@ struct FactorSplit final {
 
     const auto& arguments = expression.asCall().arguments;
     if (containsVariable(arguments[1], variable)
-        || exactRealRational(arguments[1]))
+        || expression::exact::realRational(arguments[1]))
         return std::nullopt;
 
     Expr baseDerivative = simplify(
@@ -677,7 +644,7 @@ struct FactorSplit final {
         if (!arguments[0].isSymbol()
             || !arguments[0].asSymbol().sameIdentity(variable))
             continue;
-        const auto exponent = exactRealRational(arguments[1]);
+        const auto exponent = expression::exact::realRational(arguments[1]);
         if (!exponent || !exponent->isInteger() || exponent->numerator().isNegative())
             continue;
         const auto magnitude = numeric::tryToUint64(exponent->numerator());
@@ -970,6 +937,78 @@ struct FactorSplit final {
     return add(builtins, mathematics, angles, std::move(terms));
 }
 
+[[nodiscard]] std::optional<Expr> integrateHighDegreePolynomialTimesExponential(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Multiply))
+        return std::nullopt;
+
+    const Expr* exponential = nullptr;
+    std::vector<Expr> polynomialFactors;
+    for (const Expr& factor : expression.asCall().arguments) {
+        if (isHead(factor, builtins, BuiltinId::Exp)
+            && factor.asCall().arguments.size() == 1
+            && containsVariable(factor.asCall().arguments[0], variable)) {
+            if (exponential)
+                return std::nullopt;
+            exponential = &factor;
+        }
+        else
+            polynomialFactors.push_back(factor);
+    }
+    if (!exponential || polynomialFactors.empty())
+        return std::nullopt;
+
+    Expr polynomialExpression = polynomialFactors.size() == 1
+        ? polynomialFactors.front()
+        : call(builtins, BuiltinId::Multiply, std::move(polynomialFactors));
+    const auto polynomial = toRationalPolynomial(
+        polynomialExpression, variable, builtins, PolynomialConversionOptions{128, 1024});
+    if (!polynomial || polynomial->degree() < 8 || polynomial->degree() > 128)
+        return std::nullopt;
+
+    const auto exponent = toRationalPolynomial(
+        exponential->asCall().arguments[0], variable, builtins,
+        PolynomialConversionOptions{2, 16});
+    if (!exponent || exponent->degree() != 1)
+        return std::nullopt;
+    const Rational rate = exponent->coefficient(1);
+    if (rate.isZero())
+        return std::nullopt;
+
+    std::vector<Rational> primitive(polynomial->degree() + 1, Rational{BigInt{0}});
+    Rational next{BigInt{0}};
+    for (std::size_t index = polynomial->degree() + 1; index-- > 0;) {
+        const Rational derivativeContribution = index < polynomial->degree()
+            ? Rational{BigInt::fromUnsigned(index + 1)} * next
+            : Rational{BigInt{0}};
+        primitive[index] = (polynomial->coefficient(index) - derivativeContribution) / rate;
+        next = primitive[index];
+    }
+
+    std::vector<Expr> terms;
+    terms.reserve(primitive.size());
+    for (std::size_t exponentIndex = 0; exponentIndex < primitive.size(); ++exponentIndex) {
+        if (primitive[exponentIndex].isZero())
+            continue;
+        std::vector<Expr> factors{Expr{Number{primitive[exponentIndex]}}};
+        if (exponentIndex != 0) {
+            factors.push_back(exponentIndex == 1
+                ? Expr{variable}
+                : power(builtins, mathematics, angles, Expr{variable},
+                    integer(static_cast<std::int64_t>(exponentIndex))));
+        }
+        factors.push_back(*exponential);
+        terms.push_back(multiply(builtins, mathematics, angles, std::move(factors)));
+    }
+    if (terms.empty())
+        return integer(0);
+    return add(builtins, mathematics, angles, std::move(terms));
+}
+
 [[nodiscard]] std::optional<Expr> integratePowerRule(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -982,10 +1021,10 @@ struct FactorSplit final {
 
     const auto& a = expression.asCall().arguments;
     Expr exponentExpression = simplify(a[1], builtins, mathematics, angles);
-    std::optional<Rational> exponent = exactRealRational(exponentExpression);
+    std::optional<Rational> exponent = expression::exact::realRational(exponentExpression);
     if (!exponent && isHead(exponentExpression, builtins, BuiltinId::Negate)
         && exponentExpression.asCall().arguments.size() == 1) {
-        if (const auto positive = exactRealRational(exponentExpression.asCall().arguments[0]))
+        if (const auto positive = expression::exact::realRational(exponentExpression.asCall().arguments[0]))
             exponent = -*positive;
     }
     if (!exponent || containsVariable(a[1], variable))
@@ -1077,7 +1116,7 @@ struct FactorSplit final {
     }
     else if (isHead(expression, builtins, BuiltinId::Power)
         && expression.asCall().arguments.size() == 2
-        && exactRealRational(expression.asCall().arguments[1]) == Rational{BigInt{-1}}) {
+        && expression::exact::realRational(expression.asCall().arguments[1]) == Rational{BigInt{-1}}) {
         denominator = expression.asCall().arguments[0];
     }
     else {
@@ -1298,29 +1337,6 @@ struct PolynomialExtendedGcd final {
     return reduced.remainder;
 }
 
-[[nodiscard]] std::optional<AlgebraicNumber> evaluatePolynomialAtAlgebraic(
-    const RationalPolynomial& polynomial,
-    const AlgebraicNumber& point) {
-    auto value = AlgebraicNumber::fromRational(
-        polynomial.coefficient(polynomial.degree()));
-    if (!value)
-        return std::nullopt;
-    for (std::size_t exponent = polynomial.degree(); exponent-- > 0;) {
-        auto multiplied = AlgebraicNumber::combine(
-            *value, point, AlgebraicBinaryOperation::Multiply);
-        if (!multiplied)
-            return std::nullopt;
-        auto coefficient = AlgebraicNumber::fromRational(polynomial.coefficient(exponent));
-        if (!coefficient)
-            return std::nullopt;
-        auto added = AlgebraicNumber::combine(
-            *multiplied, *coefficient, AlgebraicBinaryOperation::Add);
-        if (!added)
-            return std::nullopt;
-        value = std::move(added);
-    }
-    return value;
-}
 
 [[nodiscard]] RationalPolynomial multiplyPolynomialByMonomial(
     const RationalPolynomial& polynomial,
@@ -1487,7 +1503,7 @@ struct RationalFactor final {
         }
         if (isHead(factor, builtins, BuiltinId::Power)
             && factor.asCall().arguments.size() == 2) {
-            const auto exponent = exactRealRational(factor.asCall().arguments[1]);
+            const auto exponent = expression::exact::realRational(factor.asCall().arguments[1]);
             if (!exponent || !exponent->isInteger() || exponent->numerator().isNegative())
                 return false;
             const auto count = numeric::tryToUint64(exponent->numerator());
@@ -1499,7 +1515,7 @@ struct RationalFactor final {
                 appendFactorRef);
         }
         if (!containsVariable(factor, variable)) {
-            const auto value = exactRealRational(factor);
+            const auto value = expression::exact::realRational(factor);
             if (!value)
                 return false;
             for (std::size_t i = 0; i < multiplicity; ++i)
@@ -1748,27 +1764,49 @@ struct HermitePowerReduction final {
     if (auto canonical = ComplexAlgebraicNumber::canonicalizeAll(*roots))
         roots = std::move(canonical);
 
+    // reducedなsquare-free有理函数では numerator と denominator は互いに素であり，
+    // denominatorの各rootで留数分子が0になることはない。各rootごとに
+    // AlgebraicNumberを四則演算のたび再canonicalizeせず，同じRoot上のexact式を保持する。
+    if (polynomialGcdMonic(numerator, denominator).degree() != 0)
+        return std::nullopt;
+
+    const auto polynomialAtRootExpr = [&](const RationalPolynomial& polynomial,
+                                           const Expr& rootExpr) {
+        std::vector<Expr> terms;
+        terms.reserve(polynomial.degree() + 1);
+        for (std::size_t exponent = 0; exponent <= polynomial.degree(); ++exponent) {
+            const Rational coefficient = polynomial.coefficient(exponent);
+            if (coefficient.isZero())
+                continue;
+            Expr term{Number{coefficient}};
+            if (exponent != 0) {
+                Expr powerExpr = exponent == 1
+                    ? rootExpr
+                    : power(builtins, mathematics, angles, rootExpr,
+                        integer(static_cast<std::int64_t>(exponent)));
+                term = multiply(builtins, mathematics, angles, {
+                    std::move(term), std::move(powerExpr)});
+            }
+            terms.push_back(std::move(term));
+        }
+        if (terms.empty())
+            return integer(0);
+        if (terms.size() == 1)
+            return std::move(terms.front());
+        return add(builtins, mathematics, angles, std::move(terms));
+    };
+
     std::vector<Expr> terms;
     terms.reserve(roots->size());
     for (const ComplexAlgebraicNumber& root : *roots) {
-        const AlgebraicNumber point =
-            AlgebraicNumber::fromComplexRoot(root).withGeneratorField();
-        const auto numeratorAtRoot = evaluatePolynomialAtAlgebraic(numerator, point);
-        const auto derivativeAtRoot = evaluatePolynomialAtAlgebraic(derivative, point);
-        if (!numeratorAtRoot || !derivativeAtRoot)
-            return std::nullopt;
-        const auto residue = AlgebraicNumber::combine(
-            *numeratorAtRoot, *derivativeAtRoot, AlgebraicBinaryOperation::Divide);
-        if (!residue)
-            return std::nullopt;
-        const auto exactResidue = residue->exactRationalParts();
-        if (exactResidue && exactResidue->first.isZero() && exactResidue->second.isZero())
-            continue;
-
-        Expr residueExpr = makeCanonicalAlgebraicExpression(*residue, builtins);
         Expr rootExpr = makeCanonicalRootExpression(root, builtins);
+        Expr numeratorAtRoot = polynomialAtRootExpr(numerator, rootExpr);
+        Expr derivativeAtRoot = polynomialAtRootExpr(derivative, rootExpr);
+        Expr residueExpr = divide(
+            builtins, mathematics, angles,
+            std::move(numeratorAtRoot), std::move(derivativeAtRoot));
         Expr logarithm = call(builtins, BuiltinId::Log, {
-            subtract(builtins, mathematics, angles, Expr{variable}, std::move(rootExpr))});
+            subtract(builtins, mathematics, angles, Expr{variable}, rootExpr)});
         terms.push_back(multiply(builtins, mathematics, angles, {
             std::move(residueExpr), std::move(logarithm)}));
     }
@@ -2196,7 +2234,7 @@ struct HermitePowerReduction final {
     }
     else if (isHead(expression, builtins, BuiltinId::Power)
         && expression.asCall().arguments.size() == 2
-        && exactRealRational(expression.asCall().arguments[1])
+        && expression::exact::realRational(expression.asCall().arguments[1])
             == Rational{BigInt{-1}, BigInt{2}}) {
         radicand = expression.asCall().arguments[0];
     }
@@ -2396,6 +2434,123 @@ struct TrigArgument final {
 
 
 
+[[nodiscard]] std::optional<Expr> integrateHighDegreePolynomialTimesTrigHyperbolic(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Multiply))
+        return std::nullopt;
+
+    const Expr* function = nullptr;
+    BuiltinId id = BuiltinId::Sin;
+    std::vector<Expr> polynomialFactors;
+    for (const Expr& factor : expression.asCall().arguments) {
+        if (factor.isCall() && factor.asCall().arguments.size() == 1) {
+            const auto* definition = builtins.find(factor.asCall().head);
+            if (definition && (definition->id == BuiltinId::Sin
+                    || definition->id == BuiltinId::Cos
+                    || definition->id == BuiltinId::Sinh
+                    || definition->id == BuiltinId::Cosh)) {
+                if (function)
+                    return std::nullopt;
+                function = &factor;
+                id = definition->id;
+                continue;
+            }
+        }
+        polynomialFactors.push_back(factor);
+    }
+    if (!function || polynomialFactors.empty())
+        return std::nullopt;
+
+    Expr polynomialExpression = polynomialFactors.size() == 1
+        ? polynomialFactors.front()
+        : call(builtins, BuiltinId::Multiply, std::move(polynomialFactors));
+    const auto polynomial = toRationalPolynomial(
+        polynomialExpression, variable, builtins, PolynomialConversionOptions{128, 1024});
+    if (!polynomial || polynomial->degree() < 12 || polynomial->degree() > 128)
+        return std::nullopt;
+
+    Expr source = function->asCall().arguments[0];
+    Rational rate{BigInt{0}};
+    if (id == BuiltinId::Sin || id == BuiltinId::Cos) {
+        const TrigArgument info = trigArgument(source, builtins, mathematics, angles);
+        const auto scale = expression::exact::realRational(info.scale);
+        const auto affine = toRationalPolynomial(
+            info.argument, variable, builtins, PolynomialConversionOptions{2, 16});
+        if (!scale || !affine || affine->degree() != 1)
+            return std::nullopt;
+        rate = *scale * affine->coefficient(1);
+    }
+    else {
+        const auto affine = toRationalPolynomial(
+            source, variable, builtins, PolynomialConversionOptions{2, 16});
+        if (!affine || affine->degree() != 1)
+            return std::nullopt;
+        rate = affine->coefficient(1);
+    }
+    if (rate.isZero())
+        return std::nullopt;
+
+    std::vector<Rational> first(polynomial->degree() + 1, Rational{BigInt{0}});
+    std::vector<Rational> second(polynomial->degree() + 1, Rational{BigInt{0}});
+    Rational nextFirst{BigInt{0}};
+    Rational nextSecond{BigInt{0}};
+    for (std::size_t index = polynomial->degree() + 1; index-- > 0;) {
+        const Rational derivativeFirst = index < polynomial->degree()
+            ? Rational{BigInt::fromUnsigned(index + 1)} * nextFirst
+            : Rational{BigInt{0}};
+        const Rational derivativeSecond = index < polynomial->degree()
+            ? Rational{BigInt::fromUnsigned(index + 1)} * nextSecond
+            : Rational{BigInt{0}};
+        const Rational target = polynomial->coefficient(index);
+        if (id == BuiltinId::Sin) {
+            second[index] = (derivativeFirst - target) / rate;
+            first[index] = -derivativeSecond / rate;
+        }
+        else if (id == BuiltinId::Cos) {
+            second[index] = derivativeFirst / rate;
+            first[index] = (target - derivativeSecond) / rate;
+        }
+        else if (id == BuiltinId::Sinh) {
+            second[index] = (target - derivativeFirst) / rate;
+            first[index] = -derivativeSecond / rate;
+        }
+        else {
+            second[index] = -derivativeFirst / rate;
+            first[index] = (target - derivativeSecond) / rate;
+        }
+        nextFirst = first[index];
+        nextSecond = second[index];
+    }
+
+    const BuiltinId firstId = id == BuiltinId::Cos ? BuiltinId::Sin
+        : id == BuiltinId::Cosh ? BuiltinId::Sinh : id;
+    const BuiltinId secondId = id == BuiltinId::Sin ? BuiltinId::Cos
+        : id == BuiltinId::Cos ? BuiltinId::Cos
+        : id == BuiltinId::Sinh ? BuiltinId::Cosh : BuiltinId::Cosh;
+    // first/second are coefficients of sin/cos or sinh/cosh respectively.
+    const BuiltinId actualFirstId = (id == BuiltinId::Sin || id == BuiltinId::Cos)
+        ? BuiltinId::Sin : BuiltinId::Sinh;
+    const BuiltinId actualSecondId = (id == BuiltinId::Sin || id == BuiltinId::Cos)
+        ? BuiltinId::Cos : BuiltinId::Cosh;
+    static_cast<void>(firstId);
+    static_cast<void>(secondId);
+    Expr firstPolynomial = polynomialToExpandedExpr(
+        RationalPolynomial{std::move(first)}, variable, builtins);
+    Expr secondPolynomial = polynomialToExpandedExpr(
+        RationalPolynomial{std::move(second)}, variable, builtins);
+    Expr firstFunction = call(builtins, actualFirstId, {source});
+    Expr secondFunction = call(builtins, actualSecondId, {source});
+    return add(builtins, mathematics, angles, {
+        multiply(builtins, mathematics, angles, {
+            std::move(firstPolynomial), std::move(firstFunction)}),
+        multiply(builtins, mathematics, angles, {
+            std::move(secondPolynomial), std::move(secondFunction)})});
+}
+
 [[nodiscard]] std::optional<Expr> integrateSineCosineOverArgument(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -2477,7 +2632,7 @@ struct EllipticTrigKernel final {
             || !isHead(sinePower, builtins, BuiltinId::Power)
             || sinePower.asCall().arguments.size() != 2)
             continue;
-        const auto exponent = exactRealRational(sinePower.asCall().arguments[1]);
+        const auto exponent = expression::exact::realRational(sinePower.asCall().arguments[1]);
         if (!exponent || *exponent != Rational{BigInt{2}})
             continue;
         const Expr& sine = sinePower.asCall().arguments[0];
@@ -2561,14 +2716,14 @@ struct EllipticTrigKernel final {
 }
 
 [[nodiscard]] std::optional<std::uint64_t> negativeIntegerMagnitude(const Expr& expression) {
-    const auto value = exactRealRational(expression);
+    const auto value = expression::exact::realRational(expression);
     if (!value || !value->isInteger() || !value->numerator().isNegative())
         return std::nullopt;
     return numeric::tryToUint64(-value->numerator());
 }
 
 [[nodiscard]] std::optional<std::uint64_t> positiveIntegerMagnitude(const Expr& expression) {
-    const auto value = exactRealRational(expression);
+    const auto value = expression::exact::realRational(expression);
     if (!value || !value->isInteger() || !value->numerator().isPositive())
         return std::nullopt;
     return numeric::tryToUint64(value->numerator());
@@ -2805,7 +2960,7 @@ struct EllipticTrigKernel final {
     else if (isHead(expression, builtins, BuiltinId::Power)
         && expression.asCall().arguments.size() == 2) {
         base = &expression.asCall().arguments[0];
-        exponent = exactRealRational(expression.asCall().arguments[1]);
+        exponent = expression::exact::realRational(expression.asCall().arguments[1]);
     }
     else if (isHead(expression, builtins, BuiltinId::Divide)
         && expression.asCall().arguments.size() == 2) {
@@ -2910,7 +3065,7 @@ struct EllipticTrigKernel final {
     // Gaussian exp[-a x^2] (a>0 exact Rational) は一般1F1より erf を preferred form とする。
     // sqrt[a] はprincipal exact rootで，Dにより元のintegrandへ戻る局所原始函数を構成する。
     if (*order == 2) {
-        const auto exactCoefficient = exactRealRational(coefficient);
+        const auto exactCoefficient = expression::exact::realRational(coefficient);
         if (exactCoefficient && *exactCoefficient < Rational{BigInt{0}}) {
             const Rational positiveScale = -*exactCoefficient;
             Expr sqrtScale = call(builtins, BuiltinId::Sqrt, {rational(positiveScale)});
@@ -3107,7 +3262,7 @@ struct EllipticTrigKernel final {
     const mathematics::AngleSemantics& angles) {
     if (!isHead(expression, builtins, BuiltinId::Power)
         || expression.asCall().arguments.size() != 2
-        || exactRealRational(expression.asCall().arguments[1]) != Rational{BigInt{2}})
+        || expression::exact::realRational(expression.asCall().arguments[1]) != Rational{BigInt{2}})
         return std::nullopt;
 
     const Expr& base = expression.asCall().arguments[0];
@@ -3548,7 +3703,7 @@ struct PowerLikeFactor final {
     const evaluation::BuiltinRegistry& builtins) {
     if (isHead(expression, builtins, BuiltinId::Power)
         && expression.asCall().arguments.size() == 2) {
-        const auto exponent = exactRealRational(expression.asCall().arguments[1]);
+        const auto exponent = expression::exact::realRational(expression.asCall().arguments[1]);
         if (exponent)
             return PowerLikeFactor{expression.asCall().arguments[0], *exponent};
     }
@@ -3764,7 +3919,7 @@ struct RationalFunctionForm final {
     case BuiltinId::Power:
         if (arguments.size() == 2) {
             auto base = toRationalFunctionForm(arguments[0], variable, builtins);
-            const auto exponent = exactRealRational(arguments[1]);
+            const auto exponent = expression::exact::realRational(arguments[1]);
             if (!base || !exponent || !exponent->isInteger())
                 return std::nullopt;
             const BigInt& integerExponent = exponent->numerator();
@@ -3999,7 +4154,7 @@ struct RationalFunctionForm final {
             && monomial.asCall().arguments.size() == 2
             && monomial.asCall().arguments[0].isSymbol()
             && monomial.asCall().arguments[0].asSymbol().sameIdentity(variable)) {
-            const auto exponent = exactRealRational(monomial.asCall().arguments[1]);
+            const auto exponent = expression::exact::realRational(monomial.asCall().arguments[1]);
             if (!exponent || !exponent->isInteger() || exponent->numerator().isNegative())
                 continue;
             const auto value = numeric::tryToUint64(exponent->numerator());
@@ -4230,6 +4385,21 @@ struct RationalFunctionForm final {
         }
     }
 
+    // 一次sin/cos 2因子の積は積和公式だけで有限和へ落ちる。
+    // rational normalization等の汎用候補より先に処理し，小さい初等入力で固定費を払わない。
+    if (const auto reduced = mathematics::reduceTrigProduct(expression, builtins)) {
+        Expr result = integrateCore(
+            fullSimplify(*reduced, builtins, mathematics, angles),
+            variable, builtins, mathematics, angles, depth + 1);
+        if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
+            return result;
+    }
+
+    // exp[c x^n] は構造だけで閉じるため，rational/algebraic候補探索へ入る前に処理する。
+    if (auto hypergeometric = integrateExponentialMonomial1F1(
+            expression, variable, builtins, mathematics, angles))
+        return *hypergeometric;
+
     if (auto powerChain = tryPowerChainProduct(
             expression, variable, builtins, mathematics, angles))
         return *powerChain;
@@ -4294,11 +4464,11 @@ struct RationalFunctionForm final {
                     Expr primitive = integrateCore(
                         branch[0], variable, builtins, mathematics, angles, depth + 1);
                     if (branch.size() == 2)
-                        branches.push_back(caseBranch(builtins, std::move(primitive), branch[1]));
+                        branches.push_back(detail::makeCaseBranch(builtins, std::move(primitive), branch[1]));
                     else
-                        branches.push_back(caseBranch(builtins, std::move(primitive)));
+                        branches.push_back(detail::makeCaseBranch(builtins, std::move(primitive)));
                 }
-                return cases(builtins, std::move(branches));
+                return detail::makeCases(builtins, std::move(branches));
             }
             case BuiltinId::Log:
                 if (a.size() == 2 && !containsVariable(a[0], variable)) {
@@ -4334,6 +4504,12 @@ struct RationalFunctionForm final {
                         a[0], variable, builtins, mathematics, angles, depth + 1));
                 break;
             case BuiltinId::Multiply: {
+                if (auto directExponential = integrateHighDegreePolynomialTimesExponential(
+                        expression, variable, builtins, mathematics, angles))
+                    return *directExponential;
+                if (auto directTrigHyperbolic = integrateHighDegreePolynomialTimesTrigHyperbolic(
+                        expression, variable, builtins, mathematics, angles))
+                    return *directTrigHyperbolic;
                 FactorSplit split = splitConstantFactor(
                     expression, variable, builtins, mathematics, angles);
                 if (!isOne(split.constant) && !isOne(split.dependent)) {
@@ -4366,6 +4542,23 @@ struct RationalFunctionForm final {
                 break;
             }
             case BuiltinId::Divide:
+                if (a.size() == 2 && !containsVariable(a[0], variable)
+                    && isHead(a[1], builtins, BuiltinId::Log)
+                    && a[1].asCall().arguments.size() == 1) {
+                    const Expr& logArgument = a[1].asCall().arguments[0];
+                    Expr argumentDerivative = simplify(
+                        differentiateExpression(
+                            logArgument, variable, builtins, mathematics, angles),
+                        builtins, mathematics, angles);
+                    if (!containsVariable(argumentDerivative, variable)
+                        && provablyNonZero(argumentDerivative, builtins, mathematics)) {
+                        Expr primitive = multiply(builtins, mathematics, angles, {
+                            a[0],
+                            call(builtins, BuiltinId::LogarithmicIntegralLi, {logArgument})});
+                        return divide(builtins, mathematics, angles,
+                            std::move(primitive), std::move(argumentDerivative));
+                    }
+                }
                 if (a.size() == 2 && !containsVariable(a[0], variable)) {
                     Expr denominatorDerivative = differentiateExpression(
                         a[1], variable, builtins, mathematics, angles);
@@ -4416,9 +4609,45 @@ struct RationalFunctionForm final {
             expression, variable, builtins, mathematics, angles))
         return *elliptic;
 
-    if (auto hypergeometric = integrateExponentialMonomial1F1(
-            expression, variable, builtins, mathematics, angles))
-        return *hypergeometric;
+    // 高次の純binomialは後段の汎用候補探索を経ても最終的に2F1へ閉じる。
+    // sqrt[1+beta*x^n] (n>=3) と 1/(1+beta*x^n) (n>=5) に限定して先に送る。
+    // 低次有理函数や1/sqrt[1-x^4]はelementary / elliptic表現を優先する。
+    bool preferEarlyBinomial = false;
+    if (isHead(expression, builtins, BuiltinId::Sqrt)
+        && expression.asCall().arguments.size() == 1) {
+        if (const auto polynomial = toRationalPolynomial(
+                expression.asCall().arguments[0], variable, builtins,
+                PolynomialConversionOptions{4096, 8192});
+            polynomial && polynomial->degree() >= 3
+            && polynomial->coefficient(0) == Rational{BigInt{1}}) {
+            preferEarlyBinomial = true;
+            for (std::size_t i = 1; i < polynomial->degree(); ++i)
+                if (!polynomial->coefficient(i).isZero()) {
+                    preferEarlyBinomial = false;
+                    break;
+                }
+        }
+    }
+    else if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2
+        && isOne(expression.asCall().arguments[0])) {
+        if (const auto polynomial = toRationalPolynomial(
+                expression.asCall().arguments[1], variable, builtins,
+                PolynomialConversionOptions{4096, 8192});
+            polynomial && polynomial->degree() >= 5
+            && polynomial->coefficient(0) == Rational{BigInt{1}}) {
+            preferEarlyBinomial = true;
+            for (std::size_t i = 1; i < polynomial->degree(); ++i)
+                if (!polynomial->coefficient(i).isZero()) {
+                    preferEarlyBinomial = false;
+                    break;
+                }
+        }
+    }
+    if (preferEarlyBinomial)
+        if (auto hypergeometric2F1 = integrateBinomialPower2F1(
+                expression, variable, builtins, mathematics, angles))
+            return *hypergeometric2F1;
 
     if (auto dilogarithm = integrateLogOnePlusMonomialOverX(
             expression, variable, builtins, mathematics, angles))
@@ -4492,16 +4721,6 @@ struct RationalFunctionForm final {
             if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
                 return result;
         }
-    }
-
-    // 異なる引数の一次sin/cos積は上のmonomial規則では扱えない。
-    // 積和恒等式は複素引数でも大域的に成立するため、安全な最後の代数fallbackとして使う。
-    if (const auto reduced = mathematics::reduceTrigProduct(expression, builtins)) {
-        Expr result = integrateCore(
-            fullSimplify(*reduced, builtins, mathematics, angles),
-            variable, builtins, mathematics, angles, depth + 1);
-        if (!isHead(result, builtins, BuiltinId::SymbolicIntegral))
-            return result;
     }
 
     // 一般binomial 2F1はexactだが，atan/asinや単純reverse-chainより表現が重い。
@@ -4648,8 +4867,8 @@ struct RationalFunctionForm final {
     if (denominator->degree() == 0)
         return true;
 
-    const auto lowerValue = exactRealRational(lower);
-    const auto upperValue = exactRealRational(upper);
+    const auto lowerValue = expression::exact::realRational(lower);
+    const auto upperValue = expression::exact::realRational(upper);
     const bool lowerInfinite = isNegativeInfinityExpr(lower, builtins, infinity);
     const bool upperInfinite = isInfinityExpr(upper, infinity);
     if ((!lowerValue && !lowerInfinite) || (!upperValue && !upperInfinite))
@@ -4710,8 +4929,8 @@ struct RationalFunctionForm final {
         return false;
     const auto affine = toRationalPolynomial(
         denominator.asCall().arguments[0], variable, builtins, {1, 4});
-    const auto lo = exactRealRational(lower);
-    const auto hi = exactRealRational(upper);
+    const auto lo = expression::exact::realRational(lower);
+    const auto hi = expression::exact::realRational(upper);
     if (!affine || affine->degree() != 1 || !lo || !hi)
         return false;
     const Rational slope = affine->coefficient(1);
@@ -4733,8 +4952,8 @@ struct RationalFunctionForm final {
         return false;
     const auto affine = toRationalPolynomial(
         expression.asCall().arguments[0], variable, builtins, {1, 4});
-    const auto lo = exactRealRational(lower);
-    const auto hi = exactRealRational(upper);
+    const auto lo = expression::exact::realRational(lower);
+    const auto hi = expression::exact::realRational(upper);
     if (!affine || affine->degree() != 1 || !lo || !hi)
         return false;
     const Rational atLo = evaluatePolynomial(*affine, *lo);
@@ -4763,10 +4982,10 @@ struct RationalFunctionForm final {
     if (!inner.isSymbol() || !inner.asSymbol().sameIdentity(variable))
         return false;
 
-    const auto lo = exactRealRational(lower);
+    const auto lo = expression::exact::realRational(lower);
     if (!lo || *lo != Rational{BigInt{1}})
         return false;
-    if (const auto hi = exactRealRational(upper))
+    if (const auto hi = expression::exact::realRational(upper))
         return *hi > Rational{BigInt{1}};
     if (!upper.isSymbol())
         return false;
@@ -4842,7 +5061,7 @@ struct RationalFunctionForm final {
     const Expr& endpoint,
     LimitDirection direction,
     const evaluation::BuiltinRegistry& builtins) {
-    const auto point = exactRealRational(endpoint);
+    const auto point = expression::exact::realRational(endpoint);
     if (!point || *point != Rational{BigInt{1}} || direction != LimitDirection::Right)
         return false;
     if (!isHead(primitive, builtins, BuiltinId::Subtract)
@@ -4868,7 +5087,7 @@ struct RationalFunctionForm final {
     if (isLogLogPrimitiveAtUnitEndpoint(primitive, variable, endpoint, direction, builtins))
         return call(builtins, BuiltinId::Digamma, {integer(1)});
 
-    if (const auto endpointValue = exactRealRational(endpoint);
+    if (const auto endpointValue = expression::exact::realRational(endpoint);
         endpointValue && endpointValue->isZero()
         && (isHead(primitive, builtins, BuiltinId::SineIntegralSi)
             || isHead(primitive, builtins, BuiltinId::FresnelC)
@@ -5069,7 +5288,7 @@ struct GammaKernelMatch final {
     auto muExpr = variablePowerExponent(exponentSplit.dependent, variable, builtins);
     if (!muExpr)
         return std::nullopt;
-    const auto mu = exactRealRational(*muExpr);
+    const auto mu = expression::exact::realRational(*muExpr);
     if (!mu || !(*mu > Rational{BigInt{0}}))
         return std::nullopt;
 
@@ -5244,7 +5463,7 @@ struct BetaReflectionKernel final {
     auto qExpr = variablePowerExponent(*variablePower, variable, builtins);
     if (!qExpr)
         return std::nullopt;
-    const auto q = exactRealRational(*qExpr);
+    const auto q = expression::exact::realRational(*qExpr);
     if (!q || !(*q > Rational{BigInt{0}}))
         return std::nullopt;
 
@@ -5368,7 +5587,7 @@ struct LogMomentKernel final {
             || !factor.asCall().arguments[0].asCall().arguments[0].isSymbol()
             || !factor.asCall().arguments[0].asCall().arguments[0].asSymbol().sameIdentity(variable))
             return std::nullopt;
-        const auto power = exactRealRational(factor.asCall().arguments[1]);
+        const auto power = expression::exact::realRational(factor.asCall().arguments[1]);
         if (!power || !power->isInteger() || !(*power >= Rational{BigInt{1}}))
             return std::nullopt;
         return numeric::tryToUint64(power->numerator());
@@ -5412,7 +5631,7 @@ struct LogMomentKernel final {
     auto qExpr = variablePowerExponent(radicand.asCall().arguments[1], variable, builtins);
     if (!qExpr)
         return std::nullopt;
-    auto q = exactRealRational(*qExpr);
+    auto q = expression::exact::realRational(*qExpr);
     if (!q || !(*q > Rational{BigInt{0}}))
         return std::nullopt;
     return q;
@@ -5422,7 +5641,7 @@ struct LogMomentKernel final {
     const Expr& argument,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics) {
-    if (const auto value = exactRealRational(argument)) {
+    if (const auto value = expression::exact::realRational(argument)) {
         if (*value == Rational{BigInt{1}})
             return integer(1);
         if (*value == Rational{BigInt{1}, BigInt{2}})
@@ -5472,13 +5691,13 @@ struct LogMomentKernel final {
                         power(builtins, mathematics, angles, integer(2),
                             subtract(builtins, mathematics, angles, integer(1), *s))),
                     call(builtins, BuiltinId::Zeta, {*s})});
-                return call(builtins, BuiltinId::Cases, {
-                    call(builtins, BuiltinId::CaseBranch, {
+                return detail::makeCases(builtins, {
+                    detail::makeCaseBranch(builtins,
                         call(builtins, BuiltinId::Log, {integer(2)}),
-                        call(builtins, BuiltinId::Equal, {*s, integer(1)})}),
-                    call(builtins, BuiltinId::CaseBranch, {
+                        call(builtins, BuiltinId::Equal, {*s, integer(1)})),
+                    detail::makeCaseBranch(builtins,
                         std::move(generic),
-                        call(builtins, BuiltinId::NotEqual, {*s, integer(1)})})});
+                        call(builtins, BuiltinId::NotEqual, {*s, integer(1)}))});
             }
         }
 

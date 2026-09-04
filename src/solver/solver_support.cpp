@@ -3,6 +3,8 @@
 
 #include "evaluation/builtin_registry.hpp"
 #include "mathematics/numeric_domain.hpp"
+#include "mathematics/definedness.hpp"
+#include "mathematics/relation_builtin.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
 #include "simplification/simplification_context.hpp"
@@ -50,39 +52,15 @@ std::optional<RelationKind> relationKindOf(
     if (!definition)
         return std::nullopt;
 
-    switch (definition->id) {
-    case BuiltinId::Equal: return RelationKind::Equal;
-    case BuiltinId::NotEqual: return RelationKind::NotEqual;
-    case BuiltinId::Less: return RelationKind::Less;
-    case BuiltinId::LessEqual: return RelationKind::LessEqual;
-    case BuiltinId::Greater: return RelationKind::Greater;
-    case BuiltinId::GreaterEqual: return RelationKind::GreaterEqual;
-    default: return std::nullopt;
-    }
+    return mathematics::relationKindForBuiltin(definition->id);
 }
 
 RelationKind reversedRelation(RelationKind relation) noexcept {
-    switch (relation) {
-    case RelationKind::Less: return RelationKind::Greater;
-    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
-    case RelationKind::Greater: return RelationKind::Less;
-    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
-    case RelationKind::Equal: return RelationKind::Equal;
-    case RelationKind::NotEqual: return RelationKind::NotEqual;
-    }
-    return relation;
+    return mathematics::reverseRelation(relation);
 }
 
 BuiltinId builtinForRelation(RelationKind relation) noexcept {
-    switch (relation) {
-    case RelationKind::Equal: return BuiltinId::Equal;
-    case RelationKind::NotEqual: return BuiltinId::NotEqual;
-    case RelationKind::Less: return BuiltinId::Less;
-    case RelationKind::LessEqual: return BuiltinId::LessEqual;
-    case RelationKind::Greater: return BuiltinId::Greater;
-    case RelationKind::GreaterEqual: return BuiltinId::GreaterEqual;
-    }
-    return BuiltinId::Equal;
+    return mathematics::builtinForRelation(relation);
 }
 
 Expr relationExpr(
@@ -91,7 +69,52 @@ Expr relationExpr(
     Expr rhs,
     const evaluation::BuiltinRegistry& builtins) {
     return builtinCall(
-        builtins, builtinForRelation(relation), {std::move(lhs), std::move(rhs)});
+        builtins, solver::builtinForRelation(relation), {std::move(lhs), std::move(rhs)});
+}
+
+std::optional<SolutionSet> solveIdenticalEquality(
+    const Expr& relation,
+    std::vector<SolverVariable> variables,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto kind = relationKindOf(relation, builtins);
+    if (!kind || (*kind != RelationKind::Equal && *kind != RelationKind::NotEqual))
+        return std::nullopt;
+
+    const Expr& lhs = relation.asCall().arguments[0];
+    const Expr& rhs = relation.asCall().arguments[1];
+    const auto lhsDomain = mathematics::expressionDomainConditions(lhs, builtins, mathematics);
+    const auto rhsDomain = mathematics::expressionDomainConditions(rhs, builtins, mathematics);
+    if (!lhsDomain || !rhsDomain)
+        return std::nullopt;
+
+    mathematics::AssumptionSet definedness;
+    for (const auto& predicate : lhsDomain->predicates())
+        definedness.add(predicate);
+    for (const auto& predicate : rhsDomain->predicates())
+        definedness.add(predicate);
+
+    // syntactically同一でなくても，両辺が定義される領域ではinverse composition等が
+    // 安全に同一式へ落ちることがある。definednessとsolver変数domainだけを仮定し，
+    // generic Simplifierが証明できた場合に限って恒等式として扱う。
+    mathematics::AssumptionSet proofAssumptions = definedness;
+    for (const SolverVariable& variable : variables) {
+        if (mathematics::isSubdomainOf(variable.domain, mathematics::NumericDomain::Real))
+            proofAssumptions.add(mathematics::elementOf(
+                Expr{variable.symbol}, variable.domain));
+    }
+
+    const Expr normalizedLhs = simplifyForSolve(
+        lhs, builtins, mathematics, angles, proofAssumptions);
+    const Expr normalizedRhs = simplifyForSolve(
+        rhs, builtins, mathematics, angles, proofAssumptions);
+    if (normalizedLhs != normalizedRhs)
+        return std::nullopt;
+
+    if (*kind == RelationKind::NotEqual)
+        return SolutionSet::empty(std::move(variables));
+    return SolutionSet::universal(std::move(variables), definedness);
 }
 
 mathematics::AssumptionSet withRealVariable(

@@ -1995,17 +1995,6 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
     return result;
 }
 
-[[nodiscard]] Rational integerPowerRational(Rational base, std::size_t exponent) {
-    Rational result{BigInt{1}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result *= base;
-        exponent >>= 1U;
-        if (exponent != 0)
-            base *= base;
-    }
-    return result;
-}
 
 [[nodiscard]] Polynomial shiftedNegatedArgument(const Polynomial& polynomial, const Rational& shift) {
     // q(shift-y) をyの昇冪係数へ展開する。
@@ -2014,7 +2003,7 @@ constexpr std::size_t maximumAlgebraicArithmeticDegree = 16;
         for (std::size_t k = 0; k <= j; ++k) {
             Rational coefficient = polynomial[j]
                 * Rational{binomialInteger(j, k)}
-                * integerPowerRational(shift, j - k);
+                * numeric::pow(shift, static_cast<std::uint64_t>(j - k));
             if ((k & 1U) != 0)
                 coefficient = -coefficient;
             result[k] += coefficient;
@@ -2617,6 +2606,69 @@ private:
 }
 
 
+[[nodiscard]] std::optional<Rational> pureQuadraticRadicand(
+    const AlgebraicNumber& value) {
+    if (value.domain() != AlgebraicRootDomain::Real)
+        return std::nullopt;
+    const auto polynomial = value.polynomial();
+    if (polynomial.size() != 3 || !polynomial[1].isZero()
+        || polynomial[2].isZero())
+        return std::nullopt;
+    const Rational radicand = -polynomial[0] / polynomial[2];
+    if (radicand <= Rational{})
+        return std::nullopt;
+    return radicand;
+}
+
+[[nodiscard]] std::optional<AlgebraicNumber> pureQuadraticCombine(
+    const AlgebraicNumber& lhs,
+    const AlgebraicNumber& rhs,
+    AlgebraicBinaryOperation operation) {
+    const auto left = pureQuadraticRadicand(lhs);
+    const auto right = pureQuadraticRadicand(rhs);
+    if (!left || !right || *left == *right
+        || lhs.rootIndex() < 1 || lhs.rootIndex() > 2
+        || rhs.rootIndex() < 1 || rhs.rootIndex() > 2)
+        return std::nullopt;
+
+    const int leftSign = lhs.rootIndex() == 2 ? 1 : -1;
+    const int rightSign = rhs.rootIndex() == 2 ? 1 : -1;
+
+    switch (operation) {
+    case AlgebraicBinaryOperation::Add:
+    case AlgebraicBinaryOperation::Subtract: {
+        const int effectiveRightSign = operation == AlgebraicBinaryOperation::Add
+            ? rightSign : -rightSign;
+        const Rational difference = *left - *right;
+        const Polynomial polynomial{
+            difference * difference, Rational{},
+            -Rational{BigInt{2}} * (*left + *right), Rational{},
+            Rational{BigInt{1}}};
+
+        std::size_t index = 0;
+        if (leftSign == effectiveRightSign)
+            index = leftSign > 0 ? 4 : 1;
+        else {
+            const bool leftMagnitudeGreater = *right < *left;
+            const bool positive = leftSign > 0
+                ? leftMagnitudeGreater : !leftMagnitudeGreater;
+            index = positive ? 3 : 2;
+        }
+        return AlgebraicNumber::create(polynomial, index, AlgebraicRootDomain::Real);
+    }
+    case AlgebraicBinaryOperation::Multiply:
+    case AlgebraicBinaryOperation::Divide: {
+        const Rational radicand = operation == AlgebraicBinaryOperation::Multiply
+            ? *left * *right : *left / *right;
+        const Polynomial polynomial{
+            -radicand, Rational{}, Rational{BigInt{1}}};
+        const std::size_t index = leftSign == rightSign ? 2 : 1;
+        return AlgebraicNumber::create(polynomial, index, AlgebraicRootDomain::Real);
+    }
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] std::optional<AlgebraicNumber> materializeFieldElement(
     AlgebraicElement element,
     const AlgebraicNumber& lhs,
@@ -2957,6 +3009,11 @@ std::optional<AlgebraicNumber> AlgebraicNumber::combine(
                 return materialized;
         }
     }
+
+    // Q上の純二次根同士はresultant/primitive-elementを構成せず，既知の
+    // degree-2/4 annihilating polynomialから結果根だけをcertifyする。
+    if (const auto quadratic = pureQuadraticCombine(lhs, rhs, operation))
+        return quadratic;
 
     if (const auto reduced = primitiveElementCombine(lhs, rhs, operation))
         return reduced;

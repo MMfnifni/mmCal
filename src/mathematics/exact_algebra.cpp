@@ -1,5 +1,6 @@
 // 代数計算
 #include "exact_algebra.hpp"
+#include "expression/exact_value.hpp"
 
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
@@ -34,12 +35,6 @@ using numeric::Rational;
     evaluation::BuiltinId id) {
     return expression.isCall()
         && expression.asCall().head.sameIdentity(builtins.symbol(id));
-}
-
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
 }
 
 [[nodiscard]] Expr buildScaledAtom(
@@ -107,7 +102,7 @@ Expr scaleExactExpression(
     if (isHead(expression, builtins, evaluation::BuiltinId::Divide)) {
         const auto& arguments = expression.asCall().arguments;
         if (arguments.size() == 2) {
-            if (const auto denominator = exactRealRational(arguments[1]); denominator && !denominator->isZero())
+            if (const auto denominator = expression::exact::realRational(arguments[1]); denominator && !denominator->isZero())
                 return buildScaledAtom(coefficient / *denominator, arguments[0], builtins);
         }
     }

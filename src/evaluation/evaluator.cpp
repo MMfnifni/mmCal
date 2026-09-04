@@ -641,6 +641,12 @@ expression::Expr Evaluator::evaluateMachine(
 
                         case expression::ExprKind::Symbol: {
                             const expression::Symbol symbol = current.expression.asSymbol();
+                            if (std::find(materializationProtectedSymbols_.begin(),
+                                    materializationProtectedSymbols_.end(), symbol)
+                                != materializationProtectedSymbols_.end()) {
+                                results.push_back(current.expression);
+                                return;
+                            }
                             const expression::Expr* binding = environment_.find(symbol);
                             if (!binding) {
                                 // 未束縛SymbolはCASの自由記号として保持する。

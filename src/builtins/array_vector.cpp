@@ -6,7 +6,11 @@
 #include "builtins/linear_algebra.hpp"
 #include "error/error_message.hpp"
 #include "evaluation/evaluation_budget.hpp"
+#include "mathematics/assumption_parser.hpp"
+#include "mathematics/assumption_set.hpp"
 #include "mathematics/value_facts.hpp"
+#include "simplification/simplification_context.hpp"
+#include "simplification/simplifier.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
 #include "symbolic/differentiation.hpp"
@@ -44,12 +48,16 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
 [[nodiscard]] bool provablyRealVector(
     const ArrayExpr& vector,
     const evaluation::BuiltinRegistry& registry,
-    const mathematics::MathRegistry& mathematics) {
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AssumptionSet* assumptions = nullptr) {
     if (vector.hasExactRealStorage())
         return true;
     for (std::size_t i = 0; i < vector.size(); ++i) {
         const Expr item = vector.element(i);
-        if (!mathematics::inferValueFacts(item, registry, mathematics).isProvablyReal())
+        const mathematics::ValueFacts facts = assumptions
+            ? mathematics::inferValueFacts(item, registry, mathematics, *assumptions)
+            : mathematics::inferValueFacts(item, registry, mathematics);
+        if (!facts.isProvablyReal())
             return false;
     }
     return true;
@@ -83,8 +91,9 @@ void requireSameLength(const ArrayExpr& a, const ArrayExpr& b, std::string_view 
     const ArrayExpr& vector,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    if (!provablyRealVector(vector, registry, mathematics))
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet* assumptions = nullptr) {
+    if (!provablyRealVector(vector, registry, mathematics, assumptions))
         return Expr::call(registry.symbol(BuiltinId::VectorNorm), {vectorExpr(vector.materialize())});
     std::vector<Expr> squares;
     squares.reserve(vector.size());
@@ -283,10 +292,10 @@ Expr evaluateVectorCross(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& a = detail::requireVector(arguments[0], "vcross");
-    const ArrayExpr& b = detail::requireVector(arguments[1], "vcross");
+    const ArrayExpr& a = detail::requireVector(arguments[0], "cross");
+    const ArrayExpr& b = detail::requireVector(arguments[1], "cross");
     if (a.shape[0] != 3 || b.shape[0] != 3)
-        error::throwCalcError(error::CalcErrorType::Domain, "vcross requires two 3D vectors");
+        error::throwCalcError(error::CalcErrorType::Domain, "cross requires two 3D vectors");
     return vectorExpr({
         exact::subtract(exact::multiply({a.element(1), b.element(2)}, registry, mathematics, angles),
             exact::multiply({a.element(2), b.element(1)}, registry, mathematics, angles), registry, mathematics, angles),
@@ -302,9 +311,9 @@ Expr evaluateVectorManhattan(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& a = detail::requireVector(arguments[0], "vmanhattan");
-    const ArrayExpr& b = detail::requireVector(arguments[1], "vmanhattan");
-    requireSameLength(a, b, "vmanhattan");
+    const ArrayExpr& a = detail::requireVector(arguments[0], "manhattanDistance");
+    const ArrayExpr& b = detail::requireVector(arguments[1], "manhattanDistance");
+    requireSameLength(a, b, "manhattanDistance");
     std::vector<Expr> terms;
     terms.reserve(a.size());
     for (std::size_t i = 0; i < a.size(); ++i)
@@ -335,17 +344,48 @@ Expr evaluateVectorAngle(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& a = detail::requireVector(arguments[0], "vangle");
-    const ArrayExpr& b = detail::requireVector(arguments[1], "vangle");
-    requireSameLength(a, b, "vangle");
-    if (!provablyRealVector(a, registry, mathematics) || !provablyRealVector(b, registry, mathematics))
-        return Expr::call(registry.symbol(BuiltinId::VectorAngle), {arguments[0], arguments[1]});
-    Expr na = realNorm(a, registry, mathematics, angles);
-    Expr nb = realNorm(b, registry, mathematics, angles);
-    if ((na.isNumber() && na.asNumber().isZero()) || (nb.isNumber() && nb.asNumber().isZero()))
-        error::throwCalcError(error::CalcErrorType::Domain, "vangle is undefined for the zero vector");
+    const ArrayExpr& a = detail::requireVector(arguments[0], "vectorAngle");
+    const ArrayExpr& b = detail::requireVector(arguments[1], "vectorAngle");
+    requireSameLength(a, b, "vectorAngle");
+
+    std::optional<mathematics::AssumptionSet> assumptions;
+    if (arguments.size() == 3)
+        assumptions = mathematics::parseAssumptions(arguments[2], registry, mathematics);
+    const mathematics::AssumptionSet* assumptionPtr = assumptions ? &*assumptions : nullptr;
+    if (!provablyRealVector(a, registry, mathematics, assumptionPtr)
+        || !provablyRealVector(b, registry, mathematics, assumptionPtr))
+        return Expr::call(registry.symbol(BuiltinId::VectorAngle),
+            std::vector<Expr>(arguments.begin(), arguments.end()));
+
+    Expr na = realNorm(a, registry, mathematics, angles, assumptionPtr);
+    Expr nb = realNorm(b, registry, mathematics, angles, assumptionPtr);
+    if (assumptions) {
+        const simplification::SimplificationContext context{
+            registry, mathematics, angles, *assumptions};
+        const simplification::Simplifier simplifier;
+        na = simplifier.simplify(na, context);
+        nb = simplifier.simplify(nb, context);
+    }
+
+    const auto zeroNorm = [&](const Expr& norm) {
+        if (norm.isNumber())
+            return norm.asNumber().isZero();
+        const mathematics::ValueFacts facts = assumptions
+            ? mathematics::inferValueFacts(norm, registry, mathematics, *assumptions)
+            : mathematics::inferValueFacts(norm, registry, mathematics);
+        return facts.sign == mathematics::RealSign::Zero;
+    };
+    if (zeroNorm(na) || zeroNorm(nb))
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "vectorAngle is undefined for the zero vector");
+
     Expr cosine = exact::divide(dot(a, b, registry, mathematics, angles),
         exact::multiply({na, nb}, registry, mathematics, angles), registry, mathematics, angles);
+    if (assumptions) {
+        const simplification::SimplificationContext context{
+            registry, mathematics, angles, *assumptions};
+        cosine = simplification::Simplifier{}.simplify(cosine, context);
+    }
     return exact::call(BuiltinId::Acos, {std::move(cosine)}, registry, mathematics, angles);
 }
 
@@ -354,8 +394,9 @@ Expr evaluateVectorReflect(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& a = detail::requireVector(arguments[0], "vreflect");
-    Expr p = evaluateProjection(arguments, registry, mathematics, angles);
+    const ArrayExpr& a = detail::requireVector(arguments[0], "reflectNormal");
+    Expr p = evaluateProjectionForOperation(arguments, registry, mathematics, angles,
+        "reflectNormal", BuiltinId::VectorReflect);
     if (!p.isArray())
         return Expr::call(registry.symbol(BuiltinId::VectorReflect), {arguments[0], arguments[1]});
     Expr twice = scaleVector(p.asArray(), integer(2), registry, mathematics, angles);
@@ -367,8 +408,9 @@ Expr evaluateVectorReflectAxis(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& a = detail::requireVector(arguments[0], "vreflect_axis");
-    Expr p = evaluateProjection(arguments, registry, mathematics, angles);
+    const ArrayExpr& a = detail::requireVector(arguments[0], "reflectAxis");
+    Expr p = evaluateProjectionForOperation(arguments, registry, mathematics, angles,
+        "reflectAxis", BuiltinId::VectorReflectAxis);
     if (!p.isArray())
         return Expr::call(registry.symbol(BuiltinId::VectorReflectAxis), {arguments[0], arguments[1]});
     Expr twice = scaleVector(p.asArray(), integer(2), registry, mathematics, angles);
@@ -425,9 +467,14 @@ Expr evaluateCurl(
     const mathematics::AngleSemantics& angles) {
     const ArrayExpr& field = detail::requireVector(arguments[0], "curl");
     const auto variables = coordinateVariables(arguments[1], "curl");
+    if (field.size() == 2 && variables.size() == 2)
+        return exact::subtract(
+            partialDerivative(field.element(1), variables[0], registry, mathematics, angles),
+            partialDerivative(field.element(0), variables[1], registry, mathematics, angles),
+            registry, mathematics, angles);
     if (field.size() != 3 || variables.size() != 3)
         error::throwCalcError(error::CalcErrorType::Domain,
-            "curl requires a 3D vector field and exactly three coordinate variables");
+            "curl requires matching 2D or 3D Cartesian coordinates");
 
     const Expr dxF2 = partialDerivative(field.element(1), variables[0], registry, mathematics, angles);
     const Expr dxF3 = partialDerivative(field.element(2), variables[0], registry, mathematics, angles);
@@ -447,14 +494,28 @@ Expr evaluateLaplacian(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    requireScalarField(arguments[0], "laplacian");
     const auto variables = coordinateVariables(arguments[1], "laplacian");
-    std::vector<Expr> terms;
-    terms.reserve(variables.size());
-    for (const expression::Symbol& variable : variables)
-        terms.push_back(secondPartialDerivative(
-            arguments[0], variable, variable, registry, mathematics, angles));
-    return exact::add(std::move(terms), registry, mathematics, angles);
+    const auto scalarLaplacian = [&](const Expr& field) {
+        std::vector<Expr> terms;
+        terms.reserve(variables.size());
+        for (const expression::Symbol& variable : variables)
+            terms.push_back(secondPartialDerivative(
+                field, variable, variable, registry, mathematics, angles));
+        return exact::add(std::move(terms), registry, mathematics, angles);
+    };
+
+    if (arguments[0].isArray()) {
+        const ArrayExpr& field = detail::requireVector(arguments[0], "laplacian");
+        std::vector<Expr> components;
+        components.reserve(field.size());
+        for (std::size_t i = 0; i < field.size(); ++i)
+            components.push_back(scalarLaplacian(field.element(i)));
+        return Expr::array({field.size()}, std::move(components));
+    }
+    if (arguments[0].isList())
+        error::throwCalcError(error::CalcErrorType::Type,
+            "laplacian expects a scalar field or rank-1 vector field");
+    return scalarLaplacian(arguments[0]);
 }
 
 Expr evaluateJacobian(
@@ -497,6 +558,28 @@ Expr evaluateHessian(
             elements.push_back(secondPartialDerivative(
                 arguments[0], row, column, registry, mathematics, angles));
     return Expr::array({variables.size(), variables.size()}, std::move(elements));
+}
+
+Expr evaluateDirectionalDerivative(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    requireScalarField(arguments[0], "directionalDerivative");
+    const ArrayExpr& direction = detail::requireVector(arguments[1], "directionalDerivative");
+    const auto variables = coordinateVariables(arguments[2], "directionalDerivative");
+    if (direction.size() != variables.size())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "directionalDerivative requires one direction component per coordinate variable");
+
+    std::vector<Expr> terms;
+    terms.reserve(variables.size());
+    for (std::size_t i = 0; i < variables.size(); ++i)
+        terms.push_back(exact::multiply({
+            direction.element(i),
+            partialDerivative(arguments[0], variables[i], registry, mathematics, angles)
+        }, registry, mathematics, angles));
+    return exact::add(std::move(terms), registry, mathematics, angles);
 }
 
 } // namespace mmcal::builtins

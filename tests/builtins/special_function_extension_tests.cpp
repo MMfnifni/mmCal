@@ -307,6 +307,9 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[ellipticPi[19/20,Pi/2,1/3],20]"),
         std::string{"8.2772815079796133126"},
         "ellipticPi reduces exact rational Pi multiples without interval quotient ambiguity");
+    tests.expectEqual(eval(session, "N[ellipticPi[19/20,3Pi/2,1/3],20]"),
+        std::string{"24.831844523938839938"},
+        "ellipticPi reuses the complete value for exact half-integer pi amplitudes");
     tests.expectEqual(eval(session, "N[ellipticF[1/2,2],20]"),
         std::string{"0.55135887907967981413"},
         "ellipticF accepts m greater than one while the integration path stays on the real branch");
@@ -556,6 +559,12 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[trigamma[1],20]"),
         std::string{"1.6449340668482264365"},
         "trigamma has a certified positive-real backend");
+    tests.expectEqual(eval(session, "N[digamma[1/3],20]"),
+        std::string{"-3.1320337800208063230"},
+        "digamma preserves an exact rational argument in the certified real backend");
+    tests.expectEqual(eval(session, "N[trigamma[1/3],20]"),
+        std::string{"10.095597125427094082"},
+        "trigamma preserves an exact rational argument in the certified real backend");
     tests.expectEqual(eval(session, "N[digamma[1+I],30]"),
         std::string{"0.0946503206224769772718784827219+1.07667404746858117413405079475I"},
         "digamma has a certified complex recurrence plus asymptotic backend");
@@ -576,7 +585,7 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         "trigamma shifts negative noninteger rationals into the certified positive domain exactly");
     tests.expectEqual(eval(session, "N[digamma[N[-1/2,5]],20]"),
         std::string{"0.0365"},
-        "finite-precision negative real digamma uses the complex recurrence backend safely");
+        "finite-precision negative real digamma uses the real recurrence backend safely");
     tests.expectEqual(eval(session, "N[trigamma[N[-1/2,5]],20]"),
         std::string{"8.9348"},
         "finite-precision negative real trigamma uses the complex recurrence backend safely");

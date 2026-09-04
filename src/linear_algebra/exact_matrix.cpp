@@ -1,5 +1,7 @@
 // exact Matrix elimination。Number行列はExpr/Simplifierを経由せず直接処理する。
 #include "exact_matrix.hpp"
+#include "linear_algebra/exact_matrix_detail.hpp"
+#include "linear_algebra/number_matrix.hpp"
 #include "evaluation/evaluation_budget.hpp"
 
 #include "builtins/exact_operations.hpp"
@@ -27,99 +29,17 @@ using expression::Expr;
 using numeric::BigInt;
 using numeric::Number;
 
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
-}
+using detail::NumberMatrix;
+using detail::add;
+using detail::divide;
+using detail::exactZero;
+using detail::integer;
+using detail::multiply;
+using detail::negate;
+using detail::provablyNonZero;
+using detail::simplify;
+using detail::subtract;
 
-[[nodiscard]] bool exactZero(const Expr& value) {
-    return value.isNumber() && value.asNumber().isZero();
-}
-
-[[nodiscard]] bool provablyNonZero(
-    const Expr& value,
-    const ExactMatrixContext& context) {
-    if (value.isNumber())
-        return !value.asNumber().isZero();
-    const auto facts = mathematics::inferValueFacts(
-        value, context.builtins, context.mathematics);
-    return facts.sign == mathematics::RealSign::Positive
-        || facts.sign == mathematics::RealSign::Negative
-        || facts.sign == mathematics::RealSign::NonZero;
-}
-
-[[nodiscard]] Expr add(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::add({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
-
-[[nodiscard]] Expr subtract(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::subtract(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
-
-[[nodiscard]] Expr multiply(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::multiply({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
-
-[[nodiscard]] Expr divide(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::divide(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
-
-[[nodiscard]] Expr negate(Expr value, const ExactMatrixContext& context) {
-    return builtins::exact::negate(std::move(value),
-        context.builtins, context.mathematics, context.angles);
-}
-
-[[nodiscard]] Expr simplify(Expr value, const ExactMatrixContext& context) {
-    return builtins::exact::simplify(std::move(value),
-        context.builtins, context.mathematics, context.angles);
-}
-
-class NumericMatrix final {
-public:
-    NumericMatrix(std::size_t rows, std::size_t columns)
-        : rows_(rows), columns_(columns) {
-        const std::size_t shape[] = {rows, columns};
-        values_.assign(expression::arrayElementCount(shape), Number{BigInt{0}});
-    }
-
-    explicit NumericMatrix(const MatrixView& matrix)
-        : NumericMatrix(matrix.rows(), matrix.columns()) {
-        for (std::size_t i = 0; i < values_.size(); ++i)
-            values_[i] = matrix.array().exactNumber(i);
-    }
-
-    [[nodiscard]] std::size_t rows() const noexcept { return rows_; }
-    [[nodiscard]] std::size_t columns() const noexcept { return columns_; }
-    [[nodiscard]] Number& operator()(std::size_t row, std::size_t column) noexcept {
-        return values_[row * columns_ + column];
-    }
-    [[nodiscard]] const Number& operator()(std::size_t row, std::size_t column) const noexcept {
-        return values_[row * columns_ + column];
-    }
-
-    void swapRows(std::size_t lhs, std::size_t rhs) noexcept {
-        if (lhs == rhs)
-            return;
-        for (std::size_t column = 0; column < columns_; ++column)
-            std::swap((*this)(lhs, column), (*this)(rhs, column));
-    }
-
-    [[nodiscard]] MatrixBuffer toExprBuffer() const {
-        std::vector<Expr> elements;
-        elements.reserve(values_.size());
-        for (const Number& value : values_)
-            elements.emplace_back(value);
-        return MatrixBuffer{rows_, columns_, std::move(elements)};
-    }
-
-private:
-    std::size_t rows_ = 0;
-    std::size_t columns_ = 0;
-    std::vector<Number> values_;
-};
 
 [[nodiscard]] std::size_t augmentedColumns(std::size_t columns);
 
@@ -213,8 +133,8 @@ template <class RationalAt>
     return result;
 }
 
-[[nodiscard]] NumericMatrix rrefFromBareiss(BareissEchelonResult result) {
-    NumericMatrix matrix{result.matrix.rows(), result.matrix.columns()};
+[[nodiscard]] NumberMatrix rrefFromBareiss(BareissEchelonResult result) {
+    NumberMatrix matrix{result.matrix.rows(), result.matrix.columns()};
     for (std::size_t row = 0; row < result.matrix.rows(); ++row)
         for (std::size_t column = 0; column < result.matrix.columns(); ++column)
             matrix(row, column) = Number{result.matrix(row, column)};
@@ -269,7 +189,7 @@ template <class RationalAt>
 }
 
 [[nodiscard]] Expr numericNullSpaceBasis(
-    const NumericMatrix& reduced,
+    const NumberMatrix& reduced,
     const std::vector<std::size_t>& pivotColumns,
     std::size_t variables) {
     std::vector<bool> isPivot(variables, false);
@@ -296,7 +216,7 @@ template <class RationalAt>
 }
 
 [[nodiscard]] std::vector<std::size_t> numericPivotColumns(
-    const NumericMatrix& reduced,
+    const NumberMatrix& reduced,
     std::size_t variables) {
     std::vector<std::size_t> pivots;
     pivots.reserve(std::min(reduced.rows(), variables));
@@ -347,7 +267,7 @@ template <class RationalAt>
 }
 
 // exact complexは整数lift対象外なので、専用環を導入するまでは従来Gaussianを保持する。
-[[nodiscard]] Number numericDeterminantGaussian(NumericMatrix matrix) {
+[[nodiscard]] Number numericDeterminantGaussian(NumberMatrix matrix) {
     const std::size_t n = matrix.rows();
     Number result{BigInt{1}};
     bool negative = false;
@@ -379,8 +299,8 @@ template <class RationalAt>
 }
 
 // 同じfallbackをinverse/rref/rankで共有する。実Rational主経路はBareissへ送る。
-[[nodiscard]] NumericMatrix numericRrefGaussian(
-    NumericMatrix matrix,
+[[nodiscard]] NumberMatrix numericRrefGaussian(
+    NumberMatrix matrix,
     std::size_t pivotColumnLimit) {
     const std::size_t rows = matrix.rows();
     const std::size_t columns = matrix.columns();
@@ -415,7 +335,7 @@ template <class RationalAt>
     return matrix;
 }
 
-[[nodiscard]] std::size_t numericRank(const NumericMatrix& reduced) {
+[[nodiscard]] std::size_t numericRank(const NumberMatrix& reduced) {
     std::size_t rank = 0;
     for (std::size_t row = 0; row < reduced.rows(); ++row) {
         bool nonZero = false;
@@ -438,14 +358,14 @@ template <class RationalAt>
 [[nodiscard]] MatrixBuffer numericInverseGaussian(const MatrixView& source) {
     const std::size_t n = source.rows();
     const std::size_t columns = augmentedColumns(n);
-    NumericMatrix augmented{n, columns};
+    NumberMatrix augmented{n, columns};
     for (std::size_t row = 0; row < n; ++row) {
         for (std::size_t column = 0; column < n; ++column)
             augmented(row, column) = source(row, column).asNumber();
         augmented(row, n + row) = Number{BigInt{1}};
     }
 
-    NumericMatrix reduced = numericRrefGaussian(std::move(augmented), n);
+    NumberMatrix reduced = numericRrefGaussian(std::move(augmented), n);
     for (std::size_t row = 0; row < n; ++row)
         for (std::size_t column = 0; column < n; ++column) {
             const Number expected{BigInt{row == column ? 1 : 0}};
@@ -529,13 +449,13 @@ template <class RationalAt>
     if (variables == std::numeric_limits<std::size_t>::max())
         throw std::length_error("Linear system augmented column count exceeds the size_t range");
 
-    NumericMatrix augmented{rows, variables + 1};
+    NumberMatrix augmented{rows, variables + 1};
     for (std::size_t row = 0; row < rows; ++row) {
         for (std::size_t column = 0; column < variables; ++column)
             augmented(row, column) = source(row, column).asNumber();
         augmented(row, variables) = rhs.exactNumber(row);
     }
-    NumericMatrix reduced = numericRrefGaussian(std::move(augmented), variables);
+    NumberMatrix reduced = numericRrefGaussian(std::move(augmented), variables);
 
     std::size_t rank = 0;
     for (std::size_t row = 0; row < rows; ++row) {
@@ -850,7 +770,7 @@ std::optional<Expr> determinant(const MatrixView& matrix, const ExactMatrixConte
     if (allExactRealNumbers(matrix))
         return Expr{exactDeterminantOfRealMatrix(matrix)};
     if (allExactNumbers(matrix))
-        return Expr{numericDeterminantGaussian(NumericMatrix{matrix})};
+        return Expr{numericDeterminantGaussian(NumberMatrix{matrix})};
 
     constexpr std::size_t symbolicExpansionBudget = 512;
     std::size_t budget = symbolicExpansionBudget;
@@ -899,7 +819,7 @@ std::optional<MatrixBuffer> rref(
     if (allExactRealNumbers(matrix))
         return bareissRrefOfRealMatrix(matrix);
     if (allExactNumbers(matrix))
-        return numericRrefGaussian(NumericMatrix{matrix}, matrix.columns()).toExprBuffer();
+        return numericRrefGaussian(NumberMatrix{matrix}, matrix.columns()).toExprBuffer();
     return symbolicRref(MatrixBuffer{matrix}, context, matrix.columns());
 }
 
@@ -909,7 +829,7 @@ std::optional<std::size_t> matrixRank(
     if (allExactRealNumbers(matrix))
         return bareissRankOfRealMatrix(matrix);
     if (allExactNumbers(matrix))
-        return numericRank(numericRrefGaussian(NumericMatrix{matrix}, matrix.columns()));
+        return numericRank(numericRrefGaussian(NumberMatrix{matrix}, matrix.columns()));
     const auto reduced = symbolicRref(MatrixBuffer{matrix}, context, matrix.columns());
     if (!reduced)
         return std::nullopt;
@@ -935,7 +855,7 @@ std::optional<Expr> nullSpace(
     if (allExactRealNumbers(matrix))
         return bareissNullSpaceOfRealMatrix(matrix);
     if (allExactNumbers(matrix)) {
-        NumericMatrix reduced = numericRrefGaussian(NumericMatrix{matrix}, matrix.columns());
+        NumberMatrix reduced = numericRrefGaussian(NumberMatrix{matrix}, matrix.columns());
         const auto pivots = numericPivotColumns(reduced, matrix.columns());
         return numericNullSpaceBasis(reduced, pivots, matrix.columns());
     }

@@ -121,6 +121,10 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "ifft[fft[{1+I,2-I,3+2I,4-3I,5+I}]]"),
         std::string{"{1+I, 2-I, 3+2I, 4-3I, 5+I}"},
         "cyclotomic exact FFT preserves Gaussian-rational inputs");
+    tests.expectEqual(eval(session,
+        "ifft[fft[{2,4+2I,-3I,-5+3I,-1,1}]]"),
+        std::string{"{2, 4+2I, -3I, -5+3I, -1, 1}"},
+        "six-point Gaussian-rational FFT re-enters the twelfth cyclotomic field exactly");
     tests.expect(eval(session, "fft[{x,1,0,0,0}]").find("x") != std::string::npos,
         "symbolic exact FFT retains the generic fallback");
     tests.expectEqual(eval(session, "convolve[{1,2},{3,4}]"), std::string{"{3, 10, 8}"},

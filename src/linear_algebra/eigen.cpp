@@ -8,9 +8,11 @@
 #include "approximation/interval_math.hpp"
 #include "approximation/precision.hpp"
 #include "builtins/exact_operations.hpp"
+#include "linear_algebra/exact_matrix_detail.hpp"
 #include "expression/array_utils.hpp"
 #include "evaluation/evaluation_budget.hpp"
 #include "linear_algebra/complex_point.hpp"
+#include "linear_algebra/point_arithmetic.hpp"
 #include "numeric/big_float.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
@@ -45,34 +47,22 @@ using numeric::RoundingMode;
 
 constexpr std::size_t maximumPrecisionRetries = 10;
 
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
-}
+using detail::add;
+using detail::absolute;
+using detail::divide;
+using detail::integer;
+using detail::midpoint;
+using detail::multiply;
+using detail::one;
+using detail::squareRoot;
+using detail::subtract;
+using detail::two;
+using detail::zero;
 
-[[nodiscard]] Expr add(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::add({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr subtract(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::subtract(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr multiply(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::multiply({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr divide(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::divide(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
+
 [[nodiscard]] Expr square(Expr value, const ExactMatrixContext& context) {
     return multiply(value, value, context);
 }
-[[nodiscard]] Expr squareRoot(Expr value, const ExactMatrixContext& context) {
-    return builtins::exact::sqrt(std::move(value),
-        context.builtins, context.mathematics, context.angles);
-}
-
 [[nodiscard]] bool isUpperTriangular(const MatrixView& matrix) {
     for (std::size_t row = 1; row < matrix.rows(); ++row)
         for (std::size_t column = 0; column < row; ++column) {
@@ -167,37 +157,6 @@ constexpr std::size_t maximumPrecisionRetries = 10;
     return Expr::array({2, 2}, std::move(result));
 }
 
-[[nodiscard]] BigFloat zero(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat one(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{1}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat two(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{2}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat add(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::add(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat subtract(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::subtract(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat multiply(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::multiply(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat divide(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::divide(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat absolute(const BigFloat& value) {
-    return value.isNegative() ? -value : value;
-}
-
-[[nodiscard]] Rational midpointRational(const RealInterval& interval) {
-    return (interval.lower().toRational() + interval.upper().toRational()) / Rational{BigInt{2}};
-}
-[[nodiscard]] BigFloat midpoint(const RealInterval& interval, std::size_t bits) {
-    return BigFloat::fromRational(midpointRational(interval), bits, RoundingMode::NearestEven);
-}
 [[nodiscard]] ComplexPoint midpoint(const ComplexInterval& interval, std::size_t bits) {
     return ComplexPoint{midpoint(interval.real(), bits), midpoint(interval.imaginary(), bits)};
 }
@@ -816,6 +775,8 @@ enum class ApproximateEigenOutput {
     if (!matrix.isMatrix() || matrix.shape[0] != matrix.shape[1])
         return std::nullopt;
     approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
+    // PrecisionInsufficientはguard桁を増やせば解消し得るが，BackendUnsupportedは構造的な未対応である。
+    // 後者を同じ入力で再試行しても改善しないため，直ちに上位fallbackへ返す。
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
         evaluation::consumeEvaluationBudget(
             evaluation::EvaluationResource::CertifiedRefinement);

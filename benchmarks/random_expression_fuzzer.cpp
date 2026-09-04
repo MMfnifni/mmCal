@@ -1270,7 +1270,11 @@ bool runRandomExpressionFuzzer(const RandomExpressionFuzzerOptions& options) {
         }
 
         const double seconds = std::chrono::duration<double>(Clock::now() - started).count();
-        std::cout << "Random expression case: PASS  " << seconds << " s\n";
+        std::cout
+            << "Depth     : " << testCase.targetDepth << '\n'
+            << "Invariant : " << invariantName(testCase.invariant) << '\n'
+            << "Expression: " << testCase.expression.source << '\n'
+            << "Random expression case: PASS  " << seconds << " s\n";
         return true;
     }
 

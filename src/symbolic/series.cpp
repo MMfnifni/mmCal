@@ -3,6 +3,7 @@
 #include "builtins/arithmetic.hpp"
 #include "builtins/special_functions.hpp"
 #include "expression/array_utils.hpp"
+#include "expression/exact_value.hpp"
 #include "mathematics/value_facts.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -24,13 +25,16 @@ namespace mmcal::symbolic {
 namespace {
 
 using expression::Expr;
+using expression::exact::integer;
+using expression::exact::isOne;
+using expression::exact::isZero;
+using expression::exact::rational;
 using evaluation::BuiltinId;
+using numeric::BigInt;
+using numeric::Number;
+using numeric::Rational;
 
 constexpr std::int64_t kMaximumInternalExponent = 8192;
-
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{numeric::Number{numeric::BigInt{value}}};
-}
 
 [[nodiscard]] Expr pi(const mathematics::MathRegistry& mathematics) {
     if (const auto* definition = mathematics.findConstant(mathematics::ConstantId::Pi))
@@ -62,17 +66,6 @@ constexpr std::int64_t kMaximumInternalExponent = 8192;
     if (arguments.size() != 2 || !arguments[1].isString())
         return std::nullopt;
     return mathematics::AngleSemantics::parseUnit(arguments[1].asString());
-}
-
-[[nodiscard]] bool isZero(const Expr& expression) noexcept {
-    return expression.isNumber() && expression.asNumber().isZero();
-}
-
-[[nodiscard]] bool isOne(const Expr& expression) noexcept {
-    return expression.isNumber()
-        && expression.asNumber().isReal()
-        && expression.asNumber().asReal().isInteger()
-        && expression.asNumber().asReal().asInteger() == numeric::BigInt{1};
 }
 
 [[nodiscard]] bool isPositiveInfinityCenter(const Expr& expression) noexcept {
@@ -398,11 +391,6 @@ struct SmallRational final {
         || denominator == 0 || denominator > 64)
         return std::nullopt;
     return SmallRational{numerator, static_cast<std::uint32_t>(denominator)};
-}
-
-[[nodiscard]] Expr rational(std::int64_t numerator, std::int64_t denominator) {
-    return Expr{numeric::Number{numeric::Rational{
-        numeric::BigInt{numerator}, numeric::BigInt{denominator}}}};
 }
 
 [[nodiscard]] std::optional<std::uint32_t> exactUint32(const Expr& expression) {
@@ -1331,6 +1319,47 @@ void trimLeadingZeros(LaurentSeries& series) {
     return result;
 }
 
+[[nodiscard]] std::optional<LaurentSeries> expandExpSeriesSingleSimplify(
+    const LaurentSeries& argument,
+    std::int64_t ceiling,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    if (!argument.exactZero && argument.minimumExponent < 0)
+        return std::nullopt;
+    if (ceiling < 0)
+        return zeroSeries(ceiling);
+
+    LaurentSeries result = denseSeries(0, ceiling);
+    const Expr a0 = coefficientAt(argument, 0);
+    result.coefficients[0] = simplify(
+        call(BuiltinId::Exp, {a0}, builtins),
+        builtins, mathematics, angles, assumptions);
+
+    for (std::int64_t n = 1; n <= ceiling; ++n) {
+        std::vector<Expr> terms;
+        terms.reserve(static_cast<std::size_t>(n));
+        for (std::int64_t k = 1; k <= n; ++k) {
+            const Expr ak = coefficientAt(argument, k);
+            if (isZero(ak)) continue;
+            const std::array<Expr, 3> factors{
+                integer(k), ak, result.coefficients[static_cast<std::size_t>(n - k)]};
+            terms.push_back(builtins::evaluateMultiply(factors, builtins));
+        }
+
+        Expr sum = integer(0);
+        if (!terms.empty())
+            sum = builtins::evaluateAdd(terms, builtins);
+        const std::array<Expr, 2> quotient{sum, integer(n)};
+        result.coefficients[static_cast<std::size_t>(n)] = simplify(
+            builtins::evaluateDivide(quotient, builtins),
+            builtins, mathematics, angles, assumptions);
+    }
+    trimLeadingZeros(result);
+    return result;
+}
+
 [[nodiscard]] std::optional<LaurentSeries> expandLogSeries(
     const LaurentSeries& argument,
     std::int64_t ceiling,
@@ -1594,6 +1623,135 @@ void trimLeadingZeros(LaurentSeries& series) {
         if (!result.coefficients.empty()) result.coefficients[0] = constant;
         trimLeadingZeros(result);
         return result;
+    }
+
+    const auto exactRationalCoefficient = [](const Expr& value) -> std::optional<Rational> {
+        if (!value.isNumber() || !value.asNumber().isReal())
+            return std::nullopt;
+        return value.asNumber().asReal().toRational();
+    };
+    const auto affineRationalArgument = [&]() -> std::optional<std::pair<Rational, Rational>> {
+        if (argument.minimumExponent != 0)
+            return std::nullopt;
+        const auto a = exactRationalCoefficient(coefficientAt(argument, 0));
+        const auto b = exactRationalCoefficient(coefficientAt(argument, 1));
+        if (!a || !b || b->isZero())
+            return std::nullopt;
+        for (std::int64_t exponent = 2; exponent <= argument.ceiling; ++exponent)
+            if (!isZero(coefficientAt(argument, exponent)))
+                return std::nullopt;
+        return std::pair<Rational, Rational>{*a, *b};
+    };
+
+    if (const auto affine = affineRationalArgument(); affine && ceiling >= 0) {
+        const Rational a = affine->first;
+        const Rational b = affine->second;
+        if (id == BuiltinId::ExponentialIntegralEi && !a.isZero()) {
+            LaurentSeries result = denseSeries(0, ceiling);
+            result.coefficients[0] = constant;
+            const Expr exponential = simplify(
+                call(BuiltinId::Exp, {Expr{Number{a}}}, builtins),
+                builtins, mathematics, angles, assumptions);
+            Rational h = Rational{BigInt{1}} / a;
+            Rational bPower{BigInt{1}};
+            BigInt factorial{1};
+            for (std::int64_t n = 0; n < ceiling; ++n) {
+                if (n != 0) {
+                    bPower *= b;
+                    factorial *= BigInt::fromUnsigned(static_cast<std::uint64_t>(n));
+                    const Rational rhs = bPower / Rational{factorial};
+                    h = (rhs - b * h) / a;
+                }
+                const Rational scale = b * h
+                    / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(n + 1))};
+                result.coefficients[static_cast<std::size_t>(n + 1)] = multiply(
+                    Expr{Number{scale}}, exponential,
+                    builtins, mathematics, angles, assumptions);
+            }
+            trimLeadingZeros(result);
+            return result;
+        }
+
+        if (id == BuiltinId::LogarithmicIntegralLi
+            && a > Rational{BigInt{0}} && !(a == Rational{BigInt{1}})) {
+            LaurentSeries result = denseSeries(0, ceiling);
+            result.coefficients[0] = constant;
+            Expr logarithm = simplify(
+                call(BuiltinId::Log, {Expr{Number{a}}}, builtins),
+                builtins, mathematics, angles, assumptions);
+            Expr inverseLog = divide(
+                integer(1), logarithm,
+                builtins, mathematics, angles, assumptions);
+
+            // c_n=[t^n]1/log(a+b t) を u=1/log(a) の有理係数多項式で保持する。
+            std::vector<std::vector<Rational>> inverseCoefficients;
+            inverseCoefficients.reserve(static_cast<std::size_t>(ceiling));
+            inverseCoefficients.push_back({Rational{BigInt{0}}, Rational{BigInt{1}}});
+            Rational ratio = b / a;
+            Rational ratioPower{BigInt{1}};
+            for (std::int64_t n = 1; n < ceiling; ++n) {
+                std::vector<Rational> sum(static_cast<std::size_t>(n + 2), Rational{BigInt{0}});
+                for (std::int64_t k = 1; k <= n; ++k) {
+                    ratioPower = Rational{BigInt{1}};
+                    for (std::int64_t j = 0; j < k; ++j)
+                        ratioPower *= ratio;
+                    Rational logCoefficient = ratioPower
+                        / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(k))};
+                    if ((k & 1) == 0)
+                        logCoefficient = -logCoefficient;
+                    const auto& previous = inverseCoefficients[static_cast<std::size_t>(n - k)];
+                    for (std::size_t degree = 0; degree < previous.size(); ++degree)
+                        sum[degree] += logCoefficient * previous[degree];
+                }
+                std::vector<Rational> current(sum.size() + 1, Rational{BigInt{0}});
+                for (std::size_t degree = 0; degree < sum.size(); ++degree)
+                    current[degree + 1] = -sum[degree];
+                while (current.size() > 1 && current.back().isZero())
+                    current.pop_back();
+                inverseCoefficients.push_back(std::move(current));
+            }
+
+            const auto materialize = [&](const std::vector<Rational>& polynomial) {
+                std::vector<Expr> terms;
+                for (std::size_t degree = 0; degree < polynomial.size(); ++degree) {
+                    const Rational coefficient = polynomial[degree];
+                    if (coefficient.isZero())
+                        continue;
+                    Expr term{Number{coefficient}};
+                    if (degree != 0) {
+                        Expr powerTerm = degree == 1
+                            ? inverseLog
+                            : simplify(
+                                call(BuiltinId::Power, {
+                                    inverseLog,
+                                    integer(static_cast<std::int64_t>(degree))}, builtins),
+                                builtins, mathematics, angles, assumptions);
+                        term = multiply(
+                            term, powerTerm,
+                            builtins, mathematics, angles, assumptions);
+                    }
+                    terms.push_back(std::move(term));
+                }
+                if (terms.empty())
+                    return integer(0);
+                if (terms.size() == 1)
+                    return terms.front();
+                return simplify(
+                    call(BuiltinId::Add, std::move(terms), builtins),
+                    builtins, mathematics, angles, assumptions);
+            };
+
+            for (std::int64_t n = 0; n < ceiling; ++n) {
+                Expr coefficient = materialize(inverseCoefficients[static_cast<std::size_t>(n)]);
+                coefficient = multiply(
+                    Expr{Number{b / Rational{BigInt::fromUnsigned(static_cast<std::uint64_t>(n + 1))}}},
+                    coefficient,
+                    builtins, mathematics, angles, assumptions);
+                result.coefficients[static_cast<std::size_t>(n + 1)] = std::move(coefficient);
+            }
+            trimLeadingZeros(result);
+            return result;
+        }
     }
 
     const std::int64_t derivativeCeiling = std::max<std::int64_t>(0, ceiling - 1);
@@ -2009,7 +2167,7 @@ void scaleFormalSeries(
         return deltaLog;
     }
 
-    auto gamma = expandExpSeries(
+    auto gamma = expandExpSeriesSingleSimplify(
         *deltaLog, ceiling,
         builtins, mathematics, angles, assumptions);
     if (!gamma)

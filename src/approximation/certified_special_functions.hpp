@@ -227,7 +227,10 @@ namespace mmcal::approximation {
     const numeric::Rational& b,
     std::size_t precisionBits);
 
-// Riemann zeta。第一版certified backendは実軸s>1。
+// Riemann zeta。exact Rational s>1は元の有理値を保ったままEuler-Maclaurinへ送る。
+[[nodiscard]] RealInterval encloseZetaRational(
+    const numeric::Rational& input,
+    std::size_t precisionBits);
 [[nodiscard]] RealInterval encloseZetaReal(
     const RealInterval& input,
     std::size_t precisionBits);
@@ -236,7 +239,20 @@ namespace mmcal::approximation {
     const ComplexInterval& input,
     std::size_t precisionBits);
 
-// digamma/trigamma。第一版certified backendは正実数域。
+// digamma/trigammaのexact Rational fast path。負の非整数はexact recurrenceで正側へ移す。
+[[nodiscard]] RealInterval encloseDigammaRational(
+    const numeric::Rational& input,
+    std::size_t precisionBits);
+[[nodiscard]] RealInterval encloseTrigammaRational(
+    const numeric::Rational& input,
+    std::size_t precisionBits);
+
+// digammaの実数backend。poleを跨がない負実数区間はrecurrenceで正実軸へ移す。
+[[nodiscard]] RealInterval encloseDigammaReal(
+    const RealInterval& input,
+    std::size_t precisionBits);
+
+// 正実数用の直接backend。
 [[nodiscard]] RealInterval encloseDigammaPositive(
     const RealInterval& input,
     std::size_t precisionBits);

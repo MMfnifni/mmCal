@@ -7,6 +7,8 @@
 #include "approximation/expression_interval.hpp"
 #include "approximation/interval_math.hpp"
 #include "builtins/exact_operations.hpp"
+#include "linear_algebra/exact_matrix_detail.hpp"
+#include "linear_algebra/number_matrix.hpp"
 #include "expression/array_utils.hpp"
 #include "evaluation/evaluation_budget.hpp"
 #include "mathematics/exact_roots.hpp"
@@ -39,46 +41,13 @@ using numeric::Rational;
 constexpr std::size_t maximumPrecisionRetries = 12;
 constexpr std::size_t defaultQrBlockColumns = 1;
 
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
-}
-
-class NumberMatrix final {
-public:
-    NumberMatrix(std::size_t rows, std::size_t columns)
-        : rows_(rows), columns_(columns) {
-        const std::size_t shape[] = {rows, columns};
-        values_.assign(expression::arrayElementCount(shape), Number{BigInt{0}});
-    }
-
-    explicit NumberMatrix(const MatrixView& source)
-        : NumberMatrix(source.rows(), source.columns()) {
-        for (std::size_t i = 0; i < values_.size(); ++i)
-            values_[i] = source.array().exactNumber(i);
-    }
-
-    [[nodiscard]] std::size_t rows() const noexcept { return rows_; }
-    [[nodiscard]] std::size_t columns() const noexcept { return columns_; }
-    [[nodiscard]] Number& operator()(std::size_t row, std::size_t column) noexcept {
-        return values_[row * columns_ + column];
-    }
-    [[nodiscard]] const Number& operator()(std::size_t row, std::size_t column) const noexcept {
-        return values_[row * columns_ + column];
-    }
-    void swapRows(std::size_t lhs, std::size_t rhs) noexcept {
-        if (lhs == rhs)
-            return;
-        for (std::size_t column = 0; column < columns_; ++column)
-            std::swap((*this)(lhs, column), (*this)(rhs, column));
-    }
-
-    [[nodiscard]] const std::vector<Number>& values() const noexcept { return values_; }
-
-private:
-    std::size_t rows_ = 0;
-    std::size_t columns_ = 0;
-    std::vector<Number> values_;
-};
+using detail::NumberMatrix;
+using detail::divide;
+using detail::exactZero;
+using detail::integer;
+using detail::multiply;
+using detail::provablyNonZero;
+using detail::subtract;
 
 [[nodiscard]] bool allExactRealNumbers(const MatrixView& matrix) noexcept {
     return matrix.array().hasExactRealStorage();
@@ -145,31 +114,6 @@ private:
     return packedNumberMatrices(factors, n, n);
 }
 
-[[nodiscard]] bool exactZero(const Expr& value) {
-    return value.isNumber() && value.asNumber().isZero();
-}
-
-[[nodiscard]] bool provablyNonZero(const Expr& value, const ExactMatrixContext& context) {
-    if (value.isNumber())
-        return !value.asNumber().isZero();
-    const auto facts = mathematics::inferValueFacts(value, context.builtins, context.mathematics);
-    return facts.sign == mathematics::RealSign::Positive
-        || facts.sign == mathematics::RealSign::Negative
-        || facts.sign == mathematics::RealSign::NonZero;
-}
-
-[[nodiscard]] Expr subtract(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::subtract(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr multiply(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::multiply({std::move(lhs), std::move(rhs)},
-        context.builtins, context.mathematics, context.angles);
-}
-[[nodiscard]] Expr divide(Expr lhs, Expr rhs, const ExactMatrixContext& context) {
-    return builtins::exact::divide(std::move(lhs), std::move(rhs),
-        context.builtins, context.mathematics, context.angles);
-}
 
 [[nodiscard]] Expr packedExprMatrices(
     std::span<const MatrixBuffer* const> matrices,
@@ -687,6 +631,8 @@ template <class Operation>
 [[nodiscard]] std::optional<Expr> retryApproximation(
     approximation::ApproximationContext context,
     Operation&& operation) {
+    // PrecisionInsufficientはguard桁を増やせば解消し得るが，BackendUnsupportedは構造的な未対応である。
+    // 後者を同じ入力で再試行しても改善しないため，直ちに上位fallbackへ返す。
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
         evaluation::consumeEvaluationBudget(
             evaluation::EvaluationResource::CertifiedRefinement);

@@ -11,6 +11,7 @@
 #include "numeric/rational.hpp"
 #include "symbolic/algebraic_expression.hpp"
 #include "symbolic/algebraic_number.hpp"
+#include "symbolic/polynomial.hpp"
 
 #include <optional>
 
@@ -105,6 +106,40 @@ struct ComplexBounds final {
     return symbolic::exactAlgebraicValue(value, registry, mathematics);
 }
 
+[[nodiscard]] std::optional<bool> sameDenominatorRationalPolynomialIdentity(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& registry) {
+    const auto divideArguments = [&](const Expr& value) -> const std::vector<Expr>* {
+        if (!registry.isCallTo(value, evaluation::BuiltinId::Divide)
+            || value.asCall().arguments.size() != 2)
+            return nullptr;
+        return &value.asCall().arguments;
+    };
+    const auto* left = divideArguments(lhs);
+    const auto* right = divideArguments(rhs);
+    if (!left || !right || !((*left)[1] == (*right)[1]))
+        return std::nullopt;
+
+    std::vector<Symbol> symbols = symbolic::collectSymbols((*left)[0]);
+    for (const Symbol& symbol : symbolic::collectSymbols((*right)[0])) {
+        bool found = false;
+        for (const Symbol& existing : symbols)
+            if (existing.sameIdentity(symbol)) { found = true; break; }
+        if (!found)
+            symbols.push_back(symbol);
+    }
+    if (symbols.size() != 1)
+        return std::nullopt;
+    const auto leftPolynomial = symbolic::toRationalPolynomial(
+        (*left)[0], symbols.front(), registry);
+    const auto rightPolynomial = symbolic::toRationalPolynomial(
+        (*right)[0], symbols.front(), registry);
+    if (!leftPolynomial || !rightPolynomial)
+        return std::nullopt;
+    return leftPolynomial->coefficients() == rightPolynomial->coefficients();
+}
+
 [[nodiscard]] std::optional<bool> algebraicOrderResult(
     const Symbol& head,
     const Expr& lhs,
@@ -163,7 +198,13 @@ Expr evaluateComparison(
             equal = lhs.asString() == rhs.asString();
         }
         else {
-            const auto leftAlgebraic = algebraicValue(lhs, registry, mathematics);
+            if (const auto rationalIdentity = sameDenominatorRationalPolynomialIdentity(
+                    lhs, rhs, registry)) {
+                determined = true;
+                equal = *rationalIdentity;
+            }
+
+            const auto leftAlgebraic = determined ? std::nullopt : algebraicValue(lhs, registry, mathematics);
             const auto rightAlgebraic = algebraicValue(rhs, registry, mathematics);
             if (leftAlgebraic && rightAlgebraic) {
                 if (const auto exact = leftAlgebraic->exactEquals(*rightAlgebraic)) {

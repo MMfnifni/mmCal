@@ -1,5 +1,6 @@
 // 線形代数内部のBigFloat複素点演算
 #include "complex_point.hpp"
+#include "point_arithmetic.hpp"
 
 #include "numeric/big_int.hpp"
 #include "numeric/rational.hpp"
@@ -11,34 +12,6 @@ namespace {
 
 using numeric::BigFloat;
 using numeric::BigInt;
-using numeric::RoundingMode;
-
-[[nodiscard]] BigFloat zero(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat one(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{1}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat add(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::add(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat subtract(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::subtract(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat multiply(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::multiply(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat divide(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::divide(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-
-[[nodiscard]] BigFloat midpoint(
-    const approximation::RealInterval& interval,
-    std::size_t bits) {
-    const auto rational = (interval.lower().toRational() + interval.upper().toRational())
-        / numeric::Rational{BigInt{2}};
-    return BigFloat::fromRational(rational, bits, RoundingMode::NearestEven);
-}
 
 [[nodiscard]] BigFloat squareRoot(const BigFloat& value, std::size_t bits) {
     const auto enclosure = approximation::encloseSqrt(value.toRational(), bits + 8).interval;

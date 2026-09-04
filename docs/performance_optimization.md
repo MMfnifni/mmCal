@@ -1264,7 +1264,7 @@ c sin(k u) -> -c cos(k u)/(k u')
 constant   -> constant*x.
 ```
 
-The existing `TrigArgument` scale is retained, so Rad/Deg/Grad session semantics do not change. Nonlinear arguments are not forced through the fast path. For example, `sin[2x^2]^4` falls back to the former Fourier-Expr/general-integrator path and therefore still reaches the Fresnel transformation. Existing compact square and `sin[x]cos[x]` forms also retain their earlier routes.
+The existing `TrigArgument` scale is retained, so Rad/Deg/Grad session semantics do not change. Nonlinear arguments are not forced through the fast path. For example, `sin[2x^2]^4` falls back to the former Fourier-Expr/general-integrator path and therefore still reaches the Fresnel transformation. Simple first-power sine/cosine products may now enter the same finite-Fourier route earlier when product-to-sum gives a provably flatter primitive; in particular `integrate[sin[x]cos[x],x]` canonicalizes to `-cos[2x]/4`.
 
 On 2026-08-28, GCC Release / LTO off, `runAdvancedIntegrationTests` fell from roughly 14.9 s to about 2.2 s while retaining every test, including the degree-256 Fourier case and nonlinear Fresnel composition.
 

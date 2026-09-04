@@ -63,6 +63,187 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "right-limit direction is injected into local assumptions");
     tests.expectEqual(eval(session, "limit[abs[x]/x,x,0,-1]"), std::string{"-1"},
         "left-limit direction is injected into local assumptions");
+    tests.expectEqual(eval(session, "limit[D[abs[x],x],x,0,1]"), std::string{"1"},
+        "right-limit assumptions re-materialize a held derivative after abs simplifies");
+    tests.expectEqual(eval(session, "limit[D[abs[x],x],x,0,-1]"), std::string{"-1"},
+        "left-limit assumptions re-materialize the opposite held derivative branch");
+    tests.expectEqual(eval(session, "limit[D[abs[x],{x,2}],x,0,1]"), std::string{"0"},
+        "held repeated derivatives are materialized after directional simplification");
+    tests.expectEqual(eval(session, "limit[cases[x if x>=0;-x if x<0],x,0]"),
+        std::string{"0"},
+        "two-sided limits of variable-dependent cases compare separately simplified side branches");
+    tests.expectEqual(eval(session, "limit[cases[1 if x>0;2 if x<0],x,0]"),
+        std::string{"Indeterminate"},
+        "two-sided cases limits report disagreement between proven side limits");
+    tests.expectEqual(eval(session, "limit[solve[x==1,x],x,0]"),
+        std::string{"solve[x == 1, x]"},
+        "limit does not capture a solve-bound variable during direct substitution");
+    tests.expectEqual(eval(session, "limit[solve[y==x,y],x,0]"),
+        std::string{"solve[y == 0, y]"},
+        "limit still substitutes a free parameter inside solve relations");
+    tests.expectEqual(eval(session, "limit[solve[{x+y==1,x>0},{x,y}],x,0]"),
+        std::string{"solve[{x+y == 1, x > 0}, {x, y}]"},
+        "limit protects solve variable arrays and their constraints from capture");
+    tests.expectEqual(eval(session, "limit[grad[x^2,{x}],x,0]"),
+        std::string{"{0}"},
+        "limit materializes gradient before substituting its coordinate variable");
+    tests.expectEqual(eval(session, "limit[divergence[{x^2,y},{x,y}],x,0]"),
+        std::string{"1"},
+        "limit materializes divergence before substituting its coordinate variables");
+    tests.expectEqual(eval(session, "limit[curl[{-y,x},{x,y}],x,0]"),
+        std::string{"2"},
+        "limit materializes curl before substituting its coordinate variables");
+    tests.expectEqual(eval(session, "limit[laplacian[x^2+y^2,{x,y}],x,0]"),
+        std::string{"4"},
+        "limit materializes laplacian before substituting its coordinate variables");
+    tests.expectEqual(eval(session, "limit[jacobian[{x^2,x*y},{x,y}],x,0]"),
+        std::string{"{{0, 0}, {y, 0}}"},
+        "limit materializes jacobian before substituting its coordinate variables");
+    tests.expectEqual(eval(session, "limit[hessian[x^2+x*y+y^2,{x,y}],x,0]"),
+        std::string{"{{2, 1}, {1, 2}}"},
+        "limit materializes hessian before substituting its coordinate variables");
+    tests.expectEqual(eval(session, "limit[directionalDerivative[x^2+y^2,{1,0},{x,y}],x,0]"),
+        std::string{"0"},
+        "limit materializes directional derivatives before substituting coordinates");
+    tests.expectEqual(eval(session, "limit[diff[x^2,x,1],x,0]"),
+        std::string{"diff[x^2, x, 1]"},
+        "limit does not capture numeric-derivative control variables");
+    tests.expectEqual(eval(session, "limit[diff[x^2,x,x],x,0]"),
+        std::string{"diff[x^2, x, 0]"},
+        "limit substitutes free numeric-derivative evaluation points without touching the binder");
+    tests.expectEqual(eval(session, "limit[collect[x^2+x,x],x,0]"),
+        std::string{"0"},
+        "limit materializes collect before substituting its control variable");
+    tests.expectEqual(eval(session, "limit[groebnerBasis[{x^2+y,x*y-1},{x,y}],x,0]"),
+        std::string{"{y, -1, y^2}"},
+        "limit materializes Groebner basis before substituting polynomial-ring variables");
+    tests.expectEqual(eval(session, "limit[polynomialReduce[x^2+y,{x+y},{x,y}],x,0]"),
+        std::string{"{{-y}, y^2+y}"},
+        "limit materializes polynomialReduce before substituting polynomial-ring variables");
+    tests.expectEqual(eval(session, "limit[expand[(x+1)^2],x,0]"),
+        std::string{"1"},
+        "limit materializes expand before direct point substitution");
+    tests.expectEqual(eval(session, "limit[factor[x^2-1],x,1]"),
+        std::string{"0"},
+        "limit materializes factor before direct point substitution");
+    tests.expectEqual(eval(session, "limit[normal[series[exp[x],{x,0,2}]],x,0]"),
+        std::string{"1"},
+        "limit connects held Series through Normal before taking the finite-point limit");
+    tests.expectEqual(eval(session, "limit[toNormal[series[exp[x],{x,0,2}]],x,0]"),
+        std::string{"1"},
+        "limit connects held Series through toNormal before taking the finite-point limit");
+    tests.expectEqual(eval(session, "limit[{{x-y},y^2+y},x,0]"),
+        std::string{"{{-y}, y^2+y}"},
+        "limit evaluates ragged brace values componentwise");
+
+    tests.expectEqual(eval(session, "integrate[D[x^2,x],x]"), std::string{"x^2"},
+        "integrate materializes a held derivative before constructing the primitive");
+    tests.expectEqual(eval(session, "integrate[normal[series[exp[x],{x,0,2}]],x]"),
+        std::string{"x+x^2/2+x^3/6"},
+        "integrate materializes Normal[Series] before integration");
+    tests.expectEqual(eval(session, "normal[series[D[exp[x],x],{x,0,5}]]"),
+        std::string{"1+x+x^2/2+x^3/6+x^4/24+x^5/120"},
+        "series materializes a held derivative before coefficient extraction");
+    tests.expectEqual(eval(session,
+        "normal[series[normal[series[exp[x],{x,0,5}]],{x,0,3}]]"),
+        std::string{"1+x+x^2/2+x^3/6"},
+        "nested Normal[Series] pipelines compose without leaving held frontends");
+    tests.expectEqual(eval(session, "solve[D[x^2,x]==2*x,x,Real]"), std::string{"All"},
+        "solve materializes held derivatives before relation normalization");
+    tests.expectEqual(eval(session,
+        "solve[normal[series[exp[x],{x,0,2}]]==1+x+x^2/2,x,Real]"),
+        std::string{"All"},
+        "solve materializes Normal[Series] before proving an identity");
+    tests.expectEqual(eval(session, "integrate[1+D[x^2,x],x]"),
+        std::string{"x^2+x"},
+        "integrate materializes a nested held derivative inside ordinary arithmetic");
+    tests.expectEqual(eval(session, "integrate[sin[D[x^2,x]],x]"),
+        std::string{"-cos[2x]/2"},
+        "integrate materializes a held derivative nested inside an elementary function");
+    tests.expectEqual(eval(session,
+        "integrate[1+normal[series[exp[x],{x,0,2}]],x]"),
+        std::string{"2x+x^2/2+x^3/6"},
+        "integrate materializes nested Normal[Series] pipelines");
+    tests.expectEqual(eval(session,
+        "normal[series[1+D[exp[x],x],{x,0,3}]]"),
+        std::string{"2+x+x^2/2+x^3/6"},
+        "series materializes a nested held derivative inside ordinary arithmetic");
+    tests.expectEqual(eval(session,
+        "normal[series[1+normal[series[exp[x],{x,0,2}]],{x,0,2}]]"),
+        std::string{"2+x+x^2/2"},
+        "series materializes nested Normal[Series] inside a larger expression");
+    tests.expectEqual(eval(session,
+        "D[1+normal[series[exp[x],{x,0,2}]],x]"),
+        std::string{"x+1"},
+        "D materializes nested Normal[Series] inside ordinary arithmetic");
+    tests.expectEqual(eval(session,
+        "D[sin[normal[series[x,{x,0,2}]]],x]"),
+        std::string{"cos[x]"},
+        "D materializes a Series pipeline nested inside an elementary function");
+    tests.expectEqual(eval(session, "grad[D[x^2,x],{x}]"),
+        std::string{"{2}"},
+        "vector calculus materializes a held derivative before differentiating the field");
+    tests.expectEqual(eval(session,
+        "jacobian[{D[x^2,x],normal[series[exp[y],{y,0,2}]]},{x,y}]"),
+        std::string{"{{2, 0}, {0, y+1}}"},
+        "vector calculus materializes mixed held derivative and Series pipelines");
+    tests.expectEqual(eval(session,
+        "laplacian[normal[series[exp[x],{x,0,3}]],{x}]"),
+        std::string{"x+1"},
+        "laplacian materializes Normal[Series] before repeated differentiation");
+    tests.expectEqual(eval(session, "D[expand[(x+1)^2],x]"),
+        std::string{"2x+2"},
+        "D materializes an explicit expand frontend without evaluating the control variable");
+    tests.expectEqual(eval(session, "integrate[factor[x^2-1],x]"),
+        std::string{"-x+x^3/3"},
+        "integrate materializes an explicit factor frontend before integration");
+    tests.expectEqual(eval(session,
+        "normal[series[expand[(x+1)^3],{x,0,2}]]"),
+        std::string{"3x^2+3x+1"},
+        "series materializes an explicit expand frontend before coefficient extraction");
+    tests.expectEqual(eval(session,
+        "solve[expand[(x+1)^2]==x^2+2*x+1,x,Real]"),
+        std::string{"All"},
+        "solve materializes explicit algebra transforms before relation normalization");
+
+    kernel::KernelSession heldTransformSession;
+    static_cast<void>(eval(heldTransformSession, "x:=5"));
+    tests.expectEqual(eval(heldTransformSession, "D[expand[(x+1)^2],x]"),
+        std::string{"2x+2"},
+        "held algebra-transform materialization does not resolve a session definition of the D variable");
+    tests.expectEqual(eval(heldTransformSession, "integrate[expand[(x+1)^2],x]"),
+        std::string{"x+x^2+x^3/3"},
+        "held algebra-transform materialization does not resolve a session definition of the integration variable");
+
+    tests.expectEqual(eval(session, "D[limit[x*y,x,0],y]"), std::string{"0"},
+        "D materializes an inner limit before differentiating");
+    tests.expectEqual(eval(session, "D[integrate[x*y,x],y]"), std::string{"x^2/2"},
+        "D materializes an inner symbolic integral before differentiating");
+    tests.expectEqual(eval(session, "integrate[limit[x*y,x,0],y]"), std::string{"0"},
+        "integrate materializes an inner limit before constructing the outer primitive");
+    tests.expectEqual(eval(session,
+        "normal[series[limit[exp[x*y],x,0],{y,0,3}]]"), std::string{"1"},
+        "series materializes an inner limit before coefficient extraction");
+    tests.expectEqual(eval(session, "solve[limit[x*y,x,0]==0,y,Real]"), std::string{"All"},
+        "solve materializes an inner limit before relation normalization");
+    tests.expectEqual(eval(session, "grad[limit[x*y,x,y],{y}]"), std::string{"{2y}"},
+        "vector calculus materializes an inner limit before differentiation");
+
+    kernel::KernelSession nestedBinderSession;
+    static_cast<void>(eval(nestedBinderSession, "x:=7"));
+    static_cast<void>(eval(nestedBinderSession, "y:=5"));
+    tests.expectEqual(eval(nestedBinderSession, "D[limit[x*y,x,y],y]"),
+        std::string{"2y"},
+        "inner limit materialization protects the outer D variable from session bindings");
+    tests.expectEqual(eval(nestedBinderSession, "D[integrate[x*y,{x,0,y}],y]"),
+        std::string{"3y^2/2"},
+        "inner definite integration protects the outer D variable in endpoint expressions");
+    tests.expectEqual(eval(session, "limit[integrate[x*y,x],y,0]"), std::string{"0"},
+        "limit closes a residual symbolic integral after point substitution");
+    tests.expectEqual(eval(session, "limit[1+integrate[x*y,x],y,0]"), std::string{"1"},
+        "limit closes residual symbolic integrals inside ordinary arithmetic");
+    tests.expectEqual(eval(session, "limit[limit[x*y,x,y],y,0]"), std::string{"0"},
+        "limit closes an inner limit whose binder differs from the outer variable");
     tests.expectEqual(eval(session, "limit[atan[x],x,Infinity]"), std::string{"Pi/2"},
         "inverse-trigonometric infinity limit respects Radian semantics");
     tests.expectEqual(eval(session, "limit[exp[-x],x,Infinity]"), std::string{"0"},
@@ -222,6 +403,26 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "Solve combines constant-base exponential inversion with affine polynomial solving");
     tests.expectEqual(eval(session, "solve[log[x]==2,x,Real]"), std::string{"{x == exp[2]}"},
         "Solve reverses real Log through Exp without losing its natural domain");
+    tests.expectEqual(eval(session, "solve[log[x]==log[x],x]"), std::string{"All if x != 0"},
+        "Solve retains the finite domain condition of an identical logarithm equation");
+    tests.expectEqual(eval(session, "solve[zeta[x]==zeta[x],x]"), std::string{"All if x != 1"},
+        "Solve retains the finite pole exclusion of an identical zeta equation");
+    tests.expectEqual(eval(session, "solve[exp[log[x]]==x,x]"), std::string{"All if x != 0"},
+        "Solve proves inverse-composition identities under their complete definedness conditions");
+    tests.expectEqual(eval(session, "solve[log[exp[x]]==x,x,Real]"), std::string{"All"},
+        "Real Solve uses its ambient domain while normalizing principal log-exp composition");
+    tests.expectEqual(eval(session, "solve[sqrt[x^2]==x,x,Real]"),
+        std::string{"{x in Real if x >= 0}"},
+        "Real Solve normalizes sqrt of a square through abs and preserves the positive branch");
+    tests.expectEqual(eval(session, "solve[sqrt[x^2]==-x,x,Real]"),
+        std::string{"{x in Real if x <= 0}"},
+        "Real Solve preserves the negative branch of sqrt[x^2]==-x");
+    tests.expectEqual(eval(session, "solve[abs[x]==x,x,Real]"),
+        std::string{"{x in Real if x >= 0}"},
+        "absolute-value self equality reduces to its exact nonnegative domain");
+    tests.expectEqual(eval(session, "solve[abs[x]==-x,x,Real]"),
+        std::string{"{x in Real if x <= 0}"},
+        "absolute-value negated self equality reduces to its exact nonpositive domain");
     tests.expectEqual(eval(session, "solve[exp[x]==x,x,Real]"), std::string{"{}"},
         "real Exp has no fixed point because exp[u] is strictly above u");
     tests.expectEqual(eval(session, "solve[exp[x+1]==x+1,x,Real]"), std::string{"{}"},
@@ -246,6 +447,27 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "Solve inverts canonicalized base-2 logarithms exactly");
     tests.expectEqual(eval(session, "solve[log10[x]==2,x,Real]"), std::string{"{x == 100}"},
         "Solve inverts canonicalized base-10 logarithms exactly");
+    tests.expectEqual(eval(session, "solve[log2[x]==y,x,Real]"),
+        std::string{"{x == 2^y if y in Real}"},
+        "symbolic base-2 logarithm inversion retains the real target condition");
+    tests.expectEqual(eval(session, "solve[log10[x]==y,x,Real]"),
+        std::string{"{x == 10^y if y in Real}"},
+        "symbolic base-10 logarithm inversion retains the real target condition");
+    tests.expectEqual(eval(session, "solve[asin[x]==Pi/2,x,Real]"), std::string{"{x == 1}"},
+        "principal asin inversion includes its closed upper endpoint");
+    tests.expectEqual(eval(session, "solve[asin[x]==-Pi/2,x,Real]"), std::string{"{x == -1}"},
+        "principal asin inversion includes its closed lower endpoint without a tautological condition");
+    tests.expectEqual(eval(session, "solve[asin[x]==2,x,Real]"), std::string{"{}"},
+        "principal asin inversion rejects targets above its active-angle range");
+    tests.expectEqual(eval(session, "solve[acos[x]==Pi,x,Real]"), std::string{"{x == -1}"},
+        "principal acos inversion includes its closed upper endpoint");
+    tests.expectEqual(eval(session, "solve[atan[x]==Pi/2,x,Real]"), std::string{"{}"},
+        "principal atan inversion rejects its open endpoint before evaluating tan");
+    tests.expectEqual(eval(session, "solve[atan[x]==Pi/4,x,Real]"), std::string{"{x == 1}"},
+        "principal atan inversion accepts an interior exact angle");
+    tests.expectEqual(eval(session, "solve[acosh[x]==y,x,Real]"),
+        std::string{"{x == cosh[y] if y in Real && y >= 0}"},
+        "principal acosh inversion retains its nonnegative real range condition");
     tests.expectEqual(eval(session, "solve[2^x==-1,x,Real]"), std::string{"{}"},
         "positive real exponentials reject non-positive real right-hand sides");
     tests.expectEqual(eval(session, "solve[(1/2)^x==4,x,Real]"), std::string{"{x == -2}"},
@@ -281,6 +503,12 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[cosh[x]==1,x,Real]"),
         std::string{"{x == 0}"},
         "real cosh inversion coalesces the two branches at its minimum");
+    tests.expectEqual(eval(session, "solve[{cosh[x]==2,x>0},x,Real]"),
+        std::string{"{x == acosh[2]}"},
+        "constraint filtering uses exact acosh sign knowledge to discard the negative branch");
+    tests.expectEqual(eval(session, "solve[{cosh[x]==2,x<0},x,Real]"),
+        std::string{"{x == -acosh[2]}"},
+        "constraint filtering keeps only the negative cosh branch below zero");
     tests.expectEqual(eval(session, "solve[erf[x]==0,x,Real]"),
         std::string{"{x == 0}"},
         "real erf uses strict monotonicity to certify its unique zero");
@@ -290,6 +518,15 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[erf[x^2+1]==0,x,Real]"),
         std::string{"{}"},
         "real erf zero knowledge can certify that a composite equation has no solution");
+    tests.expectEqual(eval(session, "solve[{sqrt[x]==2,x<10},x,Real]"),
+        std::string{"{x == 4}"},
+        "relation-array Solve reuses the scalar principal-square-root dispatcher");
+    tests.expectEqual(eval(session, "solve[{sin[x]==0,x>0},x,Real]"),
+        std::string{"{x == Pi k where k in Integer if Pi k > 0}"},
+        "relation-array Solve preserves periodic scalar solutions and applies constraints");
+    tests.expectEqual(eval(session, "solve[{exp[x]==1,x>=0},x,Real]"),
+        std::string{"{x == 0}"},
+        "relation-array Solve reuses scalar transcendental dispatch before filtering constraints");
     {
         const expression::Expr xExpression = session.evaluate("x");
         const auto* infinity = session.symbolRegistry().find("Infinity");
@@ -497,6 +734,21 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[sqrt[x]==I,x]"),
         std::string{"{x == -1}"},
         "principal square-root inversion accepts the positive imaginary boundary image");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==y,x]"),
+        std::string{"{x == y^2 if re[y] > 0, x == y^2 if re[y] == 0 && im[y] >= 0}"},
+        "symbolic square-root targets retain the complete principal-range condition");
+    tests.expectEqual(eval(session, "solve[sqrt[-x]==y,x]"),
+        std::string{"{x == -y^2 if re[y] > 0, x == -y^2 if re[y] == 0 && im[y] >= 0}"},
+        "symbolic square-root targets preserve the same principal-range condition after inversion");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==-I,x]"),
+        std::string{"{}"},
+        "principal square-root inversion rejects the negative imaginary boundary image");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==-2+3I,x]"),
+        std::string{"{}"},
+        "principal square-root inversion reduces exact complex targets before range testing");
+    tests.expectEqual(eval(session, "solve[sqrt[x]==2-3I,x]"),
+        std::string{"{x == (2-3I)^2}"},
+        "principal square-root inversion accepts exact complex targets in the right half-plane");
     tests.expectEqual(eval(session, "solve[sqrt[x+1]==x-1,x]"),
         std::string{"{x == 3}"},
         "square-root candidate filtering removes roots introduced by squaring");
@@ -702,6 +954,21 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
         std::string{"2"},
         "bounded AlgebraicNumber arithmetic re-identifies an exact rational product");
+    tests.expectEqual(eval(session, "root[{-2,0,1},2]+root[{-3,0,1},2]"),
+        std::string{"root[{1, 0, -10, 0, 1}, 4]"},
+        "pure quadratic addition keeps the exact positive conjugate without general primitive-element construction");
+    tests.expectEqual(eval(session, "root[{-2,0,1},2]-root[{-3,0,1},2]"),
+        std::string{"root[{1, 0, -10, 0, 1}, 2]"},
+        "pure quadratic subtraction keeps the exact negative conjugate without general primitive-element construction");
+    tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-3,0,1},2]"),
+        std::string{"root[{-6, 0, 1}, 2]"},
+        "pure quadratic multiplication avoids a general resultant");
+    tests.expectEqual(eval(session, "root[{-2,0,1},2]/root[{-3,0,1},2]"),
+        std::string{"root[{-2/3, 0, 1}, 2]"},
+        "pure quadratic division avoids a general resultant");
+    tests.expectEqual(eval(session, "root[{-2,0,1},1]+root[{-3,0,1},2]"),
+        std::string{"root[{1, 0, -10, 0, 1}, 3]"},
+        "pure quadratic addition preserves the mixed-sign conjugate index");
     tests.expectEqual(eval(session,
         "(root[{-2,0,1},2]+root[{-3,0,1},2])^2"),
         std::string{"root[{1, -10, 1}, 2]"},

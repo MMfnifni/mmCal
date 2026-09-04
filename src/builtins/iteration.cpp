@@ -1,5 +1,6 @@
 // exactな有限列生成
 #include "iteration.hpp"
+#include "expression/exact_value.hpp"
 
 #include "error/error_message.hpp"
 #include "evaluation/evaluation_budget.hpp"
@@ -25,12 +26,6 @@ using numeric::Rational;
 
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
-}
-
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
 }
 
 [[nodiscard]] BigInt floorNonNegative(const Rational& value) {
@@ -61,9 +56,9 @@ std::vector<Expr> exactRangeValues(
     const Expr& endExpr = arguments.size() == 1 ? arguments[0] : arguments[1];
     const Expr& stepExpr = arguments.size() == 3 ? arguments[2] : defaultOne;
 
-    const auto start = exactRealRational(startExpr);
-    const auto end = exactRealRational(endExpr);
-    const auto step = exactRealRational(stepExpr);
+    const auto start = expression::exact::realRational(startExpr);
+    const auto end = expression::exact::realRational(endExpr);
+    const auto step = expression::exact::realRational(stepExpr);
     if (!start || !end || !step)
         error::throwCalcError(
             error::CalcErrorType::Type,

@@ -61,7 +61,7 @@ simplify[sqrt[x^2],2-3x>5]==>-x
 integrate[cases[x if a>0;x^2 if a<=0],x]==>cases[x^2/2 if a > 0; x^3/3 if a <= 0]
 integrate[cases[x if x>0;x^2 if x<=0],x]==>integrate[cases[x if x > 0; x^2 if x <= 0], x]
 limit[cases[sin[x]/x if a>0;(1-cos[x])/x^2 if a<=0],x,0]==>cases[1 if a > 0; 1/2 if a <= 0]
-limit[cases[sin[x]/x if x>0;(1-cos[x])/x^2 if x<=0],x,0]==>limit[cases[sin[x]/x if x > 0; (1-cos[x])/x^2 if x <= 0], x, 0]
+limit[cases[sin[x]/x if x>0;(1-cos[x])/x^2 if x<=0],x,0]==>Indeterminate
 limit[cases[1/x if a>0;x if a<=0],x,0,1]==>cases[Infinity if a > 0; 0 if a <= 0]
 
 # derivative-back invariants: an implemented primitive must differentiate back exactly
@@ -255,3 +255,104 @@ at[solve[x==x,x],0]==>TypeError: at can index only a finite solution set
 at[solve[x^2==1,x],0,y]==>DomainError: at binding selector is not a solver variable
 at[solve[x^2==1,x],0,1]==>TypeError: at solution binding selector must be a symbol
 toNormal[solve[x^2==1,x]]==>{x == 1, x == -1}
+
+# v1.5.5 cross-feature bug-hunt regressions
+limit[D[abs[x],x],x,0,1]==>1
+limit[D[abs[x],x],x,0,-1]==>-1
+solve[log[x]==log[x],x]==>All if x != 0
+solve[zeta[x]==zeta[x],x]==>All if x != 1
+solve[{sqrt[x]==2,x<10},x,Real]==>{x == 4}
+solve[{exp[x]==1,x>=0},x,Real]==>{x == 0}
+simplify[sign[log[x]],x>1]==>1
+simplify[sign[log[x]],{x>0,x<1}]==>-1
+simplify[1/log[x]-1/log[x],x>1]==>0
+rejection[{1,2},{0,0}]=>DomainError
+reflectNormal[{1,2},{0,0}]=>DomainError
+reflectAxis[{1,2},{0,0}]=>DomainError
+solve[exp[log[x]]==x,x]==>All if x != 0
+solve[log[exp[x]]==x,x,Real]==>All
+solve[sqrt[x^2]==x,x,Real]==>{x in Real if x >= 0}
+solve[sqrt[x^2]==-x,x,Real]==>{x in Real if x <= 0}
+solve[abs[x]==x,x,Real]==>{x in Real if x >= 0}
+solve[abs[x]==-x,x,Real]==>{x in Real if x <= 0}
+solve[{cosh[x]==2,x>0},x,Real]==>{x == acosh[2]}
+solve[{cosh[x]==2,x<0},x,Real]==>{x == -acosh[2]}
+limit[cases[x if x>=0;-x if x<0],x,0]==>0
+limit[cases[1 if x>0;2 if x<0],x,0]==>Indeterminate
+D[normal[series[exp[x],{x,0,5}]],x]==>1+x+x^2/2+x^3/6+x^4/24
+
+# Principal inverse composition keeps branch/domain semantics asymmetric.
+sin[asin[x]]==>x
+cos[acos[x]]==>x
+sinh[asinh[x]]==>x
+cosh[acosh[x]]==>x
+simplify[tan[atan[x]],element[x,Real]]==>x
+solve[tan[atan[x]]==x,x]==>All if x^2 != -1
+solve[tan[atan[x]]==x,x,Real]==>All
+solve[tanh[atanh[x]]==x,x]==>All if 1-x^2 != 0
+asin[sin[x]]==>asin[sin[x]]
+sin[asin[ComplexInfinity]]==>sin[asin[ComplexInfinity]]
+
+# Limit direct substitution must respect solve binders.
+limit[solve[x==1,x],x,0]==>solve[x == 1, x]
+limit[solve[y==x,y],x,0]==>solve[y == 0, y]
+limit[solve[{x+y==1,x>0},{x,y}],x,0]==>solve[{x+y == 1, x > 0}, {x, y}]
+
+# Held vector-calculus and numerical-derivative controls survive outer Limit substitution.
+limit[grad[x^2,{x}],x,0]==>{0}
+limit[divergence[{x^2,y},{x,y}],x,0]==>1
+limit[curl[{-y,x},{x,y}],x,0]==>2
+limit[laplacian[x^2+y^2,{x,y}],x,0]==>4
+limit[jacobian[{x^2,x*y},{x,y}],x,0]==>{{0, 0}, {y, 0}}
+limit[hessian[x^2+x*y+y^2,{x,y}],x,0]==>{{2, 1}, {1, 2}}
+limit[directionalDerivative[x^2+y^2,{1,0},{x,y}],x,0]==>0
+limit[diff[x^2,x,1],x,0]==>diff[x^2, x, 1]
+limit[diff[x^2,x,x],x,0]==>diff[x^2, x, 0]
+
+# Held algebra transforms, Series pipelines, and ragged braces compose through Limit.
+limit[collect[x^2+x,x],x,0]==>0
+limit[groebnerBasis[{x^2+y,x*y-1},{x,y}],x,0]==>{y, -1, y^2}
+limit[polynomialReduce[x^2+y,{x+y},{x,y}],x,0]==>{{-y}, y^2+y}
+limit[expand[(x+1)^2],x,0]==>1
+limit[factor[x^2-1],x,1]==>0
+limit[normal[series[exp[x],{x,0,2}]],x,0]==>1
+limit[toNormal[series[exp[x],{x,0,2}]],x,0]==>1
+limit[{{x-y},y^2+y},x,0]==>{{-y}, y^2+y}
+
+# Held symbolic frontends compose across integration, Series, and Solve.
+integrate[D[x^2,x],x]==>x^2
+integrate[normal[series[exp[x],{x,0,2}]],x]==>x+x^2/2+x^3/6
+normal[series[D[exp[x],x],{x,0,5}]]==>1+x+x^2/2+x^3/6+x^4/24+x^5/120
+normal[series[normal[series[exp[x],{x,0,5}]],{x,0,3}]]==>1+x+x^2/2+x^3/6
+solve[D[x^2,x]==2*x,x,Real]==>All
+solve[normal[series[exp[x],{x,0,2}]]==1+x+x^2/2,x,Real]==>All
+
+# Safe held-frontends also materialize when nested inside ordinarily evaluated expressions.
+integrate[1+D[x^2,x],x]==>x^2+x
+integrate[sin[D[x^2,x]],x]==>-cos[2x]/2
+integrate[1+normal[series[exp[x],{x,0,2}]],x]==>2x+x^2/2+x^3/6
+normal[series[1+D[exp[x],x],{x,0,3}]]==>2+x+x^2/2+x^3/6
+normal[series[1+normal[series[exp[x],{x,0,2}]],{x,0,2}]]==>2+x+x^2/2
+D[1+normal[series[exp[x],{x,0,2}]],x]==>x+1
+D[sin[normal[series[x,{x,0,2}]]],x]==>cos[x]
+
+# Vector-calculus and explicit algebra-transform frontends compose through outer Hold semantics.
+grad[D[x^2,x],{x}]==>{2}
+jacobian[{D[x^2,x],normal[series[exp[y],{y,0,2}]]},{x,y}]==>{{2, 0}, {0, y+1}}
+laplacian[normal[series[exp[x],{x,0,3}]],{x}]==>x+1
+D[expand[(x+1)^2],x]==>2x+2
+integrate[factor[x^2-1],x]==>-x+x^3/3
+normal[series[expand[(x+1)^3],{x,0,2}]]==>3x^2+3x+1
+solve[expand[(x+1)^2]==x^2+2*x+1,x,Real]==>All
+
+
+# Nested binder frontends compose without leaking outer symbolic variables into session bindings.
+D[limit[x*y,x,0],y]==>0
+D[integrate[x*y,x],y]==>x^2/2
+integrate[limit[x*y,x,0],y]==>0
+normal[series[limit[exp[x*y],x,0],{y,0,3}]]==>1
+solve[limit[x*y,x,0]==0,y,Real]==>All
+grad[limit[x*y,x,y],{y}]==>{2y}
+limit[integrate[x*y,x],y,0]==>0
+limit[1+integrate[x*y,x],y,0]==>1
+limit[limit[x*y,x,y],y,0]==>0

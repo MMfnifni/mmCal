@@ -884,17 +884,6 @@ using numeric::RealNumber;
     return hold(BuiltinId::Trigamma, arguments, registry);
 }
 
-[[nodiscard]] Rational rationalPower(Rational base, std::uint64_t exponent) {
-    Rational result{BigInt{1}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result *= base;
-        exponent >>= 1U;
-        if (exponent != 0)
-            base *= base;
-    }
-    return result;
-}
 
 [[nodiscard]] BigInt binomialInteger(std::uint64_t n, std::uint64_t k) {
     if (k > n)
@@ -946,8 +935,8 @@ using numeric::RealNumber;
     Rational sum{BigInt{0}};
     for (std::uint64_t j = *ai; j <= n; ++j) {
         Rational term{binomialInteger(n, j)};
-        term *= rationalPower(x, j);
-        term *= rationalPower(oneMinusX, n - j);
+        term *= numeric::pow(x, j);
+        term *= numeric::pow(oneMinusX, n - j);
         sum += term;
     }
     return rationalExpr(std::move(sum));

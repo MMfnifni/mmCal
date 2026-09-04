@@ -65,6 +65,8 @@ void runIntegrationTests(TestRunner& tests) {
         "integrates exact polynomials termwise");
     tests.expectEqual(eval(session, "integrate[1/x,x]"), std::string{"log[x]"},
         "integrates reciprocal by principal Log");
+    tests.expectEqual(eval(session, "integrate[2/log[3*x+1],x]"), std::string{"2li[3x+1]/3"},
+        "affine reciprocal Log integrates directly through li");
     tests.expectEqual(eval(session, "integrate[exp[x],x]"), std::string{"exp[x]"},
         "integrates exp");
     tests.expectEqual(eval(session, "integrate[sin[x],x]"), std::string{"-cos[x]"},
@@ -138,8 +140,8 @@ void runIntegrationTests(TestRunner& tests) {
         std::string{"tan[x]-x"},
         "tangent square reduces through secant squared");
     tests.expectEqual(eval(session, "integrate[sin[x]*cos[x],x]"),
-        std::string{"sin[x]^2/2"},
-        "reverse-chain candidate set recognizes trig products");
+        std::string{"-cos[2x]/4"},
+        "trigonometric product-to-sum keeps the primitive flat");
     tests.expectEqual(eval(session, "integrate[2*x/sqrt[1+x^2],x]"),
         std::string{"2sqrt[x^2+1]"},
         "reverse-chain candidate set recognizes square-root derivatives");

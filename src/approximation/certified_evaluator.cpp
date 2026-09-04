@@ -1,5 +1,6 @@
 // 式全体の保証付き区間評価
 #include "certified_evaluator.hpp"
+#include "expression/exact_value.hpp"
 #include "expression_interval.hpp"
 
 #include "certified_constants.hpp"
@@ -99,19 +100,48 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
     return precisionBits + guardBits;
 }
 
-[[nodiscard]] std::optional<std::size_t> positivePrecisionDigits(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal()
-        || !expression.asNumber().asReal().isInteger())
-        return std::nullopt;
-    const BigInt& value = expression.asNumber().asReal().asInteger();
-    if (value.isNegative() || value.isZero())
-        return std::nullopt;
-    const std::string text = value.toString();
-    std::size_t result = 0;
-    const auto converted = std::from_chars(text.data(), text.data() + text.size(), result);
-    if (converted.ec != std::errc{} || converted.ptr != text.data() + text.size())
-        return std::nullopt;
-    return result;
+
+[[nodiscard]] bool containsApproximateProvenance(
+    const Expr& root,
+    const evaluation::BuiltinRegistry& builtins) {
+    std::vector<const Expr*> pending{&root};
+    while (!pending.empty()) {
+        const Expr& current = *pending.back();
+        pending.pop_back();
+
+        if (current.isDecimalApproximation()
+            || current.isComplexDecimalApproximation())
+            return true;
+
+        if (current.isArray()) {
+            const auto& array = current.asArray();
+            for (std::size_t i = 0; i < array.size(); ++i) {
+                switch (array.storedKindAt(i)) {
+                case expression::ArrayStorageKind::DecimalApproximation:
+                case expression::ArrayStorageKind::ComplexDecimalApproximation:
+                    return true;
+                case expression::ArrayStorageKind::Generic:
+                    pending.push_back(&array.expressionAt(i));
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+        else if (current.isList()) {
+            for (const Expr& element : current.asList().elements)
+                pending.push_back(&element);
+        }
+        else if (current.isCall()) {
+            const auto& call = current.asCall();
+            if (const auto* definition = builtins.find(call.head);
+                definition && definition->id == BuiltinId::NumericalApproximation)
+                return true;
+            for (const Expr& argument : call.arguments)
+                pending.push_back(&argument);
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool exceedsCertifiedExpressionDepth(const Expr& root) {
@@ -212,17 +242,6 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
 
-[[nodiscard]] Rational rationalPower(Rational base, std::size_t exponent) {
-    Rational result{BigInt{1}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0)
-            result *= base;
-        exponent >>= 1U;
-        if (exponent != 0)
-            base *= base;
-    }
-    return result;
-}
 
 [[nodiscard]] RealInterval scaleInterval(
     const RealInterval& value,
@@ -263,7 +282,7 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
         result = approximation::add(
             result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
         return addSymmetricRemainder(
-            result, rationalPower(radius, 6) * rational(1, 5040), precisionBits);
+            result, numeric::pow(radius, 6) * rational(1, 5040), precisionBits);
     }
     case BuiltinId::Cosc: {
         RealInterval result = scaleInterval(x, rational(1, 2), precisionBits);
@@ -272,7 +291,7 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
         result = approximation::add(
             result, scaleInterval(x5, rational(1, 720), precisionBits), precisionBits);
         return addSymmetricRemainder(
-            result, rationalPower(radius, 7) * rational(1, 40320), precisionBits);
+            result, numeric::pow(radius, 7) * rational(1, 40320), precisionBits);
     }
     case BuiltinId::Sinhc: {
         RealInterval result = approximation::add(
@@ -281,7 +300,7 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
             result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
         // k>=3の正項tailは|x|<=1で初項r^6/7!と比率<=1/72の幾何級数で抑える。
         return addSymmetricRemainder(
-            result, rationalPower(radius, 6) * rational(1, 4970), precisionBits);
+            result, numeric::pow(radius, 6) * rational(1, 4970), precisionBits);
     }
     case BuiltinId::Expc: {
         RealInterval result = approximation::add(
@@ -294,7 +313,7 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
             result, scaleInterval(x4, rational(1, 120), precisionBits), precisionBits);
         // expのLagrange剰余でe^|x|<3を使う。
         return addSymmetricRemainder(
-            result, rationalPower(radius, 5) * rational(1, 240), precisionBits);
+            result, numeric::pow(radius, 5) * rational(1, 240), precisionBits);
     }
     default:
         return std::nullopt;
@@ -318,12 +337,6 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
     if (conversion.ec != std::errc{} || conversion.ptr != text.data() + text.size())
         return std::nullopt;
     return result;
-}
-
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
 }
 
 [[nodiscard]] bool isOneHalf(const Expr& expression) {
@@ -685,22 +698,28 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return std::nullopt;
         constexpr std::size_t defaultPrecisionDigits = 16;
         const std::size_t digits = call.arguments.size() == 2
-            ? positivePrecisionDigits(call.arguments[1]).value_or(0)
+            ? expression::exact::positiveSize(call.arguments[1]).value_or(0)
             : defaultPrecisionDigits;
         if (digits == 0)
             return std::nullopt;
         evaluation::checkEvaluationRequestedPrecisionDigits(digits);
 
         ApproximationContext context{digits};
+        const bool needsSeparateInformation = !bindings.empty()
+            || containsApproximateProvenance(call.arguments[0], builtins_);
         for (;;) {
             evaluation::consumeEvaluationBudget(
                 evaluation::EvaluationResource::CertifiedRefinement);
             const std::size_t nestedBits = context.workingBinaryBits();
-            const auto information = encloseBound(
-                call.arguments[0], nestedBits, bindings, EnclosureKind::Information, recursionDepth + 1);
             const auto certified = encloseBound(
                 call.arguments[0], nestedBits, bindings, EnclosureKind::Certified, recursionDepth + 1);
-            if (!information || !certified)
+            if (!certified)
+                return std::nullopt;
+            const auto information = needsSeparateInformation
+                ? encloseBound(
+                    call.arguments[0], nestedBits, bindings, EnclosureKind::Information, recursionDepth + 1)
+                : certified;
+            if (!information)
                 return std::nullopt;
             if (const auto materialized = finalizeCertifiedApproximation(
                     *certified, *information, digits))
@@ -1141,11 +1160,18 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::FresnelS: {
         if (call.arguments.size() != 1)
             return std::nullopt;
-        const auto exactRational = exactRealRational(call.arguments[0]);
+        const auto exactRational = expression::exact::realRational(call.arguments[0]);
         if (exactRational && definition->id == BuiltinId::Gamma)
             return CertifiedValue{encloseGammaRational(*exactRational, precisionBits)};
         if (exactRational && definition->id == BuiltinId::LogGamma)
             return CertifiedValue{encloseLogGammaRational(*exactRational, precisionBits)};
+        if (exactRational && definition->id == BuiltinId::Zeta
+            && *exactRational > Rational{BigInt{1}})
+            return CertifiedValue{encloseZetaRational(*exactRational, precisionBits)};
+        if (exactRational && definition->id == BuiltinId::Digamma)
+            return CertifiedValue{encloseDigammaRational(*exactRational, precisionBits)};
+        if (exactRational && definition->id == BuiltinId::Trigamma)
+            return CertifiedValue{encloseTrigammaRational(*exactRational, precisionBits)};
 
         const auto value = encloseArgument(0);
         if (!value)
@@ -1194,12 +1220,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         case BuiltinId::Zeta:
             return CertifiedValue{encloseZetaReal(value->asReal(), precisionBits)};
         case BuiltinId::Digamma:
-            if (value->asReal().lower().toRational() > Rational{})
-                return CertifiedValue{encloseDigammaPositive(value->asReal(), precisionBits)};
-            // digammaは非正整数のpoleを除けば負の実軸上でも実数値を持つ。
-            // positive-only real backendへ誤送せず，複素recurrenceでpoleを分類して実部へ射影する。
-            return CertifiedValue{encloseDigammaComplex(
-                ComplexInterval::fromReal(value->asReal()), precisionBits).real()};
+            // 実軸上では負側もreal recurrenceで正実軸backendへ移し，複素interval固定費を避ける。
+            return CertifiedValue{encloseDigammaReal(value->asReal(), precisionBits)};
         case BuiltinId::Trigamma:
             if (value->asReal().lower().toRational() > Rational{})
                 return CertifiedValue{encloseTrigammaPositive(value->asReal(), precisionBits)};
@@ -1358,9 +1380,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Hypergeometric1F1: {
         if (call.arguments.size() != 3)
             return std::nullopt;
-        const auto a = exactRealRational(call.arguments[0]);
-        const auto b = exactRealRational(call.arguments[1]);
-        const auto z = exactRealRational(call.arguments[2]);
+        const auto a = expression::exact::realRational(call.arguments[0]);
+        const auto b = expression::exact::realRational(call.arguments[1]);
+        const auto z = expression::exact::realRational(call.arguments[2]);
         if (a && b && z)
             return CertifiedValue{encloseHypergeometric1F1Real(
                 *a, *b, *z, precisionBits)};
@@ -1387,10 +1409,10 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Hypergeometric2F1: {
         if (call.arguments.size() != 4)
             return std::nullopt;
-        const auto a = exactRealRational(call.arguments[0]);
-        const auto b = exactRealRational(call.arguments[1]);
-        const auto c = exactRealRational(call.arguments[2]);
-        const auto z = exactRealRational(call.arguments[3]);
+        const auto a = expression::exact::realRational(call.arguments[0]);
+        const auto b = expression::exact::realRational(call.arguments[1]);
+        const auto c = expression::exact::realRational(call.arguments[2]);
+        const auto z = expression::exact::realRational(call.arguments[3]);
         if (a && b && c && z) {
             const Rational absZ = z->numerator().isNegative() ? -*z : *z;
             if (absZ < rational(1))
@@ -1430,8 +1452,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return std::nullopt;
         const auto exactPiCoefficient = mathematics::extractRationalPiMultiple(
             call.arguments[0], builtins_, mathematics_);
-        const auto exactPhi = exactRealRational(call.arguments[0]);
-        const auto exactM = exactRealRational(call.arguments[1]);
+        const auto exactPhi = expression::exact::realRational(call.arguments[0]);
+        const auto exactM = expression::exact::realRational(call.arguments[1]);
         if (exactPhi && exactM)
             return CertifiedValue{definition->id == BuiltinId::EllipticF
                 ? encloseEllipticFReal(*exactPhi, *exactM, precisionBits)
@@ -1467,9 +1489,9 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
             return std::nullopt;
         const auto exactPiCoefficient = mathematics::extractRationalPiMultiple(
             call.arguments[1], builtins_, mathematics_);
-        const auto exactN = exactRealRational(call.arguments[0]);
-        const auto exactPhi = exactRealRational(call.arguments[1]);
-        const auto exactM = exactRealRational(call.arguments[2]);
+        const auto exactN = expression::exact::realRational(call.arguments[0]);
+        const auto exactPhi = expression::exact::realRational(call.arguments[1]);
+        const auto exactM = expression::exact::realRational(call.arguments[2]);
         if (exactN && exactPhi && exactM)
             return CertifiedValue{encloseEllipticPiReal(
                 *exactN, *exactPhi, *exactM, precisionBits)};
@@ -1593,7 +1615,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Polylog: {
         if (call.arguments.size() != 2)
             return std::nullopt;
-        const auto order = exactRealRational(call.arguments[0]);
+        const auto order = expression::exact::realRational(call.arguments[0]);
         if (!order || !order->isInteger() || !order->numerator().isPositive()) {
             // PolyLogは一般の数値orderにも数学的には定義されるが，現certified backendは
             // exact positive integer order専用。数値orderをgeneric unevaluatedへ落とさない。
@@ -1606,7 +1628,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (!count)
             throw CertifiedBackendUnsupported{
                 "Certified polylog order exceeds the bounded-work backend range"};
-        if (const auto z = exactRealRational(call.arguments[1]))
+        if (const auto z = expression::exact::realRational(call.arguments[1]))
             return CertifiedValue{enclosePolylogReal(*count, *z, precisionBits)};
         const auto z = encloseArgument(1);
         if (!z)
@@ -1630,8 +1652,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
         if (call.arguments.size() != 3)
             return std::nullopt;
 
-        const auto exactA = exactRealRational(call.arguments[0]);
-        const auto exactB = exactRealRational(call.arguments[1]);
+        const auto exactA = expression::exact::realRational(call.arguments[0]);
+        const auto exactB = expression::exact::realRational(call.arguments[1]);
         const auto a = encloseArgument(0);
         const auto b = encloseArgument(1);
         const auto x = encloseArgument(2);
@@ -1677,8 +1699,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::BetaLog: {
         if (call.arguments.size() != 2)
             return std::nullopt;
-        const auto exactA = exactRealRational(call.arguments[0]);
-        const auto exactB = exactRealRational(call.arguments[1]);
+        const auto exactA = expression::exact::realRational(call.arguments[0]);
+        const auto exactB = expression::exact::realRational(call.arguments[1]);
         if (exactA && exactB) {
             if (definition->id == BuiltinId::Beta)
                 return CertifiedValue{encloseBetaRational(*exactA, *exactB, precisionBits)};
@@ -2404,12 +2426,18 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::VectorSum:
     case BuiltinId::VectorInner:
     case BuiltinId::VectorOuter:
+    case BuiltinId::VectorRejection:
+    case BuiltinId::OrthogonalQ:
+    case BuiltinId::OrthonormalQ:
+    case BuiltinId::LinearIndependentQ:
+    case BuiltinId::GramSchmidt:
     case BuiltinId::Gradient:
     case BuiltinId::Divergence:
     case BuiltinId::Curl:
     case BuiltinId::Laplacian:
     case BuiltinId::Jacobian:
     case BuiltinId::Hessian:
+    case BuiltinId::DirectionalDerivative:
     case BuiltinId::UnitApplied:
     case BuiltinId::Factorial:
     case BuiltinId::Derivative:

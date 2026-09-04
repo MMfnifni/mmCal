@@ -90,8 +90,8 @@ madd[{{1,2}},{{3,4},{5,6}}]==>DomainError: madd requires identical array shapes
 mmul[{{1,2},{3,4}},{{5,6}}]==>DomainError: dot inner dimensions do not agree
 mdet[{{1,2,3},{4,5,6}}]==>DomainError: det requires a square matrix
 minverse[{{1,2},{2,4}}]==>DomainError: Matrix is singular
-vnormalize[{0,0}]==>DomainError: normalize requires a nonzero vector
-vangle[{0,0},{1,0}]==>DomainError: vangle is undefined for the zero vector
+normalize[{0,0}]==>DomainError: normalize requires a nonzero vector
+vectorAngle[{0,0},{1,0}]==>DomainError: vectorAngle is undefined for the zero vector
 
 # Session / calculus / solver contract boundaries.
 angleMode[foo]==>DomainError: angleMode expects one of Rad, Deg, Grad

@@ -9,6 +9,7 @@
 #include "approximation/precision.hpp"
 #include "expression/array_utils.hpp"
 #include "evaluation/evaluation_budget.hpp"
+#include "linear_algebra/point_arithmetic.hpp"
 #include "numeric/big_float.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -41,41 +42,18 @@ using numeric::RoundingMode;
 
 constexpr std::size_t maximumPrecisionRetries = 10;
 
+using detail::absolute;
+using detail::add;
+using detail::divide;
+using detail::midpoint;
+using detail::multiply;
+using detail::one;
+using detail::subtract;
+using detail::two;
+using detail::zero;
+
 [[nodiscard]] Expr integer(std::int64_t value) {
     return Expr{Number{BigInt{value}}};
-}
-
-[[nodiscard]] BigFloat zero(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat one(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{1}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat two(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{2}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat add(const BigFloat& a, const BigFloat& b, std::size_t bits) {
-    return numeric::add(a, b, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat subtract(const BigFloat& a, const BigFloat& b, std::size_t bits) {
-    return numeric::subtract(a, b, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat multiply(const BigFloat& a, const BigFloat& b, std::size_t bits) {
-    return numeric::multiply(a, b, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat divide(const BigFloat& a, const BigFloat& b, std::size_t bits) {
-    return numeric::divide(a, b, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat absolute(const BigFloat& value) {
-    return value.isNegative() ? -value : value;
-}
-
-[[nodiscard]] Rational midpointRational(const RealInterval& interval) {
-    return (interval.lower().toRational() + interval.upper().toRational()) / Rational{BigInt{2}};
-}
-
-[[nodiscard]] BigFloat midpoint(const RealInterval& interval, std::size_t bits) {
-    return BigFloat::fromRational(midpointRational(interval), bits, RoundingMode::NearestEven);
 }
 
 [[nodiscard]] BigFloat squareRoot(const BigFloat& value, std::size_t bits) {
@@ -680,6 +658,8 @@ std::optional<Expr> approximateSingularValueDecomposition(
     if (!matrix.isMatrix())
         return std::nullopt;
     approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
+    // PrecisionInsufficientはguard桁を増やせば解消し得るが，BackendUnsupportedは構造的な未対応である。
+    // 後者を同じ入力で再試行しても改善しないため，直ちに上位fallbackへ返す。
     for (std::size_t attempt = 0; attempt < maximumPrecisionRetries; ++attempt) {
         evaluation::consumeEvaluationBudget(
             evaluation::EvaluationResource::CertifiedRefinement);

@@ -121,17 +121,8 @@ using numeric::Number;
     RelationKind relation,
     const ValueFacts& facts,
     bool expressionOnLeft) noexcept {
-    if (!expressionOnLeft) {
-        switch (relation) {
-        case RelationKind::Less: relation = RelationKind::Greater; break;
-        case RelationKind::LessEqual: relation = RelationKind::GreaterEqual; break;
-        case RelationKind::Greater: relation = RelationKind::Less; break;
-        case RelationKind::GreaterEqual: relation = RelationKind::LessEqual; break;
-        case RelationKind::Equal:
-        case RelationKind::NotEqual:
-            break;
-        }
-    }
+    if (!expressionOnLeft)
+        relation = reverseRelation(relation);
 
     if (!facts.isProvablyReal())
         return facts.provablyNonReal ? TruthValue::False : TruthValue::Unknown;
@@ -190,17 +181,6 @@ using numeric::Number;
 }
 
 
-[[nodiscard]] RelationKind reversedRelation(RelationKind relation) noexcept {
-    switch (relation) {
-    case RelationKind::Less: return RelationKind::Greater;
-    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
-    case RelationKind::Greater: return RelationKind::Less;
-    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
-    case RelationKind::Equal: return RelationKind::Equal;
-    case RelationKind::NotEqual: return RelationKind::NotEqual;
-    }
-    return relation;
-}
 
 struct RationalRangeBound final {
     numeric::Rational value;
@@ -272,7 +252,7 @@ struct RationalRange final {
         return TruthValue::Unknown;
 
     if (!functionOnLeft)
-        relation = reversedRelation(relation);
+        relation = reverseRelation(relation);
 
     const numeric::Rational bound = boundExpression.asNumber().asReal().toRational();
     const auto lowerComparison = range->lower
@@ -464,7 +444,7 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
     if (assumptions_.contains(predicate))
         return TruthValue::True;
     if (assumptions_.contains(relation(
-            reversedRelation(relationPredicate.relation),
+            reverseRelation(relationPredicate.relation),
             relationPredicate.rhs, relationPredicate.lhs)))
         return TruthValue::True;
 
@@ -507,7 +487,7 @@ TruthValue KnowledgeContext::prove(const Predicate& predicate) const {
     if (assumptions_.contains(relation(
             complement, relationPredicate.lhs, relationPredicate.rhs))
         || assumptions_.contains(relation(
-            reversedRelation(complement), relationPredicate.rhs, relationPredicate.lhs)))
+            reverseRelation(complement), relationPredicate.rhs, relationPredicate.lhs)))
         return TruthValue::False;
 
     if (isZero(relationPredicate.rhs))

@@ -1,4 +1,5 @@
 // 記号微分D
+#include "symbolic/cases.hpp"
 #include "differentiation.hpp"
 
 #include "builtins/names.hpp"
@@ -11,7 +12,9 @@
 #include "simplification/simplifier.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "expression/array_utils.hpp"
+#include "expression/exact_value.hpp"
 #include "symbolic/algebra_transforms.hpp"
+#include "symbolic/polynomial.hpp"
 #include "symbolic/substitution.hpp"
 #include "symbolic/series.hpp"
 
@@ -26,13 +29,10 @@ namespace {
 
 using evaluation::BuiltinId;
 using expression::Expr;
+using expression::exact::integer;
 using numeric::BigInt;
 using numeric::Number;
 using numeric::Rational;
-
-[[nodiscard]] Expr integer(std::int64_t value) {
-    return Expr{Number{BigInt{value}}};
-}
 
 [[nodiscard]] bool isHead(
     const Expr& expression,
@@ -87,21 +87,6 @@ using numeric::Rational;
     return call(builtins, BuiltinId::Power, {std::move(base), std::move(exponent)});
 }
 
-[[nodiscard]] Expr caseBranch(
-    const evaluation::BuiltinRegistry& builtins,
-    Expr value,
-    std::optional<Expr> condition = std::nullopt) {
-    std::vector<Expr> arguments{std::move(value)};
-    if (condition)
-        arguments.push_back(std::move(*condition));
-    return call(builtins, BuiltinId::CaseBranch, std::move(arguments));
-}
-
-[[nodiscard]] Expr cases(
-    const evaluation::BuiltinRegistry& builtins,
-    std::vector<Expr> branches) {
-    return call(builtins, BuiltinId::Cases, std::move(branches));
-}
 
 [[nodiscard]] Expr pi(const mathematics::MathRegistry& mathematics) {
     const auto* definition = mathematics.findConstant(mathematics::ConstantId::Pi);
@@ -695,9 +680,9 @@ using numeric::Rational;
             zeroDerivative = multiply(builtins, {innerDerivative, std::move(zeroDerivative)});
             Expr nonzero = call(builtins, BuiltinId::NotEqual, {radians, integer(0)});
             Expr zeroCondition = call(builtins, BuiltinId::Equal, {radians, integer(0)});
-            return cases(builtins, {
-                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
-                caseBranch(builtins, std::move(zeroDerivative), std::move(zeroCondition))});
+            return detail::makeCases(builtins, {
+                detail::makeCaseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                detail::makeCaseBranch(builtins, std::move(zeroDerivative), std::move(zeroCondition))});
         }
         break;
     case BuiltinId::Sinhc:
@@ -733,9 +718,9 @@ using numeric::Rational;
             atZero = multiply(builtins, {innerDerivative, std::move(atZero)});
             Expr nonzero = call(builtins, BuiltinId::NotEqual, {u, integer(0)});
             Expr zeroCondition = call(builtins, BuiltinId::Equal, {u, integer(0)});
-            return cases(builtins, {
-                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
-                caseBranch(builtins, std::move(atZero), std::move(zeroCondition))});
+            return detail::makeCases(builtins, {
+                detail::makeCaseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                detail::makeCaseBranch(builtins, std::move(atZero), std::move(zeroCondition))});
         }
         break;
     case BuiltinId::Erf:
@@ -891,9 +876,9 @@ using numeric::Rational;
             Expr ordinary = multiply(builtins, {innerDerivative, std::move(kernel)});
             Expr nonzero = call(builtins, BuiltinId::NotEqual, {a[1], integer(0)});
             Expr zeroCondition = call(builtins, BuiltinId::Equal, {a[1], integer(0)});
-            return cases(builtins, {
-                caseBranch(builtins, std::move(ordinary), std::move(nonzero)),
-                caseBranch(builtins, innerDerivative, std::move(zeroCondition))});
+            return detail::makeCases(builtins, {
+                detail::makeCaseBranch(builtins, std::move(ordinary), std::move(nonzero)),
+                detail::makeCaseBranch(builtins, innerDerivative, std::move(zeroCondition))});
         }
         break;
 
@@ -1158,12 +1143,18 @@ using numeric::Rational;
     case BuiltinId::VectorSum:
     case BuiltinId::VectorInner:
     case BuiltinId::VectorOuter:
+    case BuiltinId::VectorRejection:
+    case BuiltinId::OrthogonalQ:
+    case BuiltinId::OrthonormalQ:
+    case BuiltinId::LinearIndependentQ:
+    case BuiltinId::GramSchmidt:
     case BuiltinId::Gradient:
     case BuiltinId::Divergence:
     case BuiltinId::Curl:
     case BuiltinId::Laplacian:
     case BuiltinId::Jacobian:
     case BuiltinId::Hessian:
+    case BuiltinId::DirectionalDerivative:
     case BuiltinId::Transpose:
     case BuiltinId::MatrixAdd:
     case BuiltinId::MatrixMultiply:
@@ -1262,7 +1253,7 @@ using numeric::Rational;
 
                 if (branch.size() == 1 && !boundaryConditions.empty()) {
                     for (Expr& boundary : boundaryConditions)
-                        branches.push_back(caseBranch(
+                        branches.push_back(detail::makeCaseBranch(
                             builtins, unresolvedDerivative(expression, variable, builtins),
                             std::move(boundary)));
                     boundaryConditions.clear();
@@ -1274,18 +1265,15 @@ using numeric::Rational;
                 // x依存の狭義不等式の後にあるdefault枝にはその境界点が含まれ得る。
                 // そこでdefault値を直接微分すると，abs[x]型の非微分可能点へ偽の値を
                 // 与えるため，補集合を内部と境界へ分割できない場合はD[...]を保持する。
-                std::vector<Expr> branchArguments{std::move(branchDerivative)};
-                if (derivativeCondition)
-                    branchArguments.push_back(std::move(*derivativeCondition));
-                branches.push_back(call(
-                    builtins, BuiltinId::CaseBranch, std::move(branchArguments)));
+                branches.push_back(detail::makeCaseBranch(
+                    builtins, std::move(branchDerivative), std::move(derivativeCondition)));
             }
             if (safe) {
                 for (Expr& boundary : boundaryConditions)
-                    branches.push_back(caseBranch(
+                    branches.push_back(detail::makeCaseBranch(
                         builtins, unresolvedDerivative(expression, variable, builtins),
                         std::move(boundary)));
-                return cases(builtins, std::move(branches));
+                return detail::makeCases(builtins, std::move(branches));
             }
         }
         break;
@@ -1369,6 +1357,34 @@ using numeric::Rational;
     const Expr& exponent = expression.asCall().arguments[0];
     if (!containsVariable(exponent, variable))
         return std::nullopt;
+
+    // exact quadratic exponentではP_nを式木として微分・展開せず，
+    // 係数vector上で P_(n+1)=P'_n+q'P_n を更新する。
+    if (const auto q = toRationalPolynomial(
+            exponent, variable, builtins, PolynomialConversionOptions{3, 16});
+        q && q->degree() <= 2) {
+        const Rational q0 = q->coefficient(0);
+        static_cast<void>(q0);
+        const Rational linear = q->coefficient(1);
+        const Rational quadratic = q->coefficient(2);
+        const Rational slope = Rational{BigInt{2}} * quadratic;
+        std::vector<Rational> coefficients{Rational{BigInt{1}}};
+        for (std::uint64_t n = 0; n < order; ++n) {
+            std::vector<Rational> next(coefficients.size() + 1, Rational{BigInt{0}});
+            for (std::size_t i = 0; i < coefficients.size(); ++i) {
+                if (i != 0)
+                    next[i - 1] += Rational{BigInt::fromUnsigned(i)} * coefficients[i];
+                next[i] += linear * coefficients[i];
+                next[i + 1] += slope * coefficients[i];
+            }
+            while (next.size() > 1 && next.back().isZero())
+                next.pop_back();
+            coefficients = std::move(next);
+        }
+        RationalPolynomial polynomial{std::move(coefficients)};
+        Expr factor = polynomialToExpandedExpr(polynomial, variable, builtins);
+        return multiply(builtins, {std::move(factor), expression});
+    }
 
     Expr first = simplify(
         derivativeCore(exponent, variable, builtins, mathematics, angles),
@@ -1590,10 +1606,10 @@ void appendDerivativeLinearTerms(
     Expr atZero = divide(
         builtins, Expr{Number{factorial}},
         power(builtins, Expr{Number{BigInt::fromUnsigned(order)}}, arguments[0]));
-    return cases(builtins, {
-        caseBranch(builtins, std::move(ordinary),
+    return detail::makeCases(builtins, {
+        detail::makeCaseBranch(builtins, std::move(ordinary),
             call(builtins, BuiltinId::NotEqual, {z, integer(0)})),
-        caseBranch(builtins, std::move(atZero),
+        detail::makeCaseBranch(builtins, std::move(atZero),
             call(builtins, BuiltinId::Equal, {z, integer(0)}))});
 }
 

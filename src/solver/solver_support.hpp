@@ -3,6 +3,7 @@
 #include "expression/expr.hpp"
 #include "mathematics/assumption_set.hpp"
 #include "mathematics/predicate.hpp"
+#include "solution_set.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +50,14 @@ namespace mmcal::solver {
     expression::Expr lhs,
     expression::Expr rhs,
     const evaluation::BuiltinRegistry& builtins);
+
+
+[[nodiscard]] std::optional<SolutionSet> solveIdenticalEquality(
+    const expression::Expr& relation,
+    std::vector<SolverVariable> variables,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 
 [[nodiscard]] mathematics::AssumptionSet withRealVariable(
     const mathematics::AssumptionSet& assumptions,

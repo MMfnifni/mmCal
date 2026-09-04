@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace mmcal::builtins {
 
@@ -45,6 +46,38 @@ namespace mmcal::builtins {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateProjection(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateProjectionForOperation(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::string_view operationName,
+    evaluation::BuiltinId unresolvedId);
+[[nodiscard]] expression::Expr evaluateRejection(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateOrthogonalQ(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateOrthonormalQ(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateLinearIndependentQ(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateGramSchmidt(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,

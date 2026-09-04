@@ -128,7 +128,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{274},
+    tests.expectEqual(registry.size(), std::size_t{278},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -220,7 +220,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: table holds the body and binds its iterator specification");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{254},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{258},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
@@ -297,6 +297,15 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("Ei") && sourceFunctions.contains("Si")
         && sourceFunctions.contains("Ci") && sourceFunctions.contains("li")
         && sourceFunctions.contains("polylog")
+        && sourceFunctions.contains("rejection")
+        && sourceFunctions.contains("orthogonalQ")
+        && sourceFunctions.contains("orthonormalQ")
+        && sourceFunctions.contains("linearIndependentQ")
+        && sourceFunctions.contains("gramSchmidt")
+        && !sourceFunctions.contains("vdot") && !sourceFunctions.contains("vnorm")
+        && !sourceFunctions.contains("vlength") && !sourceFunctions.contains("vnormalize")
+        && !sourceFunctions.contains("vunit") && !sourceFunctions.contains("vdistance")
+        && !sourceFunctions.contains("gradient")
         && !sourceFunctions.contains("Sin") && !sourceFunctions.contains("ArcTan")
         && !sourceFunctions.contains("Integrate") && !sourceFunctions.contains("Limit")
         && !sourceFunctions.contains("Solve") && !sourceFunctions.contains("Rationalize"),

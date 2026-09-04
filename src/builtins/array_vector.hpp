@@ -100,5 +100,10 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateDirectionalDerivative(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 
 } // namespace mmcal::builtins

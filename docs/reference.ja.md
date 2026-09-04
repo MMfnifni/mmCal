@@ -481,6 +481,8 @@ CertifiedEnclosure ⊆ InformationEnclosure
 | `a`の非zero性を証明できるときの`a/0` | `ComplexInfinity` |
 | 任意の`x`に対する`x^(1/0)` | `Indeterminate` |
 
+`Array / scalar`も同じ規則を各成分へ適用する。したがって`{0,1}/0 -> {Indeterminate, ComplexInfinity}`，`{0,0}/0 -> {Indeterminate, Indeterminate}`であり，Array全体を一つの`Indeterminate`へ潰さない。
+
 exact numeric baseの単位絶対値は実部・虚部のexact Rational演算で判定する。symbolic baseでは`simplify[z^Infinity,abs[z]==1]`のように明示的に証明できる場合だけ使い，単位円近傍のapproximationからexactな`abs[z]==1`を推測しない。`Indeterminate`は算術と登録済みscalar数学函数を伝播し，`N[Indeterminate,p]`でも保持され，`Indeterminate==Indeterminate`は`False`である。これは方向付き無限大を含む完全な代数ではなく，境界を明示したexceptional-value契約である。
 
 InformationEnclosureは確率分布や統計的confidence intervalではない。また「真値がこの広い区間のどこにでもあり得る」と計算基盤が主張するものでもない。真値保証そのものはCertifiedEnclosureが担当し，InformationEnclosureは**現在の値から利用してよい情報量の契約**を表す。したがって計算基盤がより狭いCertifiedEnclosureを内部に持っていても，それだけを理由に既存近似値の情報量は増えない。
@@ -830,7 +832,7 @@ asin[1/2] -> Pi/6
 atan2[1,-1] -> 3Pi/4
 ```
 
-`tan`, `sec`, `cot`, `csc`の極はdefinednessとして扱い，有限値を捏造しない。
+`tan`, `sec`, `cot`, `csc`の極はdefinednessとして扱い，有限値を捏造しない。主値逆函数との**元函数側の合成**は，定義性を失わない場合だけ縮約する。有限式では`sin[asin[x]] -> x`，`cos[acos[x]] -> x`を認めるが，`tan[atan[x]]`は複素例外点を消さないため必要なdefinednessを証明できる場合だけ縮約する。逆向きの`asin[sin[x]]`等は周期性とbranchを持つため一般には縮約しない。
 
 ---
 
@@ -844,7 +846,7 @@ asinh acosh atanh
 csch sech coth
 ```
 
-逆双曲線函数は主値の複素分岐を持ち，`MathRegistry`に分岐情報を保持する。
+逆双曲線函数は主値の複素分岐を持ち，`MathRegistry`に分岐情報を保持する。`sinh[asinh[x]]`と`cosh[acosh[x]]`は定義性を保てる有限式で元の引数へ戻す。`tanh[atanh[x]]`は`atanh`の特異点を消さない場合だけ縮約し，逆向きの主値合成は一般には行わない。
 
 ---
 
@@ -1259,7 +1261,7 @@ integrate[1/sqrt[1-x^4],x]
 -> ellipticF[asin[x], -1]
 ```
 
-最後のquartic reductionは正しい局所primitiveだが，現在の`fullSimplify`は`sin[asin[x]]`と主値 square rootの積を一般に安全な恒等式へ潰し切れない。そのためderivative-back harnessではResolutionOnlyとして監視し，証明器不足を理由に積分能力を削らない。一般の楕円函数方程式も，逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
+最後のquartic reductionは正しい局所primitiveである。`sin[asin[x]]`自体は主値逆函数の安全な向きとして縮約できるが，derivative-backで現れる主値square rootまで含む恒等式は局所branch条件を必要とする場合があるため，証明できないケースはResolutionOnlyとして監視する。一般の楕円函数方程式も，逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
 
 ## 17.10 Ei / Si / Ci / li / Polylogarithm
 
@@ -1330,6 +1332,7 @@ integrate[exp[x]/x,x] -> Ei[x]
 integrate[sin[x]/x,x] -> Si[x]
 integrate[cos[x]/x,x] -> Ci[x]
 integrate[1/log[x],x] -> li[x]
+integrate[2/log[3x+1],x] -> 2li[3x+1]/3
 integrate[li[x],x] -> x li[x]-Ei[2log[x]]
 integrate[log[1-x]/x,x] -> -polylog[2, x]
 ```
@@ -1896,7 +1899,18 @@ D[x^2 y^3,x,y]
 -> 6 x y^2
 ```
 
-HoldAllなので既存の変数値に置換せず式を微分する。
+HoldAllなので既存の変数値に置換せず式を微分する。被微分式の中に`D`，`Series`，`Normal[Series[...]]` / `toNormal[Series[...]]`，または`expand` / `factor` / `simplify` / `fullSimplify` / `collect`のような安全にmaterializeできるsymbolic frontendが通常評価される式木として含まれる場合は，そのfrontendを先に既存kernelへ接続してから微分する。同じ限定materializationは`integrate`，`series`，`solve`，Vector Calculusでも共有する。任意のHoldAll函数へ侵入したり，制御変数を現在のsession bindingで一般評価したりはしない。 内側の`limit` / `integrate`もbinder自身の規則で安全に閉じられる場合は同じ経路へ接続する。このとき外側の微分・積分・Series・Solve・Vector Calculusの制御変数は一時的にsession definitionから保護し，例えば`y:=5`が存在しても`D[limit[x*y,x,y],y] -> 2y`を維持する。同一変数の`D[integrate[f,x],x]`は原始函数を先に展開せず，微積分基本定理の直接ruleを優先する。
+
+```text
+D[expand[(x+1)^2],x]
+-> 2x+2
+
+integrate[sin[D[x^2,x]],x]
+-> -cos[2x]/2
+
+grad[D[x^2,x],{x}]
+-> {2}
+```
 
 ```text
 D[x^3 + 2x,x]
@@ -2288,6 +2302,8 @@ limit[expr,{x,a,direction}]
 
 第4引数またはbrace形式の第3要素は方向を表し，`-1`が左，`1`が右。省略時は二側極限。`limit[expr,{x,a,direction}]`は4引数形と等価である。方向は単なる表示指定ではなく一時的なassumption `x<a` / `x>a` としてKnowledgeContextへ渡される。
 
+`limit`は第1引数を極限変数へ直接代入する前に，内部の束縛変数・制御変数を保護する。`D`，vector calculus，`solve`，`collect` / Gröbner操作，`Series` / `Normal`等は安全にmaterializeできる場合は先に評価し，内側のbinderを外側の極限点で置換しない。brace/List値は成分ごとに極限を取る。
+
 ```text
 limit[sin[x]/x,x,0]
 -> 1
@@ -2430,7 +2446,12 @@ solve[x^2 < 4,x]
 
 solve[{2x+3y==5,x-2y==9},{x,y}]
 -> {{x==37/7, y==-13/7}}
+
+solve[sqrt[x]==y,x]
+-> {x == y^2 if re[y] > 0, x == y^2 if re[y] == 0 && im[y] >= 0}
 ```
+
+主値`sqrt`を反転する場合は，平方して得た候補だけでなく右辺がprincipal square rootの像に属する条件も保持する。generic complex parameter `y` では，像は`re[y] > 0`または`re[y] == 0 && im[y] >= 0`である。したがって`sqrt[x]==y`は条件付きの`x==y^2`として完全に表現し，証明不能だからと`UnresolvedSolutionSet`へ落とさない。
 
 `SolutionSet`はEmpty / Finite / Universal / Conditional / Unresolvedを区別する。
 対応外の式を「解なし」と誤認しない。
@@ -2506,7 +2527,22 @@ solve[ln[x]==2,x,Real]
 
 solve[log2[x]==3,x,Real]
 -> {x == 8}
+
+solve[log2[x]==y,x,Real]
+-> {x == 2^y if y in Real}
+
+solve[asin[x]==Pi/2,x,Real]
+-> {x == 1}
+
+solve[atan[x]==Pi/2,x,Real]
+-> {}
+
+solve[acosh[x]==y,x,Real]
+-> {x == cosh[y] if y in Real && y >= 0}
 ```
+
+
+principal `asin` / `acos` / `atan` / `acosh`を右辺から反転する場合も，主値の実値域をSolutionBranch条件として保持する。`asin` / `acos` / `atan`の端点は現在の`angleMode[]`に従い，`atan`だけは両端を含まない。定数同士の端点比較はcertified enclosureで判定し，範囲外を偽の条件付きbranchとして残さない。
 
 ### Real-定義域 nonexistence / uniqueness proof
 
@@ -2981,53 +3017,101 @@ N[norm[v],100]
 
 は，巨大なexact中間式を完成させてから近似するのではなく，対応するBigFloat/interval 計算基盤へ要求精度を渡して直接評価できる。exact入力を外側`N`が直接数値計算基盤へ送る場合，入力区間は要求精度に応じて再精密化できる。これに対し，行列要素が既に`DecimalApproximation` / `ComplexDecimalApproximation`なら，値計算にはCertifiedEnclosure，pivot・零／非零・階数等の判定にはInformationEnclosureを使い，入力が宣言していない情報を復活させない。`solveLinear` / `inverse` / `rref` / `matrixRank` / `nullSpace`はInformationEnclosureからpivot構造を証明できる場合だけ結果を返し，証明不能なcaseをepsilonや内部の点値で補わない。`det` / `dot` / `norm`等の連続量はCertified/Information両区間を並行伝播し，相殺時には出力Precisionを自然に下げる。現在の`luDecomposition` / `qrDecomposition` / `svd` / `conditionNumber` / `pseudoInverse` / `leastSquares` / `eigen*`は，**既に有限precisionの行列**に対する摂動保証が未完成なため，その場合は保守的に未評価へ戻す。一方，exact行列に対する`N[...,p]`では従来どおり対応する保証付き数値計算基盤を利用する。
 
-## 26.2 Vector補助函数と互換alias
+## 26.2 Vector・内積・直交化
 
-Vector向けの補助函数には，独立したcanonical函数と互換aliasの両方がある。
-
-canonical函数:
+rank-1 Arrayをvectorとして扱う。row / column orientationはvector自体には持たせず，`dot`がrankに応じたcontractionを行う。Vector専用の基本APIは次である。
 
 ```text
-madd
-vadd vsub vscalar
-vcross
-inner outer
-vproject vangle
-vmanhattan veuclidean
-vreflect vreflect_axis
-vsum
-grad divergence curl laplacian jacobian hessian
+dot[a,b]
+inner[a,b]
+outer[a,b]
+norm[v]
+normalize[v]
+cross[a,b]
+distance[a,b]
+manhattanDistance[a,b]
+projection[a,b]
+rejection[a,b]
+vectorAngle[a,b]
+vectorAngle[a,b,assumptions]
+reflectNormal[a,normal]
+reflectAxis[a,axis]
 ```
 
-互換alias:
+`dot[a,b]`はbilinear contractionであり，complex vectorでも共役を入れない。Hermitian内積は`inner[a,b]`で明示し，第1引数を共役する。
 
 ```text
-matmul mmul vdot -> dot
-rank mrank       -> matrixRank
-mget             -> at
-vnorm vlength    -> norm
-vnormalize vunit -> normalize
-vdistance distance -> veuclidean
-cross              -> vcross
-projection         -> vproject
-gradient           -> grad
-singularValueDecomposition -> svd
+inner[{1,I},{1,I}] -> 2
+dot[{1,I},{1,I}] -> 0
+norm[{1,I}] -> sqrt[2]
 ```
 
-aliasは別算法を持たず，同じ`BuiltinId`へ束ねる。`vadd`等のcanonical vector helperは互換名ではなく，それ自体が公開APIである。`dot`は従来どおりbilinear contraction，`inner[a,b]`は第1引数を共役するHermitian内積であり，`norm[v]`は後者と整合する。`projection[a,b]` / `vproject[a,b]`は`b inner[b,a]/inner[b,b]`を用いる。
+`projection[a,b]`はvector `a`をdirection `b`へHermitian射影し，`b inner[b,a]/inner[b,b]`を返す。`rejection[a,b]`は`a-projection[a,b]`であり，`b`にHermitian直交する成分を返す。directionがzeroであることを証明できる場合はDomainError，zero/nonzeroを証明できないsymbolic caseは未評価に保つ。
+
+```text
+projection[{1,I},{1,0}] -> {1,0}
+rejection[{1,I},{1,0}] -> {0,I}
+distance[{1,I},{2,0}] -> sqrt[2]
+manhattanDistance[{1,I},{2,0}] -> 2
+```
+
+`vectorAngle`は実vector間の幾何学的角度であり，現在の`angleMode[]`に従う。complex vectorへは一般化しない。symbolic成分の実数性を明示する必要がある場合は第3引数へassumptionsを与えられる。zero vectorであることを証明できる場合はDomainErrorとする。
+
+```text
+vectorAngle[{1,0},{0,1}] -> Pi/2
+vectorAngle[{x,0},{1,0},{element[x,Real],x>0}] -> 0
+```
+
+`reflectNormal[v,n]`は法線`n`を持つ原点通過hyperplaneに関する反射，`reflectAxis[v,a]`はdirection `a`が張る1次元部分空間に関する反射である。どちらもHermitian projectionを基礎にする。
+
+vector集合をrank-2 Arrayの**各行**として与える直交化APIも備える。
+
+```text
+orthogonalQ[vectors]
+orthonormalQ[vectors]
+linearIndependentQ[vectors]
+gramSchmidt[vectors]
+```
+
+`orthogonalQ`は異なる行同士のHermitian内積が0かを判定する。zero rowは許容し，線形独立性までは要求しない。`orthonormalQ`はこれに加えて各行のHermitian normが1であることを要求する。`linearIndependentQ`は行vectorの線形独立性をexactなzero/nonzero判定だけで調べる。証明できないsymbolic pivot相当を勝手にnonzeroとはみなさない。
+
+`gramSchmidt`はHermitian内積を用い，入力行のspanに対するorthonormal basisを返す。直交化中は非正規化basisを保持し，最後にだけ正規化することで根号を含む途中式の膨張を抑える。provably dependentな行は落とす。途中で必要なnormのzero/nonzeroを証明できないsymbolic入力では，basisを推測せず未評価に保つ。
+
+```text
+orthogonalQ[{{1,0},{0,I}}] -> True
+orthonormalQ[{{1,0},{0,I}}] -> True
+linearIndependentQ[{{1,2},{2,4}}] -> False
+gramSchmidt[{{1,1},{1,-1}}]
+-> {{sqrt[2]/2,sqrt[2]/2},{sqrt[2]/2,-sqrt[2]/2}}
+```
+
+旧Vector convenience函数`vadd` / `vsub` / `vscalar` / `vsum`は公開登録から外した。Arrayの`+` / `-` / scalar multiplicationと`sum`を直接使う。旧`vcross` / `vmanhattan` / `veuclidean` / `vproject` / `vangle` / `vreflect` / `vreflect_axis`も公開名から外し，それぞれ`cross` / `manhattanDistance` / `distance` / `projection` / `vectorAngle` / `reflectNormal` / `reflectAxis`を正式名とする。Vector処理に別算法を持つ互換aliasは置かない。
 
 ベクトル解析はCartesian座標を明示して使う。
 
 ```text
 grad[f,{x,y,z}]
 divergence[{P,Q,R},{x,y,z}]
+curl[{P,Q},{x,y}]
 curl[{P,Q,R},{x,y,z}]
 laplacian[f,{x,y,z}]
+laplacian[{P,Q,R},{x,y,z}]
 jacobian[{f1,f2,...},{x1,x2,...}]
 hessian[f,{x1,x2,...}]
+directionalDerivative[f,v,{x1,x2,...}]
 ```
 
-座標指定は重複のないsymbolからなるrank-1 Arrayでなければならない。`curl`は3次元Cartesian field専用である。曲線座標系のscale factorやmetricは暗黙に仮定しない。
+`grad`はscalar fieldからvector，`divergence`はcoordinate数と同じcomponent数のvector fieldからscalarを返す。`curl`は2次元では`dQ/dx-dP/dy`というscalar，3次元では通常のvector curlを返す。`laplacian`はscalar fieldでは各座標に関する2階偏微分の和，vector fieldではそれを各componentへ適用する。`jacobian`はcomponent×coordinate，`hessian`はcoordinate×coordinateのArrayを返す。
+
+`directionalDerivative[f,v,vars]`は`v`と`grad[f,vars]`のbilinear contractionである。`v`は自動的には正規化しない。単位方向に沿う微分が必要なら`normalize[v]`を明示して渡す。
+
+```text
+curl[{-y,x},{x,y}] -> 2
+laplacian[{x^2,y^2},{x,y}] -> {2,2}
+directionalDerivative[x^2+y^2,{1,2},{x,y}] -> 2x+4y
+```
+
+座標指定は重複のないsymbolからなる非空rank-1 Arrayでなければならない。`curl`は2次元または3次元Cartesian fieldに限定する。円筒座標・球座標等のscale factorやmetricは暗黙に仮定しない。
 
 ---
 
@@ -3174,7 +3258,7 @@ N[randn[],8]
 | `unit`, `csgn`           | `sign`       |
 | `rect`                   | `polar`      |
 | `ave`                    | `mean`       |
-| `matmul`, `mmul`, `vdot` | `dot`        |
+| `matmul`, `mmul`         | `dot`        |
 | `mtranspose`             | `transpose`  |
 | `mget`                   | `at`         |
 | `singularValueDecomposition` | `svd` |
@@ -3185,9 +3269,6 @@ N[randn[],8]
 | `mrows`                  | `rows`       |
 | `mcols`                  | `cols`       |
 | `mdiag`                  | `diag`       |
-| `vnorm`, `vlength`       | `norm`       |
-| `vdistance`              | `veuclidean` |
-| `vnormalize`, `vunit`    | `normalize`  |
 
 aliasは別実装ではなく同一`BuiltinId`へ束ねる。数学metadataやSolver規則を二重管理しない。
 
@@ -3197,30 +3278,35 @@ mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりa
 
 # 30. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名274個 / sourceから呼出可能な名前254個**。内部headはsource-callable数に含めない。
+現在の開発treeでは **builtin/alias登録名278個 / sourceから呼出可能な名前258個**。内部headはsource-callable数に含めない。
 
 ```text
-Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
-Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
-arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt, cases,
-ceil, choice, cis, collect, cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman,
-cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
-det, dft, diag, digamma, diff, dimensions, distance, divergence, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
-Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
-expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, grad, gradient, groebnerBasis, harmmean, hessian, hypot, ibeta, identity, if, ifft, im, imag, inner,
-integrate, inverse, iqr, isprime, jacobian, kurtp, kurts, laplacian, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
-log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
-mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, toNormal, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
-outer, polynomialReduce, pow, precision, prod, projection, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
-qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
-sec, sech, series, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
-singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
-totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
-vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta,
-bitand, bitor, bitxor, bitnot, bitshiftl, bitshiftr, bitlength, bitcount, bitget, fma, clamp, proj
+Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,
+In, N, Out, RtoD, RtoG, Si, UnDef, abs, accuracy, acos,
+acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2, atanh,
+ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor,
+bitshiftl, bitshiftr, bitxor, cases, cbrt, ceil, choice, cis, clamp, collect,
+cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman, cos, cosc,
+cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
+det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
+eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp,
+expand, expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib,
+floor, fma, frac, fract, fresnelc, fresnels, fullSimplify, gamma, gcd, geomean,
+grad, gramSchmidt, groebnerBasis, harmmean, hessian, hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity,
+if, ifft, im, imag, inner, integrate, inverse, iqr, isprime, jacobian,
+kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
+linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd,
+mag, manhattanDistance, map, matmul, matrixRank, max, mcols, mdet, mdiag, mean,
+median, mget, min, minverse, mmul, mod, mode, mrank, mrows, mtrace,
+mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ, orthonormalQ,
+outer, percentile, percentrank, perm, polar, polylog, polynomialReduce, pow, precision, prevprime,
+prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed, randint,
+randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection,
+rem, reshape, risingfact, rms, root, round, rows, rref, sec, sech,
+series, sign, simplify, sin, sinc, singularValueDecomposition, sinh, sinhc, skew, solve,
+solveLinear, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc,
+tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit,
+var, vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
 ```
 
 ---

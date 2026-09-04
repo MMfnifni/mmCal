@@ -694,6 +694,8 @@ case番号は**1-based**である。
 
 各caseはmaster seedとcase番号から独立したcase seedを導出して生成する。このため，48172件目を再現するために1～48171件目を再実行する必要はない。
 
+単一case再現ではFAILだけでなくPASS時も`Depth`，`Invariant`，`Expression`を表示する。数学的不変条件は通るが異常に遅いcaseを，生成式を失わず直接診断できる。
+
 長時間`--loop`を回す上で重要な仕様である。
 
 ## 8.6 Depth

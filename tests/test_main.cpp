@@ -50,61 +50,83 @@
 #include "symbolic/series_tests.hpp"
 #include "test_framework.hpp"
 
+#include <chrono>
 #include <exception>
 #include <iostream>
+#include <string_view>
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
+        bool timings = false;
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view argument = argv[i];
+            if (argument == "--timings") {
+                timings = true;
+                continue;
+            }
+            std::cerr << "Unknown argument: " << argument << '\n';
+            return 2;
+        }
+
         mmcal::tests::TestRunner tests;
-        mmcal::tests::runApproximationTests(tests);
-        mmcal::tests::runRealIntervalTests(tests);
-        mmcal::tests::runCertifiedConstantTests(tests);
-        mmcal::tests::runCertifiedSqrtTests(tests);
-        mmcal::tests::runCertifiedTranscendentalTests(tests);
-        mmcal::tests::runCertifiedComplexTranscendentalTests(tests);
-        mmcal::tests::runBigUIntTests(tests);
-        mmcal::tests::runBigIntTests(tests);
-        mmcal::tests::runBigFloatTests(tests);
-        mmcal::tests::runIntegerAlgorithmTests(tests);
-        mmcal::tests::runDecimalApproximationTests(tests);
-        mmcal::tests::runRationalTests(tests);
-        mmcal::tests::runRealNumberTests(tests);
-        mmcal::tests::runNumberTests(tests);
-        mmcal::tests::runExprTests(tests);
-        mmcal::tests::runLinearAlgebraTests(tests);
-        mmcal::tests::runNumericalCalculusTests(tests);
-        mmcal::tests::runAggregateArrayElementaryTests(tests);
-        mmcal::tests::runStatisticsTests(tests);
-        mmcal::tests::runCombinatoricsSignalTests(tests);
-        mmcal::tests::runSpecialFunctionExtensionTests(tests);
-        mmcal::tests::runRandomFunctionTests(tests);
-        mmcal::tests::runHistoryDiagnosticTests(tests);
-        mmcal::tests::runSessionApproximationTests(tests);
-        mmcal::tests::runIntegrationTests(tests);
-        mmcal::tests::runAdvancedIntegrationTests(tests);
-        mmcal::tests::runCalculusKnowledgeTests(tests);
-        mmcal::tests::runBuiltinRegistryTests(tests);
-        mmcal::tests::runSymbolTableTests(tests);
-        mmcal::tests::runSymbolRegistryTests(tests);
-        mmcal::tests::runMathRegistryTests(tests);
-        mmcal::tests::runDefinednessTests(tests);
-        mmcal::tests::runValueFactsTests(tests);
-        mmcal::tests::runKnowledgeContextTests(tests);
-        mmcal::tests::runSolutionSetTests(tests);
-        mmcal::tests::runSimplifierTests(tests);
-        mmcal::tests::runExactAlgebraTests(tests);
-        mmcal::tests::runExactTrigonometryTests(tests);
-        mmcal::tests::runExactTranscendentalTests(tests);
-        mmcal::tests::runDifferentiationTests(tests);
-        mmcal::tests::runSeriesTests(tests);
-        mmcal::tests::runEnvironmentTests(tests);
-        mmcal::tests::runUserFunctionRegistryTests(tests);
-        mmcal::tests::runEvaluatorTests(tests);
-        mmcal::tests::runErrorMessageTests(tests);
-        mmcal::tests::runLexerTests(tests);
-        mmcal::tests::runParserTests(tests);
-        mmcal::tests::runLowererTests(tests);
-        mmcal::tests::runKernelSessionTests(tests);
+        const auto run = [&](std::string_view name, auto&& function) {
+            const auto started = std::chrono::steady_clock::now();
+            function();
+            if (timings) {
+                const auto elapsed = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count();
+                std::cout << "[TIMING] " << name << ": " << elapsed << " ms\n";
+            }
+        };
+        run("Approximation", [&] { mmcal::tests::runApproximationTests(tests); });
+        run("RealInterval", [&] { mmcal::tests::runRealIntervalTests(tests); });
+        run("CertifiedConstant", [&] { mmcal::tests::runCertifiedConstantTests(tests); });
+        run("CertifiedSqrt", [&] { mmcal::tests::runCertifiedSqrtTests(tests); });
+        run("CertifiedTranscendental", [&] { mmcal::tests::runCertifiedTranscendentalTests(tests); });
+        run("CertifiedComplexTranscendental", [&] { mmcal::tests::runCertifiedComplexTranscendentalTests(tests); });
+        run("BigUInt", [&] { mmcal::tests::runBigUIntTests(tests); });
+        run("BigInt", [&] { mmcal::tests::runBigIntTests(tests); });
+        run("BigFloat", [&] { mmcal::tests::runBigFloatTests(tests); });
+        run("IntegerAlgorithm", [&] { mmcal::tests::runIntegerAlgorithmTests(tests); });
+        run("DecimalApproximation", [&] { mmcal::tests::runDecimalApproximationTests(tests); });
+        run("Rational", [&] { mmcal::tests::runRationalTests(tests); });
+        run("RealNumber", [&] { mmcal::tests::runRealNumberTests(tests); });
+        run("Number", [&] { mmcal::tests::runNumberTests(tests); });
+        run("Expr", [&] { mmcal::tests::runExprTests(tests); });
+        run("LinearAlgebra", [&] { mmcal::tests::runLinearAlgebraTests(tests); });
+        run("NumericalCalculus", [&] { mmcal::tests::runNumericalCalculusTests(tests); });
+        run("AggregateArrayElementary", [&] { mmcal::tests::runAggregateArrayElementaryTests(tests); });
+        run("Statistics", [&] { mmcal::tests::runStatisticsTests(tests); });
+        run("CombinatoricsSignal", [&] { mmcal::tests::runCombinatoricsSignalTests(tests); });
+        run("SpecialFunctionExtension", [&] { mmcal::tests::runSpecialFunctionExtensionTests(tests); });
+        run("RandomFunction", [&] { mmcal::tests::runRandomFunctionTests(tests); });
+        run("HistoryDiagnostic", [&] { mmcal::tests::runHistoryDiagnosticTests(tests); });
+        run("SessionApproximation", [&] { mmcal::tests::runSessionApproximationTests(tests); });
+        run("Integration", [&] { mmcal::tests::runIntegrationTests(tests); });
+        run("AdvancedIntegration", [&] { mmcal::tests::runAdvancedIntegrationTests(tests); });
+        run("CalculusKnowledge", [&] { mmcal::tests::runCalculusKnowledgeTests(tests); });
+        run("BuiltinRegistry", [&] { mmcal::tests::runBuiltinRegistryTests(tests); });
+        run("SymbolTable", [&] { mmcal::tests::runSymbolTableTests(tests); });
+        run("SymbolRegistry", [&] { mmcal::tests::runSymbolRegistryTests(tests); });
+        run("MathRegistry", [&] { mmcal::tests::runMathRegistryTests(tests); });
+        run("Definedness", [&] { mmcal::tests::runDefinednessTests(tests); });
+        run("ValueFacts", [&] { mmcal::tests::runValueFactsTests(tests); });
+        run("KnowledgeContext", [&] { mmcal::tests::runKnowledgeContextTests(tests); });
+        run("SolutionSet", [&] { mmcal::tests::runSolutionSetTests(tests); });
+        run("Simplifier", [&] { mmcal::tests::runSimplifierTests(tests); });
+        run("ExactAlgebra", [&] { mmcal::tests::runExactAlgebraTests(tests); });
+        run("ExactTrigonometry", [&] { mmcal::tests::runExactTrigonometryTests(tests); });
+        run("ExactTranscendental", [&] { mmcal::tests::runExactTranscendentalTests(tests); });
+        run("Differentiation", [&] { mmcal::tests::runDifferentiationTests(tests); });
+        run("Series", [&] { mmcal::tests::runSeriesTests(tests); });
+        run("Environment", [&] { mmcal::tests::runEnvironmentTests(tests); });
+        run("UserFunctionRegistry", [&] { mmcal::tests::runUserFunctionRegistryTests(tests); });
+        run("Evaluator", [&] { mmcal::tests::runEvaluatorTests(tests); });
+        run("ErrorMessage", [&] { mmcal::tests::runErrorMessageTests(tests); });
+        run("Lexer", [&] { mmcal::tests::runLexerTests(tests); });
+        run("Parser", [&] { mmcal::tests::runParserTests(tests); });
+        run("Lowerer", [&] { mmcal::tests::runLowererTests(tests); });
+        run("KernelSession", [&] { mmcal::tests::runKernelSessionTests(tests); });
         return tests.result();
     }
     catch (const std::exception& error) {

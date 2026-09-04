@@ -71,8 +71,8 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
     if (arguments.front().isSolutionSet()) {
         const solver::SolutionSet& solutions = arguments.front().asSolutionSet();
         if (solutions.kind() != solver::SolutionSetKind::Finite)
-            error::throwCalcError(error::CalcErrorType::Domain,
-                "at requires a finite SolutionSet");
+            error::throwCalcError(error::CalcErrorType::Type,
+                "at can index only a finite solution set");
         if (arguments.size() < 2 || arguments.size() > 3)
             detail::arrayTypeError(
                 "at expects a branch index and optional binding symbol for SolutionSet");
@@ -90,13 +90,13 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
         }
 
         if (!arguments[2].isSymbol())
-            detail::arrayTypeError("at SolutionSet binding selector must be a symbol");
+            detail::arrayTypeError("at solution binding selector must be a symbol");
         const expression::Symbol variable = arguments[2].asSymbol();
         for (const solver::SolutionBinding& binding : branch.bindings)
             if (binding.variable.sameIdentity(variable))
                 return binding.value;
         error::throwCalcError(error::CalcErrorType::Domain,
-            "at SolutionSet branch does not bind the requested symbol");
+            "at binding selector is not a solver variable");
     }
     if (arguments.front().isList()) {
         const auto& list = arguments.front().asList();

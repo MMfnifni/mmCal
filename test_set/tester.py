@@ -459,6 +459,7 @@ def main(argv=None):
     active_total = 0
     session_total = 0
     file_timings = []
+    session_timings = []
     for _path, sessions in loaded_files:
         session_total += len(sessions)
         for _startup_args, cases in sessions:
@@ -490,7 +491,10 @@ def main(argv=None):
                 responses, returncode, stderr = run_session(
                     executable, startup_args, active, args.timeout
                 )
-                file_elapsed_ms += (time.perf_counter() - session_started) * 1000.0
+                session_elapsed_ms = (time.perf_counter() - session_started) * 1000.0
+                file_elapsed_ms += session_elapsed_ms
+                session_timings.append((
+                    session_elapsed_ms, test_file.name, session_index, len(active)))
             except RunnerProtocolError as exc:
                 print("[RUNNER ERROR] {} session {}: {}".format(
                     test_file.name, session_index, exc))
@@ -548,6 +552,14 @@ def main(argv=None):
             print("  {:10.3f} ms  {:8.3f} ms/test  {:4d}  {}".format(
                 elapsed, per_test, count, name
             ))
+        if session_timings:
+            print("\nSlowest isolated sessions:")
+            for elapsed, name, session_index, count in sorted(
+                    session_timings, reverse=True)[:args.timings]:
+                per_test = elapsed / count if count else 0.0
+                print("  {:10.3f} ms  {:8.3f} ms/test  {:4d}  {} session {}".format(
+                    elapsed, per_test, count, name, session_index
+                ))
     print("=====================")
     return 1 if failed else 0
 

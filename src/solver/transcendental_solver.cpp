@@ -12,6 +12,7 @@
 #include "solver_support.hpp"
 #include "symbolic/polynomial.hpp"
 
+#include <array>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -1516,6 +1517,131 @@ std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
             builtins, mathematics, angles);
     }
 
+    // principal inverse functions are injective on the real axis, but their output
+    // ranges are part of the inversion contract.  Trigonometric ranges follow the
+    // active angle semantics instead of assuming radians.
+    struct PrincipalInverseSpec final {
+        mathematics::FunctionId function;
+        BuiltinId inverse;
+        bool lowerInclusive;
+        bool upperInclusive;
+        std::optional<numeric::Rational> lowerTurns;
+        std::optional<numeric::Rational> upperTurns;
+        bool nonNegative = false;
+    };
+    const std::array principalInverseSpecs{
+        PrincipalInverseSpec{mathematics::FunctionId::Asin, BuiltinId::Sin, true, true,
+            numeric::Rational{BigInt{-1}, BigInt{4}},
+            numeric::Rational{BigInt{1}, BigInt{4}}},
+        PrincipalInverseSpec{mathematics::FunctionId::Acos, BuiltinId::Cos, true, true,
+            numeric::Rational{BigInt{0}}, numeric::Rational{BigInt{1}, BigInt{2}}},
+        PrincipalInverseSpec{mathematics::FunctionId::Atan, BuiltinId::Tan, false, false,
+            numeric::Rational{BigInt{-1}, BigInt{4}},
+            numeric::Rational{BigInt{1}, BigInt{4}}},
+        PrincipalInverseSpec{mathematics::FunctionId::Acosh, BuiltinId::Cosh, true, true,
+            std::nullopt, std::nullopt, true}};
+
+    for (const PrincipalInverseSpec& spec : principalInverseSpecs) {
+        auto inverseSide = matchNamedFunctionSide(
+            sides[0], sides[1], variable, mathematics, spec.function);
+        if (!inverseSide)
+            inverseSide = matchNamedFunctionSide(
+                sides[1], sides[0], variable, mathematics, spec.function);
+        if (!inverseSide)
+            continue;
+
+        inverseSide->rhs = simplifyForSolve(
+            inverseSide->rhs, builtins, mathematics, angles, assumptions);
+        mathematics::AssumptionSet conditions;
+        const auto realPredicate = mathematics::elementOf(
+            inverseSide->rhs, mathematics::NumericDomain::Real);
+        const TruthValue rhsReal = knowledge.prove(realPredicate);
+        if (rhsReal == TruthValue::False)
+            return SolutionSet::empty(
+                {SolverVariable{variable, mathematics::NumericDomain::Real}});
+        if (rhsReal == TruthValue::Unknown)
+            conditions.add(realPredicate);
+
+        const auto requireRelation = [&](
+            RelationKind relation, const Expr& lhs, const Expr& rhs) -> bool {
+            const Expr difference = simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Subtract), {lhs, rhs}),
+                builtins, mathematics, angles, proofAssumptions);
+            if (exactZero(difference)) {
+                switch (relation) {
+                case RelationKind::Less:
+                case RelationKind::Greater:
+                case RelationKind::NotEqual:
+                    return false;
+                case RelationKind::LessEqual:
+                case RelationKind::GreaterEqual:
+                case RelationKind::Equal:
+                    return true;
+                }
+            }
+            const auto predicate = mathematics::relation(relation, lhs, rhs);
+            const TruthValue truth = knowledge.prove(predicate);
+            if (truth == TruthValue::True)
+                return true;
+            if (truth == TruthValue::False)
+                return false;
+
+            const CertifiedOrder order = certifiedConstantOrder(
+                lhs, rhs, builtins, mathematics, angles);
+            if (order != CertifiedOrder::Unknown) {
+                switch (relation) {
+                case RelationKind::Less: return order == CertifiedOrder::Less;
+                case RelationKind::LessEqual:
+                    return order == CertifiedOrder::Less || order == CertifiedOrder::Equal;
+                case RelationKind::Greater: return order == CertifiedOrder::Greater;
+                case RelationKind::GreaterEqual:
+                    return order == CertifiedOrder::Greater || order == CertifiedOrder::Equal;
+                case RelationKind::Equal: return order == CertifiedOrder::Equal;
+                case RelationKind::NotEqual: return order != CertifiedOrder::Equal;
+                }
+            }
+
+            conditions.add(predicate);
+            return true;
+        };
+
+        if (spec.nonNegative) {
+            if (!requireRelation(
+                    RelationKind::GreaterEqual, inverseSide->rhs, integerExpr(0)))
+                return SolutionSet::empty(
+                    {SolverVariable{variable, mathematics::NumericDomain::Real}});
+        }
+        else {
+            if (spec.lowerTurns) {
+                const Expr lower = simplifyForSolve(
+                    angleValueFromTurns(*spec.lowerTurns, builtins, mathematics, angles),
+                    builtins, mathematics, angles, proofAssumptions);
+                if (!requireRelation(
+                        spec.lowerInclusive ? RelationKind::GreaterEqual : RelationKind::Greater,
+                        inverseSide->rhs, lower))
+                    return SolutionSet::empty(
+                        {SolverVariable{variable, mathematics::NumericDomain::Real}});
+            }
+            if (spec.upperTurns) {
+                const Expr upper = simplifyForSolve(
+                    angleValueFromTurns(*spec.upperTurns, builtins, mathematics, angles),
+                    builtins, mathematics, angles, proofAssumptions);
+                if (!requireRelation(
+                        spec.upperInclusive ? RelationKind::LessEqual : RelationKind::Less,
+                        inverseSide->rhs, upper))
+                    return SolutionSet::empty(
+                        {SolverVariable{variable, mathematics::NumericDomain::Real}});
+            }
+        }
+
+        Expr target = simplifyForSolve(
+            Expr::call(builtins.symbol(spec.inverse), {inverseSide->rhs}),
+            builtins, mathematics, angles, proofAssumptions);
+        return solveRealTargetEquation(
+            inverseSide->argument, std::move(target), variable, conditions,
+            builtins, mathematics, angles);
+    }
+
     // cosh is even and strictly increasing on [0,inf).  For real target r>=1,
     // cosh(u)==r is exactly u==+/-acosh(r); at r==1 the two branches coalesce.
     auto coshSide = matchNamedFunctionSide(
@@ -1572,19 +1698,28 @@ std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
     if (baseLog) {
         const CertifiedOrder baseToOne = certifiedConstantOrder(
             baseLog->base, integerExpr(1), builtins, mathematics, angles);
+        const TruthValue basePositive = knowledge.prove(mathematics::relation(
+            RelationKind::Greater, baseLog->base, integerExpr(0)));
         if (baseToOne != CertifiedOrder::Unknown && baseToOne != CertifiedOrder::Equal
-            && knowledge.prove(mathematics::relation(
-                RelationKind::Greater, baseLog->base, integerExpr(0))) == TruthValue::True
-            && knowledge.prove(mathematics::elementOf(
-                baseLog->rhs, mathematics::NumericDomain::Real)) == TruthValue::True) {
+            && basePositive == TruthValue::True) {
+            const TruthValue rhsReal = knowledge.prove(mathematics::elementOf(
+                baseLog->rhs, mathematics::NumericDomain::Real));
+            if (rhsReal == TruthValue::False)
+                return SolutionSet::empty(
+                    {SolverVariable{variable, mathematics::NumericDomain::Real}});
+
+            mathematics::AssumptionSet conditions;
+            if (rhsReal == TruthValue::Unknown)
+                conditions.add(mathematics::elementOf(
+                    baseLog->rhs, mathematics::NumericDomain::Real));
+
             Expr target = simplifyForSolve(
                 Expr::call(builtins.symbol(BuiltinId::Power),
                     {baseLog->base, baseLog->rhs}),
                 builtins, mathematics, angles, proofAssumptions);
-            Expr transformed = Expr::call(
-                builtins.symbol(BuiltinId::Equal), {baseLog->argument, std::move(target)});
-            return solveUnivariatePolynomialRelation(
-                transformed, variable, builtins, mathematics, angles);
+            return solveRealTargetEquation(
+                baseLog->argument, std::move(target), variable, conditions,
+                builtins, mathematics, angles);
         }
     }
 

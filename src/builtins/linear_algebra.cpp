@@ -206,6 +206,115 @@ using numeric::Number;
         || facts.sign == mathematics::RealSign::NonZero;
 }
 
+[[nodiscard]] bool provablyZero(
+    const Expr& value,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics) {
+    if (value.isNumber())
+        return value.asNumber().isZero();
+    return mathematics::inferValueFacts(value, registry, mathematics).sign
+        == mathematics::RealSign::Zero;
+}
+
+[[nodiscard]] Expr matrixRow(const ArrayExpr& matrix, std::size_t row) {
+    std::vector<Expr> elements;
+    elements.reserve(matrix.shape[1]);
+    const std::size_t offset = row * matrix.shape[1];
+    for (std::size_t column = 0; column < matrix.shape[1]; ++column)
+        elements.push_back(matrix.element(offset + column));
+    return Expr::array({matrix.shape[1]}, std::move(elements));
+}
+
+[[nodiscard]] Expr subtractVectors(
+    const ArrayExpr& lhs,
+    const ArrayExpr& rhs,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::vector<Expr> output;
+    output.reserve(lhs.size());
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        output.push_back(exact::subtract(
+            lhs.element(i), rhs.element(i), registry, mathematics, angles));
+    return Expr::array(lhs.shape, std::move(output));
+}
+
+[[nodiscard]] Expr scaleVector(
+    const ArrayExpr& vector,
+    const Expr& factor,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::vector<Expr> output;
+    output.reserve(vector.size());
+    for (std::size_t i = 0; i < vector.size(); ++i)
+        output.push_back(productTerm(
+            vector.element(i), factor, registry, mathematics, angles));
+    return Expr::array(vector.shape, std::move(output));
+}
+
+[[nodiscard]] Expr gramSchmidtCore(
+    const ArrayExpr& vectors,
+    BuiltinId unresolvedId,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    bool requireFullRank,
+    bool returnPredicate) {
+    const std::size_t rowCount = vectors.shape[0];
+    const std::size_t dimension = vectors.shape[1];
+    if (requireFullRank && rowCount > dimension)
+        return Expr{false};
+
+    std::vector<Expr> basis;
+    std::vector<Expr> squaredNorms;
+    basis.reserve(std::min(rowCount, dimension));
+    squaredNorms.reserve(std::min(rowCount, dimension));
+    for (std::size_t row = 0; row < rowCount; ++row) {
+        Expr residual = matrixRow(vectors, row);
+        for (std::size_t i = 0; i < basis.size(); ++i) {
+            const Expr numerator = hermitianInner(
+                basis[i].asArray(), residual.asArray(), registry, mathematics, angles);
+            const Expr coefficient = exact::divide(
+                numerator, squaredNorms[i], registry, mathematics, angles);
+            const Expr component = scaleVector(
+                basis[i].asArray(), coefficient, registry, mathematics, angles);
+            residual = subtractVectors(
+                residual.asArray(), component.asArray(), registry, mathematics, angles);
+        }
+
+        const Expr squaredNorm = hermitianInner(
+            residual.asArray(), residual.asArray(), registry, mathematics, angles);
+        if (provablyZero(squaredNorm, registry, mathematics)) {
+            if (requireFullRank)
+                return Expr{false};
+            continue;
+        }
+        if (!provablyNonZero(squaredNorm, registry, mathematics))
+            return Expr::call(registry.symbol(unresolvedId), {Expr::array(vectors)});
+
+        basis.push_back(std::move(residual));
+        squaredNorms.push_back(squaredNorm);
+    }
+
+    if (returnPredicate)
+        return Expr{basis.size() == rowCount};
+
+    std::vector<Expr> output;
+    output.reserve(basis.size() * dimension);
+    for (std::size_t row = 0; row < basis.size(); ++row) {
+        const Expr norm = exact::sqrt(
+            squaredNorms[row], registry, mathematics, angles);
+        const Expr reciprocal = exact::divide(
+            integer(1), norm, registry, mathematics, angles);
+        const Expr unit = scaleVector(
+            basis[row].asArray(), reciprocal, registry, mathematics, angles);
+        for (std::size_t i = 0; i < dimension; ++i)
+            output.push_back(unit.asArray().element(i));
+    }
+    return Expr::array({basis.size(), dimension}, std::move(output));
+}
+
 [[nodiscard]] linear_algebra::ExactMatrixContext exactContext(
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
@@ -683,23 +792,25 @@ Expr evaluateDistance(
     return hermitianNorm(vector.asArray(), registry, mathematics, angles);
 }
 
-Expr evaluateProjection(
+Expr evaluateProjectionForOperation(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    const ArrayExpr& vector = detail::requireVector(arguments[0], "projection");
-    const ArrayExpr& onto = detail::requireVector(arguments[1], "projection");
+    const mathematics::AngleSemantics& angles,
+    std::string_view operationName,
+    BuiltinId unresolvedId) {
+    const ArrayExpr& vector = detail::requireVector(arguments[0], operationName);
+    const ArrayExpr& onto = detail::requireVector(arguments[1], operationName);
     if (vector.size() != onto.size())
         error::throwCalcError(error::CalcErrorType::Domain,
-            "projection requires vectors with the same length");
+            std::string{operationName} + " requires vectors with the same length");
 
     const Expr denominator = hermitianInner(onto, onto, registry, mathematics, angles);
     if (denominator.isNumber() && denominator.asNumber().isZero())
         error::throwCalcError(error::CalcErrorType::Domain,
-            "projection requires a nonzero direction vector");
+            std::string{operationName} + " requires a nonzero direction vector");
     if (!provablyNonZero(denominator, registry, mathematics))
-        return Expr::call(registry.symbol(BuiltinId::VectorProject),
+        return Expr::call(registry.symbol(unresolvedId),
             {arguments[0], arguments[1]});
 
     const Expr factor = exact::divide(
@@ -711,6 +822,107 @@ Expr evaluateProjection(
         output.push_back(productTerm(
             onto.element(i), factor, registry, mathematics, angles));
     return Expr::array(onto.shape, std::move(output));
+}
+
+Expr evaluateProjection(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    return evaluateProjectionForOperation(arguments, registry, mathematics, angles,
+        "projection", BuiltinId::VectorProject);
+}
+
+Expr evaluateRejection(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vector = detail::requireVector(arguments[0], "rejection");
+    const ArrayExpr& onto = detail::requireVector(arguments[1], "rejection");
+    if (vector.size() != onto.size())
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "rejection requires vectors with the same length");
+
+    const Expr projected = evaluateProjectionForOperation(arguments, registry, mathematics, angles,
+        "rejection", BuiltinId::VectorRejection);
+    if (!projected.isArray())
+        return Expr::call(registry.symbol(BuiltinId::VectorRejection),
+            {arguments[0], arguments[1]});
+    return subtractVectors(vector, projected.asArray(), registry, mathematics, angles);
+}
+
+Expr evaluateOrthogonalQ(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vectors = detail::requireMatrix(arguments[0], "orthogonalQ");
+    for (std::size_t i = 0; i < vectors.shape[0]; ++i) {
+        const Expr lhs = matrixRow(vectors, i);
+        for (std::size_t j = i + 1; j < vectors.shape[0]; ++j) {
+            const Expr rhs = matrixRow(vectors, j);
+            const Expr product = hermitianInner(
+                lhs.asArray(), rhs.asArray(), registry, mathematics, angles);
+            if (provablyZero(product, registry, mathematics))
+                continue;
+            if (provablyNonZero(product, registry, mathematics))
+                return Expr{false};
+            return Expr::call(registry.symbol(BuiltinId::OrthogonalQ), {arguments[0]});
+        }
+    }
+    return Expr{true};
+}
+
+Expr evaluateOrthonormalQ(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vectors = detail::requireMatrix(arguments[0], "orthonormalQ");
+    for (std::size_t i = 0; i < vectors.shape[0]; ++i) {
+        const Expr lhs = matrixRow(vectors, i);
+        const Expr normSquared = hermitianInner(
+            lhs.asArray(), lhs.asArray(), registry, mathematics, angles);
+        const Expr unitDifference = exact::subtract(
+            normSquared, integer(1), registry, mathematics, angles);
+        if (!provablyZero(unitDifference, registry, mathematics)) {
+            if (provablyNonZero(unitDifference, registry, mathematics))
+                return Expr{false};
+            return Expr::call(registry.symbol(BuiltinId::OrthonormalQ), {arguments[0]});
+        }
+        for (std::size_t j = i + 1; j < vectors.shape[0]; ++j) {
+            const Expr rhs = matrixRow(vectors, j);
+            const Expr product = hermitianInner(
+                lhs.asArray(), rhs.asArray(), registry, mathematics, angles);
+            if (provablyZero(product, registry, mathematics))
+                continue;
+            if (provablyNonZero(product, registry, mathematics))
+                return Expr{false};
+            return Expr::call(registry.symbol(BuiltinId::OrthonormalQ), {arguments[0]});
+        }
+    }
+    return Expr{true};
+}
+
+Expr evaluateLinearIndependentQ(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vectors = detail::requireMatrix(arguments[0], "linearIndependentQ");
+    return gramSchmidtCore(vectors, BuiltinId::LinearIndependentQ,
+        registry, mathematics, angles, true, true);
+}
+
+Expr evaluateGramSchmidt(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& vectors = detail::requireMatrix(arguments[0], "gramSchmidt");
+    return gramSchmidtCore(vectors, BuiltinId::GramSchmidt,
+        registry, mathematics, angles, false, false);
 }
 
 Expr evaluateDeterminant(

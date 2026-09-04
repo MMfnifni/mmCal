@@ -1,5 +1,6 @@
 // 安全な標準式簡約
 #include "simplifier.hpp"
+#include "expression/exact_value.hpp"
 #include "expression/array_utils.hpp"
 
 #include "expression_ordering.hpp"
@@ -99,12 +100,6 @@ using numeric::RealNumber;
         && expression.asNumber().asReal() == RealNumber{BigInt{value}};
 }
 
-[[nodiscard]] std::optional<Rational> exactRealRational(const Expr& expression) {
-    if (!expression.isNumber() || !expression.asNumber().isReal())
-        return std::nullopt;
-    return expression.asNumber().asReal().toRational();
-}
-
 [[nodiscard]] std::optional<BigInt> positiveExactInteger(const Expr& expression) {
     if (!expression.isNumber() || !expression.asNumber().isReal())
         return std::nullopt;
@@ -161,6 +156,36 @@ void sortCanonical(std::vector<Expr>& expressions) {
                 return true;
     }
     return false;
+}
+
+[[nodiscard]] std::optional<BuiltinId> principalInverseOf(BuiltinId function) noexcept {
+    switch (function) {
+    case BuiltinId::Sin: return BuiltinId::Asin;
+    case BuiltinId::Cos: return BuiltinId::Acos;
+    case BuiltinId::Tan: return BuiltinId::Atan;
+    case BuiltinId::Sinh: return BuiltinId::Asinh;
+    case BuiltinId::Cosh: return BuiltinId::Acosh;
+    case BuiltinId::Tanh: return BuiltinId::Atanh;
+    default: return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<Expr> simplifyPrincipalInverseComposition(
+    BuiltinId outer,
+    const Expr& argument,
+    const SimplificationContext& context) {
+    const auto inverse = principalInverseOf(outer);
+    if (!inverse || !isHead(argument, context.builtins, *inverse)
+        || argument.asCall().arguments.size() != 1)
+        return std::nullopt;
+
+    const Expr& inner = argument.asCall().arguments.front();
+    // f[f^-1[z]] の向きだけを縮約する。逆向きは周期性・branch cutのため一般には成立しない。
+    // extended/special infinityはinverseの有限平面上の恒等式の対象外なので，従来の未評価を保つ。
+    // atan/atanh のbranch point等で未定義な点を消さないよう，inverse call全体のdefinednessも要求する。
+    if (containsInfinity(inner) || !provablyDefined(argument, context))
+        return std::nullopt;
+    return inner;
 }
 
 [[nodiscard]] std::optional<Expr> predefinedValue(
@@ -237,7 +262,7 @@ struct LinearTerm final {
     if (isHead(expression, builtins, BuiltinId::Divide)) {
         const auto& arguments = expression.asCall().arguments;
         if (arguments.size() == 2) {
-            const auto denominator = exactRealRational(arguments[1]);
+            const auto denominator = expression::exact::realRational(arguments[1]);
             if (denominator && !denominator->isZero()) {
                 LinearTerm numerator = extractLinearTerm(arguments[0], builtins);
                 numerator.coefficient /= *denominator;
@@ -250,7 +275,7 @@ struct LinearTerm final {
         Rational coefficient{BigInt{1}};
         std::vector<Expr> factors;
         for (const Expr& factor : expression.asCall().arguments) {
-            if (const auto numeric = exactRealRational(factor)) {
+            if (const auto numeric = expression::exact::realRational(factor)) {
                 coefficient *= *numeric;
                 continue;
             }
@@ -602,7 +627,7 @@ struct PositiveIntegerPower final {
     const auto& arguments = expression.asCall().arguments;
     if (arguments.size() != 2)
         return std::nullopt;
-    const auto exponent = exactRealRational(arguments[1]);
+    const auto exponent = expression::exact::realRational(arguments[1]);
     if (!exponent || !exponent->isInteger() || !exponent->numerator().isPositive())
         return std::nullopt;
     const auto count = numeric::tryToUint64(exponent->numerator());
@@ -669,8 +694,8 @@ struct PositiveIntegerPower final {
         if (!base)
             return std::nullopt;
 
-        const auto a = exactRealRational((*base)[0]);
-        const auto b = exactRealRational((*base)[1]);
+        const auto a = expression::exact::realRational((*base)[0]);
+        const auto b = expression::exact::realRational((*base)[1]);
         if (!a || !b || a->isZero() || *b != *a + Rational{BigInt{1}})
             return std::nullopt;
         // 積分器が生成するa=1/n>0の領域だけに限定し、parameter poleを跨ぐ一般変形にしない。
@@ -697,8 +722,8 @@ struct PositiveIntegerPower final {
         if (!shifted)
             return std::nullopt;
 
-        const auto shiftedA = exactRealRational((*shifted)[0]);
-        const auto shiftedB = exactRealRational((*shifted)[1]);
+        const auto shiftedA = expression::exact::realRational((*shifted)[0]);
+        const auto shiftedB = expression::exact::realRational((*shifted)[1]);
         if (!shiftedA || !shiftedB
             || *shiftedA != *a + Rational{BigInt{1}}
             || *shiftedB != *b + Rational{BigInt{1}}
@@ -735,9 +760,9 @@ struct PositiveIntegerPower final {
         const auto* base = hypergeometric2F1Arguments(baseTerm.atom, builtins);
         if (!base)
             return std::nullopt;
-        const auto a = exactRealRational((*base)[0]);
-        const auto b = exactRealRational((*base)[1]);
-        const auto c = exactRealRational((*base)[2]);
+        const auto a = expression::exact::realRational((*base)[0]);
+        const auto b = expression::exact::realRational((*base)[1]);
+        const auto c = expression::exact::realRational((*base)[2]);
         if (!a || !b || !c || b->numerator().isNegative() || b->isZero()
             || *c != *b + Rational{BigInt{1}})
             return std::nullopt;
@@ -761,9 +786,9 @@ struct PositiveIntegerPower final {
         const auto* shifted = hypergeometric2F1Arguments(*shiftedAtom, builtins);
         if (!shifted)
             return std::nullopt;
-        const auto shiftedA = exactRealRational((*shifted)[0]);
-        const auto shiftedB = exactRealRational((*shifted)[1]);
-        const auto shiftedC = exactRealRational((*shifted)[2]);
+        const auto shiftedA = expression::exact::realRational((*shifted)[0]);
+        const auto shiftedB = expression::exact::realRational((*shifted)[1]);
+        const auto shiftedC = expression::exact::realRational((*shifted)[2]);
         if (!shiftedA || !shiftedB || !shiftedC
             || *shiftedA != *a + Rational{BigInt{1}}
             || *shiftedB != *b + Rational{BigInt{1}}
@@ -853,8 +878,8 @@ struct PositiveIntegerPower final {
         if (isHead(arguments[0], context.builtins, BuiltinId::Subtract)
             && arguments[0].asCall().arguments.size() == 2) {
             const auto& inner = arguments[0].asCall().arguments;
-            const auto innerConstant = exactRealRational(inner[1]);
-            const auto outerConstant = exactRealRational(arguments[1]);
+            const auto innerConstant = expression::exact::realRational(inner[1]);
+            const auto outerConstant = expression::exact::realRational(arguments[1]);
             if (innerConstant && outerConstant)
                 return Expr::call(context.builtins.symbol(BuiltinId::Subtract), {
                     inner[0], Expr{Number{*innerConstant + *outerConstant}}});
@@ -915,10 +940,10 @@ struct PositiveIntegerPower final {
 
         // 正のexact Rationalの平方根を分母に持つ場合だけ共役化する。
         // c/sqrt[r] = c sqrt[r]/r (r>0) はprincipal branchでも安全で、atan[1/sqrt[3]] 等を既存のexact inverse-trig知識へ正規化できる。
-        if (const auto numerator = exactRealRational(arguments[0]); numerator
+        if (const auto numerator = expression::exact::realRational(arguments[0]); numerator
             && isHead(arguments[1], context.builtins, BuiltinId::Sqrt)
             && arguments[1].asCall().arguments.size() == 1) {
-            if (const auto radicand = exactRealRational(
+            if (const auto radicand = expression::exact::realRational(
                     arguments[1].asCall().arguments[0]);
                 radicand && *radicand > Rational{BigInt{0}}) {
                 return mathematics::scaleExactExpression(
@@ -928,7 +953,7 @@ struct PositiveIntegerPower final {
 
         // exactな有理分母なら、分子に既に付いている有理係数と先に約分する。
         // 例: (4 sqrt[2])/2 -> 2 sqrt[2]。branchやdomainには触れず、Rational係数だけを整理するため常に安全。
-        if (const auto denominator = exactRealRational(arguments[1]);
+        if (const auto denominator = expression::exact::realRational(arguments[1]);
             denominator && !denominator->isZero()) {
             LinearTerm numerator = extractLinearTerm(arguments[0], context.builtins);
             if (!(numerator.coefficient == Rational{BigInt{1}})
@@ -1090,7 +1115,7 @@ struct PositiveIntegerPower final {
                 return integerExpr(1);
             return expression;
         }
-        if (const auto exponent = exactRealRational(arguments[1]); exponent) {
+        if (const auto exponent = expression::exact::realRational(arguments[1]); exponent) {
             if (*exponent == Rational{BigInt{1}, BigInt{2}})
                 return Expr::call(context.builtins.symbol(BuiltinId::Sqrt), {arguments[0]});
             // principal sqrtは定義上 w^2=z を満たすため、(sqrt[z])^2=z はbranch cutを跨いでも安全。
@@ -1460,6 +1485,9 @@ struct PositiveIntegerPower final {
 
         if (!mathFunction)
             return expression;
+        if (auto composed = simplifyPrincipalInverseComposition(
+            definition->id, arguments[0], context))
+            return std::move(*composed);
         if (definition->id == BuiltinId::Asin
             || definition->id == BuiltinId::Acos
             || definition->id == BuiltinId::Atan) {
@@ -1510,6 +1538,10 @@ struct PositiveIntegerPower final {
             if (mathFunction->parity == mathematics::FunctionParity::Odd)
                 return Expr::call(context.builtins.symbol(BuiltinId::Negate), {sameFunction});
         }
+
+        if (auto composed = simplifyPrincipalInverseComposition(
+            definition->id, arguments[0], context))
+            return std::move(*composed);
 
         if (auto exact = mathematics::simplifyExactHyperbolic(
             mathFunction->id, arguments[0], context.builtins, context.mathematics))
@@ -1760,12 +1792,18 @@ struct PositiveIntegerPower final {
     case BuiltinId::VectorSum:
     case BuiltinId::VectorInner:
     case BuiltinId::VectorOuter:
+    case BuiltinId::VectorRejection:
+    case BuiltinId::OrthogonalQ:
+    case BuiltinId::OrthonormalQ:
+    case BuiltinId::LinearIndependentQ:
+    case BuiltinId::GramSchmidt:
     case BuiltinId::Gradient:
     case BuiltinId::Divergence:
     case BuiltinId::Curl:
     case BuiltinId::Laplacian:
     case BuiltinId::Jacobian:
     case BuiltinId::Hessian:
+    case BuiltinId::DirectionalDerivative:
     case BuiltinId::Factorial:
     case BuiltinId::Derivative:
     case BuiltinId::SymbolicIntegral:

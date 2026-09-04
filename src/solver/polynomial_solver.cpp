@@ -5,6 +5,7 @@
 #include "mathematics/math_ids.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "mathematics/predicate.hpp"
+#include "mathematics/relation_builtin.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 #include "simplification/simplification_context.hpp"
@@ -623,15 +624,7 @@ void appendDegenerateLinearCases(
     const auto* definition = builtins.find(relation.asCall().head);
     if (!definition)
         return std::nullopt;
-    switch (definition->id) {
-    case BuiltinId::Equal: return RelationKind::Equal;
-    case BuiltinId::NotEqual: return RelationKind::NotEqual;
-    case BuiltinId::Less: return RelationKind::Less;
-    case BuiltinId::LessEqual: return RelationKind::LessEqual;
-    case BuiltinId::Greater: return RelationKind::Greater;
-    case BuiltinId::GreaterEqual: return RelationKind::GreaterEqual;
-    default: return std::nullopt;
-    }
+    return mathematics::relationKindForBuiltin(definition->id);
 }
 
 
@@ -1636,6 +1629,14 @@ struct SymbolicLinearEquation final {
 
 } // namespace
 
+std::optional<SolutionSet> solveDirectAlgebraicBindingRelation(
+    const Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    return solveDirectAlgebraicBinding(relation, variable, builtins, mathematics);
+}
+
 SolutionSet solveUnivariatePolynomialRelation(
     const Expr& relation,
     const expression::Symbol& variable,
@@ -1746,6 +1747,92 @@ SolutionSet solveUnivariatePolynomialRelation(
     return lhs.degree() > 0;
 }
 
+std::optional<SolutionSet> solveFactoredRealAlgebraicPolynomialEquation(
+    const Expr& equation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto relation = relationKindOf(equation, builtins);
+    if (relation && *relation != RelationKind::Equal)
+        return std::nullopt;
+
+    const Expr zeroForm = equationZeroForm(equation, builtins, mathematics, angles);
+    const auto polynomial = symbolic::toRationalPolynomial(zeroForm, variable, builtins);
+    if (!polynomial || polynomial->degree() <= 2 || polynomial->isZero())
+        return std::nullopt;
+
+    if (const auto rationalRoots = rationalRealRootsWithoutIrrationalResidual(*polynomial)) {
+        const std::vector<SolverVariable> variables{{
+            variable, mathematics::NumericDomain::Real}};
+        std::vector<SolutionBranch> branches;
+        branches.reserve(rationalRoots->size());
+        for (const auto& [root, multiplicity] : *rationalRoots)
+            branches.push_back(branch(variable, Expr{Number{root}}, multiplicity));
+        return branches.empty()
+            ? SolutionSet::empty(variables)
+            : SolutionSet::finite(variables, std::move(branches));
+    }
+
+    Expr factored = symbolic::factorExpression(zeroForm, builtins, mathematics, angles);
+    if (!isHead(factored, builtins, BuiltinId::Multiply))
+        return std::nullopt;
+
+    std::vector<symbolic::RealAlgebraicNumber> roots;
+    std::size_t nonconstantFactors = 0;
+    for (const Expr& factor : factored.asCall().arguments) {
+        const auto factorPolynomial = symbolic::toRationalPolynomial(factor, variable, builtins);
+        if (!factorPolynomial) {
+            if (!symbolic::containsSymbol(factor, variable))
+                continue;
+            return std::nullopt;
+        }
+        if (factorPolynomial->degree() == 0)
+            continue;
+        ++nonconstantFactors;
+        const auto factorRoots = symbolic::RealAlgebraicNumber::isolateAll(
+            factorPolynomial->coefficients());
+        if (!factorRoots)
+            return std::nullopt;
+        roots.insert(roots.end(), factorRoots->begin(), factorRoots->end());
+    }
+    if (nonconstantFactors < 2)
+        return std::nullopt;
+
+    std::sort(roots.begin(), roots.end(),
+        [](const symbolic::RealAlgebraicNumber& lhs,
+           const symbolic::RealAlgebraicNumber& rhs) {
+            const auto left = symbolic::AlgebraicNumber::fromRealRoot(lhs);
+            const auto right = symbolic::AlgebraicNumber::fromRealRoot(rhs);
+            const auto order = left.exactRealCompare(right);
+            if (order)
+                return *order == symbolic::AlgebraicOrder::Less;
+            return lhs.isolatingInterval().upper <= rhs.isolatingInterval().lower;
+        });
+    roots.erase(std::unique(roots.begin(), roots.end(),
+        [](const symbolic::RealAlgebraicNumber& lhs,
+           const symbolic::RealAlgebraicNumber& rhs) {
+            const auto left = symbolic::AlgebraicNumber::fromRealRoot(lhs);
+            const auto right = symbolic::AlgebraicNumber::fromRealRoot(rhs);
+            return left.exactEquals(right).value_or(false);
+        }), roots.end());
+
+    const std::vector<SolverVariable> variables{{
+        variable, mathematics::NumericDomain::Real}};
+    std::vector<SolutionBranch> branches;
+    branches.reserve(roots.size());
+    for (const auto& root : roots) {
+        const auto canonical = symbolic::RealAlgebraicNumber::create(
+            root.polynomial(), root.rootIndex());
+        branches.push_back(branch(variable,
+            symbolic::makeCanonicalRootExpression(
+                canonical ? *canonical : root, builtins)));
+    }
+    return branches.empty()
+        ? SolutionSet::empty(variables)
+        : SolutionSet::finite(variables, std::move(branches));
+}
+
 std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
     const Expr& equation,
     const expression::Symbol& variable,
@@ -1762,6 +1849,146 @@ std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
         return std::nullopt;
     if (polynomial->isZero())
         return SolutionSet::universal({{variable, mathematics::NumericDomain::Real}});
+
+    // 有理根だけで実根集合が閉じる場合は，Rootへ持ち上げずそのまま返す。
+    // complexな残余因子は実解へ寄与しないため，x^4-1のような基本形のcanonical表示も保てる。
+    if (const auto rationalRoots = rationalRealRootsWithoutIrrationalResidual(*polynomial)) {
+        const std::vector<SolverVariable> variables{{
+            variable, mathematics::NumericDomain::Real}};
+        std::vector<SolutionBranch> branches;
+        branches.reserve(rationalRoots->size());
+        for (const auto& [root, multiplicity] : *rationalRoots)
+            branches.push_back(branch(variable, Expr{Number{root}}, multiplicity));
+        return branches.empty()
+            ? SolutionSet::empty(variables)
+            : SolutionSet::finite(variables, std::move(branches));
+    }
+
+    // x^4+b*x^2+cでy=x^2が異なる正の有理根を2個持つ場合は，
+    // 4次全体を分離せず二つのx^2-y因子を直接分離する。
+    if (polynomial->degree() == 4
+        && polynomial->coefficient(1).isZero()
+        && polynomial->coefficient(3).isZero()
+        && polynomial->coefficient(4) == rational(1)) {
+        const Rational b = polynomial->coefficient(2);
+        const Rational c = polynomial->coefficient(0);
+        const Rational discriminant = b * b - rational(4) * c;
+        const auto numeratorRoot = numeric::integerSqrt(discriminant.numerator());
+        const auto denominatorRoot = numeric::integerSqrt(discriminant.denominator());
+        if (discriminant >= rational(0)
+            && numeratorRoot.remainder.isZero()
+            && denominatorRoot.remainder.isZero()) {
+            const Rational sqrtDiscriminant{
+                numeratorRoot.root, denominatorRoot.root};
+            const Rational y1 = (-b - sqrtDiscriminant) / rational(2);
+            const Rational y2 = (-b + sqrtDiscriminant) / rational(2);
+            const auto isRationalSquare = [](const Rational& value) {
+                if (value < rational(0)) return false;
+                const auto n = numeric::integerSqrt(value.numerator());
+                const auto d = numeric::integerSqrt(value.denominator());
+                return n.remainder.isZero() && d.remainder.isZero();
+            };
+            if (y1 > rational(0) && y2 > rational(0)
+                && y1 != y2 && !isRationalSquare(y1) && !isRationalSquare(y2)) {
+                std::vector<symbolic::RealAlgebraicNumber> roots;
+                for (const Rational& y : {y1, y2}) {
+                    const std::array<Rational, 3> factor{-y, rational(0), rational(1)};
+                    const auto factorRoots = symbolic::RealAlgebraicNumber::isolateAll(factor);
+                    if (!factorRoots || factorRoots->size() != 2) {
+                        roots.clear();
+                        break;
+                    }
+                    roots.insert(roots.end(), factorRoots->begin(), factorRoots->end());
+                }
+                if (roots.size() == 4) {
+                    std::sort(roots.begin(), roots.end(),
+                        [](const auto& lhs, const auto& rhs) {
+                            const auto left = symbolic::AlgebraicNumber::fromRealRoot(lhs);
+                            const auto right = symbolic::AlgebraicNumber::fromRealRoot(rhs);
+                            return left.exactRealCompare(right)
+                                == symbolic::AlgebraicOrder::Less;
+                        });
+                    const std::vector<SolverVariable> variables{{
+                        variable, mathematics::NumericDomain::Real}};
+                    std::vector<SolutionBranch> branches;
+                    for (const auto& root : roots)
+                        branches.push_back(branch(variable,
+                            symbolic::makeCanonicalRootExpression(root, builtins)));
+                    return SolutionSet::finite(variables, std::move(branches));
+                }
+            }
+        }
+    }
+
+    // reducible polynomialは全体を高次数のまま分離してからminimal polynomialへ戻さず，
+    // Q上の因子ごとに実根を分離する。小次数因子のSturm計算を共有できるため，
+    // (x^2-a)(x^2-b)のような基本形で高次数root分離の固定費を払わない。
+    Expr factored = symbolic::factorExpression(
+        zeroForm, builtins, mathematics, angles);
+    if (isHead(factored, builtins, BuiltinId::Multiply)) {
+        std::vector<symbolic::RealAlgebraicNumber> factorRoots;
+        std::size_t nonconstantFactors = 0;
+        bool usable = true;
+        for (const Expr& factor : factored.asCall().arguments) {
+            const auto factorPolynomial = symbolic::toRationalPolynomial(
+                factor, variable, builtins);
+            if (!factorPolynomial) {
+                if (!symbolic::containsSymbol(factor, variable))
+                    continue;
+                usable = false;
+                break;
+            }
+            if (factorPolynomial->degree() == 0)
+                continue;
+            ++nonconstantFactors;
+            const auto roots = symbolic::RealAlgebraicNumber::isolateAll(
+                factorPolynomial->coefficients());
+            if (!roots) {
+                usable = false;
+                break;
+            }
+            factorRoots.insert(factorRoots.end(), roots->begin(), roots->end());
+        }
+        if (usable && nonconstantFactors >= 2) {
+            std::sort(factorRoots.begin(), factorRoots.end(),
+                [](const symbolic::RealAlgebraicNumber& lhs,
+                   const symbolic::RealAlgebraicNumber& rhs) {
+                    const auto left = symbolic::AlgebraicNumber::fromRealRoot(lhs);
+                    const auto right = symbolic::AlgebraicNumber::fromRealRoot(rhs);
+                    const auto order = left.exactRealCompare(right);
+                    if (order)
+                        return *order == symbolic::AlgebraicOrder::Less;
+                    return lhs.isolatingInterval().upper <= rhs.isolatingInterval().lower;
+                });
+            factorRoots.erase(std::unique(factorRoots.begin(), factorRoots.end(),
+                [](const symbolic::RealAlgebraicNumber& lhs,
+                   const symbolic::RealAlgebraicNumber& rhs) {
+                    const auto left = symbolic::AlgebraicNumber::fromRealRoot(lhs);
+                    const auto right = symbolic::AlgebraicNumber::fromRealRoot(rhs);
+                    return left.exactEquals(right).value_or(false);
+                }), factorRoots.end());
+            const std::vector<SolverVariable> variables{{
+                variable, mathematics::NumericDomain::Real}};
+            std::vector<SolutionBranch> branches;
+            branches.reserve(factorRoots.size());
+            for (const auto& root : factorRoots) {
+                const auto canonical = symbolic::RealAlgebraicNumber::create(
+                    root.polynomial(), root.rootIndex());
+                const auto& value = canonical ? *canonical : root;
+                if (value.degree() == 1) {
+                    const auto coefficients = value.polynomial();
+                    branches.push_back(branch(variable, Expr{Number{
+                        -coefficients[0] / coefficients[1]}}));
+                    continue;
+                }
+                branches.push_back(branch(variable,
+                    symbolic::makeCanonicalRootExpression(value, builtins)));
+            }
+            return branches.empty()
+                ? SolutionSet::empty(variables)
+                : SolutionSet::finite(variables, std::move(branches));
+        }
+    }
 
     const auto roots = symbolic::RealAlgebraicNumber::isolateAll(polynomial->coefficients());
     if (!roots)

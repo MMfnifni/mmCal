@@ -3,6 +3,7 @@
 #include "big_int.hpp"
 
 #include <compare>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -44,5 +45,6 @@ private:
 [[nodiscard]] Rational operator-(Rational lhs, const Rational& rhs);
 [[nodiscard]] Rational operator*(Rational lhs, const Rational& rhs);
 [[nodiscard]] Rational operator/(Rational lhs, const Rational& rhs);
+[[nodiscard]] Rational pow(Rational base, std::uint64_t exponent);
 
 } // namespace mmcal::numeric

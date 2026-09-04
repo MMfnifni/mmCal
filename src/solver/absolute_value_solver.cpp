@@ -191,11 +191,31 @@ std::optional<SolutionSet> solveRealAbsoluteValueRelation(
             matched->rhs, NumericDomain::Real)) != TruthValue::True)
         return std::nullopt;
 
+    matched->argument = simplifyForSolve(
+        std::move(matched->argument), builtins, mathematics, angles, local);
     matched->rhs = simplifyForSolve(
         std::move(matched->rhs), builtins, mathematics, angles, local);
     const RhsSign sign = classifyRhsSign(
         matched->rhs, builtins, mathematics, local);
     const std::vector<SolverVariable> variables{{variable, NumericDomain::Real}};
+
+    if (matched->relation == RelationKind::Equal && argumentReal) {
+        // |u|=u / |u|=-u はrhsの符号を先に推測する必要がなく，
+        // それぞれu>=0 / u<=0とexactに同値である。symbolic rhsを
+        // Unknown扱いしてUnresolvedへ落とさず，既存のReal relation solverへ渡す。
+        if (matched->rhs == matched->argument)
+            return solveRealTransformed(
+                relationExpr(RelationKind::GreaterEqual, matched->argument, integerExpr(0), builtins),
+                variable, builtins, mathematics, angles);
+
+        Expr negativeArgument = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Negate), {matched->argument}),
+            builtins, mathematics, angles, local);
+        if (matched->rhs == negativeArgument)
+            return solveRealTransformed(
+                relationExpr(RelationKind::LessEqual, matched->argument, integerExpr(0), builtins),
+                variable, builtins, mathematics, angles);
+    }
 
     if (matched->relation == RelationKind::Equal) {
         if (!argumentReal)

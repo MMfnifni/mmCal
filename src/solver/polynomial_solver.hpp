@@ -22,10 +22,27 @@ namespace mmcal::solver {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 
+// x == exact algebraic value の直接bindingだけを拾う低コスト経路。
+// Real/Rational制約付きsolveで一般函数proofへ入る前に使い，最終domain判定はapplySolveConstraintsへ任せる。
+[[nodiscard]] std::optional<SolutionSet> solveDirectAlgebraicBindingRelation(
+    const expression::Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics);
+
 // 互換用の等式solver entry point。ordered relationも渡せるが、新規コードは上を使う。
 // 既存radical/binomial solverで閉じない有理係数等式を、実代数数Rootでexactに補完する。
 // 非多項式・現degree budget外はnulloptとして既存Unresolved semanticsを維持する。
 [[nodiscard]] std::optional<SolutionSet> solveRealAlgebraicPolynomialEquation(
+    const expression::Expr& equation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
+// Q上で複数因子へ分かれるReal polynomialだけを因子単位で解く高速経路。
+// 一般の既約多項式はnulloptとして既存のproof / radical経路を優先する。
+[[nodiscard]] std::optional<SolutionSet> solveFactoredRealAlgebraicPolynomialEquation(
     const expression::Expr& equation,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,

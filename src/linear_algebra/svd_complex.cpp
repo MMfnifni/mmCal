@@ -8,6 +8,7 @@
 #include "approximation/precision.hpp"
 #include "expression/array_utils.hpp"
 #include "linear_algebra/complex_point.hpp"
+#include "linear_algebra/point_arithmetic.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/complex_decimal_approximation.hpp"
 #include "numeric/decimal_approximation.hpp"
@@ -32,39 +33,6 @@ using numeric::BigFloat;
 using numeric::BigInt;
 using numeric::Rational;
 using numeric::RoundingMode;
-
-[[nodiscard]] BigFloat zero(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat one(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{1}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat two(std::size_t bits) {
-    return BigFloat::fromBigInt(BigInt{2}, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat add(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::add(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat subtract(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::subtract(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat multiply(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::multiply(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat divide(const BigFloat& lhs, const BigFloat& rhs, std::size_t bits) {
-    return numeric::divide(lhs, rhs, bits, RoundingMode::NearestEven);
-}
-[[nodiscard]] BigFloat absolute(const BigFloat& value) {
-    return value.isNegative() ? -value : value;
-}
-
-[[nodiscard]] Rational midpointRational(const RealInterval& interval) {
-    return (interval.lower().toRational() + interval.upper().toRational()) / Rational{BigInt{2}};
-}
-
-[[nodiscard]] BigFloat midpoint(const RealInterval& interval, std::size_t bits) {
-    return BigFloat::fromRational(midpointRational(interval), bits, RoundingMode::NearestEven);
-}
 
 [[nodiscard]] BigFloat squareRoot(const BigFloat& value, std::size_t bits) {
     if (value.isNegative())

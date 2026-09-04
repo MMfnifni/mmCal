@@ -54,6 +54,30 @@ void runDefinednessTests(TestRunner& tests) {
         && tanConditions->contains(expectedTan),
         "Definedness: tan requires cos(argument) != 0 from MathRegistry metadata");
 
+    const Expr atanY = call(builtins, BuiltinId::Atan, {y});
+    const Expr tanAtanY = call(builtins, BuiltinId::Tan, {atanY});
+    const auto tanAtanConditions = mathematics::expressionDomainConditions(
+        tanAtanY, builtins, mathematics);
+    const Expr ySquarePlusOne = call(builtins, BuiltinId::Add, {
+        integer(1), call(builtins, BuiltinId::Power, {y, integer(2)})});
+    const auto expectedAtan = mathematics::relation(
+        RelationKind::NotEqual, ySquarePlusOne, integer(0));
+    tests.expect(tanAtanConditions && tanAtanConditions->size() == 1
+        && tanAtanConditions->contains(expectedAtan),
+        "Definedness: tan[atan[y]] inherits only atan branch-point exclusions");
+
+    const Expr atanhY = call(builtins, BuiltinId::Atanh, {y});
+    const Expr tanhAtanhY = call(builtins, BuiltinId::Tanh, {atanhY});
+    const auto tanhAtanhConditions = mathematics::expressionDomainConditions(
+        tanhAtanhY, builtins, mathematics);
+    const Expr oneMinusYSquare = call(builtins, BuiltinId::Subtract, {
+        integer(1), call(builtins, BuiltinId::Power, {y, integer(2)})});
+    const auto expectedAtanh = mathematics::relation(
+        RelationKind::NotEqual, oneMinusYSquare, integer(0));
+    tests.expect(tanhAtanhConditions && tanhAtanhConditions->size() == 1
+        && tanhAtanhConditions->contains(expectedAtanh),
+        "Definedness: tanh[atanh[y]] inherits only atanh branch-point exclusions");
+
     const Expr logY = call(builtins, BuiltinId::Log, {y});
     const auto logConditions = mathematics::expressionDomainConditions(
         logY, builtins, mathematics);
@@ -156,6 +180,24 @@ void runDefinednessTests(TestRunner& tests) {
         expY, builtins, mathematics);
     tests.expect(expConditions && expConditions->empty(),
         "Definedness: entire functions add no domain conditions");
+
+    const Expr reciprocalX = call(builtins, BuiltinId::Divide, {integer(1), x});
+    const Expr arrayValue = Expr::array({2}, {reciprocalX, logY});
+    const auto arrayConditions = mathematics::expressionDomainConditions(
+        arrayValue, builtins, mathematics);
+    tests.expect(arrayConditions && arrayConditions->size() == 2
+        && arrayConditions->contains(expectedXNonZero)
+        && arrayConditions->contains(expectedLog),
+        "Definedness: Array values collect element domain conditions");
+
+    const Expr raggedValue = Expr::list({
+        Expr::array({1}, {reciprocalX}), logY});
+    const auto raggedConditions = mathematics::expressionDomainConditions(
+        raggedValue, builtins, mathematics);
+    tests.expect(raggedConditions && raggedConditions->size() == 2
+        && raggedConditions->contains(expectedXNonZero)
+        && raggedConditions->contains(expectedLog),
+        "Definedness: ragged brace Lists collect nested element domain conditions");
 
     const Expr gammaY = call(builtins, BuiltinId::Gamma, {y});
     tests.expect(!mathematics::expressionDomainConditions(gammaY, builtins, mathematics),

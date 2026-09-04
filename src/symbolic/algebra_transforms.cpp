@@ -764,6 +764,81 @@ struct ProductParts final {
         {std::move(variableTerm), Expr{Number{numerator}}});
 }
 
+[[nodiscard]] std::optional<Expr> factorQuadraticInPower(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    const std::size_t degree = polynomial.degree();
+    if (degree < 4 || degree % 2 != 0
+        || polynomial.coefficient(degree) != rational(1))
+        return std::nullopt;
+
+    const std::size_t middle = degree / 2;
+    for (std::size_t i = 1; i < degree; ++i)
+        if (i != middle && !polynomial.coefficient(i).isZero())
+            return std::nullopt;
+
+    const Rational b = polynomial.coefficient(middle);
+    const Rational c = polynomial.coefficient(0);
+    const Rational discriminant = b * b - rational(4) * c;
+    if (discriminant < rational(0))
+        return std::nullopt;
+    const auto numeratorRoot = numeric::integerSqrt(discriminant.numerator());
+    const auto denominatorRoot = numeric::integerSqrt(discriminant.denominator());
+    if (!numeratorRoot.remainder.isZero() || !denominatorRoot.remainder.isZero())
+        return std::nullopt;
+
+    const Rational sqrtDiscriminant{numeratorRoot.root, denominatorRoot.root};
+    const Rational y1 = (-b - sqrtDiscriminant) / rational(2);
+    const Rational y2 = (-b + sqrtDiscriminant) / rational(2);
+    if (y1 == y2)
+        return std::nullopt;
+
+    auto power = [&] {
+        if (middle == 1)
+            return Expr{variable};
+        return Expr::call(builtins.symbol(BuiltinId::Power), {
+            Expr{variable}, Expr{Number{BigInt::fromUnsigned(middle)}}});
+    };
+    auto factor = [&](const Rational& root) {
+        if (root.isZero())
+            return power();
+        return subtractExpr(power(), Expr{Number{root}}, builtins);
+    };
+    return multiplyExpr({factor(y1), factor(y2)}, builtins);
+}
+
+[[nodiscard]] std::optional<Expr> factorSparseCyclotomicTrinomial(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    const std::size_t degree = polynomial.degree();
+    if (degree < 4 || degree % 4 != 0)
+        return std::nullopt;
+    const std::size_t middle = degree / 2;
+    const std::size_t inner = degree / 4;
+    if (!(polynomial.coefficient(degree) == rational(1))
+        || !(polynomial.coefficient(middle) == rational(1))
+        || !(polynomial.coefficient(0) == rational(1)))
+        return std::nullopt;
+    for (std::size_t i = 1; i < degree; ++i)
+        if (i != middle && !polynomial.coefficient(i).isZero())
+            return std::nullopt;
+
+    auto powerExpr = [&](std::size_t exponent) {
+        if (exponent == 1)
+            return Expr{variable};
+        return Expr::call(builtins.symbol(BuiltinId::Power), {
+            Expr{variable}, Expr{Number{BigInt::fromUnsigned(exponent)}}});
+    };
+    Expr high = powerExpr(2 * inner);
+    Expr low = powerExpr(inner);
+    Expr plus = addExpr(addExpr(high, low, builtins), Expr{Number{BigInt{1}}}, builtins);
+    Expr minus = addExpr(subtractExpr(powerExpr(2 * inner), powerExpr(inner), builtins),
+        Expr{Number{BigInt{1}}}, builtins);
+    return multiplyExpr({std::move(plus), std::move(minus)}, builtins);
+}
+
 [[nodiscard]] std::optional<Expr> factorUnivariate(
     RationalPolynomial polynomial,
     const expression::Symbol& variable,
@@ -942,7 +1017,17 @@ Expr factorExpression(
         if (variables.size() == 1) {
             if (const auto univariate = toRationalPolynomial(core, variables.front(), builtins);
                 univariate && univariate->degree() > 1) {
-                if (const auto perfectPower = factorPerfectUnivariatePower(
+                if (const auto quadraticPower = factorQuadraticInPower(
+                    *univariate, variables.front(), builtins)) {
+                    core = *quadraticPower;
+                    factoredCore = true;
+                }
+                else if (const auto sparse = factorSparseCyclotomicTrinomial(
+                    *univariate, variables.front(), builtins)) {
+                    core = *sparse;
+                    factoredCore = true;
+                }
+                else if (const auto perfectPower = factorPerfectUnivariatePower(
                     *univariate, variables.front(), builtins)) {
                     core = *perfectPower;
                     factoredCore = true;

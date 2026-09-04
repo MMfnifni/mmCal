@@ -361,6 +361,9 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: Expand distributes a polynomial expression");
     tests.expectEqual(evaluateAndFormat(session, "factor[x^2 - 1]"), std::string{"(x-1)(x+1)"},
         "KernelSession: Factor handles a univariate rational quadratic");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^4 - 5*x^2 + 6]"),
+        std::string{"(x^2-2)(x^2-3)"},
+        "KernelSession: Factor handles a quadratic polynomial in x^m");
     tests.expectEqual(evaluateAndFormat(session, "collect[(x + 1)^3, x]"), std::string{"x^3+3x^2+3x+1"},
         "KernelSession: Collect uses the shared polynomial representation");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 == 1, x]"), std::string{"{x == 1, x == -1}"},
@@ -1081,9 +1084,9 @@ void runKernelSessionTests(TestRunner& tests) {
         "KernelSession: recursive function evaluates through local scopes");
 
     kernel::KernelSession provenanceSession;
-    static_cast<void>(provenanceSession.evaluate("inner[x] := log[x - x]"));
-    static_cast<void>(provenanceSession.evaluate("outer[y] := inner[y]"));
-    const error::CalcError provenanceError = evaluateError(provenanceSession, "outer[4]");
+    static_cast<void>(provenanceSession.evaluate("provenanceInner[x] := log[x - x]"));
+    static_cast<void>(provenanceSession.evaluate("provenanceOuter[y] := provenanceInner[y]"));
+    const error::CalcError provenanceError = evaluateError(provenanceSession, "provenanceOuter[4]");
     tests.expect(provenanceError.document()
         && provenanceError.document()->inputNumber() == 1,
         "KernelSession: function-body error keeps definition input document");
@@ -1545,6 +1548,27 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"x"},
         "KernelSession: rational affine assumptions propagate a positive lower bound");
     tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "simplify[sign[log[x]],x>1]"),
+        std::string{"1"},
+        "KernelSession: assumptions propagate the positive sign of log above one");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "simplify[sign[log[x]],{x>0,x<1}]"),
+        std::string{"-1"},
+        "KernelSession: assumptions propagate the negative sign of log between zero and one");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "simplify[1/log[x]-1/log[x],x>1]"),
+        std::string{"0"},
+        "KernelSession: log sign knowledge proves the reciprocal denominator nonzero");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession, "D[normal[series[exp[x],{x,0,5}]],x]"),
+        std::string{"1+x+x^2/2+x^3/6+x^4/24"},
+        "KernelSession: D materializes an explicitly normalized Series before differentiation");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "fullSimplify[D[normal[series[exp[x],{x,0,5}]],x]-normal[D[series[exp[x],{x,0,5}],x]]]"),
+        std::string{"0"},
+        "KernelSession: derivative of Normal[Series] agrees with Normal of the Series derivative");
+    tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "fullSimplify[1/(1-x)-1/(1-x),x<1]"),
         std::string{"0"},
@@ -1572,8 +1596,8 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "limit[cases[sin[x]/x if x>0;(1-cos[x])/x^2 if x<=0],x,0]"),
-        std::string{"limit[cases[sin[x]/x if x > 0; (1-cos[x])/x^2 if x <= 0], x, 0]"},
-        "KernelSession: limit keeps variable-dependent cases unresolved instead of evaluating singular branches at the point");
+        std::string{"Indeterminate"},
+        "KernelSession: two-sided cases limits compare directional branches without evaluating singular values at the point");
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "groebnerBasis[{x y-1,y^2-x},{x,y},Lex]"),

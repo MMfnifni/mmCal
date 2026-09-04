@@ -475,6 +475,8 @@ CertifiedEnclosure ⊆ InformationEnclosure
 | `a/0` when `a` is proved nonzero | `ComplexInfinity` |
 | `x^(1/0)` for any `x` | `Indeterminate` |
 
+`Array / scalar` applies the same rules componentwise. Thus `{0,1}/0 -> {Indeterminate, ComplexInfinity}` and `{0,0}/0 -> {Indeterminate, Indeterminate}` instead of collapsing the whole Array to one exceptional atom.
+
 For an exact numeric base, unit magnitude is checked with exact Rational real and imaginary parts. For a symbolic base it is used only under an explicit proof such as `simplify[z^Infinity,abs[z]==1]`; a numerical approximation near the unit circle is never guessed to be exactly on it. `Indeterminate` propagates through arithmetic and registered scalar mathematical functions, `N[Indeterminate,p]` preserves it, and `Indeterminate==Indeterminate` is `False`. This is a deliberately bounded exceptional-value contract, not yet a complete algebra of all directed infinities.
 
 The InformationEnclosure is not a probability distribution or a statistical confidence interval, nor does it claim that the backend considers every point in the wider interval mathematically possible. Truth certification belongs exclusively to the CertifiedEnclosure. The InformationEnclosure is an **information contract**: a narrower internal certificate alone does not grant later code permission to recover undeclared digits.
@@ -806,7 +808,7 @@ asin[1/2] -> Pi/6
 atan2[1,-1] -> 3Pi/4
 ```
 
-Poles of `tan`, `sec`, `cot`, and `csc` are treated as definedness conditions. Finite values are not fabricated at poles.
+Poles of `tan`, `sec`, `cot`, and `csc` are treated as definedness conditions. Finite values are not fabricated at poles. Composition in the **function-after-principal-inverse** direction is reduced only when definedness is preserved. For finite expressions, `sin[asin[x]] -> x` and `cos[acos[x]] -> x` are valid; `tan[atan[x]]` is reduced only when the complex exceptional points can be excluded. Reverse compositions such as `asin[sin[x]]` remain branch- and period-sensitive and are not simplified in general.
 
 ---
 
@@ -820,7 +822,7 @@ asinh acosh atanh
 csch sech coth
 ```
 
-Inverse hyperbolic functions with principal complex branches carry branch metadata in `MathRegistry`.
+Inverse hyperbolic functions with principal complex branches carry branch metadata in `MathRegistry`. `sinh[asinh[x]]` and `cosh[acosh[x]]` reduce to the original argument for finite expressions when definedness is preserved. `tanh[atanh[x]]` is reduced only when the singularities of `atanh` are not erased; reverse principal-value compositions are not simplified in general.
 
 ---
 
@@ -1235,7 +1237,7 @@ integrate[1/sqrt[1-x^4],x]
 -> ellipticF[asin[x], -1]
 ```
 
-The final quartic reduction is a correct local primitive, but the current `fullSimplify` cannot always prove the corresponding `sin[asin[x]]` and principal-square-root product identity globally. The derivative-back harness therefore monitors it in ResolutionOnly mode instead of reducing integration capability because of a proof-engine limitation. General elliptic equations also remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
+The final quartic reduction is a correct local primitive. `sin[asin[x]]` itself now reduces in the safe principal-inverse direction, but derivative-back identities that also contain principal square roots can still require local branch conditions. Cases that cannot be proved are therefore monitored in ResolutionOnly mode rather than reducing integration capability. General elliptic equations remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
 
 ## 17.10 Ei / Si / Ci / li / Polylogarithm
 
@@ -1306,6 +1308,7 @@ integrate[exp[x]/x,x] -> Ei[x]
 integrate[sin[x]/x,x] -> Si[x]
 integrate[cos[x]/x,x] -> Ci[x]
 integrate[1/log[x],x] -> li[x]
+integrate[2/log[3x+1],x] -> 2li[3x+1]/3
 integrate[li[x],x] -> x li[x]-Ei[2log[x]]
 integrate[log[1-x]/x,x] -> -polylog[2, x]
 ```
@@ -1871,7 +1874,18 @@ D[x^2 y^3,x,y]
 -> 6 x y^2
 ```
 
-`D` has HoldAll semantics, so existing variable values do not replace the symbols being differentiated.
+`D` has HoldAll semantics, so existing variable values do not replace the symbols being differentiated. When the differentiated expression contains a symbolic frontend that can be materialized safely as part of an ordinarily evaluated expression tree—such as `D`, `Series`, `Normal[Series[...]]` / `toNormal[Series[...]]`, or explicit `expand` / `factor` / `simplify` / `fullSimplify` / `collect` transforms—mmCal first connects that frontend to its existing kernel and then differentiates the result. The same narrowly scoped materialization is shared by `integrate`, `series`, `solve`, and Vector Calculus. It does not descend arbitrarily into HoldAll calls or resolve control variables through current session bindings. Inner `limit` / `integrate` calls also participate when their own binder rules can close them safely. Outer differentiation, integration, Series, Solve, and vector-calculus control variables are temporarily protected from session definitions, so a definition such as `y:=5` does not change `D[limit[x*y,x,y],y] -> 2y`. For the same variable, `D[integrate[f,x],x]` continues to use the direct fundamental-theorem rule instead of expanding an antiderivative first.
+
+```text
+D[expand[(x+1)^2],x]
+-> 2x+2
+
+integrate[sin[D[x^2,x]],x]
+-> -cos[2x]/2
+
+grad[D[x^2,x],{x}]
+-> {2}
+```
 
 ```text
 D[x^3 + 2x,x]
@@ -2247,6 +2261,8 @@ limit[expr,{x,a,direction}]
 
 The fourth argument, or the third element of the brace form, specifies direction: `-1` means left and `1` means right. If omitted, a two-sided limit is requested. `limit[expr,{x,a,direction}]` is equivalent to the four-argument form. Direction is not merely a display option; it is supplied to `KnowledgeContext` as a temporary assumption `x<a` / `x>a`.
 
+Before substituting the limit point into its held first argument, `limit` protects inner bound/control variables. Held `D`, vector-calculus operators, `solve`, `collect` / Gröbner operations, and `Series` / `Normal` pipelines are materialized first when that is safe, so an outer limit point does not replace an inner binder. Brace/List values are handled componentwise.
+
 ```text
 limit[sin[x]/x,x,0]
 -> 1
@@ -2389,7 +2405,12 @@ solve[x^2 < 4,x]
 
 solve[{2x+3y==5,x-2y==9},{x,y}]
 -> {{x==37/7, y==-13/7}}
+
+solve[sqrt[x]==y,x]
+-> {x == y^2 if re[y] > 0, x == y^2 if re[y] == 0 && im[y] >= 0}
 ```
+
+When a principal `sqrt` is inverted, mmCal retains not only the squared candidate but also the condition that the right-hand side lies in the range of the principal square root. For a generic complex parameter `y`, that range is `re[y] > 0` or `re[y] == 0 && im[y] >= 0`. Thus `sqrt[x]==y` is represented completely as a conditional `x==y^2` instead of falling back to `UnresolvedSolutionSet`.
 
 `SolutionSet` distinguishes Empty / Finite / Universal / Conditional / Unresolved.
 Unsupported expressions are not misreported as having no solutions.
@@ -2463,7 +2484,22 @@ solve[ln[x]==2,x,Real]
 
 solve[log2[x]==3,x,Real]
 -> {x == 8}
+
+solve[log2[x]==y,x,Real]
+-> {x == 2^y if y in Real}
+
+solve[asin[x]==Pi/2,x,Real]
+-> {x == 1}
+
+solve[atan[x]==Pi/2,x,Real]
+-> {}
+
+solve[acosh[x]==y,x,Real]
+-> {x == cosh[y] if y in Real && y >= 0}
 ```
+
+
+When principal `asin` / `acos` / `atan` / `acosh` is inverted from the right-hand side, its principal real output range is retained as a solution-branch condition. The trigonometric endpoints follow the active `angleMode[]`; `atan` uses open endpoints. Constant endpoint comparisons use certified enclosures, so out-of-range constants are rejected instead of surviving as false conditional branches.
 
 ### Real-domain nonexistence / uniqueness proof
 
@@ -2911,53 +2947,101 @@ N[norm[v],100]
 
 can pass the requested precision directly to the BigFloat/interval backend instead of first constructing a potentially huge exact intermediate expression. When an exact matrix is sent into an outer `N`, its input enclosure can be recomputed at the requested working precision. When matrix elements already contain `DecimalApproximation` / `ComplexDecimalApproximation` leaves, value computation uses the CertifiedEnclosure while zero/nonzero, pivot, and rank decisions use the InformationEnclosure, so undeclared guard information cannot reappear. `solveLinear`, `inverse`, `rref`, `matrixRank`, and `nullSpace` return results only when InformationEnclosures certify the required pivot structure; uncertain cases are not completed with epsilon thresholds or hidden point values. Continuous quantities such as `det`, `dot`, and `norm` propagate Certified/Information enclosures in parallel so cancellation naturally reduces output Precision. The current `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, and `eigen*` perturbation certificates are not yet defined for matrices that already contain finite-precision leaves, so those inputs remain conservatively unevaluated. Exact matrices evaluated through `N[...,p]` continue to use the certified numerical backends.
 
-## 26.2 Vector helpers and compatibility aliases
+## 26.2 Vectors, inner products, and orthogonalization
 
-The vector-oriented API contains both independent canonical functions and compatibility aliases.
-
-Canonical functions:
+A rank-1 Array is a vector. Vectors carry no row/column orientation; `dot` performs rank-dependent contraction explicitly. The primary vector API is:
 
 ```text
-madd
-vadd vsub vscalar
-vcross
-inner outer
-vproject vangle
-vmanhattan veuclidean
-vreflect vreflect_axis
-vsum
-grad divergence curl laplacian jacobian hessian
+dot[a,b]
+inner[a,b]
+outer[a,b]
+norm[v]
+normalize[v]
+cross[a,b]
+distance[a,b]
+manhattanDistance[a,b]
+projection[a,b]
+rejection[a,b]
+vectorAngle[a,b]
+vectorAngle[a,b,assumptions]
+reflectNormal[a,normal]
+reflectAxis[a,axis]
 ```
 
-Compatibility aliases:
+`dot[a,b]` is a bilinear contraction and does not conjugate complex components. The Hermitian inner product is explicit as `inner[a,b]`, which conjugates its first argument.
 
 ```text
-matmul mmul vdot -> dot
-rank mrank       -> matrixRank
-mget             -> at
-vnorm vlength    -> norm
-vnormalize vunit -> normalize
-vdistance distance -> veuclidean
-cross              -> vcross
-projection         -> vproject
-gradient           -> grad
-singularValueDecomposition -> svd
+inner[{1,I},{1,I}] -> 2
+dot[{1,I},{1,I}] -> 0
+norm[{1,I}] -> sqrt[2]
 ```
 
-Aliases have no separate algorithm; they resolve to the same `BuiltinId`. Canonical vector helpers such as `vadd` are public APIs in their own right, not compatibility names. `dot` remains a bilinear contraction, while `inner[a,b]` is the Hermitian inner product that conjugates its first argument and therefore matches `norm[v]`. `projection[a,b]` / `vproject[a,b]` uses `b inner[b,a]/inner[b,b]`.
+`projection[a,b]` projects vector `a` onto direction `b` as `b inner[b,a]/inner[b,b]`. `rejection[a,b]` returns `a-projection[a,b]`, the component Hermitian-orthogonal to `b`. A direction proved to be zero is a DomainError; a symbolic direction whose zero/nonzero status cannot be proved remains unevaluated.
+
+```text
+projection[{1,I},{1,0}] -> {1,0}
+rejection[{1,I},{1,0}] -> {0,I}
+distance[{1,I},{2,0}] -> sqrt[2]
+manhattanDistance[{1,I},{2,0}] -> 2
+```
+
+`vectorAngle` is the geometric angle between real vectors and follows the current `angleMode[]`. It is not generalized to complex vectors. A third assumptions argument may be supplied when symbolic component realness must be stated explicitly. A vector proved to be zero produces a DomainError.
+
+```text
+vectorAngle[{1,0},{0,1}] -> Pi/2
+vectorAngle[{x,0},{1,0},{element[x,Real],x>0}] -> 0
+```
+
+`reflectNormal[v,n]` reflects across the origin-passing hyperplane with normal `n`; `reflectAxis[v,a]` reflects across the one-dimensional subspace spanned by direction `a`. Both use Hermitian projection.
+
+Orthogonalization APIs accept a rank-2 Array whose **rows** are the vectors.
+
+```text
+orthogonalQ[vectors]
+orthonormalQ[vectors]
+linearIndependentQ[vectors]
+gramSchmidt[vectors]
+```
+
+`orthogonalQ` tests whether distinct rows have zero Hermitian inner product. Zero rows are permitted; the predicate does not imply linear independence. `orthonormalQ` additionally requires every row to have Hermitian norm 1. `linearIndependentQ` tests row independence using exact zero/nonzero decisions only and never treats an unproved symbolic pivot as nonzero.
+
+`gramSchmidt` uses modified Gram-Schmidt with the Hermitian inner product and returns an orthonormal basis for the row span. Provably dependent rows are dropped. If a required symbolic norm cannot be proved zero or nonzero, the expression remains unevaluated rather than guessing a basis.
+
+```text
+orthogonalQ[{{1,0},{0,I}}] -> True
+orthonormalQ[{{1,0},{0,I}}] -> True
+linearIndependentQ[{{1,2},{2,4}}] -> False
+gramSchmidt[{{1,1},{1,-1}}]
+-> {{sqrt[2]/2,sqrt[2]/2},{sqrt[2]/2,-sqrt[2]/2}}
+```
+
+The old convenience functions `vadd` / `vsub` / `vscalar` / `vsum` are no longer registered; use Array `+` / `-` / scalar multiplication and `sum` directly. The old public names `vcross` / `vmanhattan` / `veuclidean` / `vproject` / `vangle` / `vreflect` / `vreflect_axis` are also removed. Their primary names are `cross` / `manhattanDistance` / `distance` / `projection` / `vectorAngle` / `reflectNormal` / `reflectAxis`. Vector operations do not keep compatibility aliases with separate public spellings.
 
 Vector-calculus operators use explicit Cartesian coordinates.
 
 ```text
 grad[f,{x,y,z}]
 divergence[{P,Q,R},{x,y,z}]
+curl[{P,Q},{x,y}]
 curl[{P,Q,R},{x,y,z}]
 laplacian[f,{x,y,z}]
+laplacian[{P,Q,R},{x,y,z}]
 jacobian[{f1,f2,...},{x1,x2,...}]
 hessian[f,{x1,x2,...}]
+directionalDerivative[f,v,{x1,x2,...}]
 ```
 
-The coordinate specification must be a rank-1 Array of distinct symbols. `curl` is restricted to three-dimensional Cartesian fields. No curvilinear scale factors or metric are assumed implicitly.
+`grad` maps a scalar field to a vector. `divergence` maps a vector field with one component per coordinate to a scalar. In two dimensions, `curl` returns the scalar `dQ/dx-dP/dy`; in three dimensions it returns the usual vector curl. `laplacian` sums second partial derivatives for a scalar field and applies that scalar Laplacian componentwise to a vector field. `jacobian` returns component-by-coordinate shape and `hessian` returns coordinate-by-coordinate shape.
+
+`directionalDerivative[f,v,vars]` is the bilinear contraction of `v` with `grad[f,vars]`. The direction is not normalized automatically; pass `normalize[v]` explicitly when a unit direction is required.
+
+```text
+curl[{-y,x},{x,y}] -> 2
+laplacian[{x^2,y^2},{x,y}] -> {2,2}
+directionalDerivative[x^2+y^2,{1,2},{x,y}] -> 2x+4y
+```
+
+The coordinate specification must be a nonempty rank-1 Array of distinct symbols. `curl` is restricted to matching two- or three-dimensional Cartesian fields. No cylindrical/spherical scale factors or metric are assumed implicitly.
 
 ---
 
@@ -3104,7 +3188,7 @@ N[randn[],8]
 | `unit`, `csgn`           | `sign`       |
 | `rect`                   | `polar`      |
 | `ave`                    | `mean`       |
-| `matmul`, `mmul`, `vdot` | `dot`        |
+| `matmul`, `mmul`         | `dot`        |
 | `mtranspose`             | `transpose`  |
 | `mget`                   | `at`         |
 | `singularValueDecomposition` | `svd` |
@@ -3115,9 +3199,6 @@ N[randn[],8]
 | `mrows`                  | `rows`       |
 | `mcols`                  | `cols`       |
 | `mdiag`                  | `diag`       |
-| `vnorm`, `vlength`       | `norm`       |
-| `vdistance`              | `veuclidean` |
-| `vnormalize`, `vunit`    | `normalize`  |
 
 Aliases are not separate implementations; they resolve to the same `BuiltinId`. Mathematical metadata and Solver rules are therefore not duplicated.
 
@@ -3127,30 +3208,35 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 30. Current source-callable function list
 
-The current development tree contains **274 registered builtin/alias names / 254 source-callable names**. Internal heads are not included in the source-callable count.
+The current development tree contains **278 registered builtin/alias names / 258 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
-Clear, D, Defs, DtoG, DtoR, Exit, GtoD, GtoR, In, N,
-Out, RtoD, RtoG, UnDef, abs, accuracy, acos, acosh, angleMode, arg,
-arrayRank, asin, asinh, at, atan, atan2, atanh, ave, beta, betaln, binom, cbrt, cases,
-ceil, choice, cis, collect, cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman,
-cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
-det, dft, diag, digamma, diff, dimensions, distance, divergence, dot, eigenvalues, eigenvectors, eigensystem, element, erf, erfc, exp, explain, expand, expc,
-Ei, Si, Ci, li, polylog, fresnelc, fresnels, hypergeometric1F1, hypergeometric2F1, ellipticF, ellipticE, ellipticPi,
-expm1, fact, factor, factorint, fallingfact, fft, fib, floor, frac, fract, fullSimplify,
-gamma, gcd, geomean, grad, gradient, groebnerBasis, harmmean, hessian, hypot, ibeta, identity, if, ifft, im, imag, inner,
-integrate, inverse, iqr, isprime, jacobian, kurtp, kurts, laplacian, lcm, leastSquares, length, lgamma, lambertw, limit, ln, log,
-log10, log1p, log2, mad, madR, madd, mag, map, matmul, max, mcols,
-mdet, mdiag, matrixRank, mean, median, mget, min, minverse, mmul, mod, mode,
-luDecomposition, mrank, mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, toNormal, normalize, nullSpace, percentile, percentrank, perm, polar, prevprime,
-outer, polynomialReduce, pow, precision, prod, projection, pseudoInverse, quantile, quotient, rand, randSeed, randint, randn, range, rank,
-qrDecomposition, rationalize, re, real, rect, rem, reshape, risingfact, rms, root, round, rows, rref,
-sec, sech, series, sign, simplify, sin, sinc, sinh, sinhc, skew, solve, solveLinear,
-singularValueDecomposition, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc, tanh, tanhc, trace,
-totient, transpose, trigamma, trimmean, trunc, unit, vadd, vangle, var, vars, vcross, vdistance,
-vdot, veuclidean, vlength, vmanhattan, vnorm, vnormalize, vproject, vreflect, vreflect_axis, vscalar,
-vsub, vsum, vunit, winsor, winsorR, zeros, zscore, zeta,
-bitand, bitor, bitxor, bitnot, bitshiftl, bitshiftr, bitlength, bitcount, bitget, fma, clamp, proj
+Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,
+In, N, Out, RtoD, RtoG, Si, UnDef, abs, accuracy, acos,
+acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2, atanh,
+ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor,
+bitshiftl, bitshiftr, bitxor, cases, cbrt, ceil, choice, cis, clamp, collect,
+cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman, cos, cosc,
+cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
+det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
+eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp,
+expand, expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib,
+floor, fma, frac, fract, fresnelc, fresnels, fullSimplify, gamma, gcd, geomean,
+grad, gramSchmidt, groebnerBasis, harmmean, hessian, hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity,
+if, ifft, im, imag, inner, integrate, inverse, iqr, isprime, jacobian,
+kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
+linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd,
+mag, manhattanDistance, map, matmul, matrixRank, max, mcols, mdet, mdiag, mean,
+median, mget, min, minverse, mmul, mod, mode, mrank, mrows, mtrace,
+mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ, orthonormalQ,
+outer, percentile, percentrank, perm, polar, polylog, polynomialReduce, pow, precision, prevprime,
+prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed, randint,
+randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection,
+rem, reshape, risingfact, rms, root, round, rows, rref, sec, sech,
+series, sign, simplify, sin, sinc, singularValueDecomposition, sinh, sinhc, skew, solve,
+solveLinear, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc,
+tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit,
+var, vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
 ```
 
 ---

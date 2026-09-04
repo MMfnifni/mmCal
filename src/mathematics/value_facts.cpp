@@ -291,18 +291,6 @@ struct RationalAffineForm final {
     }
 }
 
-[[nodiscard]] RelationKind reverseOrderedRelation(RelationKind relation) noexcept {
-    switch (relation) {
-    case RelationKind::Less: return RelationKind::Greater;
-    case RelationKind::LessEqual: return RelationKind::GreaterEqual;
-    case RelationKind::Greater: return RelationKind::Less;
-    case RelationKind::GreaterEqual: return RelationKind::LessEqual;
-    case RelationKind::Equal:
-    case RelationKind::NotEqual:
-        return relation;
-    }
-    return relation;
-}
 
 struct RationalBound final {
     numeric::Rational value;
@@ -397,7 +385,7 @@ struct RationalBound final {
 
         RelationKind relation = relationPredicate->relation;
         if (difference.coefficient < numeric::Rational{BigInt{0}})
-            relation = reverseOrderedRelation(relation);
+            relation = reverseRelation(relation);
         const numeric::Rational boundary = -difference.constant / difference.coefficient;
 
         switch (relation) {
@@ -486,17 +474,8 @@ struct RationalBound final {
 [[nodiscard]] RealSign signFromRelation(
     RelationKind relation,
     bool expressionOnLeft) noexcept {
-    if (!expressionOnLeft) {
-        switch (relation) {
-        case RelationKind::Less: relation = RelationKind::Greater; break;
-        case RelationKind::LessEqual: relation = RelationKind::GreaterEqual; break;
-        case RelationKind::Greater: relation = RelationKind::Less; break;
-        case RelationKind::GreaterEqual: relation = RelationKind::LessEqual; break;
-        case RelationKind::Equal:
-        case RelationKind::NotEqual:
-            break;
-        }
-    }
+    if (!expressionOnLeft)
+        relation = reverseRelation(relation);
 
     switch (relation) {
     case RelationKind::Equal: return RealSign::Zero;
@@ -604,13 +583,38 @@ struct RationalBound final {
     const expression::CallExpr& call,
     const std::unordered_map<const void*, ValueFacts>& facts,
     const evaluation::BuiltinRegistry& builtins,
-    const MathRegistry& mathematics) {
+    const MathRegistry& mathematics,
+    const AssumptionSet* assumptions) {
     const auto* builtin = builtins.find(call.head);
     if (!builtin)
         return {};
 
     const auto argument = [&](std::size_t index) -> const ValueFacts& {
         return childFacts(facts, call.arguments[index]);
+    };
+
+    const auto logarithmSign = [&](const Expr& value, const ValueFacts& valueFacts) {
+        if (!valueFacts.isProvablyReal() || valueFacts.sign != RealSign::Positive)
+            return RealSign::Unknown;
+        if (value.isNumber() && value.asNumber().isReal()) {
+            const auto exact = value.asNumber().asReal().toRational();
+            const numeric::Rational one{BigInt{1}};
+            return exact == one ? RealSign::Zero
+                : exact > one ? RealSign::Positive : RealSign::Negative;
+        }
+        if (!assumptions)
+            return RealSign::Unknown;
+
+        // 正実軸ではLogは単調増加でLog[1]=0。arg-1の符号を既存の
+        // affine assumption推論へ渡せば，x>1や3x+1>1を別実装せず扱える。
+        Expr shifted = Expr::call(
+            builtins.symbol(BuiltinId::Subtract),
+            {value, Expr{Number{BigInt{1}}}});
+        ValueFacts shiftedFacts{
+            NumericDomain::Real, RealSign::Unknown, valueFacts.exact, false};
+        shiftedFacts = applyAffineAssumptions(
+            shifted, shiftedFacts, *assumptions, builtins, mathematics);
+        return shiftedFacts.sign;
     };
 
     switch (builtin->id) {
@@ -984,10 +988,22 @@ struct RationalBound final {
                     && minusOne <= value && value <= one)
                 || (builtin->id == BuiltinId::Atanh && minusOne < value && value < one)
                 || (builtin->id == BuiltinId::Acosh && value >= one);
-            if (realPrincipal)
-                return ValueFacts{NumericDomain::Real,
-                    builtin->id == BuiltinId::Atanh ? argument(0).sign : RealSign::Unknown,
-                    argument(0).exact, false};
+            if (realPrincipal) {
+                RealSign sign = RealSign::Unknown;
+                switch (builtin->id) {
+                case BuiltinId::Asin:
+                case BuiltinId::Atanh:
+                    sign = argument(0).sign;
+                    break;
+                case BuiltinId::Acos:
+                case BuiltinId::Acosh:
+                    sign = value == one ? RealSign::Zero : RealSign::Positive;
+                    break;
+                default:
+                    break;
+                }
+                return ValueFacts{NumericDomain::Real, sign, argument(0).exact, false};
+            }
         }
         // 実入力でもprincipal値が複素数になる領域を持つため、範囲条件を証明できない一般式ではComplexを保守的な上界とする。
         return ValueFacts{NumericDomain::Complex, RealSign::Unknown, argument(0).exact, false};
@@ -1009,16 +1025,9 @@ struct RationalBound final {
     case BuiltinId::Log:
         if (call.arguments.size() == 1 && argument(0).isNumeric()) {
             const ValueFacts& input = argument(0);
-            if (input.isProvablyReal() && input.sign == RealSign::Positive) {
-                RealSign logSign = RealSign::Unknown;
-                if (call.arguments[0].isNumber() && call.arguments[0].asNumber().isReal()) {
-                    const auto value = call.arguments[0].asNumber().asReal().toRational();
-                    const numeric::Rational one{BigInt{1}};
-                    logSign = value == one ? RealSign::Zero
-                        : value > one ? RealSign::Positive : RealSign::Negative;
-                }
-                return ValueFacts{NumericDomain::Real, logSign, input.exact, false};
-            }
+            if (input.isProvablyReal() && input.sign == RealSign::Positive)
+                return ValueFacts{
+                    NumericDomain::Real, logarithmSign(call.arguments[0], input), input.exact, false};
             if (input.isProvablyNegativeReal())
                 return ValueFacts{NumericDomain::Complex, RealSign::Unknown, input.exact, true};
             return ValueFacts{NumericDomain::Complex, RealSign::Unknown, input.exact, false};
@@ -1029,8 +1038,19 @@ struct RationalBound final {
             const ValueFacts& value = argument(1);
             const bool exact = base.exact && value.exact;
             if (base.isProvablyReal() && base.sign == RealSign::Positive
-                && value.isProvablyReal() && value.sign == RealSign::Positive)
-                return ValueFacts{NumericDomain::Real, RealSign::Unknown, exact, false};
+                && value.isProvablyReal() && value.sign == RealSign::Positive) {
+                RealSign sign = RealSign::Unknown;
+                if (call.arguments[0].isNumber() && call.arguments[0].asNumber().isReal()) {
+                    const auto exactBase = call.arguments[0].asNumber().asReal().toRational();
+                    const numeric::Rational one{BigInt{1}};
+                    if (exactBase != one) {
+                        sign = logarithmSign(call.arguments[1], value);
+                        if (exactBase < one)
+                            sign = negateSign(sign);
+                    }
+                }
+                return ValueFacts{NumericDomain::Real, sign, exact, false};
+            }
             return ValueFacts{NumericDomain::Complex, RealSign::Unknown, exact, false};
         }
         return {};
@@ -1351,12 +1371,18 @@ struct RationalBound final {
     case BuiltinId::VectorSum:
     case BuiltinId::VectorInner:
     case BuiltinId::VectorOuter:
+    case BuiltinId::VectorRejection:
+    case BuiltinId::OrthogonalQ:
+    case BuiltinId::OrthonormalQ:
+    case BuiltinId::LinearIndependentQ:
+    case BuiltinId::GramSchmidt:
     case BuiltinId::Gradient:
     case BuiltinId::Divergence:
     case BuiltinId::Curl:
     case BuiltinId::Laplacian:
     case BuiltinId::Jacobian:
     case BuiltinId::Hessian:
+    case BuiltinId::DirectionalDerivative:
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify:
     case BuiltinId::Map:
@@ -1475,7 +1501,8 @@ ValueFacts inferValueFactsImpl(
             result = factsForSymbol(current.expression.asSymbol(), mathematics);
             break;
         case expression::ExprKind::Call:
-            result = inferCallFacts(current.expression.asCall(), facts, builtins, mathematics);
+            result = inferCallFacts(
+                current.expression.asCall(), facts, builtins, mathematics, assumptions);
             break;
         case expression::ExprKind::Boolean:
         case expression::ExprKind::String:

@@ -225,4 +225,16 @@ Rational operator/(Rational lhs, const Rational& rhs) {
     return lhs;
 }
 
+Rational pow(Rational base, std::uint64_t exponent) {
+    Rational result{BigInt{1}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0)
+            result *= base;
+        exponent >>= 1U;
+        if (exponent != 0)
+            base *= base;
+    }
+    return result;
+}
+
 } // namespace mmcal::numeric

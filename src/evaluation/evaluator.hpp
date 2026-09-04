@@ -74,6 +74,9 @@ private:
     EvaluationLimits limits_{};
     std::vector<expression::Symbol> resolvingSymbols_;
     std::vector<ActiveUserFunctionFrame> activeUserFunctions_;
+    // 外側のsymbolic binderを内側frontendの先行materializeから保護する。
+    // Environmentそのものを書き換えず，この評価器の再入時だけ自由記号として扱う。
+    std::vector<expression::Symbol> materializationProtectedSymbols_;
     // N[...] の評価中だけ有効な要求精度スタック。
     // 外側のexact評価規則は変えず、FFT等のprecision-aware builtinだけがこの情報を参照する。
     std::vector<approximation::ApproximationContext> approximationContexts_;
@@ -99,6 +102,11 @@ private:
         bool input);
     [[nodiscard]] expression::Expr resolveHeldHistoryReferences(
         const expression::Expr& expression);
+    [[nodiscard]] expression::Expr materializeSafeHeldFrontends(
+        const expression::Expr& expression);
+    [[nodiscard]] expression::Expr materializeSafeHeldFrontends(
+        const expression::Expr& expression,
+        std::span<const expression::Symbol> protectedSymbols);
     [[nodiscard]] expression::Expr evaluateDefinitions() const;
     [[nodiscard]] expression::Expr evaluateUndefine(std::span<const expression::Expr> arguments);
     void emitWarning(std::string_view code, std::string message);

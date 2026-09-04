@@ -48,6 +48,18 @@ private:
     [[nodiscard]] bool collectExpression(const Expr& expression) {
         if (expression.isNumber() || expression.isSymbol())
             return true;
+        if (expression.isArray()) {
+            for (std::size_t i = 0; i < expression.asArray().size(); ++i)
+                if (!collectExpression(expression.asArray().element(i)))
+                    return false;
+            return true;
+        }
+        if (expression.isList()) {
+            for (const Expr& element : expression.asList().elements)
+                if (!collectExpression(element))
+                    return false;
+            return true;
+        }
         if (!expression.isCall())
             return false;
 
@@ -133,6 +145,16 @@ private:
         std::span<const Expr> arguments) {
         if (function.definednessRule == FunctionDefinednessRule::PrincipalPower)
             return collectPrincipalPower(arguments);
+
+        // tan[atan[z]] / tanh[atanh[z]] はinverseが有限に定義される点では外側函数も必ず定義される。
+        // genericなCosNonZero/CoshNonZeroを重ねると，恒等式Solveに冗長な条件だけが残る。
+        if (arguments.size() == 1 && arguments[0].isCall()) {
+            const FunctionDefinition* inner = mathematics_.findFunction(arguments[0].asCall().head);
+            if (inner && ((function.id == FunctionId::Tan && inner->id == FunctionId::Atan)
+                || (function.id == FunctionId::Tanh && inner->id == FunctionId::Atanh)))
+                return collectExpression(arguments[0]);
+        }
+
         if (!collectAll(arguments))
             return false;
 

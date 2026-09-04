@@ -452,11 +452,17 @@ using CyclotomicCoordinateMemo =
     case BuiltinId::Sqrt: {
         if (call.arguments.size() != 1
             || !call.arguments[0].isNumber()
-            || !call.arguments[0].asNumber().isReal()
-            || call.arguments[0].asNumber().asReal().toRational() != Rational{BigInt{2}}
-            || field.conductor() % 8 != 0)
+            || !call.arguments[0].asNumber().isReal())
             return std::nullopt;
-        const std::size_t exponent = field.conductor() / 8;
+        const Rational radicand = call.arguments[0].asNumber().asReal().toRational();
+        std::size_t denominator = 0;
+        if (radicand == Rational{BigInt{2}} && field.conductor() % 8 == 0)
+            denominator = 8;
+        else if (radicand == Rational{BigInt{3}} && field.conductor() % 12 == 0)
+            denominator = 12;
+        else
+            return std::nullopt;
+        const std::size_t exponent = field.conductor() / denominator;
         const auto positive = field.power(exponent);
         const auto negative = field.power(field.conductor() - exponent);
         return addCoordinates(positive, negative);

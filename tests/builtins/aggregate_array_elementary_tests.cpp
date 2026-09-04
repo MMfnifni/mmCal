@@ -136,30 +136,36 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expect(evalError(session, "{{1,2},{3,4}}*{{5,6},{7,8}}").type()
             == error::CalcErrorType::Type,
         "Array-by-Array multiplication requires explicit dot");
-    tests.expectEqual(eval(session, "vadd[{1,2},{3,4}]"), std::string{"{4, 6}"},
-        "vector addition is elementwise and exact");
-    tests.expect(evalError(session, "vscalar[{1,2},{}]").type() == error::CalcErrorType::Type,
-        "vector scaling rejects an array-valued scale");
-    tests.expectEqual(eval(session, "vdot[{1,2},{3,4}]"), std::string{"11"},
+    tests.expectEqual(eval(session, "dot[{1,2},{3,4}]"), std::string{"11"},
         "vector dot product is exact");
-    tests.expectEqual(eval(session, "vcross[{1,0,0},{0,1,0}]"), std::string{"{0, 0, 1}"},
+    tests.expectEqual(eval(session, "cross[{1,0,0},{0,1,0}]"), std::string{"{0, 0, 1}"},
         "3D cross product is exact");
-    tests.expectEqual(eval(session, "vnorm[{3,4}]"), std::string{"5"},
+    const auto crossDimensionError = evalError(session, "cross[{1,2},{3,4}]");
+    tests.expect(crossDimensionError.type() == error::CalcErrorType::Domain
+        && std::string{crossDimensionError.what()} == "cross requires two 3D vectors",
+        "cross diagnostics use the canonical public function name");
+    tests.expect(evalError(session, "vcross[{1,0,0},{0,1,0}]").type() == error::CalcErrorType::Name,
+        "removed legacy vector names are no longer registered");
+    tests.expectEqual(eval(session, "norm[{3,4}]"), std::string{"5"},
         "real vector norm preserves exact square roots");
-    tests.expectEqual(eval(session, "vnormalize[{3,4}]"), std::string{"{3/5, 4/5}"},
+    tests.expectEqual(eval(session, "normalize[{3,4}]"), std::string{"{3/5, 4/5}"},
         "vector normalization preserves exact rationals");
-    tests.expectEqual(eval(session, "vproject[{1,2},{0,1}]"), std::string{"{0, 2}"},
+    tests.expectEqual(eval(session, "projection[{1,2},{0,1}]"), std::string{"{0, 2}"},
         "vector projection is exact");
-    tests.expectEqual(eval(session, "vangle[{1,0},{0,1}]"), std::string{"Pi/2"},
+    tests.expectEqual(eval(session, "vectorAngle[{1,0},{0,1}]"), std::string{"Pi/2"},
         "vector angle follows the default Radian semantics");
-    tests.expectEqual(eval(session, "vreflect[{1,1},{0,1}]"), std::string{"{1, -1}"},
+    tests.expectEqual(eval(session, "reflectNormal[{1,1},{0,1}]"), std::string{"{1, -1}"},
         "reflection about a normal vector is exact");
-    tests.expectEqual(eval(session, "vreflect_axis[{1,1},{0,1}]"), std::string{"{-1, 1}"},
+    tests.expectEqual(eval(session, "reflectAxis[{1,1},{0,1}]"), std::string{"{-1, 1}"},
         "reflection about an axis vector is exact");
-    tests.expectEqual(eval(session, "vsum[{1,2,3}]"), std::string{"6"},
-        "vector element sum shares exact aggregation semantics");
     tests.expectEqual(eval(session, "{1,2}/2"), std::string{"{1/2, 1}"},
         "Array division supports scalar scaling without introducing elementwise Array division");
+    tests.expectEqual(eval(session, "{0,1}/0"),
+        std::string{"{Indeterminate, ComplexInfinity}"},
+        "Array division by exact zero preserves scalar exceptional semantics per component");
+    tests.expectEqual(eval(session, "{0,0}/0"),
+        std::string{"{Indeterminate, Indeterminate}"},
+        "zero Array components divided by exact zero remain indeterminate componentwise");
     tests.expect(evalError(session, "2/{1,2}").type() == error::CalcErrorType::Type,
         "scalar-by-Array division remains undefined");
     tests.expectEqual(eval(session, "inner[{1,I},{1,I}]"), std::string{"2"},
@@ -171,10 +177,39 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         "distance routes vector distance through the Hermitian norm");
     tests.expectEqual(eval(session, "projection[{1,I},{1,0}]"), std::string{"{1, 0}"},
         "projection uses the Hermitian projection convention for complex vectors");
-    tests.expectEqual(eval(session, "vproject[{1,I},{1,0}]"), std::string{"{1, 0}"},
-        "legacy vproject routes to the canonical Hermitian projection");
-    tests.expectEqual(eval(session, "vmanhattan[{1,I},{2,0}]"), std::string{"2"},
+    tests.expectEqual(eval(session, "manhattanDistance[{1,I},{2,0}]"), std::string{"2"},
         "Manhattan distance extends naturally to complex components through abs");
+    tests.expectEqual(eval(session, "rejection[{1,I},{1,0}]"), std::string{"{0, I}"},
+        "rejection returns the Hermitian-orthogonal complement of a projection");
+    const auto rejectionZeroDirection = evalError(session, "rejection[{1,2},{0,0}]");
+    tests.expect(rejectionZeroDirection.type() == error::CalcErrorType::Domain
+        && std::string{rejectionZeroDirection.what()} == "rejection requires a nonzero direction vector",
+        "rejection reports its own public function name for a zero direction");
+    const auto reflectNormalZeroDirection = evalError(session, "reflectNormal[{1,2},{0,0}]");
+    tests.expect(reflectNormalZeroDirection.type() == error::CalcErrorType::Domain
+        && std::string{reflectNormalZeroDirection.what()} == "reflectNormal requires a nonzero direction vector",
+        "reflectNormal reports its own public function name for a zero normal");
+    const auto reflectAxisZeroDirection = evalError(session, "reflectAxis[{1,2},{0,0}]");
+    tests.expect(reflectAxisZeroDirection.type() == error::CalcErrorType::Domain
+        && std::string{reflectAxisZeroDirection.what()} == "reflectAxis requires a nonzero direction vector",
+        "reflectAxis reports its own public function name for a zero axis");
+    tests.expectEqual(eval(session, "orthogonalQ[{{1,0},{0,I}}]"), std::string{"True"},
+        "orthogonalQ uses the Hermitian inner product between matrix rows");
+    tests.expectEqual(eval(session, "orthonormalQ[{{1,0},{0,I}}]"), std::string{"True"},
+        "orthonormalQ also verifies unit Hermitian row norms");
+    tests.expectEqual(eval(session, "linearIndependentQ[{{1,2},{2,4}}]"), std::string{"False"},
+        "linearIndependentQ detects exact row dependence");
+    tests.expectEqual(eval(session, "linearIndependentQ[{{1,2},{2,5}}]"), std::string{"True"},
+        "linearIndependentQ certifies exact row independence");
+    tests.expectEqual(eval(session, "gramSchmidt[{{1,1},{1,-1}}]"),
+        std::string{"{{sqrt[2]/2, sqrt[2]/2}, {sqrt[2]/2, -sqrt[2]/2}}"},
+        "gramSchmidt returns an exact Hermitian-orthonormal row basis");
+    tests.expectEqual(eval(session, "gramSchmidt[{{1,0},{2,0},{0,1}}]"),
+        std::string{"{{1, 0}, {0, 1}}"},
+        "gramSchmidt drops provably dependent input rows");
+    tests.expectEqual(eval(session, "gramSchmidt[{{1,2,3},{2,0,1},{0,1,0}}]"),
+        std::string{"{{sqrt[14]/14, sqrt[14]/7, 3sqrt[14]/14}, {23/(3sqrt[70]), -5/(3sqrt[70]/2), -1/(3sqrt[70])}, {2/(3sqrt[5]), 5/(3sqrt[5]), -4/(3sqrt[5])}}"},
+        "gramSchmidt keeps exact full-rank three-dimensional inputs evaluable");
 
     tests.expectEqual(eval(session, "grad[x^2+y^2+z^2,{x,y,z}]"),
         std::string{"{2x, 2y, 2z}"},
@@ -199,8 +234,16 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "curl[grad[x*y*z,{x,y,z}],{x,y,z}]"),
         std::string{"{0, 0, 0}"},
         "curl of an exact gradient reduces to zero");
-    tests.expect(evalError(session, "curl[{x,y},{x,y}]").type() == error::CalcErrorType::Domain,
-        "curl rejects non-three-dimensional Cartesian fields");
+    tests.expectEqual(eval(session, "curl[{-y,x},{x,y}]"), std::string{"2"},
+        "curl returns the scalar rotation for a two-dimensional Cartesian field");
+    tests.expectEqual(eval(session, "laplacian[{x^2,y^2},{x,y}]"), std::string{"{2, 2}"},
+        "laplacian applies the scalar Cartesian operator componentwise to vector fields");
+    tests.expectEqual(eval(session, "directionalDerivative[x^2+y^2,{1,2},{x,y}]"),
+        std::string{"2x+4y"},
+        "directionalDerivative contracts a direction with the Cartesian gradient");
+    tests.expectEqual(eval(session,
+        "vectorAngle[{x,0},{1,0},{element[x,Real],x>0}]"), std::string{"0"},
+        "vectorAngle accepts explicit assumptions for symbolic real vectors");
     tests.expect(evalError(session, "grad[x^2,{x,x}]").type() == error::CalcErrorType::Domain,
         "vector-calculus coordinate lists require distinct symbols");
 

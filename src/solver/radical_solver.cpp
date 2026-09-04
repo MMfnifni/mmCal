@@ -41,6 +41,84 @@ enum class RangeDecision {
     Unknown
 };
 
+[[nodiscard]] std::optional<Number> exactClosedNumber(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    std::size_t depth = 0) {
+    if (depth > 64)
+        return std::nullopt;
+    if (expression.isNumber())
+        return expression.asNumber();
+    if (!expression.isCall())
+        return std::nullopt;
+
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    if (definition->id == BuiltinId::Negate && arguments.size() == 1) {
+        const auto value = exactClosedNumber(arguments[0], builtins, depth + 1);
+        return value ? std::optional<Number>{-*value} : std::nullopt;
+    }
+
+    if ((definition->id == BuiltinId::Add || definition->id == BuiltinId::Multiply)
+        && !arguments.empty()) {
+        auto result = exactClosedNumber(arguments[0], builtins, depth + 1);
+        if (!result)
+            return std::nullopt;
+        for (std::size_t i = 1; i < arguments.size(); ++i) {
+            const auto value = exactClosedNumber(arguments[i], builtins, depth + 1);
+            if (!value)
+                return std::nullopt;
+            if (definition->id == BuiltinId::Add)
+                *result += *value;
+            else
+                *result *= *value;
+        }
+        return result;
+    }
+
+    if ((definition->id == BuiltinId::Subtract || definition->id == BuiltinId::Divide)
+        && arguments.size() == 2) {
+        auto lhs = exactClosedNumber(arguments[0], builtins, depth + 1);
+        const auto rhs = exactClosedNumber(arguments[1], builtins, depth + 1);
+        if (!lhs || !rhs || (definition->id == BuiltinId::Divide && rhs->isZero()))
+            return std::nullopt;
+        if (definition->id == BuiltinId::Subtract)
+            *lhs -= *rhs;
+        else
+            *lhs /= *rhs;
+        return lhs;
+    }
+
+    if (definition->id == BuiltinId::Power && arguments.size() == 2
+        && arguments[1].isNumber() && arguments[1].asNumber().isReal()
+        && arguments[1].asNumber().asReal().isInteger()) {
+        auto base = exactClosedNumber(arguments[0], builtins, depth + 1);
+        if (!base)
+            return std::nullopt;
+        const auto& integer = arguments[1].asNumber().asReal().asInteger();
+        const bool negative = integer.isNegative();
+        numeric::BigInt magnitude = negative ? -integer : integer;
+        std::uint64_t exponent = 0;
+        try {
+            exponent = std::stoull(magnitude.toString());
+        }
+        catch (...) {
+            return std::nullopt;
+        }
+        if (exponent > 64 || (negative && base->isZero()))
+            return std::nullopt;
+        Number value = numeric::integerPower(*base, exponent);
+        if (negative)
+            value = Number{numeric::BigInt{1}} / value;
+        return value;
+    }
+
+    return std::nullopt;
+}
+
 [[nodiscard]] bool isEqualRelation(
     const Expr& expression,
     const evaluation::BuiltinRegistry& builtins) {
@@ -248,6 +326,8 @@ void appendAssumptions(
         appendAssumptions(localAssumptions, candidate.conditions);
         Expr rhs = symbolic::substituteSymbol(matched.rhs, variable, binding->value);
         rhs = simplifyForSolve(std::move(rhs), builtins, mathematics, angles, localAssumptions);
+        if (const auto exact = exactClosedNumber(rhs, builtins))
+            rhs = Expr{*exact};
 
         SolutionBranch branch = candidate;
         branch.multiplicity.reset();
@@ -256,10 +336,28 @@ void appendAssumptions(
             switch (principalSqrtRange(rhs, builtins, mathematics, localAssumptions)) {
             case RangeDecision::Reject:
                 continue;
-            case RangeDecision::Unknown:
-                // 複素principal sqrtの像は半平面境界を含むdisjunctionになる。
-                // 現AssumptionSetでそのORを弱めて表現すると解を落とすため、推測しない。
-                return std::nullopt;
+            case RangeDecision::Unknown: {
+                Expr realPart = Expr::call(
+                    builtins.symbol(BuiltinId::Re), {rhs});
+                Expr imaginaryPart = Expr::call(
+                    builtins.symbol(BuiltinId::Im), {rhs});
+                realPart = simplifyForSolve(
+                    std::move(realPart), builtins, mathematics, angles, localAssumptions);
+                imaginaryPart = simplifyForSolve(
+                    std::move(imaginaryPart), builtins, mathematics, angles, localAssumptions);
+
+                SolutionBranch interior = branch;
+                interior.conditions.add(mathematics::relation(
+                    RelationKind::Greater, realPart, integerExpr(0)));
+                accepted.push_back(std::move(interior));
+
+                branch.conditions.add(mathematics::relation(
+                    RelationKind::Equal, realPart, integerExpr(0)));
+                branch.conditions.add(mathematics::relation(
+                    RelationKind::GreaterEqual, imaginaryPart, integerExpr(0)));
+                accepted.push_back(std::move(branch));
+                continue;
+            }
             case RangeDecision::RequireNonNegativeReal:
                 branch.conditions.add(mathematics::relation(
                     RelationKind::GreaterEqual, rhs, integerExpr(0)));

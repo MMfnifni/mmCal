@@ -623,7 +623,7 @@ integrate[sin[x]^2 cos[x]^2, x]
 
 ```text
 integrate[sin[x] cos[x], x]
-= sin[x]^2/2
+= -cos[2x]/4
 ```
 
 ```text
