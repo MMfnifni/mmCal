@@ -262,6 +262,33 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
         && piExplain.find("{\"CertifiedEnclosure\", {") != std::string::npos
         && piExplain.find("{\"InformationEnclosure\", {") != std::string::npos,
         "explain exposes certified and information enclosures separately");
+
+    const auto verifiedEigen = warnings.evaluate(
+        "at[N[eigenvalues[{{Pi,1},{0,2}}],8],0]");
+    tests.expect(verifiedEigen.isDecimalApproximation()
+        && verifiedEigen.asDecimalApproximation().origin()
+            == numeric::ApproximationOrigin::VerifiedApproximation
+        && !verifiedEigen.asDecimalApproximation().hasRigorousEnclosure(),
+        "Schur numerical eigenvalues are marked verified instead of rigorous point enclosures");
+    const std::string verifiedExplain = eval(warnings,
+        "explain[at[N[eigenvalues[{{Pi,1},{0,2}}],8],0],\"internal\"]");
+    tests.expect(verifiedExplain.find("{\"Exactness\", \"VerifiedApproximation\"}") != std::string::npos
+        && verifiedExplain.find("{\"CertifiedEnclosure\", \"Unavailable\"}") != std::string::npos
+        && verifiedExplain.find("{\"ApproximationOrigin\", \"VerifiedApproximation\"}") != std::string::npos
+        && verifiedExplain.find("{\"RigorousEnclosureAvailable\", False}") != std::string::npos,
+        "explain distinguishes residual-verified numerical points from rigorous enclosures");
+
+    const auto reducedVerifiedEigen = warnings.evaluate(
+        "N[at[N[eigenvalues[{{Pi,1},{0,2}}],8],0],5]");
+    tests.expect(reducedVerifiedEigen.isDecimalApproximation()
+        && reducedVerifiedEigen.asDecimalApproximation().origin()
+            == numeric::ApproximationOrigin::VerifiedApproximation
+        && !reducedVerifiedEigen.asDecimalApproximation().certifiedEnclosureIsPoint(),
+        "lowering precision does not promote a verified numerical point to a rigorous enclosure");
+    tests.expectEqual(eval(warnings,
+        "N[at[N[eigenvalues[{{Pi,1},{0,2}}],8],0],5]>3"),
+        std::string{"3.1416 > 3"},
+        "verified numerical points are not reused as proof for comparisons");
     tests.expect(evalError(warnings, "explain[1,\"full\"]").type() == error::CalcErrorType::Domain,
         "explain rejects unknown modes instead of silently changing cost semantics");
 }

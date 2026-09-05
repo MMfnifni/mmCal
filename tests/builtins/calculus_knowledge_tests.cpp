@@ -69,6 +69,10 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "left-limit assumptions re-materialize the opposite held derivative branch");
     tests.expectEqual(eval(session, "limit[D[abs[x],{x,2}],x,0,1]"), std::string{"0"},
         "held repeated derivatives are materialized after directional simplification");
+    tests.expectEqual(eval(session, "limit[D[x,{x,4097}],x,0]"), std::string{"0"},
+        "Limit materializes held derivatives beyond the former order-4096 cutoff");
+    tests.expectEqual(eval(session, "limit[D[x,{x,1000000}],x,0]"), std::string{"0"},
+        "Limit shares high-order D zero-termination instead of imposing a separate order cap");
     tests.expectEqual(eval(session, "limit[cases[x if x>=0;-x if x<0],x,0]"),
         std::string{"0"},
         "two-sided limits of variable-dependent cases compare separately simplified side branches");
@@ -921,6 +925,15 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[x^5-x+1==0,x,Real]"),
         std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1]}"},
         "Real Solve falls back to an exact Root representation for unresolved rational polynomials");
+    tests.expectEqual(eval(session, "solve[(x+1)^-65>0,x,Real]"),
+        std::string{"{x in Real if x > -1}"},
+        "rational-function Solve is not cut off by the former negative-power magnitude 64 boundary");
+    tests.expectEqual(eval(session, "solve[(x+1)^-100>0,x,Real]"),
+        std::string{"{x in Real if x < -1, x in Real if x > -1}"},
+        "even high negative powers preserve both real sign-chart components");
+    tests.expectEqual(eval(session, "solve[(x+1)^-4097>0,x,Real]"),
+        std::string{"UnresolvedSolutionSet[x]"},
+        "rational-function Solve still respects the generated polynomial degree safety boundary");
     tests.expectEqual(eval(session, "solve[(x^2-2)^2==0,x,Real]"),
         std::string{"{x == root[{-2, 0, 1}, 1], x == root[{-2, 0, 1}, 2]}"},
         "algebraic Root fallback preserves distinct repeated-polynomial roots canonically");
@@ -944,6 +957,9 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[root[{1,0,1},2,Complex],30]"),
         std::string{"1.0I"},
         "complex Root refinement certifies an exact imaginary algebraic root");
+    tests.expectEqual(eval(session, "N[root[{2,4,0,0,0,1},3,Complex],6]"),
+        std::string{"-0.492739"},
+        "complex Root refinement suppresses the imaginary component when isolation proves the root is real");
     (void)eval(session, "root[{-2,0,0,0,0,0,0,0,1},1,Complex]");
     tests.expectEqual(eval(session, "N[Out[-1],30]"),
         std::string{"0.0-1.09050773266525765920701065576I"},

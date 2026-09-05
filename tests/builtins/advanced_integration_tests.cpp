@@ -70,6 +70,9 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         "integration is linear across polynomial and trigonometric terms");
     tests.expectEqual(eval(session, "D[sin[x],x]"), std::string{"cos[x]"},
         "canonical trigonometric names share derivative knowledge");
+    tests.expectEqual(eval(session,
+        "integrate[log[x]^65,{x,0,1}]==-65!"), std::string{"True"},
+        "logarithmic moments are not cut off at the former power-64 boundary");
 
     tests.expectEqual(eval(session, "integrate[E^x*cos[x],x]"),
         std::string{"(cos[x]+sin[x])exp[x]/2"},
@@ -115,6 +118,42 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expect(algebraicCubicProof.find("D[") == std::string::npos
             && algebraicCubicProof.find("integrate[") == std::string::npos,
         "algebraic-log residue derivative is fully evaluable after round-trip parsing");
+
+    const std::string algebraicDegree13 = eval(session, "integrate[1/(x^13+x+1),x]");
+    tests.expect(algebraicDegree13.find("integrate[") == std::string::npos
+            && algebraicDegree13.find("root[") != std::string::npos
+            && algebraicDegree13.find("log[") != std::string::npos,
+        "square-free algebraic-log integration is not cut off at the former degree-12 boundary");
+    const std::string algebraicDegree13Proof = derivativeBackProof(
+        session, algebraicDegree13, "1/(x^13+x+1)");
+    tests.expect(algebraicDegree13Proof.find("D[") == std::string::npos
+            && algebraicDegree13Proof.find("integrate[") == std::string::npos,
+        "degree-13 algebraic-log derivative remains fully evaluable after round-trip parsing");
+
+    const std::string repeatedDegree13 = eval(session, "integrate[1/(x^13+x+1)^2,x]");
+    tests.expect(repeatedDegree13.find("integrate[") == std::string::npos
+            && repeatedDegree13.find("/(x^13+x+1)") != std::string::npos
+            && repeatedDegree13.find("root[") != std::string::npos,
+        "single square-free factor powers bypass the former degree-12 Hermite boundary");
+
+    const std::string mixedBeyondDegree12 = eval(
+        session, "integrate[1/((x^3+x+1)^4*(x^2+1)),x]");
+    tests.expect(mixedBeyondDegree12.find("integrate[") == std::string::npos
+            && mixedBeyondDegree12.find("atan[x]") != std::string::npos
+            && mixedBeyondDegree12.find("root[") != std::string::npos,
+        "Yun plus CRT separates repeated mixed factors beyond the former degree-12 boundary");
+    const std::string mixedBeyondDegree12Proof = derivativeBackProof(
+        session, mixedBeyondDegree12, "1/((x^3+x+1)^4*(x^2+1))");
+    tests.expect(mixedBeyondDegree12Proof.find("D[") == std::string::npos
+            && mixedBeyondDegree12Proof.find("integrate[") == std::string::npos,
+        "high-degree CRT/Hermite rational primitive remains fully evaluable after round-trip parsing");
+    const std::string mixedBeyondDegree12Approx = eval(
+        session, "N[integrate[1/((x^3+x+1)^4*(x^2+1)),x],10]");
+    tests.expect(mixedBeyondDegree12Approx.find("+-") == std::string::npos
+            && mixedBeyondDegree12Approx.find("--") == std::string::npos
+            && mixedBeyondDegree12Approx.find("/-") == std::string::npos
+            && mixedBeyondDegree12Approx.find("I log[") == std::string::npos,
+        "finite-precision algebraic-log formatting keeps signs and complex coefficients reparsable");
 
     const std::string repeatedCubic = eval(session, "integrate[1/(x^3+x+1)^3,x]");
     tests.expect(repeatedCubic.find("integrate[") == std::string::npos
@@ -183,6 +222,14 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[exp[2*x^3],x]"),
         std::string{"x hypergeometric1F1[1/3, 4/3, 2x^3]"},
         "coefficient exponential monomial uses the owned 1F1 argument safely");
+    tests.expectEqual(
+        eval(session, "fullSimplify[D[integrate[x^129*exp[x],x],x]-x^129*exp[x]]"),
+        std::string{"0"},
+        "polynomial-times-exponential recurrence is not cut off at the former degree-128 boundary");
+    tests.expectEqual(
+        eval(session, "fullSimplify[D[integrate[x^129*sin[x],x],x]-x^129*sin[x]]"),
+        std::string{"0"},
+        "polynomial-times-trigonometric recurrence is not cut off at the former degree-128 boundary");
     tests.expectEqual(eval(session,
         "fullSimplify[D[x hypergeometric1F1[1/3,4/3,2*x^3],x]-exp[2*x^3]]"),
         std::string{"0"},

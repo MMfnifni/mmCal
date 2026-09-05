@@ -572,11 +572,11 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
         std::string{"0.463000096622763786298326518184-0.794233542759318865583013617157I"},
         "trigamma has a certified complex Euler-Maclaurin backend");
     tests.expectEqual(eval(session, "N[digamma[2+I]-digamma[1+I]-1/(1+I),20]"),
-        std::string{"0.0"},
-        "exact-complex digamma recurrence cancels symbolically before certified evaluation");
+        std::string{"0"},
+        "exact-complex digamma recurrence cancels to an exact-source zero display");
     tests.expectEqual(eval(session, "N[trigamma[2+I]-trigamma[1+I]+1/(1+I)^2,20]"),
-        std::string{"0.0"},
-        "exact-complex trigamma recurrence cancels symbolically before certified evaluation");
+        std::string{"0"},
+        "exact-complex trigamma recurrence cancels to an exact-source zero display");
     tests.expectEqual(eval(session, "N[digamma[-1/2],20]"),
         std::string{"0.036489973978576520559"},
         "digamma shifts negative noninteger rationals into the certified positive domain exactly");

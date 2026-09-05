@@ -312,7 +312,7 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"nullSpace[{{x, 1}}]"},
         "Linear algebra: nullSpace does not guess an undecidable symbolic pivot");
     tests.expectEqual(eval(session, "N[nullSpace[{{1,Pi}}],12]"),
-        std::string{"{{-3.14159265359, 1.0}}"},
+        std::string{"{{-3.14159265359, 1}}"},
         "Linear algebra: N keeps exact-first pivot structure for nullSpace before approximating its basis");
     tests.expectEqual(eval(session, "nullSpace[N[{{Pi,1}},12]]"),
         std::string{"{{-0.31830988618, 1.0}}"},
@@ -336,7 +336,7 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"{{1.0, 2.0}, {3.0, 4.0}}"},
         "Linear algebra: fraction-free exact QR reconstructs A");
     tests.expectEqual(eval(session, "N[qrDecomposition[{{1,2},{3,4}}],8]"),
-        std::string{"{{{-0.31622777, -0.94868330}, {-0.94868330, 0.31622777}}, {{-3.1622777, -4.4271887}, {0.0, -0.63245553}}}"},
+        std::string{"{{{-0.31622777, -0.94868330}, {-0.94868330, 0.31622777}}, {{-3.1622777, -4.4271887}, {0, -0.63245553}}}"},
         "Linear algebra: N dispatches QR directly to the certified Householder backend");
     tests.expectEqual(eval(session, "dimensions[at[qrDecomposition[{{1,0},{0,1},{0,0}}],0]]"),
         std::string{"{3, 2}"},
@@ -349,7 +349,7 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}}"},
         "Linear algebra: rectangular reduced QR reconstructs A");
     tests.expectEqual(eval(session, "N[luDecomposition[{{Pi,1},{2,3}}],8]"),
-        std::string{"{{{1.0, 0.0}, {0.0, 1.0}}, {{1.0, 0.0}, {0.63661977, 1.0}}, {{3.1415927, 1.0}, {0.0, 2.3633802}}}"},
+        std::string{"{{{1, 0}, {0, 1}}, {{1, 0}, {0.63661977, 1}}, {{3.1415927, 1}, {0, 2.3633802}}}"},
         "Linear algebra: N dispatches LU directly to the certified decomposition backend");
     tests.expectEqual(eval(session, "qrDecomposition[{{a,b},{0,c}}]"),
         std::string{"{{{1, 0}, {0, 1}}, {{a, b}, {0, c}}}"},
@@ -389,8 +389,8 @@ void runLinearAlgebraTests(TestRunner& tests) {
         std::string{"{{3.14159265359, 6.28318530718}, {9.42477796077, 12.5663706144}}"},
         "Linear algebra: approximate Array inputs infer backend precision like FFT");
     tests.expectEqual(eval(session, "N[matrixRank[{{Pi,2Pi},{1,2}}],12]"),
-        std::string{"1.0"},
-        "Linear algebra: N preserves exact rank while retaining approximate-value display provenance");
+        std::string{"1"},
+        "Linear algebra: N displays an exact-source integer rank without a redundant decimal marker");
     tests.expectEqual(eval(session, "matrixRank[N[{{Pi,2Pi},{1,2}},12]]"),
         std::string{"matrixRank[{{3.14159265359, 6.28318530718}, {1.0, 2.0}}]"},
         "Linear algebra: approximate matrixRank does not invent a rank-deficiency threshold");

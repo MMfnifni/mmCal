@@ -297,6 +297,11 @@ void runKernelSessionTests(TestRunner& tests) {
         "simplify[(2*x)^3]"),
         std::string{"8x^3"},
         "KernelSession: exact numeric product coefficient is powered without branch assumptions");
+    tests.expectEqual(evaluateAndFormat(
+        nestedPowerSession,
+        "simplify[((x+1)/(x-1))^65]"),
+        std::string{"(x+1)^65/(x-1)^65"},
+        "KernelSession: positive integer quotient powers are not cut off at the former exponent-64 boundary");
 
 
     kernel::KernelSession elementarySession;
@@ -462,6 +467,28 @@ void runKernelSessionTests(TestRunner& tests) {
         "factor[x^12+6x^11+87x^10+380*x^9+2895x^8+9366x^7+47881x^6+112392x^5+416880*x^4+656640*x^3+1804032x^2+1492992x+2985984]"),
         std::string{"(x^2+x+12)^6"},
         "KernelSession: factor reconstructs an exact univariate perfect polynomial power");
+    tests.expectEqual(evaluateAndFormat(session,
+        "factor[expand[(x^2+x+1)^65]]"),
+        std::string{"(x^2+x+1)^65"},
+        "KernelSession: factor perfect-power reconstruction is not cut off at exponent 64");
+    {
+        std::ostringstream expected;
+        expected << "(x-1)(";
+        for (int exponent = 256; exponent >= 0; --exponent) {
+            if (exponent != 256)
+                expected << '+';
+            if (exponent == 0)
+                expected << '1';
+            else if (exponent == 1)
+                expected << 'x';
+            else
+                expected << "x^" << exponent;
+        }
+        expected << ')';
+        tests.expectEqual(evaluateAndFormat(session, "factor[x^257-1]"),
+            expected.str(),
+            "KernelSession: factor skips impossible perfect-power reconstruction for a square-free high-degree residual");
+    }
     tests.expectEqual(evaluateAndFormat(session, "(12+x+x^2)^6"),
         std::string{"(x^2+x+12)^6"},
         "KernelSession: formatter displays univariate polynomial sums in descending degree order");
@@ -585,6 +612,63 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"{{x == -1/(a-1), y == (2a-1)/(a-1)} if a != 1}"},
         "KernelSession: a user constraint can select the nonsingular symbolic linear-system branch");
     tests.expectEqual(
+        evaluateAndFormat(session,
+            "solve[{a*x==1,b*y==2,c*z==3,d*w==4,e*v==5},{x,y,z,w,v}]"),
+        std::string{"cases[{{x == 1/a, y == 2/b, z == 3/c, w == 4/d, v == 5/e}} if a b c d e != 0; Unresolved if a b c d e == 0]"},
+        "KernelSession: diagonal symbolic linear systems are not capped at four variables");
+    tests.expectEqual(
+        evaluateAndFormat(session,
+            "solve[{a*x+y==1,b*y+z==2,c*z+w==3,d*w+v==4,e*v+u==5,f*u+t==6,g*t+s==7,h*s==8},{x,y,z,w,v,u,t,s}]"),
+        std::string{"cases[{{x == (1-(2-(3-(4-(5-(6-(7-8/h)/g)/f)/e)/d)/c)/b)/a, y == (2-(3-(4-(5-(6-(7-8/h)/g)/f)/e)/d)/c)/b, z == (3-(4-(5-(6-(7-8/h)/g)/f)/e)/d)/c, w == (4-(5-(6-(7-8/h)/g)/f)/e)/d, v == (5-(6-(7-8/h)/g)/f)/e, u == (6-(7-8/h)/g)/f, t == (7-8/h)/g, s == 8/h}} if a b c d e f g h != 0; Unresolved if a b c d e f g h == 0]"},
+        "KernelSession: upper-triangular symbolic linear systems scale by substitution rather than Cramer expansion");
+    tests.expectEqual(
+        evaluateAndFormat(session, "at[solve[x^257-1==0,x],0,x]"),
+        std::string{"1"},
+        "KernelSession: exact binomial solve is not capped at degree 256");
+    tests.expectEqual(
+        evaluateAndFormat(session, "integrate[x^1000*log[x],x]"),
+        std::string{"x^1001log[x]/1001-x^1001/1002001"},
+        "KernelSession: monomial-times-log integration has no artificial degree-256 cap");
+    tests.expectEqual(
+        evaluateAndFormat(session,
+            "fullSimplify[D[integrate[tan[x]^257,x],x]-tan[x]^257,cos[x]!=0]"),
+        std::string{"0"},
+        "KernelSession: direct trigonometric power reduction uses the integration budget beyond order 256");
+    tests.expectEqual(
+        evaluateAndFormat(session,
+            "fullSimplify[D[integrate[sin[x]^-257,x],x]-sin[x]^-257,sin[x]!=0]"),
+        std::string{"0"},
+        "KernelSession: reciprocal trigonometric power reduction uses the integration budget beyond order 256");
+    tests.expectEqual(
+        evaluateAndFormat(session, "D[x,{x,1000000}]"),
+        std::string{"0"},
+        "KernelSession: high-order D stops at exact zero instead of enforcing a fixed order-4096 cap");
+    const std::string repeatedExp65 = evaluateAndFormat(session, "D[exp[x^2],{x,65}]");
+    tests.expect(
+        repeatedExp65.find("D[") == std::string::npos
+            && repeatedExp65.find("exp[x^2]") != std::string::npos,
+        "KernelSession: quadratic-exponential repeated D crosses the former order-64 boundary");
+    const std::string repeatedLambert65 = evaluateAndFormat(session, "D[lambertw[x],{x,65}]");
+    tests.expect(
+        repeatedLambert65.find("D[") == std::string::npos
+            && repeatedLambert65.find("lambertw[x]") != std::string::npos,
+        "KernelSession: Lambert W repeated D crosses the former order-64 boundary");
+    const std::string repeatedPolylog65 = evaluateAndFormat(session, "D[polylog[3,x],{x,65}]");
+    tests.expect(
+        repeatedPolylog65.find("D[") == std::string::npos
+            && repeatedPolylog65.find("polylog[") != std::string::npos,
+        "KernelSession: polylog repeated D crosses the former order-64 boundary");
+    tests.expectEqual(
+        evaluateAndFormat(session,
+            "fullSimplify[D[integrate[sin[x]^257,x],x]-sin[x]^257]"),
+        std::string{"0"},
+        "KernelSession: positive sine powers above 256 use the budgeted reduction formula");
+    tests.expectEqual(
+        evaluateAndFormat(session,
+            "fullSimplify[D[integrate[cos[x]^258,x],x]-cos[x]^258]"),
+        std::string{"0"},
+        "KernelSession: positive cosine powers above 256 use the budgeted reduction formula");
+    tests.expectEqual(
         evaluateAndFormat(session, "solve[log[y]*x + 1 == 0, x]"),
         std::string{"cases[{x == -1/log[y]} if log[y] != 0; {} if log[y] == 0] if y != 0"},
         "KernelSession: coefficient domain conditions include the principal logarithm domain");
@@ -681,17 +765,17 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"0.50"},
         "KernelSession: N marks terminating decimals as approximate values");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[0,5]"),
-        std::string{"0.0"},
-        "KernelSession: N distinguishes approximate zero from exact zero in display");
+        std::string{"0"},
+        "KernelSession: exact-source integer zero uses exact-looking top-level display");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[2,20]"),
-        std::string{"2.0"},
-        "KernelSession: N distinguishes approximate integers from exact integers in display");
+        std::string{"2"},
+        "KernelSession: exact-source integer point uses exact-looking top-level display");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[617/500,20]"),
         std::string{"1.2340"},
         "KernelSession: terminating approximate decimals retain one provenance zero");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[I,20]"),
-        std::string{"1.0I"},
-        "KernelSession: approximate pure imaginary values retain an approximate coefficient");
+        std::string{"I"},
+        "KernelSession: exact-source imaginary integer coefficient uses exact-looking top-level display");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[N[1/2,5],20]"),
         std::string{"0.50"},
         "KernelSession: outer N never turns a terminating approximation back into exact-looking text");
@@ -725,6 +809,24 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[log[1 + I], 30]"),
         std::string{"0.346573590279972654708616060729+0.785398163397448309615660845820I"},
         "KernelSession: N evaluates the principal complex logarithm");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "x-N[-2,5]"),
+        std::string{"x+2.0"},
+        "KernelSession: formatter folds subtraction of a negative DecimalApproximation");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "x*N[-2+3I,5]"),
+        std::string{"(-2.0+3.0I)x"},
+        "KernelSession: complex finite-precision coefficients keep multiplicative parentheses");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "x/N[-2,5]"),
+        std::string{"-x/2.0"},
+        "KernelSession: negative finite-precision denominators move their sign outside the quotient");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "x/N[-2+3I,5]"),
+        std::string{"-x/(2.0-3.0I)"},
+        "KernelSession: complex finite-precision denominators keep a reparsable global sign");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "N[-2,5]^x"),
+        std::string{"(-2.0)^x"},
+        "KernelSession: negative DecimalApproximation power bases retain required parentheses");
+    tests.expectEqual(evaluateAndFormat(numericalSession, "x^N[-2+3I,5]"),
+        std::string{"x^(-2.0+3.0I)"},
+        "KernelSession: complex DecimalApproximation exponents retain required parentheses");
     tests.expectEqual(evaluateAndFormat(numericalSession, "N[exp[1 + I], 30]"),
         std::string{"1.46869393991588515713896759733+2.28735528717884239120817190670I"},
         "KernelSession: N evaluates general complex Exp without machine floating point");
@@ -1378,6 +1480,12 @@ void runKernelSessionTests(TestRunner& tests) {
     }
     {
         evaluation::EvaluationLimits limits;
+        limits.maxEvaluationSteps = 1000;
+        expectResourceLimit(limits, "D[polylog[3,x],{x,65}]",
+            "Evaluation step budget", "repeated-D recurrence preflight");
+    }
+    {
+        evaluation::EvaluationLimits limits;
         limits.maxGeneratedNodes = 0;
         expectResourceLimit(limits, "1+2", "Generated expression node budget", "generated nodes");
     }
@@ -1646,7 +1754,7 @@ void runKernelSessionTests(TestRunner& tests) {
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "N[solve[{x^3-3x^2-y+1==0,-x^2+y^2-1==0},{x,y}],10]"),
-        std::string{"{{x == -0.7746228995+0.0I, y == -1.264927127+0.0I}, {x == 0.0, y == 1.0}, {x == 1.185885346+0.0I, y == -1.551233076+0.0I}, {x == 2.360409337+0.0I, y == -2.563499998+0.0I}, {x == 3.228328216+0.0I, y == 3.37966020+0.0I}}"},
+        std::string{"{{x == -0.7746228995, y == -1.264927127}, {x == 0.0, y == 1.0}, {x == 1.185885346, y == -1.551233076}, {x == 2.360409337, y == -2.563499998}, {x == 3.228328216, y == 3.37966020}}"},
         "KernelSession: bivariate polynomial Solve retries the alternate Lex projection when the requested order is not in shape position");
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,

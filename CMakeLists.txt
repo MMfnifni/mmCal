@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(mmCal VERSION 1.5.4 LANGUAGES CXX)
+project(mmCal VERSION 1.5.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -33,7 +33,13 @@ constexpr int precedenceUnary = 30;
 constexpr int precedencePower = 40;
 constexpr int precedencePostfix = 50;
 
-void appendExpr(std::string& output, const Expr& expression, unsigned radix, int parentPrecedence);
+void appendExpr(
+    std::string& output,
+    const Expr& expression,
+    unsigned radix,
+    int parentPrecedence,
+    bool compactExactApproxInteger = false);
+[[nodiscard]] std::optional<Expr> positiveMagnitudeOfNegative(const Expr& expression);
 
 [[nodiscard]] int numberPrecedence(const numeric::Number& number) noexcept {
     // Numberは式木上はAtomだが、線形表示は "-8" や "1/3" のように
@@ -68,6 +74,118 @@ void appendNumber(
     output += number.toString(radix);
     if (parenthesize)
         output.push_back(')');
+}
+
+[[nodiscard]] bool displayAsExactInteger(
+    const numeric::DecimalApproximation& value) noexcept {
+    // ExactValue由来で，certified truthと表示値が同一の整数pointなら，
+    // 有限precision metadataを保持したまま表示だけexact integerへ戻せる。
+    return value.origin() == numeric::ApproximationOrigin::ExactValue
+        && value.certifiedEnclosureIsPoint()
+        && value.displayedValue() == value.certifiedLower()
+        && value.displayedValue().isInteger();
+}
+
+[[nodiscard]] std::string decimalApproximationText(
+    const numeric::DecimalApproximation& value,
+    unsigned radix,
+    bool compactExactInteger) {
+    if (compactExactInteger && displayAsExactInteger(value))
+        return value.displayedValue().numerator().toString(radix);
+    return std::string{value.text()};
+}
+
+[[nodiscard]] int decimalApproximationPrecedence(
+    const numeric::DecimalApproximation& value) noexcept {
+    return value.displayedValue().numerator().isNegative()
+        ? precedenceUnary
+        : precedencePostfix + 1;
+}
+
+void appendDecimalApproximation(
+    std::string& output,
+    const numeric::DecimalApproximation& value,
+    unsigned radix,
+    int parentPrecedence,
+    bool compactExactInteger = false) {
+    const int precedence = decimalApproximationPrecedence(value);
+    const bool parenthesize = precedence < parentPrecedence;
+    if (parenthesize)
+        output.push_back('(');
+    output += decimalApproximationText(value, radix, compactExactInteger);
+    if (parenthesize)
+        output.push_back(')');
+}
+
+[[nodiscard]] int complexDecimalApproximationPrecedence(
+    const numeric::ComplexDecimalApproximation& value) noexcept {
+    if (value.imaginaryCertifiedExactlyZero())
+        return decimalApproximationPrecedence(value.real());
+    if (value.realCertifiedExactlyZero())
+        return precedenceMultiplicative;
+    return precedenceAdditive;
+}
+
+void appendComplexDecimalApproximation(
+    std::string& output,
+    const numeric::ComplexDecimalApproximation& value,
+    unsigned radix,
+    int parentPrecedence,
+    bool compactExactInteger = false) {
+    const int precedence = complexDecimalApproximationPrecedence(value);
+    const bool parenthesize = precedence < parentPrecedence;
+    if (parenthesize)
+        output.push_back('(');
+
+    const std::string real = decimalApproximationText(
+        value.real(), radix, compactExactInteger);
+    const std::string imaginary = decimalApproximationText(
+        value.imaginary(), radix, compactExactInteger);
+    const bool negativeImaginary = !imaginary.empty() && imaginary.front() == '-';
+    const std::string_view magnitude = negativeImaginary
+        ? std::string_view{imaginary}.substr(1)
+        : std::string_view{imaginary};
+
+    if (value.imaginaryCertifiedExactlyZero())
+        output += real;
+    else if (value.realCertifiedExactlyZero()) {
+        if (negativeImaginary)
+            output.push_back('-');
+        if (magnitude != "1")
+            output += magnitude;
+        output.push_back('I');
+    }
+    else {
+        output += real;
+        output += negativeImaginary ? "-" : "+";
+        if (magnitude != "1")
+            output += magnitude;
+        output.push_back('I');
+    }
+
+    if (parenthesize)
+        output.push_back(')');
+}
+
+[[nodiscard]] std::optional<Expr> positiveMagnitudeOfNegativeApproximationAtom(
+    const Expr& expression) {
+    if (expression.isDecimalApproximation()) {
+        const auto& value = expression.asDecimalApproximation();
+        if (value.displayedValue().numerator().isNegative())
+            return Expr{value.negated()};
+        return std::nullopt;
+    }
+
+    if (!expression.isComplexDecimalApproximation())
+        return std::nullopt;
+
+    const auto& value = expression.asComplexDecimalApproximation();
+    const bool leadingNegative = value.realCertifiedExactlyZero()
+        ? value.imaginary().displayedValue().numerator().isNegative()
+        : value.real().displayedValue().numerator().isNegative();
+    if (leadingNegative)
+        return Expr{value.negated()};
+    return std::nullopt;
 }
 
 void appendEscapedString(std::string& output, std::string_view value) {
@@ -343,7 +461,8 @@ void appendArrayDimension(
     const expression::ArrayExpr& array,
     std::size_t dimension,
     std::size_t offset,
-    unsigned radix) {
+    unsigned radix,
+    bool compactExactApproxInteger) {
     output.push_back('{');
 
     const std::size_t count = array.shape[dimension];
@@ -367,18 +486,24 @@ void appendArrayDimension(
                 appendNumber(output, array.numberAt(elementOffset), radix, precedenceLowest);
                 break;
             case expression::ArrayStorageKind::DecimalApproximation:
-                output += array.decimalAt(elementOffset).text();
+                appendDecimalApproximation(
+                    output, array.decimalAt(elementOffset), radix, precedenceLowest,
+                    compactExactApproxInteger);
                 break;
             case expression::ArrayStorageKind::ComplexDecimalApproximation:
-                output += array.complexDecimalAt(elementOffset).text();
+                appendComplexDecimalApproximation(
+                    output, array.complexDecimalAt(elementOffset), radix, precedenceLowest,
+                    compactExactApproxInteger);
                 break;
             case expression::ArrayStorageKind::Generic:
-                appendExpr(output, array.expressionAt(elementOffset), radix, precedenceLowest);
+                appendExpr(output, array.expressionAt(elementOffset), radix,
+                    precedenceLowest, compactExactApproxInteger);
                 break;
             }
         }
         else
-            appendArrayDimension(output, array, dimension + 1, elementOffset, radix);
+            appendArrayDimension(output, array, dimension + 1, elementOffset, radix,
+                compactExactApproxInteger);
     }
 
     output.push_back('}');
@@ -422,10 +547,49 @@ void appendBinaryCall(
         output.push_back(')');
 }
 
+void appendDivideCall(
+    std::string& output,
+    const CallExpr& call,
+    unsigned radix,
+    int parentPrecedence) {
+    if (call.arguments.size() != 2)
+        return;
+
+    auto denominatorMagnitude =
+        positiveMagnitudeOfNegativeApproximationAtom(call.arguments.back());
+    if (!denominatorMagnitude) {
+        appendBinaryCall(
+            output, call, "/", precedenceMultiplicative, radix, parentPrecedence, true);
+        return;
+    }
+
+    auto numeratorMagnitude = positiveMagnitudeOfNegative(call.arguments.front());
+    const bool negative = !numeratorMagnitude;
+    const Expr& numerator = numeratorMagnitude ? *numeratorMagnitude : call.arguments.front();
+
+    const bool parenthesize = precedenceMultiplicative < parentPrecedence;
+    if (parenthesize)
+        output.push_back('(');
+
+    if (negative)
+        output.push_back('-');
+    appendExpr(output, numerator, radix, precedenceMultiplicative);
+    output.push_back('/');
+    appendExpr(output, *denominatorMagnitude, radix, precedenceMultiplicative + 1);
+
+    if (parenthesize)
+        output.push_back(')');
+}
+
 [[nodiscard]] std::optional<Expr> positiveMagnitudeOfNegative(const Expr& expression) {
     if (expression.isNumber() && expression.asNumber().isReal()
         && expression.asNumber().asReal().isNegative())
         return Expr{-expression.asNumber()};
+
+    if (auto magnitude = positiveMagnitudeOfNegativeApproximationAtom(expression))
+        return magnitude;
+    if (expression.isDecimalApproximation() || expression.isComplexDecimalApproximation())
+        return std::nullopt;
 
     if (!expression.isCall())
         return std::nullopt;
@@ -436,13 +600,12 @@ void appendBinaryCall(
         return call.arguments.front();
 
     if (head == builtins::names::multiply && !call.arguments.empty()) {
-        const Expr& first = call.arguments.front();
-        if (!first.isNumber() || !first.asNumber().isReal()
-            || !first.asNumber().asReal().isNegative())
+        auto firstMagnitude = positiveMagnitudeOfNegative(call.arguments.front());
+        if (!firstMagnitude)
             return std::nullopt;
 
         std::vector<Expr> factors{call.arguments.begin(), call.arguments.end()};
-        factors.front() = Expr{-first.asNumber()};
+        factors.front() = std::move(*firstMagnitude);
         if (factors.front().isNumber()
             && factors.front().asNumber().isReal()
             && factors.front().asNumber().asReal().isInteger()
@@ -454,8 +617,15 @@ void appendBinaryCall(
     }
 
     if (head == builtins::names::divide && call.arguments.size() == 2) {
-        if (auto numerator = positiveMagnitudeOfNegative(call.arguments.front()))
-            return Expr::call(call.head, {std::move(*numerator), call.arguments[1]});
+        auto numerator = positiveMagnitudeOfNegative(call.arguments.front());
+        auto denominator = positiveMagnitudeOfNegativeApproximationAtom(call.arguments.back());
+        if (denominator) {
+            if (numerator)
+                return std::nullopt;
+            return Expr::call(call.head, {call.arguments.front(), std::move(*denominator)});
+        }
+        if (numerator)
+            return Expr::call(call.head, {std::move(*numerator), call.arguments.back()});
     }
 
     return std::nullopt;
@@ -471,8 +641,14 @@ struct DisplayMonomial final {
     std::uint64_t degree = 0;
 };
 
+[[nodiscard]] bool isDisplayNumericCoefficient(const Expr& expression) noexcept {
+    return expression.isNumber()
+        || expression.isDecimalApproximation()
+        || expression.isComplexDecimalApproximation();
+}
+
 [[nodiscard]] std::optional<DisplayMonomial> displayMonomial(const Expr& expression) {
-    if (expression.isNumber())
+    if (isDisplayNumericCoefficient(expression))
         return DisplayMonomial{};
 
     if (expression.isSymbol())
@@ -500,7 +676,7 @@ struct DisplayMonomial final {
 
     DisplayMonomial result;
     for (const Expr& factor : call.arguments) {
-        if (factor.isNumber())
+        if (isDisplayNumericCoefficient(factor))
             continue;
         const auto monomial = displayMonomial(factor);
         if (!monomial || !monomial->variable)
@@ -779,7 +955,7 @@ void appendCall(
     }
 
     if (head == builtins::names::divide && call.arguments.size() == 2) {
-        appendBinaryCall(output, call, "/", precedenceMultiplicative, radix, parentPrecedence, true);
+        appendDivideCall(output, call, radix, parentPrecedence);
         return;
     }
 
@@ -907,7 +1083,8 @@ void appendExpr(
     std::string& output,
     const Expr& expression,
     unsigned radix,
-    int parentPrecedence) {
+    int parentPrecedence,
+    bool compactExactApproxInteger) {
     using expression::ExprKind;
 
     switch (expression.kind()) {
@@ -916,11 +1093,15 @@ void appendExpr(
         break;
 
     case ExprKind::DecimalApproximation:
-        output += expression.asDecimalApproximation().text();
+        appendDecimalApproximation(
+            output, expression.asDecimalApproximation(), radix, parentPrecedence,
+            compactExactApproxInteger);
         break;
 
     case ExprKind::ComplexDecimalApproximation:
-        output += expression.asComplexDecimalApproximation().text();
+        appendComplexDecimalApproximation(
+            output, expression.asComplexDecimalApproximation(), radix, parentPrecedence,
+            compactExactApproxInteger);
         break;
 
     case ExprKind::Boolean:
@@ -938,7 +1119,7 @@ void appendExpr(
     case ExprKind::Array: {
         const auto& array = expression.asArray();
         if (expression::braceLiteralPreservesShape(array.shape)) {
-            appendArrayDimension(output, array, 0, 0, radix);
+            appendArrayDimension(output, array, 0, 0, radix, compactExactApproxInteger);
             break;
         }
 
@@ -955,7 +1136,8 @@ void appendExpr(
         for (std::size_t i = 0; i < list.elements.size(); ++i) {
             if (i != 0)
                 output += ", ";
-            appendExpr(output, list.elements[i], radix, precedenceLowest);
+            appendExpr(output, list.elements[i], radix, precedenceLowest,
+                compactExactApproxInteger);
         }
         output.push_back('}');
         break;
@@ -975,7 +1157,7 @@ void appendExpr(
 
 std::string formatExpr(const expression::Expr& expression, unsigned radix) {
     std::string output;
-    appendExpr(output, expression, radix, precedenceLowest);
+    appendExpr(output, expression, radix, precedenceLowest, true);
     return output;
 }
 

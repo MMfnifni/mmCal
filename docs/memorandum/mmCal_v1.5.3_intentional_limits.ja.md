@@ -44,33 +44,35 @@ v1.5.3では，各workerが独立`KernelSession`を所有し，case間・比較�
 | `expand` expanded terms         |            4096 | 超過時は巨大展開を作らず元部分式を保持                |
 | Polynomial conversion degree    |            4096 | 多項式化による式爆発防止                              |
 | Polynomial conversion terms     |            4096 | 同上                                                  |
+| `factor` perfect-power exponent | 固定上限なし | good prime上の`gcd[p,p']` multiplicityから安全な候補上界を求め，exact reconstructionを絞る |
 | 一般trig monomial reduction既定 | total degree 64 | 共通helperの既定budget                                |
 
 ## 3. 微分・積分・極限
 
 | 項目                                  |        現在値 | 動作                                                   |
 | ------------------------------------- | ------------: | ------------------------------------------------------ |
-| `D[...,{x,n}]` order                  |      最大4096 | それ以上はOverflow error                               |
+| `D[...,{x,n}]` order                  | 固定上限なし | 共通`EvaluationStep` budgetで実作業量を制御し，exact 0到達時は早期終了 |
 | symbolic integrate recursion depth    |            24 | それ以上は探索打切り                                   |
 | integration substitution candidates   |            32 | 候補爆発防止                                           |
-| trig integer-power integration        |   主に最大256 | `sin/cos/tan/cot/sec/csc`等の有限展開/reduction policy |
+| trig integer-power integration        | 固定上限なし（pure family） | pure `sin/cos/tan/cot/sec/csc`はreduction recurrence＋共通積分budget。mixed finite-Fourier展開は256を維持 |
+| `[0,1]` logarithmic moments           | 固定log冪上限なし | `x^a log[x]^m`は閉形式`(-1)^m m!/(a+1)^(m+1)`へ落とし，factorial構築workを共通`IntegrationCandidate` budgetへ課す |
 | specialized rational denominator path |  degree最大12 | 高次数の無制限partial-fraction探索を避ける             |
-| direct Lambert/polylog/quadratic-exp repeated D | `n<=64` | compact exact fast path。超過時は一般`D`反復へ代替経路し，全体の`D` order上限4096は不変 |
+| direct Lambert/polylog/quadratic-exp repeated D | 固定上限なし | compact exact fast pathの係数更新数を`EvaluationStep`へ事前課金し，BigInt/Rational係数をbit-length budgetで監視。構造非適合時のみ一般`D`反復へ代替 |
 | `limit` recursion depth               |            24 | 未解決式へ戻す                                         |
 | l'Hopital iterations                  |            12 | それ以上は無制限反復しない                             |
 | `nintegrate` maximum subintervals     | 2^18 = 262144 | adaptive refinement安全弁                              |
 | Newton–Cotes degree                   |             8 | certified numerical integrationの固定rule              |
 | numerical calculus decimal digits     |    既定100000 | 共通`maxRequestedPrecisionDigits`。独立した局所hard capは持たない |
 
-有理函数積分は，一次・二次因子のcompact partial fractionを優先した後，Q[x]上のYun square-free decompositionとHermite reductionで重複高次因子を処理し，次数3以上のsquare-free部分をcertified Complex Rootの留数分解`P(r)/Q'(r) Log[x-r]`へ落とす。specialized rational denominator pathの現work budgetはdegree 12であり，これは数学的定義域境界ではなく式サイズ・全根isolation・algebraic residue materializationを無制限化しないためのresource-safety境界である。Rothstein–Trager / Lazard–Rioboo–Trager型の留数groupingは未実装で，現出力よりcompactな実`log/atan`表現へまとめる余地がある。
+有理函数積分は，一次・二次因子のcompact partial fractionを優先した後，Q[x]上のYun square-free decompositionとHermite reductionで重複高次因子を処理し，次数3以上のsquare-free部分をcertified Complex Rootの留数分解`P(r)/Q'(r) Log[x-r]`へ落とす。有理函数積分の旧degree 12境界は利用者向け制限としては撤廃した。degree 12を超える分母ではdense partial-fraction線形系を構築せず，Yun square-free decompositionで得た互いに素な`f_i^k`をpolynomial CRTでexact分離する。1次/2次成分は既存recurrence，高次反復成分は`f_i'`のmodular inverseによるHermite reduction，square-free残差はcertified Complex Rootの留数分解へ渡す。degree 12以下では既存のdense partial-fraction pathを残し，従来のcompactな`log/atan`出力を優先するためのalgorithm選択値としてのみ12を使う。高次側の実安全弁はPolynomial conversionのdegree 64，algebraic construction degree budget，Root isolation，およびCRT・多項式評価・Hermite stepに対応する共通`IntegrationCandidate` budgetである。Rothstein–Trager / Lazard–Rioboo–Trager型の留数groupingは未実装で，現出力よりcompactな実`log/atan`表現へまとめる余地がある。
 
 ## 4. Solve / polynomial
 
 | 項目                                  |             現在値 | 動作                                                                                                                                              |
 | ------------------------------------- | -----------------: | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| symbolic-coefficient linear system    |          最大4変数 | Cramer式爆発防止。Rational coefficient系の一般Gauss-Jordanとは別                                                                                  |
-| binomial polynomial solve             |      degree最大256 | `a*x^n+b`系のexact root展開budget                                                                                                                 |
-| rational-function polynomial exponent |            -64..64 | solver内部変換の式爆発防止                                                                                                                        |
+| symbolic-coefficient linear system    | dense一般系は最大4変数 | Cramer式爆発防止。対角・上三角・下三角系はforward/back substitutionで固定変数上限なし。symbolic pivot条件をSolutionSetへ保持 |
+| binomial polynomial solve             | 固定degree上限なし | `a*x^n+b`のexact root生成数に応じて共通`SolverBranch` budgetを消費し，固定256境界は持たない |
+| rational-function polynomial power    | 固定指数上限なし | 生成される分子・分母のdegreeを各4096以内に制限し，指数値そのものでは打ち切らない。degree超過時は従来どおり未解決へ戻す |
 | polynomial conversion                 | degree/terms各4096 | 共通budget                                                                                                                                        |
 | algebraic `root` defining polynomial  |       degree最大96 | Real Sturm分離・Complex certified isolationを無制限化しない。2026-08-28にoutward interval Rouché証明，Durand–Kerner早期終了，高次Root materializationの不要なfield構築除去を行った後，`solve[x^65+x+1==0,x]`約1.5秒，80次約2.9秒，96次約4.1秒まで連続的に測定できたため，旧64上限を96へ再設定した。96超は未測定領域として共通budgetで停止する |
 | algebraic-field candidate             |       degree最大16 | resultant / minimal-polynomial factor reduction / primitive-element reductionの次数爆発を抑える。証明不能・超過時は代替経路またはsymbolic式を保持 |

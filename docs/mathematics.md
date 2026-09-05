@@ -31,9 +31,9 @@ log[-1]  -> I Pi
 
 `N[expr,p]`の`p`は有効10進桁数である。真値を含むCertifiedEnclosureを内部で計算し，要求された有効桁表示が一意に確定するまで作業精度を増やす。固定小数点以下桁数は`:fix`の表示機能が担当する。
 
-近似結果は表示値だけでなく，真値保証用CertifiedEnclosureと，後続計算で再利用してよい情報量を表すInformationEnclosureを保持する。常に`CertifiedEnclosure ⊆ InformationEnclosure`とし，`precision` / `accuracy` / `rationalize`および近似値の後続演算はこの区別を利用する。
+近似結果は表示値だけでなくprovenanceを保持する。ExactValue / CertifiedInterval由来では真値保証用CertifiedEnclosureと，後続計算で再利用してよい情報量を表すInformationEnclosureを分離し，`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。SVD / eigen等で残差・関係式を要求桁まで検証した数値候補はVerifiedApproximationとして区別し，通常数値演算には使えるが真値のrigorous point enclosureとしてcertified函数や比較証明へ再利用しない。
 
-`:fix`はこれとは別であり，正確値を画面上だけ指定桁数以下の小数へ丸めて表示する。末尾の不要な0は表示時に省略する。
+`:fix`はこれとは別であり，正確値を画面上だけ指定桁数以下の小数へ丸めて表示する。末尾の不要な0は表示時に省略する。またExactValue由来のfinite-precision値がrigorousに同じ整数pointである場合，top-level値表示では`N[2,20] -> 2`のように不要な`.0`を省略するが，内部のprecision metadataは保持する。
 
 ## 定義域と未解決
 

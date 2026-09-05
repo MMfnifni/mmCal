@@ -291,6 +291,12 @@ void runIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[exp[x^6],x]"),
         std::string{"x hypergeometric1F1[1/6, 7/6, x^6]"},
         "exponential monomial uses the branch-safe confluent hypergeometric primitive");
+    tests.expectEqual(eval(session, "integrate[exp[x^4097],x]"),
+        std::string{"x hypergeometric1F1[1/4097, 4098/4097, x^4097]"},
+        "exponential monomial integration is not cut off at the former order-4096 boundary");
+    tests.expectEqual(eval(session, "integrate[exp[-2*x^1000000],x]"),
+        std::string{"x hypergeometric1F1[1/1000000, 1000001/1000000, -2x^1000000]"},
+        "closed-form exponential monomials accept large exact integer powers without linear work in the exponent");
 
     const std::string unsupported = eval(session, "integrate[gamma[x],x]");
     tests.expect(unsupported.find("integrate[") == 0,

@@ -25,6 +25,15 @@ using numeric::ApproximationOrigin;
 using numeric::BigInt;
 using numeric::ComplexDecimalApproximation;
 using numeric::DecimalApproximation;
+
+[[nodiscard]] std::string_view approximationOriginName(ApproximationOrigin origin) noexcept {
+    switch (origin) {
+    case ApproximationOrigin::ExactValue: return "ExactValue";
+    case ApproximationOrigin::CertifiedInterval: return "CertifiedInterval";
+    case ApproximationOrigin::VerifiedApproximation: return "VerifiedApproximation";
+    }
+    return "Unknown";
+}
 using numeric::Number;
 using mathematics::ArithmeticClass;
 using mathematics::ConstantDefinition;
@@ -466,7 +475,9 @@ void explainDecimal(
     std::vector<Expr>& properties,
     bool internal) {
     add(properties, "Domain", text("Real"));
-    add(properties, "Exactness", text("CertifiedApproximation"));
+    add(properties, "Exactness", text(value.hasRigorousEnclosure()
+        ? "CertifiedApproximation"
+        : "VerifiedApproximation"));
     if (value.requestedSignificantDigits() != 0)
         add(properties, "RequestedPrecisionDigits", integer(value.requestedSignificantDigits()));
     else
@@ -475,16 +486,18 @@ void explainDecimal(
     add(properties, "PrecisionDigits", integer(numeric::precisionDigits(value)));
     add(properties, "AccuracyDigits", integer(numeric::accuracyDigits(value)));
     add(properties, "Rounded", Expr{value.isRounded()});
-    add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    if (value.hasRigorousEnclosure())
+        add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    else
+        add(properties, "CertifiedEnclosure", text("Unavailable"));
     add(properties, "InformationEnclosure", informationEnclosure(value));
 
     if (internal) {
         add(properties, "Representation", text("DecimalApproximation"));
-        add(properties, "ApproximationOrigin", text(
-            value.origin() == ApproximationOrigin::ExactValue
-                ? "ExactValue"
-                : "CertifiedInterval"));
-        add(properties, "CertifiedEnclosureIsPoint", Expr{value.certifiedEnclosureIsPoint()});
+        add(properties, "ApproximationOrigin", text(approximationOriginName(value.origin())));
+        add(properties, "RigorousEnclosureAvailable", Expr{value.hasRigorousEnclosure()});
+        add(properties, "CertifiedEnclosureIsPoint", Expr{
+            value.hasRigorousEnclosure() && value.certifiedEnclosureIsPoint()});
         add(properties, "InformationEnclosureIsPoint", Expr{value.informationEnclosureIsPoint()});
         add(properties, "CertifiedExactlyZero", Expr{value.certifiedExactlyZero()});
         add(properties, "InformationExactlyZero", Expr{value.informationExactlyZero()});
@@ -495,8 +508,12 @@ void explainComplexDecimal(
     const ComplexDecimalApproximation& value,
     std::vector<Expr>& properties,
     bool internal) {
+    const bool rigorous = value.real().hasRigorousEnclosure()
+        && value.imaginary().hasRigorousEnclosure();
     add(properties, "Domain", text("Complex"));
-    add(properties, "Exactness", text("CertifiedApproximation"));
+    add(properties, "Exactness", text(rigorous
+        ? "CertifiedApproximation"
+        : "VerifiedApproximation"));
     const std::size_t requestedPrecision = std::min(
         value.real().requestedSignificantDigits(),
         value.imaginary().requestedSignificantDigits());
@@ -508,11 +525,17 @@ void explainComplexDecimal(
             value.imaginary().requestedFractionalDigits())));
     add(properties, "PrecisionDigits", integer(numeric::precisionDigits(value)));
     add(properties, "AccuracyDigits", integer(numeric::accuracyDigits(value)));
-    add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    if (rigorous)
+        add(properties, "CertifiedEnclosure", certifiedEnclosure(value));
+    else
+        add(properties, "CertifiedEnclosure", text("Unavailable"));
     add(properties, "InformationEnclosure", informationEnclosure(value));
 
     if (internal) {
         add(properties, "Representation", text("ComplexDecimalApproximation"));
+        add(properties, "RealApproximationOrigin", text(approximationOriginName(value.real().origin())));
+        add(properties, "ImaginaryApproximationOrigin", text(approximationOriginName(value.imaginary().origin())));
+        add(properties, "RigorousEnclosureAvailable", Expr{rigorous});
         add(properties, "RealCertifiedExactlyZero", Expr{value.realCertifiedExactlyZero()});
         add(properties, "ImaginaryCertifiedExactlyZero", Expr{value.imaginaryCertifiedExactlyZero()});
         add(properties, "RealInformationExactlyZero", Expr{value.realInformationExactlyZero()});

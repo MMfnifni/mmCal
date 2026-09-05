@@ -6,6 +6,8 @@
 #include "evaluation/environment.hpp"
 #include "evaluation/evaluator.hpp"
 #include "formatting/expr_formatter.hpp"
+#include "numeric/complex_decimal_approximation.hpp"
+#include "numeric/decimal_approximation.hpp"
 #include "syntax/lexer.hpp"
 #include "syntax/lowerer.hpp"
 #include "syntax/parser.hpp"
@@ -68,7 +70,7 @@ private:
     using numeric::Number;
 
     const auto atom = [&]() -> Expr {
-        switch (random.choose(7)) {
+        switch (random.choose(9)) {
         case 0: return Expr{Number{BigInt{static_cast<std::int64_t>(random.choose(19)) - 9}}};
         case 1: return Expr{numeric::Rational{
             BigInt{static_cast<std::int64_t>(random.choose(17)) - 8},
@@ -77,7 +79,27 @@ private:
         case 3: return Expr{symbols.intern("y")};
         case 4: return Expr{symbols.intern("e")};
         case 5: return Expr{symbols.intern("Pi")};
-        default: return Expr{symbols.intern("E")};
+        case 6: return Expr{symbols.intern("E")};
+        case 7: {
+            const numeric::Rational value{
+                BigInt{static_cast<std::int64_t>(random.choose(17)) - 8},
+                BigInt{static_cast<std::int64_t>(random.choose(8)) + 1}};
+            return Expr{numeric::DecimalApproximation::fromRealSignificant(
+                numeric::RealNumber{value}, 5)};
+        }
+        default: {
+            const auto component = [&]() {
+                return numeric::DecimalApproximation::fromRealSignificant(
+                    numeric::RealNumber{numeric::Rational{
+                        BigInt{static_cast<std::int64_t>(random.choose(17)) - 8},
+                        BigInt{static_cast<std::int64_t>(random.choose(8)) + 1}}},
+                    5);
+            };
+            auto real = component();
+            auto imaginary = component();
+            return Expr{numeric::ComplexDecimalApproximation::fromComponents(
+                std::move(real), std::move(imaginary), false, false)};
+        }
         }
     };
 

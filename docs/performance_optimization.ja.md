@@ -1684,7 +1684,7 @@ mod 3 : factor degrees 1 + 15  -> proper factor候補 {1}
 
 `D[expr,{x,n}]`を一階微分の反復だけで処理すると，`LambertW`，`polylog`，`exp[q(x)]`で`cases`・積商則・共通指数因子が毎回再展開され，数学的には単純な高階導函数でも式木が急増する。2026-08-29から，direct variableかつ`n<=64`では函数族ごとのexact recurrenceを先に試す。Lambert WはDLMF 4.13.4_1--4.13.4_2の多項式`p_n(W)`，polylogは`theta=xD`とsigned Stirling number，二次`q`の`exp[q]`は`P_(n+1)=P'_n+q'P_n`を使う。
 
-この経路は近似fast pathではなくexact Expr構成である。64を超えた場合や形が一致しない場合は従来の一般`D`へ代替経路し，公開order上限4096と微分意味論は変更しない。今回の作業では長時間benchmarkを行わず，代表式のcompact outputとtargeted compile/smoke testだけを確認した。
+この経路は近似fast pathではなくexact Expr構成である。64を超えた場合や形が一致しない場合は従来の一般`D`へ代替経路する。その後，旧公開order 4096境界は撤廃され，一般`D`の反復workは共通`EvaluationStep` budgetで制御し，exact 0到達時は早期終了する仕様へ移行した。今回の作業では長時間benchmarkを行わず，代表式のcompact outputとtargeted compile/smoke testだけを確認した。
 
 # 36. 有理函数積分のHermite reductionとalgebraic-log 代替経路
 

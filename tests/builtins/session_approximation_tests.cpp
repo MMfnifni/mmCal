@@ -187,8 +187,38 @@ void runSessionApproximationTests(TestRunner& tests) {
         std::string{"1.6180339887498948482"},
         "N certifies Phi from its exact algebraic definition");
     tests.expectEqual(eval(approximation, "N[x+Pi,20]"),
-        std::string{"3.1415926535897932385+x"},
+        std::string{"x+3.1415926535897932385"},
         "N structurally approximates numerically closed subexpressions while preserving free symbols");
+    tests.expectEqual(eval(approximation, "N[x^2+2x+1,5]"),
+        std::string{"x^2+2x+1"},
+        "partial N preserves exact integer atoms used by symbolic structure");
+    tests.expectEqual(eval(approximation, "N[perm[x,2],5]"),
+        std::string{"perm[x, 2]"},
+        "partial N preserves discrete integer parameters");
+    tests.expectEqual(eval(approximation, "N[comb[x,2],5]"),
+        std::string{"comb[x, 2]"},
+        "partial N preserves combinatorial integer parameters");
+    tests.expectEqual(eval(approximation, "N[lambertw[2,x],5]"),
+        std::string{"lambertw[2, x]"},
+        "partial N preserves Lambert W branch indices");
+    tests.expectEqual(eval(approximation, "N[polylog[2,x],5]"),
+        std::string{"polylog[2, x]"},
+        "partial N preserves exact integer special-function parameters");
+    tests.expectEqual(eval(approximation,
+        "N[1/3,5]x^2+N[1/2,5]x+N[2/3,5]"),
+        std::string{"0.33333x^2+0.50x+0.66667"},
+        "formatter orders approximate-coefficient polynomials by descending degree");
+    {
+        kernel::KernelSession delayed;
+        tests.expectEqual(eval(delayed, "a:=N[perm[x,2],5]"),
+            std::string{"perm[x, 2]"},
+            "partial N stores a valid exact discrete parameter");
+        tests.expectEqual(eval(delayed, "x:=5"), std::string{"5"},
+            "partial N delayed-evaluation setup binds the free variable");
+        tests.expectEqual(eval(delayed, "a"), std::string{"20"},
+            "partial N output remains evaluable after the free variable is bound");
+    }
+
     tests.expectEqual(eval(approximation, "N[sin[x]+Pi,20]"),
         std::string{"3.1415926535897932385+sin[x]"},
         "N leaves symbolic function calls intact while approximating independent numeric parts");

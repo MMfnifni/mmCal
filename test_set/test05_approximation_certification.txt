@@ -38,7 +38,7 @@ rationalize[N[1/3,20],0]==>33333333333333333333/100000000000000000000
 rationalize[0.1]==>1/10
 
 # N is recursive over arrays and exact finite decimals are not zero-padded.
-N[{1/3,1/2,2},5]==>{0.33333,0.50,2.0}
+N[{1/3,1/2,2},5]==>{0.33333,0.50,2}
 N[{sqrt[2],Pi},10]==>{1.414213562,3.141592654}
 
 # N propagates precision into FFT; approximate operands select the same certified backend.
@@ -214,9 +214,9 @@ N[hypergeometric2F1[1/2,1/3,1/10^20,1/2+I/4],20]==>10157290331004504305.0+131374
 # ============================================================================
 # @session
 # Approximation leaves remain visibly approximate even for terminating values.
-N[0,5]==>0.0
-N[2,20]==>2.0
-N[N[0,5],20]==>0.0
+N[0,5]==>0
+N[2,20]==>2
+N[N[0,5],20]==>0
 
 # Whole-complex certification must not accept independently zero-rounded components.
 N[Ci[120+I],20]=>0.0074445393237725791671+0.0079585143427773070995I

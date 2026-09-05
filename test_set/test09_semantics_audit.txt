@@ -25,8 +25,22 @@ element[root[{-2,0,1},2],Rational] ==> False
 solve[x==1/2,x,Integer] ==> {}
 solve[x==Pi,x,Integer] ==> {}
 solve[x==Phi,x,Rational] ==> {}
-N[x+Pi,20] ==> 3.1415926535897932385+x
+N[x+Pi,20] ==> x+3.1415926535897932385
 N[sin[x]+Pi,20] ==> 3.1415926535897932385+sin[x]
+# Partial N preserves exact integers that can be structural/discrete parameters.
+N[x^2+2x+1,5] ==> x^2+2x+1
+N[perm[x,2],5] ==> perm[x, 2]
+N[comb[x,2],5] ==> comb[x, 2]
+N[lambertw[2,x],5] ==> lambertw[2, x]
+N[polylog[2,x],5] ==> polylog[2, x]
+# Approximate numeric coefficients still participate in canonical polynomial ordering.
+N[1/3,5]x^2+N[1/2,5]x+N[2/3,5] ==> 0.33333x^2+0.50x+0.66667
+x-N[-2,5] ==> x+2.0
+x*N[-2+3I,5] ==> (-2.0+3.0I)x
+x/N[-2,5] ==> -x/2.0
+x/N[-2+3I,5] ==> -x/(2.0-3.0I)
+N[-2,5]^x ==> (-2.0)^x
+x^N[-2+3I,5] ==> x^(-2.0+3.0I)
 N[True,20] ==> True
 N[Infinity,20] ==> Infinity
 N[lambertw[-1,-1/2],30] ==> lambertw[-1, -1/2]
@@ -259,6 +273,8 @@ toNormal[solve[x^2==1,x]]==>{x == 1, x == -1}
 # v1.5.5 cross-feature bug-hunt regressions
 limit[D[abs[x],x],x,0,1]==>1
 limit[D[abs[x],x],x,0,-1]==>-1
+limit[D[x,{x,4097}],x,0]==>0
+limit[D[x,{x,1000000}],x,0]==>0
 solve[log[x]==log[x],x]==>All if x != 0
 solve[zeta[x]==zeta[x],x]==>All if x != 1
 solve[{sqrt[x]==2,x<10},x,Real]==>{x == 4}
@@ -356,3 +372,21 @@ grad[limit[x*y,x,y],{y}]==>{2y}
 limit[integrate[x*y,x],y,0]==>0
 limit[1+integrate[x*y,x],y,0]==>1
 limit[limit[x*y,x,y],y,0]==>0
+# symbolic triangular linear systems are not limited to four variables
+solve[{a*x==1,b*y==2,c*z==3,d*w==4,e*v==5},{x,y,z,w,v}]==>cases[{{x == 1/a, y == 2/b, z == 3/c, w == 4/d, v == 5/e}} if a b c d e != 0; Unresolved if a b c d e == 0]
+solve[{a*x+y==1,b*y+z==2,c*z+w==3,d*w+v==4,e*v==5},{x,y,z,w,v}]==>cases[{{x == (1-(2-(3-(4-5/e)/d)/c)/b)/a, y == (2-(3-(4-5/e)/d)/c)/b, z == (3-(4-5/e)/d)/c, w == (4-5/e)/d, v == 5/e}} if a b c d e != 0; Unresolved if a b c d e == 0]
+# binomial solve uses the request branch budget instead of a degree-256 hard cap
+at[solve[x^257-1==0,x],0,x]==>1
+# O(1) monomial-log primitive is not capped at degree 256
+integrate[x^1000*log[x],x]==>x^1001log[x]/1001-x^1001/1002001
+# trigonometric reduction formulas use the request integration budget beyond order 256
+fullSimplify[D[integrate[tan[x]^257,x],x]-tan[x]^257,cos[x]!=0]==>0
+fullSimplify[D[integrate[sin[x]^-257,x],x]-sin[x]^-257,sin[x]!=0]==>0
+# D uses request-scoped work budget instead of a fixed order-4096 cap
+D[x,{x,1000000}]==>0
+# high positive sin/cos powers use reduction formulas beyond the old Fourier degree cap
+fullSimplify[D[integrate[sin[x]^257,x],x]-sin[x]^257]==>0
+fullSimplify[D[integrate[cos[x]^258,x],x]-cos[x]^258]==>0
+# v1.5.5 simplify: quotient Power distribution is constant-work in the exponent.
+simplify[((x+1)/(x-1))^65]==>(x+1)^65/(x-1)^65
+

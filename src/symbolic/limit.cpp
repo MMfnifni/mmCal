@@ -6,6 +6,7 @@
 #include "builtins/polynomial_ideal.hpp"
 #include "mathematics/assumption_parser.hpp"
 #include "mathematics/definedness.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "expression/array_utils.hpp"
 #include "expression/exact_value.hpp"
@@ -128,7 +129,7 @@ constexpr std::size_t maximumLHopitalSteps = 12;
                 return std::nullopt;
             const auto parsed = numeric::tryToUint64(
                 spec.element(1).asNumber().asReal().asInteger());
-            if (!parsed || *parsed > 4096)
+            if (!parsed)
                 return std::nullopt;
             variable = spec.element(0).asSymbol();
             order = *parsed;
@@ -144,10 +145,16 @@ constexpr std::size_t maximumLHopitalSteps = 12;
                 continue;
             }
         }
-        for (std::uint64_t derivative = 0; derivative < order; ++derivative)
+        for (std::uint64_t derivative = 0; derivative < order; ++derivative) {
+            // D本体と同様，固定orderではなくrequest-scoped budgetで実作業量を制御する。
+            // exact 0へ到達した後は残りの高階微分を反復する必要がない。
+            evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::EvaluationStep);
             result = differentiateExpression(result, variable, builtins, mathematics, angles);
-        if (order > 1)
-            result = canonicalizeDerivativeOutput(result, builtins, mathematics, angles);
+            if (order > 1)
+                result = canonicalizeDerivativeOutput(result, builtins, mathematics, angles);
+            if (result.isNumber() && result.asNumber().isZero())
+                break;
+        }
     }
     return result;
 }

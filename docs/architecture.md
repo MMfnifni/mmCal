@@ -1,6 +1,6 @@
 # mmCal 内部構造
 
-> 対象バージョン: **v1.5.3**
+> 対象バージョン: **v1.5.5**
 
 ## 方針
 
@@ -62,7 +62,7 @@ v1.5.2では`N`の要求精度を子builtinへ伝播できるprecision-aware経�
 
 v1.5.3ではexact非2冪FFT用に`CyclotomicFieldContext`を追加した。これは一般`NumberFieldContext`と異なりembedding/root isolationを持たず，cyclotomic quotient `Q[t]/Phi_n(t)`，power-basis reduction，`t^k`座標だけを保持する軽量なexact kernelである。FFT内部ではRational座標だけを加減乗算し，出力境界で一つの既存`cis[-2 Pi/n Rad]` generatorへ戻す。Gaussian Rationalは`4|conductor`となるよう必要時`lcm(n,4)`へ拡張する。degree budget超過やsymbolic membership未証明では従来generic Expr/DFTへfallbackするため，このbackendはexact-first意味論を狭めない。
 
-v1.5.3の`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,p]`の`p`は有効10進桁数であり，非zero表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，丸め半量子`0.5*10^(e-p+1)`をInformationEnclosureへ含める。backend内部のguard桁は後からAccuracyとして回収しない。通常四則演算とcertified対応scalar函数では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。ordered comparisonや`min/max`の離散判定はInformationEnclosureだけで証明できる場合に限る。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。`:fix`はこれとは独立した固定小数表示である。
+v1.5.3の`DecimalApproximation` / `ComplexDecimalApproximation`は，真値保証用の**CertifiedEnclosure**と，後続計算で利用してよい情報量を表す**InformationEnclosure**を別々のexact Rational boundsとして保持し，常に`CertifiedEnclosure ⊆ InformationEnclosure`を保つ。`N[x,p]`の`p`は有効10進桁数であり，非zero表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，丸め半量子`0.5*10^(e-p+1)`をInformationEnclosureへ含める。backend内部のguard桁は後からAccuracyとして回収しない。通常四則演算とcertified対応scalar函数では両enclosureを独立にinterval伝播し，exact `Number`は双方へ同じpoint intervalとして混在させる。ordered comparisonや`min/max`の離散判定はInformationEnclosureだけで証明できる場合に限る。出力値の正当性はCertifiedEnclosure，`accuracy` / `precision` / default `rationalize`と外側`N`の情報量制限はInformationEnclosureを基準にする。結果自身へ伝播済みInformationEnclosureを保存するため，複数演算を跨いでも単なる要求桁数へ情報を圧縮し直さない。`:fix`はこれとは独立した固定小数表示である。 v1.5.5では近似値由来を`ExactValue` / `CertifiedInterval` / `VerifiedApproximation`へ分離した。SVD / eigen等で残差・直交性・Schur関係を要求桁まで検証したcomponentはVerifiedとして通常の有限precision四則には利用できるが，rigorousなpoint enclosureや比較証明へは昇格させない。外側`N[...,q]`で再量子化してもVerifiedを維持する。
 
 ### `linear_algebra`
 

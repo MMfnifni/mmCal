@@ -3,7 +3,7 @@
 This document is the detailed specification of **mmCal as implemented**.
 For a user-oriented introduction, see the root-level `README.md`.
 
-> Target: **v1.5.4 development tree**
+> Target: **v1.5.5**
 
 This document changes with each version; retrieve older versions from the Git history when needed.
 
@@ -124,7 +124,7 @@ Here, the `1` in `sin[1]` means **1 radian**. The default angle unit is radians.
 
 For `N[expr,p]`, mmCal confirms that both endpoints of an interval containing the true value round to the same `p`-significant-digit decimal result before returning a `DecimalApproximation`. Near zero, where relative Precision may be unavailable, a zero-centered approximation can still be returned when its InformationEnclosure proves useful absolute Accuracy.
 
-A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance (exact input / certified interval), the displayed decimal value as an exact Rational, and two exact Rational intervals: a **CertifiedEnclosure** and an **InformationEnclosure**. The CertifiedEnclosure proves containment of the true value. The InformationEnclosure limits how much information later computations may legitimately reuse, with the invariant `CertifiedEnclosure ⊆ InformationEnclosure`. `ComplexDecimalApproximation` keeps the same metadata independently for its real and imaginary components. `precision`, `accuracy`, and `rationalize` use the InformationEnclosure directly rather than reparsing the display string and guessing its quality.
+A `DecimalApproximation` is not merely a display string. It retains the requested digit count, provenance, and the displayed decimal value as an exact Rational. Provenance distinguishes **ExactValue**, **CertifiedInterval**, and **VerifiedApproximation**. ExactValue and CertifiedInterval values carry a rigorous **CertifiedEnclosure** containing the true value plus an **InformationEnclosure** limiting how much information later computations may reuse, with `CertifiedEnclosure ⊆ InformationEnclosure`. VerifiedApproximation is used for numerical algorithm candidates whose residual or structural relation has been checked to the requested digits but for which mmCal does not claim a componentwise rigorous enclosure of a unique mathematical value; its CertifiedEnclosure is therefore unavailable for proof. `ComplexDecimalApproximation` tracks provenance independently for its components. `precision`, `accuracy`, and `rationalize` use stored information metadata rather than reparsing the display string.
 
 ```text
 N[sqrt[2],30]
@@ -417,11 +417,11 @@ N[expr,p]
 
 `N` is also the entry point for precision-aware evaluation. It resolves the requested precision before evaluating its first argument and keeps that precision context active while the child expression is evaluated. Ordinary builtins still follow exact-first evaluation; only explicitly supported builtins such as FFT consume the context and evaluate directly in a certified approximate domain.
 
-If whole-expression certification is unavailable, ordinary evaluated Calls / Arrays / Lists may still be traversed structurally: only numerically closed subexpressions are approximated, while free symbols and unresolved symbolic function parts remain exact. Calls with `HoldAll` / `HoldFirst`-style semantics are not blindly rebuilt, preserving their evaluation contract.
+If whole-expression certification is unavailable, ordinary evaluated Calls / Arrays / Lists may still be traversed structurally: only numerically closed subexpressions are approximated, while free symbols and unresolved symbolic function parts remain exact. During partial traversal of a symbolic Call, exact integer atoms that may serve as exponents, branch indices, counts, or other structural parameters are not converted to forms such as `2.0`. Direct numeric requests such as `N[2,p]` still create a finite-precision approximation value internally. When such a value came from exact input, is rigorously a singleton, and its displayed value is the same exact integer, top-level value formatting may omit the redundant decimal marker: `N[2,20] -> 2`, `N[{2,1/2},10] -> {2,0.50}`, and `N[2+3I,10] -> 2+3I`. Inside unevaluated syntax the finite-precision marker is retained, e.g. `x+N[2,20] -> x+2.0`. Calls with `HoldAll` / `HoldFirst`-style semantics are not blindly rebuilt, preserving their evaluation contract.
 
 ```text
 N[x+Pi,20]
--> 3.1415926535897932385+x
+-> x+3.1415926535897932385
 
 N[sin[x]+Pi,20]
 -> 3.1415926535897932385+sin[x]
@@ -450,20 +450,22 @@ accuracy[N[Pi/10^20,20]]
 -> 39
 ```
 
-When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. For a certified-interval result produced at a requested significant precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. The requested digit count, CertifiedEnclosure, and InformationEnclosure remain intact in metadata, so the number of visible zeros is not itself the precision guarantee.
+When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. If an ExactValue approximation is rigorously the same exact integer as its displayed value, top-level value formatting omits the decimal point entirely (`N[2,20] -> 2`). This does not convert the internal approximation back into an exact `Number`; embedded expression syntax retains the finite-precision marker. For a noninteger certified-interval result produced at a requested significant precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` that is not eligible for exact-source integer presentation is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. Requested digits and information metadata remain intact, so visible zeros are not themselves a precision guarantee.
 
 ## 7.1 CertifiedEnclosure / InformationEnclosure
 
-`DecimalApproximation` and `ComplexDecimalApproximation` retain two different intervals for every approximate component.
+`DecimalApproximation` and `ComplexDecimalApproximation` distinguish rigorous enclosure metadata from residual-verified numerical candidates.
 
-- **CertifiedEnclosure** — an interval that the backend has proved contains the true value. Internal guard digits may make it much narrower than the precision declared to the user. Truth-containment checks and unique decimal-rounding checks use this interval.
-- **InformationEnclosure** — an interval describing how much information later computation is allowed to reuse from the approximation. For nonzero `N[x,p]`, if `e=floor(log10(|d|))` for displayed value `d`, it contains both the CertifiedEnclosure and at least `d ± 0.5*10^(e-p+1)`. The information contract therefore follows the value scale and prevents hidden guard digits from later reappearing as user-visible Accuracy. For zero-centered approximations, the InformationEnclosure directly expresses absolute Accuracy instead of relative Precision.
+- **CertifiedEnclosure** — available for ExactValue and CertifiedInterval origins. It is an interval that the backend has proved contains the true value. Internal guard digits may make it much narrower than the precision declared to the user. Truth-containment checks and unique decimal-rounding checks use this interval.
+- **InformationEnclosure** — records the information scale carried by the finite-precision value. For rigorous nonzero `N[x,p]`, if `e=floor(log10(|d|))` for displayed value `d`, it contains both the CertifiedEnclosure and at least `d ± 0.5*10^(e-p+1)`. For zero-centered rigorous approximations it directly expresses absolute Accuracy instead of relative Precision. VerifiedApproximation also retains finite-precision information metadata, but that metadata is not promoted into a truth enclosure.
 
-The invariant is always
+For rigorous origins the invariant is
 
 ```text
 CertifiedEnclosure ⊆ InformationEnclosure
 ```
+
+For VerifiedApproximation, `explain` reports `CertifiedEnclosure` as `Unavailable`. Ordinary finite-precision arithmetic is allowed and keeps the Verified provenance, while certified function evaluation and comparison proof do not consume a Verified point as if it were a rigorous singleton.
 
 `Infinity` is positive extended-real infinity. `ComplexInfinity` records infinite magnitude without a determined real or complex direction, while `Indeterminate` records that no unambiguous numerical value exists. These are protected atoms rather than finite algebraic symbols. The evaluator currently canonicalizes the following proof-safe exceptional forms:
 
@@ -1299,7 +1301,7 @@ The exact degeneration `polylog[1,x] -> -log[1-x]` gives
 D[polylog[2,x],x] -> cases[-log[1-x]/x if x != 0; 1 if x == 0]
 ```
 
-For direct-variable repeated derivatives `D[polylog[s,x],{x,n}]` with `n<=64`, mmCal uses the Euler operator `theta=x D` and signed Stirling numbers instead of building nested `D[cases[...]]`; at `x=0`, the exact series coefficient gives `n!/n^s`.
+For direct-variable repeated derivatives `D[polylog[s,x],{x,n}]`, mmCal uses the Euler operator `theta=x D` and signed Stirling numbers instead of building nested `D[cases[...]]`. The former fixed `n<=64` boundary is removed: Stirling-coefficient update work is precharged to the shared `EvaluationStep` budget. At `x=0`, the exact series coefficient gives `n!/n^s`, with factorial BigInt growth checked by the shared bit-length budget.
 
 The same shared knowledge closes
 
@@ -1597,6 +1599,8 @@ factor[x^2-1]
 -> (x-1)(x+1)
 ```
 
+Perfect-power reconstruction for univariate Rational polynomials has no fixed exponent-64 cutoff. A good-prime `gcd(p,p')` supplies a safe upper bound that cannot exclude the true exponent, and only those candidates are verified exactly. High-degree square-free polynomials skip perfect-power reconstruction through the same modular test.
+
 `fullSimplify` performs bounded candidate search. A shorter expression is not preferred if obtaining it changes the domain.
 
 ```text
@@ -1633,7 +1637,7 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 
 `Power` definedness distinguishes exact Rational exponents: a positive non-integer Rational exponent permits a zero base where the evaluator defines it, while a negative Rational exponent retains a nonzero-base requirement. `zeta[s]` is not treated as globally unknown for definedness; its sole pole is represented by the finite condition `s != 1`.
 
-## 22.1 `series` / `normal` / `toNormal` (v1.5.5 WIP)
+## 22.1 `series` / `normal` / `toNormal` (v1.5.5)
 
 ```text
 series[expr,{x,a,n}]
@@ -1643,6 +1647,8 @@ toNormal[expr]
 ```
 
 `series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists, arrays, and calls, and now also recurses into binding right-hand sides of finite and conditional `SolutionSet` objects while preserving set structure, branch conditions, free variables, multiplicity, and domain metadata. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`. The TPSA kernel composes exact constants, the expansion variable, sums, differences, products, division, integer powers, `exp` / `log` / `sin` / `cos` / `sinh` / `cosh`, `tan/cot/sec/csc`, `tanh/coth/sech/csch`, `expm1/log1p`, `sinc/cosc/tanc`, `sinhc/tanhc/expc`, `log2/log10`, and principal `sqrt` / exact rational powers, supporting Taylor series, Laurent series with a finite principal part, and Puiseux series on an exact rational exponent grid. `log2/log10` lower through the general `log[base,x] = log[x]/log[base]` form for both finite logarithmic Series and the `+Infinity` logarithmic layers. Different Puiseux denominators are re-embedded into an exact LCM grid. Analytic functions compose through coefficient recurrences rather than repeated higher differentiation. A symbolic leading coefficient is inverted only when nonzero status is proved, while principal `log` is expanded only at a proved positive-real or nonreal regular center. Direct trigonometric series honor the current angle mode and explicit `Rad` / `Deg` / `Grad`. At a branch point, non-integer rational powers are restricted to a positive leading coefficient with a simple zero/pole, or to an already branched Puiseux expression. Higher-multiplicity cases such as `sqrt[x^2]` and uncertified negative leading directions remain unevaluated rather than selecting a branch by guesswork.
+
+For analytic bases with valuation zero, integer powers use exponentiation by squaring directly on the truncated `SeriesData`, so there is no fixed exponent-4096 cutoff. Requests such as `series[(1+x)^-1000000,{x,0,2}]` therefore require only logarithmically many power steps when the requested order is small. Laurent/Puiseux powers with nonzero valuation retain a separate internal exponent-grid safety boundary.
 
 `Infinity` is also accepted as an expansion center. Here `Infinity` means real `+Infinity`, not a general point on the Riemann sphere; internally the expansion is mapped to `t->0+` with `t=1/x`. Therefore exponent `r` in `seriesData[x,Infinity,...]` denotes `(1/x)^r`, and logarithmic layers denote `log[1/x]^k`. For example, `series[1/(x+1),{x,Infinity,4}]` represents `x^-1-x^-2+x^-3-x^-4+O[x^-5]`. `normal` / `toNormal` emit ordinary powers of `x` rather than leaving intermediate forms such as `(1/x)^(-m)`. `D` incorporates `dt/dx=-t^2`, while `integrate` uses `dx=-t^-2 dt`; integrating an explicit `1/x` term therefore closes into the logarithmic layer as `-log[1/x]`. If the truncation remainder is exactly `O(1/x)`, integration is left unevaluated because the unknown remainder can generate a logarithm that the current `O(t^r)` metadata cannot describe. The initial scope includes rational functions, polynomial growth, `exp[1/x]`, Puiseux powers, and `log[1/x]`. Oscillatory `sin[x]`, essential growth `exp[x]`, and direct `log[x]` require dedicated asymptotic providers and remain unevaluated.
 
@@ -1864,7 +1870,7 @@ D[expr,{x,n}]
 D[expr,x,y,...]
 ```
 
-`{x,n}` means the non-negative integer `n`-th derivative. Multiple specifications are applied from left to right.
+`{x,n}` means the non-negative integer `n`-th derivative. Multiple specifications are applied from left to right. Higher derivatives no longer have a fixed order-4096 cap; actual work is bounded by the shared `EvaluationBudget`. Once the derivative becomes exact `0`, the remaining iterations terminate immediately, so an intrinsically cheap request such as `D[x,{x,1000000}] -> 0` is not rejected merely because of its order. The compact repeated-D fast paths for Lambert W, `polylog`, and quadratic-or-lower exponentials no longer have a fixed order-64 cap either. Their coefficient-recurrence work is precharged to `EvaluationStep`, generated BigInt/Rational coefficients are checked against the shared bit-length budget, and oversized requests therefore stop before allocating the recurrence vectors. Expressions outside the structural fast-path conditions still fall back to the general `D` loop.
 
 ```text
 D[sin[x],{x,4}]
@@ -1975,11 +1981,11 @@ Major exact rules currently implemented:
 
 - Constants, `x`, and arbitrary finite polynomials
 - Rational powers of affine bases; exponent `-1` is mapped to Log
-- Rational functions with Rational coefficients. Linear/quadratic factors use exact partial fractions, including repeated irreducible quadratics `(a x^2+b x+c)^k` through an exact completing-the-square recurrence. Denominators containing factors of degree three or higher use a Q[x] square-free decomposition plus Hermite reduction; the remaining square-free part is represented as a finite algebraic-log sum over certified complex `root[...,k,Complex]` values with exact residues `P(r)/Q'(r)`. Elementary reverse-chain rules run first so compact `atan/asin` forms are preferred when available. The specialized rational path currently uses a degree-12 work budget. Forms such as `x^m/(1+x^n)` may still fall through to a `hypergeometric2F1` primitive when appropriate
+- Rational functions with Rational coefficients. Linear/quadratic factors use exact partial fractions, including repeated irreducible quadratics `(a x^2+b x+c)^k` through an exact completing-the-square recurrence. Denominators containing factors of degree three or higher use a Q[x] square-free decomposition plus Hermite reduction; the remaining square-free part is represented as a finite algebraic-log sum over certified complex `root[...,k,Complex]` values with exact residues `P(r)/Q'(r)`. Elementary reverse-chain rules run first so compact `atan/asin` forms are preferred when available. For rational denominators above degree 12, mmCal no longer builds the dense partial-fraction linear system. Yun square-free decomposition produces pairwise-coprime `f_i^k` components, which are separated exactly by polynomial CRT. Linear/quadratic components use the existing recurrences, repeated higher-degree components use Hermite reduction through the modular inverse of `f_i'`, and the remaining square-free terms go directly to the residue formula. The former degree-12 value is therefore an algorithm-selection threshold for preserving the established compact partial-fraction output at lower degrees, not a user-visible solvability boundary. The higher-degree path is controlled by the existing polynomial-conversion, algebraic-degree, and shared integration budgets. Forms such as `x^m/(1+x^n)` may still fall through to a `hypergeometric2F1` primitive when appropriate
 - Quadratic inverse-square-root forms with provably positive Rational scale, plus `sqrt[q(x)]` primitives for exact Rational quadratics `q(x)`
-- Finite Fourier reduction for `sin^m/cos^n`; the integrator may explicitly expand positive integer total degree up to 256
-- `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) through the standard `csc/sec` reduction recurrences
-- Positive integer powers (`2<=n<=256`) of `tan/cot/sec/csc` through the standard reduction formulas
+- Finite Fourier reduction for `sin^m/cos^n`; mixed products and low-order pure powers may be expanded explicitly through positive integer total degree 256. Pure `sin[x]^n` / `cos[x]^n` above 256 switch to the standard reduction recurrence under the shared integration budget rather than a fixed degree cap
+- Negative integer powers of `sin[u]` / `cos[u]` through the standard `csc/sec` reduction recurrences, with no fixed 256-order cap; iteration work is controlled by the shared integration budget
+- Positive integer powers of `tan/cot/sec/csc` through the standard reduction formulas, with no fixed 256-order cap; iteration work is controlled by the shared integration budget
 - Linearity over sums, differences, negation, and factors independent of the integration variable
 - Safe standard primitives for `exp/sin/cos/tan/cot/sec/csc`
 - Safe standard primitives for `sinh/cosh/tanh/coth/sech/csch`
@@ -1988,7 +1994,7 @@ Major exact rules currently implemented:
 - `erf/erfc`
 - `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals; the defining `Pi*x^2/2` kernels are recognized directly
 - Gaussian family: for exact positive Rational `a`, `exp[-a x^2]` prefers the canonical `erf` primitive over generic 1F1, and improper endpoints close through the the exact `erf` endpoint limits at ±Infinity
-- `hypergeometric1F1`; outside the preferred Gaussian family, `exp[c x^n]` with positive integer `n>=2` reduces to an entire 1F1 primitive at the origin
+- `hypergeometric1F1`; outside the preferred Gaussian family, `exp[c x^n]` with any exact positive integer `n>=2` reduces to an entire 1F1 primitive at the origin. There is no fixed exponent-4096 cutoff because the closed-form expression size does not grow linearly with the exponent value
 - Exact inverse chain rule; `f'(x) f(x)^p` is also recognized structurally instead of depending on the accidental post-`D` expression shape
 - Finite integration by parts for polynomial × `exp/sin/cos/sinh/cosh`
 - Exact integration of `exp[a x+b] sin/cos[c x+d]` forms by solving a linear system
@@ -2234,6 +2240,8 @@ integrate[1/(1+x^4),{x,0,Infinity}]
 integrate[log[x]^2,{x,0,1}]
 -> 2
 
+More generally, when `a>-1` is proved, `x^a log[x]^m` is reduced exactly to `(-1)^m m!/(a+1)^(m+1)`. There is no fixed power-64 cutoff on `m`; actual factorial-construction work is charged to the shared integration budget.
+
 integrate[sin[x]/x,{x,0,Infinity}]
 -> Pi/2
 
@@ -2450,6 +2458,8 @@ Positive-dimensional systems are not assigned guessed algebraic-variety paramete
 Because `solve` is `HoldAll`, its input is not sent through the general Evaluator before classification. A dedicated **solve-safe normalization** layer canonicalizes builtin aliases and applies proof-safe Simplifier rewrites only. This avoids evaluation side effects while making equivalent spellings such as `E^x` / `exp[x]`, `ln` / `log`, and `log2` / `log10` share solver capabilities.
 
 Denominator zeros, Log definedness, rational-function holes/poles, and related constraints are retained as global conditions where possible.
+
+Power conversion for rational-function sign charts has no fixed `±64` exponent cutoff. Instead, the generated numerator and denominator polynomials are each bounded by degree 4096, so inputs such as `(x+1)^-65` are not rejected merely because of the exponent magnitude; requests whose generated degree exceeds the safety boundary remain unresolved.
 
 When current Predicate representation cannot completely express a condition, such as the pole set of Gamma, the solver leaves the result unresolved rather than fabricating an incomplete condition.
 
@@ -2895,11 +2905,11 @@ at[qr,1] -> R
 
 Householder application also has a column-block kernel that processes multiple columns during one row-major scan. On the current no-BLAS BigFloat/interval backend, measurements at orders 8/16/24 did not show a consistent speedup, so automatic blocking is not enabled; the unblocked-equivalent path remains the default and the block kernel/benchmark are retained for later backend optimization.
 
-`svd[A]` returns reduced `{U,S,V}`. For m×n input, `k=min(m,n)`, `U:m×k`, `S:k×k`, and `V:n×k`. Real input satisfies `A = U S Transpose[V]`; complex input satisfies `A = U S conjugateTranspose[V]`. The general numerical backend deliberately does not form `A^H A`: it uses Householder bidiagonalization followed by one-sided Jacobi column orthogonalization. Candidate factors are returned only after interval checks validate reconstruction residual and `U^H U` / `V^H V` orthogonality more strictly than the requested output digits; otherwise guard digits are increased and the calculation is retried. Exact SVD is restricted to natural closed cases such as exact real diagonal matrices. Singular vectors are not unique inside repeated-singular-value subspaces, so the certificate concerns reconstruction and orthogonality rather than a unique componentwise vector.
+`svd[A]` returns reduced `{U,S,V}`. For m×n input, `k=min(m,n)`, `U:m×k`, `S:k×k`, and `V:n×k`. Real input satisfies `A = U S Transpose[V]`; complex input satisfies `A = U S conjugateTranspose[V]`. The general numerical backend deliberately does not form `A^H A`: it uses Householder bidiagonalization followed by one-sided Jacobi column orthogonalization. Candidate factors are returned only after interval checks validate reconstruction residual and `U^H U` / `V^H V` orthogonality more strictly than the requested output digits; otherwise guard digits are increased and the calculation is retried. These numerical components are tagged `VerifiedApproximation`: the verified statement concerns reconstruction and orthogonality, not a rigorous singleton enclosure for each component. Exact SVD is restricted to natural closed cases such as exact real diagonal matrices. Singular vectors are not unique inside repeated-singular-value subspaces.
 
-`conditionNumber[A]` returns the spectral 2-norm condition number `sigma_max/sigma_min`. Proven exact rank deficiency returns `Infinity`; a nonzero rectangular matrix with only one singular value returns `1`, and exact real diagonal matrices return an exact ratio. A general exact nondiagonal matrix is not forced into a large singular-value expression; use `N[...]` to dispatch it to certified SVD. The condition number of an empty matrix is a DomainError.
+`conditionNumber[A]` returns the spectral 2-norm condition number `sigma_max/sigma_min`. Proven exact rank deficiency returns `Infinity`; a nonzero rectangular matrix with only one singular value returns `1`, and exact real diagonal matrices return an exact ratio. A general exact nondiagonal matrix is not forced into a large singular-value expression; use `N[...]` to dispatch it to the residual-verified numerical SVD backend. The condition number of an empty matrix is a DomainError.
 
-`pseudoInverse[A]` returns the Moore-Penrose pseudoinverse. Exact numeric matrices use rank factorization `A=FG` and evaluate `A^+=G^H(GG^H)^-1(F^H F)^-1F^H` with exact arithmetic, so rank-deficient Rational and complex matrices remain exact. Zero-by-n and n-by-zero inputs return an empty matrix with transposed shape. For `N[pseudoInverse[A],p]` with exact `A`, the requested-precision path uses certified SVD. A matrix that already contains finite-precision elements is currently kept unevaluated because the SVD backend does not yet certify the full input perturbation through singular subspaces; hidden CertifiedEnclosure points are not used to reconstruct rank or singular values.
+`pseudoInverse[A]` returns the Moore-Penrose pseudoinverse. Exact numeric matrices use rank factorization `A=FG` and evaluate `A^+=G^H(GG^H)^-1(F^H F)^-1F^H` with exact arithmetic, so rank-deficient Rational and complex matrices remain exact. Zero-by-n and n-by-zero inputs return an empty matrix with transposed shape. For `N[pseudoInverse[A],p]` with exact `A`, the requested-precision path uses the residual-verified numerical SVD backend. A matrix that already contains finite-precision elements is currently kept unevaluated because the SVD backend does not yet certify the full input perturbation through singular subspaces; hidden CertifiedEnclosure points are not used to reconstruct rank or singular values.
 
 `leastSquares[A,b]` returns the minimum-norm least-squares solution `A^+ b`. The length of `b` must equal the row count of `A`. Exact numeric inputs remain exact, including rank-deficient cases. The outer-`N` path for an exact matrix may use certified SVD, while a matrix that already contains finite-precision elements follows the same conservative rule as `pseudoInverse` and remains unevaluated.
 
@@ -3208,7 +3218,7 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 # 30. Current source-callable function list
 
-The current development tree contains **278 registered builtin/alias names / 258 source-callable names**. Internal heads are not included in the source-callable count.
+v1.5.5 contains **278 registered builtin/alias names / 258 source-callable names**. Internal heads are not included in the source-callable count.
 
 ```text
 Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,

@@ -57,6 +57,8 @@ struct ComplexBounds final {
     }
     if (value.isDecimalApproximation()) {
         const auto& approximate = value.asDecimalApproximation();
+        if (!approximate.hasRigorousEnclosure())
+            return std::nullopt;
         return RealBounds{approximate.informationLower(), approximate.informationUpper()};
     }
     return std::nullopt;
@@ -76,12 +78,17 @@ struct ComplexBounds final {
     }
     if (value.isDecimalApproximation()) {
         const auto& approximate = value.asDecimalApproximation();
+        if (!approximate.hasRigorousEnclosure())
+            return std::nullopt;
         return ComplexBounds{
             RealBounds{approximate.informationLower(), approximate.informationUpper()},
             RealBounds{numeric::Rational{}, numeric::Rational{}}};
     }
     if (value.isComplexDecimalApproximation()) {
         const auto& approximate = value.asComplexDecimalApproximation();
+        if (!approximate.real().hasRigorousEnclosure()
+            || !approximate.imaginary().hasRigorousEnclosure())
+            return std::nullopt;
         return ComplexBounds{
             RealBounds{approximate.realInformationLower(), approximate.realInformationUpper()},
             RealBounds{approximate.imaginaryInformationLower(), approximate.imaginaryInformationUpper()}};

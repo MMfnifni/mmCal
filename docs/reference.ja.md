@@ -3,7 +3,7 @@
 この文書は **mmCalの実装そのもの** を基準にした詳細仕様書である。
 ユーザー向けの導入はルートの`README.ja.md`を参照する。
 
-> 対象: **v1.5.4 開発版**
+> 対象: **v1.5.5**
 
 この文書はバージョンごとに常に変動するため，過去バージョンはgitより引っ張り出してください。
 
@@ -122,7 +122,7 @@ gamma[1/3]
 
 `N[expr,p]`では，真値を含む区間の両端が同じ`p`有効桁の10進丸めへ入ることを確認してから`DecimalApproximation`を返す。0近傍で相対Precisionを定義できない場合でも，InformationEnclosureから絶対Accuracyを保証できるならzero-centered approximationを返せる。
 
-現在の`DecimalApproximation`は表示文字列だけではなく，要求桁数，由来（exact入力 / certified interval），表示10進値そのもののexact Rationalに加えて，**CertifiedEnclosure**と**InformationEnclosure**の2種類のexact Rational区間を保持する。CertifiedEnclosureは真値包含を証明する区間，InformationEnclosureはその近似値から後続計算で利用してよい情報量を表す区間であり，常に`CertifiedEnclosure ⊆ InformationEnclosure`を満たす。`ComplexDecimalApproximation`も実部・虚部ごとに同じmetadataを保持する。`precision/accuracy/rationalize`はInformationEnclosureを直接使い，表示文字列を再parseして精度を推測しない。
+現在の`DecimalApproximation`は表示文字列だけではなく，要求桁数，由来，表示10進値そのもののexact Rationalを保持する。由来は**ExactValue** / **CertifiedInterval** / **VerifiedApproximation**を区別する。ExactValueとCertifiedIntervalは真値を含むrigorousな**CertifiedEnclosure**と，後続計算で再利用してよい情報量を表す**InformationEnclosure**を持ち，`CertifiedEnclosure ⊆ InformationEnclosure`を満たす。VerifiedApproximationは，残差や構造関係を要求桁まで検証した数値算法の候補点であり，componentごとの唯一の真値を囲うrigorous enclosureとは主張しないため，証明用CertifiedEnclosureは利用不可とする。`ComplexDecimalApproximation`もcomponentごとに由来を保持する。`precision/accuracy/rationalize`は保存metadataを利用し，表示文字列を再parseして精度を推測しない。
 
 ```text
 N[sqrt[2],30]
@@ -423,11 +423,11 @@ Arrayへ再帰的に適用できるほか，`arg`などが返す明示角度単�
 
 `N`はprecision-aware evaluationの入口でもある。第2引数の要求精度を先に確定し，第1引数の評価中はそのprecision contextを保持する。通常builtinは従来どおりexact評価され，FFTなど明示的に対応したbuiltinだけが要求精度を受け取って直接certified 計算基盤へ降りる。したがってexact-firstの意味論を全体へ暗黙に変更しない。
 
-whole-expressionをcertified数値として閉じられない場合でも，通常評価されるCall / Array / Listでは**数値閉包な部分だけ**を再帰的に近似する。自由symbolや未評価symbolic函数はexactのまま残す。`HoldAll` / `HoldFirst`等の評価属性を持つCallを勝手に再構築して保持規則を破らない。
+whole-expressionをcertified数値として閉じられない場合でも，通常評価されるCall / Array / Listでは**数値閉包な部分だけ**を再帰的に近似する。自由symbolや未評価symbolic函数はexactのまま残す。symbolic Callを部分走査するときは，指数・branch番号・個数等の構造parameterになり得るexact integer atomを`2.0`等へ変換しない。`N[2,p]`のように値そのものを数値化する場合，内部では従来どおりfinite-precision approximationを作る。ただしexact入力由来で，rigorous singletonかつ表示値も同じexact integerなら，top-levelの値表示では不要な小数点を省略する。例えば`N[2,20] -> 2`，`N[{2,1/2},10] -> {2,0.50}`，`N[2+3I,10] -> 2+3I`である。未評価式内部ではfinite precisionであることを示すため`x+N[2,20] -> x+2.0`のように小数表記を維持する。`HoldAll` / `HoldFirst`等の評価属性を持つCallを勝手に再構築して保持規則を破らない。
 
 ```text
 N[x+Pi,20]
--> 3.1415926535897932385+x
+-> x+3.1415926535897932385
 
 N[sin[x]+Pi,20]
 -> 3.1415926535897932385+sin[x]
@@ -456,20 +456,22 @@ accuracy[N[Pi/10^20,20]]
 -> 39
 ```
 
-exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。certified interval由来の有効桁結果では，要求桁に対応する末尾0の連続だけを圧縮し，最後に1個の0を残す。したがって内部の12桁保証が `1.000000000000` を確定していても表示は `1.0`，`1.500000000000` なら `1.50` とする。要求桁数，CertifiedEnclosure，InformationEnclosureはmetadataに全て保持し，表示上の0の個数を精度保証そのものとして扱わない。
+exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。ExactValue由来の近似値がrigorousに同じexact integer pointである場合，top-level値表示では小数点自体を省略し，`N[2,20] -> 2`とする。これは内部値をexact `Number`へ戻す処理ではなく，式内部ではfinite-precision markerを保持する。非整数のcertified interval由来結果では，要求桁に対応する末尾0の連続だけを圧縮し，最後に1個の0を残す。要求桁数とinformation metadataは保持され，表示上の0の個数を精度保証そのものとして扱わない。
 
 ## 7.1 CertifiedEnclosure / InformationEnclosure
 
-`DecimalApproximation` / `ComplexDecimalApproximation`は，近似値ごとに2種類の区間を保持する。
+`DecimalApproximation` / `ComplexDecimalApproximation`は，rigorous enclosureを持つ近似と，残差検証済みの数値候補を区別する。
 
-- **CertifiedEnclosure** — 真値が必ず含まれることを計算基盤が証明した区間。内部guard桁により，ユーザーへ宣言した桁数より大幅に狭い場合がある。真値包含の検証と要求桁への一意丸め判定にはこちらを使う。
-- **InformationEnclosure** — その近似値から後続計算で利用してよい情報量を表す区間。非zeroの`N[x,p]`で表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，少なくとも`d ± 0.5*10^(e-p+1)`とCertifiedEnclosureの双方を包含する。したがって情報量は値のscaleに追従し，内部guard桁をユーザー可視のAccuracyとして後から回収しない。zero-centered approximationでは相対Precisionではなく，InformationEnclosureが直接absolute Accuracyを表す。
+- **CertifiedEnclosure** — ExactValue / CertifiedInterval由来で利用可能。真値が必ず含まれることを計算基盤が証明した区間である。内部guard桁により，ユーザーへ宣言した桁数より大幅に狭い場合がある。真値包含の検証と要求桁への一意丸め判定にはこちらを使う。
+- **InformationEnclosure** — finite-precision値が保持する情報量のscaleを表す。rigorousな非zero `N[x,p]`では，表示値`d`の10進指数を`e=floor(log10(|d|))`とすると，少なくとも`d ± 0.5*10^(e-p+1)`とCertifiedEnclosureの双方を包含する。zero-centered rigorous approximationではrelative Precisionではなくabsolute Accuracyを表す。VerifiedApproximationもfinite-precision information metadataを保持するが，それを真値包含証明へ昇格させない。
 
-常に次を不変条件とする。
+rigorous originでは次を不変条件とする。
 
 ```text
 CertifiedEnclosure ⊆ InformationEnclosure
 ```
+
+VerifiedApproximationでは`explain`の`CertifiedEnclosure`を`Unavailable`とする。通常のfinite-precision四則は許可しVerifiedのまま伝播するが，certified函数評価や比較証明にはVerified pointをrigorous singletonとして使用しない。
 
 `Infinity`は正の拡張実無限大，`ComplexInfinity`は実・複素方向を決められない無限大，`Indeterminate`は数値を一意に定義できないことを表す。いずれも有限代数symbolではなく保護atomである。現在は次の証明安全な不定形をcanonical化する。
 
@@ -1323,7 +1325,7 @@ D[polylog[s,x],x] -> cases[polylog[s-1, x]/x if x != 0; 1 if x == 0]
 D[polylog[2,x],x] -> cases[-log[1-x]/x if x != 0; 1 if x == 0]
 ```
 
-まで閉じる。direct variableの高階微分`D[polylog[s,x],{x,n}]`は`n<=64`で，Euler作用素`theta=x D`とsigned Stirling numberを使ってgenericなnested `D[cases[...]]`を作らず直接構成する。`x=0`では級数係数から`n!/n^s`をexactに保持する。
+まで閉じる。direct variableの高階微分`D[polylog[s,x],{x,n}]`は，Euler作用素`theta=x D`とsigned Stirling numberを使ってgenericなnested `D[cases[...]]`を作らず直接構成する。旧`n<=64`固定境界は撤廃し，Stirling係数更新量を共通`EvaluationStep` budgetへ事前課金する。`x=0`では級数係数から`n!/n^s`をexactに保持し，factorialを含むBigInt成長も共通bit-length budgetで制御する。
 
 積分器ではこの共有Knowledgeにより，
 
@@ -1622,6 +1624,8 @@ factor[x^2-1]
 -> (x-1)(x+1)
 ```
 
+一変数Rational多項式の完全冪復元では，完全冪指数に固定64次上限を設けない。good prime上の`gcd[p,p']`から真の指数を落とさない上界を求め，その候補だけをexactに検証する。高次数のsquare-free多項式はこの有限体判定でperfect-power探索を省略する。
+
 `fullSimplify`はbounded candidate search。短い式を選ぶために定義域を変えてよいわけではない。
 
 ```text
@@ -1658,7 +1662,7 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 
 `Power`のdefinednessはexact Rational指数まで区別する。正の非整数Rational指数ではbase=0を許す一方，負のRational指数はbase非零を要求する。`zeta[s]`は一般に「definedness不明」とせず，唯一の極 `s=1`を` s != 1 `として扱える。
 
-## 22.1 `series` / `normal` / `toNormal`（v1.5.5 WIP）
+## 22.1 `series` / `normal` / `toNormal`（v1.5.5）
 
 ```text
 series[expr,{x,a,n}]
@@ -1668,6 +1672,8 @@ toNormal[expr]
 ```
 
 `series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，finite/conditional `SolutionSet`のbinding右辺も再帰変換し，集合構造，branch条件，自由変数，multiplicity，domain metadataは保持する。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。TPSA基盤で定数，展開変数，和，差，積，除算，整数冪，`exp` / `log` / `sin` / `cos` / `sinh` / `cosh`，`tan/cot/sec/csc`，`tanh/coth/sech/csch`，`expm1/log1p`，`sinc/cosc/tanc`，`sinhc/tanhc/expc`，`log2/log10`，principal `sqrt` / exact有理冪を合成し，Taylor，有限principal partを持つLaurent，およびexact有理指数格子を持つPuiseux展開へ対応する。`log2/log10`は一般の`log[base,x] = log[x]/log[base]`として有限点および`+Infinity`のlog層へ接続する。analytic函数は高階`D`の反復ではなく係数漸化式で処理する。異なるPuiseux分母はLCM格子へexactに再配置する。記号的な先頭係数を逆数化する場合は非零性を証明できるときだけ展開し，principal `log`は展開中心が正の実数または非実数であることを証明できる場合に限る。direct trigは現在の角度modeと明示`Rad` / `Deg` / `Grad`を尊重する。分岐点上の非整数有理冪は，現在正の先頭係数を持つsimple zero/pole，または既にbranchを明示したPuiseux式に限定する。`sqrt[x^2]`のような高重複零点や負向きのprincipal branchを一意に証明できない形は推測せず未評価にする。
+
+valuation 0のanalytic baseに対する整数冪は，必要打切り次数の`SeriesData`上で二乗法を使うため，指数4096の固定境界を持たない。したがって`series[(1+x)^-1000000,{x,0,2}]`のように要求orderが小さい場合は大きなexact整数指数でも対数的な冪乗回数で処理する。非零valuationを持つLaurent/Puiseux冪は内部指数gridの安全境界を別途維持する。
 
 展開中心には`Infinity`も指定できる。ここで`Infinity`は複素無限遠一般ではなく実軸の`+Infinity`を意味し，内部では`t=1/x`として`t->0+`の局所展開へ写す。したがって`seriesData[x,Infinity,...]`の指数`r`は`(1/x)^r`，log係数層は`log[1/x]^k`を表す。例えば`series[1/(x+1),{x,Infinity,4}]`は`x^-1-x^-2+x^-3-x^-4+O[x^-5]`に対応し，`normal` / `toNormal`は`(1/x)^(-m)`のような中間形を残さず通常の`x`冪へ戻す。`D`では`dt/dx=-t^2`，`integrate`では`dx=-t^-2 dt`を係数演算へ反映し，`1/x`項の積分は`-log[1/x]`としてlog層へ閉じる。ただし打切り剰余がちょうど`O(1/x)`の場合，積分後の未知剰余がlog型になり得て現在の`O(t^r)`metadataだけでは表せないため未評価へ戻す。初期対応は有理函数，多項式成長，`exp[1/x]`，Puiseux冪，`log[1/x]`等である。`sin[x]`の無限振動，`exp[x]`のessential growth，直接の`log[x]`等は別のasymptotic providerを必要とするため未評価に保つ。
 
@@ -1889,7 +1895,7 @@ D[expr,{x,n}]
 D[expr,x,y,...]
 ```
 
-`{x,n}`は非負整数`n`階微分，複数specは左から順に適用する。
+`{x,n}`は非負整数`n`階微分，複数specは左から順に適用する。高階微分に固定の4096階上限は設けず，共通`EvaluationBudget`で実作業量を制御する。導函数がexact `0`へ到達した場合は残りの反復を即時終了するため，`D[x,{x,1000000}] -> 0`のように本質的に軽い要求は次数だけを理由に拒否しない。Lambert W / `polylog` / 二次以下の指数函数のcompact repeated-D fast pathにも固定64階上限はない。係数漸化式の実更新数を`EvaluationStep`へ事前課金し，生成するBigInt/Rational係数も共通bit-length budgetで監視するため，高階でもbudget内なら直接構成し，巨大orderは係数vector確保前に停止する。構造条件を満たさない式は一般`D`反復へ戻る。
 
 ```text
 D[sin[x],{x,4}]
@@ -2000,11 +2006,11 @@ integrate[1/(2x+3),x]
 
 - 定数，`x`，任意の有限多項式
 - affine baseの有理冪。指数`-1`はLogへ送る
-- Rational係数の有理函数。1次/2次因子はexact partial fractionへ分解し，重複既約2次因子`(a x^2+b x+c)^k`も平方完成に基づくexact recurrenceで処理する。次数3以上を含む分母はQ[x]上のsquare-free decompositionとHermite reductionで重複度を落とし，残るsquare-free因子をcertified Complex `root[...,k,Complex]`とexact residue `P(r)/Q'(r)`によるalgebraic-log和へ分解する。elementary reverse-chainを先に試すため，`x/(1+x^4)`等の簡潔な`atan/asin`表現を優先する。specialized rational pathは現在degree 12まで。`x^m/(1+x^n)`型は必要に応じ`hypergeometric2F1` primitiveへも接続する
+- Rational係数の有理函数。1次/2次因子はexact partial fractionへ分解し，重複既約2次因子`(a x^2+b x+c)^k`も平方完成に基づくexact recurrenceで処理する。次数3以上を含む分母はQ[x]上のsquare-free decompositionとHermite reductionで重複度を落とし，残るsquare-free因子をcertified Complex `root[...,k,Complex]`とexact residue `P(r)/Q'(r)`によるalgebraic-log和へ分解する。elementary reverse-chainを先に試すため，`x/(1+x^4)`等の簡潔な`atan/asin`表現を優先する。degree 12を超える有理分母はdense partial-fraction線形系を使わず，Yun square-free decompositionで得た互いに素な`f_i^k`をpolynomial CRTでexactに分離する。1次/2次成分は既存recurrenceへ，高次反復成分は`f_i'`のmodular inverseによるHermite reductionへ，square-free残差は留数公式へ直接渡す。そのため旧degree 12は利用者向けの可解性境界ではなく，degree 12以下で従来のcompact partial-fraction出力を優先するalgorithm選択値になった。高次側は既存のPolynomial conversion・algebraic degree・共通積分budgetで制御する。`x^m/(1+x^n)`型は必要に応じ`hypergeometric2F1` primitiveへも接続する
 - 正のRational scaleを証明できる二次逆平方根型の`asin/asinh` primitive，およびexact Rational係数二次式`q(x)`の`sqrt[q(x)]` primitive
-- `sin^m/cos^n`の有限Fourier reduction。積分器は正整数総次数256までを明示的に展開可能
-- `sin[u]^(-n)` / `cos[u]^(-n)` (`1<=n<=256`) を `csc/sec` の標準漸化式で積分
-- `tan/cot/sec/csc`の正整数冪 (`2<=n<=256`) を標準reduction formulaで積分
+- `sin^m/cos^n`の有限Fourier reduction。混合積や低次数pure powerでは正整数総次数256までを明示的に展開可能。pure `sin[x]^n` / `cos[x]^n`は256を超える場合，固定次数上限ではなく標準reduction recurrenceと共通積分budgetへ切り替える
+- `sin[u]^(-n)` / `cos[u]^(-n)`を`csc/sec`の標準漸化式で積分。固定256次上限は持たず，反復workは共通積分budgetで制御する
+- `tan/cot/sec/csc`の正整数冪を標準reduction formulaで積分。固定256次上限は持たず，反復workは共通積分budgetで制御する
 - 和・差・符号反転，積分変数に依存しない係数の線形性
 - `exp/sin/cos/tan/cot/sec/csc`の安全な標準原始函数
 - `sinh/cosh/tanh/coth/sech/csch`の安全な標準原始函数
@@ -2013,9 +2019,9 @@ integrate[1/(2x+3),x]
 - `erf/erfc`
 - `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元。`Pi*x^2/2`の定義核も直接認識
 - Gaussian family。`a`がexact positive Rationalの`exp[-a x^2]`は一般1F1より`erf`をpreferred canonical primitiveとして選び，improper endpointでも`erf`の±Infinity endpoint極限からexact Gaussian積分へ閉じる
-- `hypergeometric1F1`。上記Gaussian以外の正整数`n>=2`の`exp[c x^n]`を原点で正則な1F1原始函数へ還元
+- `hypergeometric1F1`。上記Gaussian以外の任意のexact正整数`n>=2`について`exp[c x^n]`を原点で正則な1F1原始函数へ還元する。指数4096の固定上限は持たず，閉形式の式サイズが指数値に比例しないfamilyとして扱う
 - exactな逆chain rule。`f'(x) f(x)^p`はD後の偶然の式形に依存せず構造的にも認識
-- 多項式×`exp/sin/cos/sinh/cosh`に対する有限回のintegration by parts
+- 多項式×`exp/sin/cos/sinh/cosh`に対する係数漸化式。旧degree 128固定境界は持たず，既存Polynomial conversionのdegree/term安全弁と共通積分budgetで実作業量を制御する
 - `exp[a x+b] sin/cos[c x+d]`型を連立一次式としてexact積分
 - 主値 `sqrt[x]`を含む有理的な形への`t=sqrt[x]`局所置換，および`sqrt[q(sqrt[x])]`の二次根号class
 - 共通引数を持つ`R(sin(theta),cos(theta))`に対するbounded Weierstrass置換`t=tan(theta/2)`。変換後は既存exact有理積分器へ渡す
@@ -2275,6 +2281,8 @@ integrate[1/(1+x^4),{x,0,Infinity}]
 integrate[log[x]^2,{x,0,1}]
 -> 2
 
+一般に`a>-1`を証明できる`x^a log[x]^m`は`(-1)^m m!/(a+1)^(m+1)`へexactに還元する。`m`に固定64次上限は設けず，factorial構築に比例する実作業量を共通積分budgetで制御する。
+
 integrate[sin[x]/x,{x,0,Infinity}]
 -> Pi/2
 
@@ -2493,6 +2501,8 @@ Solverは`HoldAll`の入力を一般Evaluatorへ流さず，専用の**solve-saf
 そのため評価副作用を起こさずに`E^x`と`exp[x]`，`ln`と`log`，`log2` / `log10`等の表現差を解法能力差へ漏らさない。
 
 分母zero，Logのdefinedness，rational-functionのhole/極等を可能な範囲でglobal conditionとして保持する。
+
+rational-functionをpolynomial sign chartへ変換するPowerには固定の`±64`指数境界を設けない。代わりに実際に生成される分子・分母の多項式degreeを各4096以内へ制限するため，`(x+1)^-65`等を指数値だけで拒否せず，生成degreeが安全境界を超える場合だけ従来どおり未解決へ戻す。
 
 Gammaの極集合のように現Predicateで完全表現できない条件は，不完全な条件を捏造せずunresolvedのまま扱う。
 
@@ -2965,11 +2975,11 @@ at[qr,1] -> R
 
 Householder適用には複数列を一度のrow-major走査で処理できるcolumn-block kernelも実装している。ただし外部BLASを使わない現計算基盤では8/16/24次の実測で一貫した高速化が得られなかったため，自動block化は採用せずunblocked相当を既定とする。block kernelとbenchmarkは今後のBigFloat/Matrix 計算基盤最適化用に残す。
 
-`svd[A]`はreduced SVDを `{U,S,V}` で返す。m×n入力に対して`k=min(m,n)`，`U:m×k`，`S:k×k`，`V:n×k`。実数なら `A = U S Transpose[V]`，複素数なら `A = U S conjugateTranspose[V]`。一般数値計算基盤は条件数を二乗する`A^H A`を形成せず，Householder bidiagonalizationの後にone-sided Jacobiで列を直交化する。候補factorはreconstruction residualと`U^H U` / `V^H V`の直交性を区間演算で要求表示桁より厳しく監査し，証明できなければguard digitsを増やして再試行する。exact SVDは自然に閉じる実対角等へ限定する。重複特異値の部分空間ではsingular vector basisは一意ではないため，componentごとの「唯一の真値」を主張せず，再構成・直交性を保証する。
+`svd[A]`はreduced SVDを `{U,S,V}` で返す。m×n入力に対して`k=min(m,n)`，`U:m×k`，`S:k×k`，`V:n×k`。実数なら `A = U S Transpose[V]`，複素数なら `A = U S conjugateTranspose[V]`。一般数値計算基盤は条件数を二乗する`A^H A`を形成せず，Householder bidiagonalizationの後にone-sided Jacobiで列を直交化する。候補factorはreconstruction residualと`U^H U` / `V^H V`の直交性を区間演算で要求表示桁より厳しく監査し，証明できなければguard digitsを増やして再試行する。これら一般数値componentは`VerifiedApproximation`として返し，検証対象は再構成・直交性であって各componentのrigorous singleton enclosureではない。exact SVDは自然に閉じる実対角等へ限定する。重複特異値の部分空間ではsingular vector basisは一意ではない。
 
-`conditionNumber[A]`は2-ノルム条件数 `σmax/σmin` を返す。exact行列で階数落ちを証明できれば`Infinity`，特異値が1個だけの非零矩形行列は`1`，実対角行列はexactな比を返す。一般のexact非対角行列では，特異値を閉形式へ無理に展開せず未評価に留め，`N[...]`で保証付きSVDへ送る。空行列の条件数はDomainErrorである。
+`conditionNumber[A]`は2-ノルム条件数 `σmax/σmin` を返す。exact行列で階数落ちを証明できれば`Infinity`，特異値が1個だけの非零矩形行列は`1`，実対角行列はexactな比を返す。一般のexact非対角行列では，特異値を閉形式へ無理に展開せず未評価に留め，`N[...]`で残差検証付き数値SVDへ送る。空行列の条件数はDomainErrorである。
 
-`pseudoInverse[A]`はMoore–Penrose擬似逆行列を返す。exactな数値行列では階数分解 `A=FG` を作り，`A^+=G^H(GG^H)^-1(F^H F)^-1F^H` をexact算術で評価するため，階数落ちしたRational・複素行列も近似へ落とさない。0×n / n×0行列では形状を転置した空行列を返す。`N[pseudoInverse[A],p]`のようにexact行列から要求精度付きで入る場合は保証付きSVDを使う。一方，既に有限precisionの要素を含む行列は，現SVD 計算基盤が入力摂動全体を特異部分空間まで保証する段階ではないため，隠れたCertifiedEnclosureから階数や特異値を復元せず保守的に未評価へ戻す。
+`pseudoInverse[A]`はMoore–Penrose擬似逆行列を返す。exactな数値行列では階数分解 `A=FG` を作り，`A^+=G^H(GG^H)^-1(F^H F)^-1F^H` をexact算術で評価するため，階数落ちしたRational・複素行列も近似へ落とさない。0×n / n×0行列では形状を転置した空行列を返す。`N[pseudoInverse[A],p]`のようにexact行列から要求精度付きで入る場合は残差検証付き数値SVDを使う。一方，既に有限precisionの要素を含む行列は，現SVD 計算基盤が入力摂動全体を特異部分空間まで保証する段階ではないため，隠れたCertifiedEnclosureから階数や特異値を復元せず保守的に未評価へ戻す。
 
 `leastSquares[A,b]`は `A^+ b` として最小ノルムの最小二乗解を返す。`b`の長さは`A`の行数と一致しなければならない。exactな数値入力では階数落ちを含めてexactに処理する。exact行列を外側`N`から数値化する経路は保証付きSVDを使うが，行列自体が既に有限precisionなら`pseudoInverse`と同じ理由で保守的に未評価へ戻す。
 
@@ -3278,7 +3288,7 @@ mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりa
 
 # 30. 現在のsource-callable函数一覧
 
-現在の開発treeでは **builtin/alias登録名278個 / sourceから呼出可能な名前258個**。内部headはsource-callable数に含めない。
+v1.5.5では **builtin/alias登録名278個 / sourceから呼出可能な名前258個**。内部headはsource-callable数に含めない。
 
 ```text
 Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,

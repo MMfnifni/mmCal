@@ -1,6 +1,6 @@
 # mmCal Cheatsheet
 
-現行開発tree基準。詳細は `docs/reference.ja.md`。その場での確認は `:help <函数名>`。
+v1.5.5基準。詳細は `docs/reference.ja.md`。その場での確認は `:help <函数名>`。
 
 ## 1. 入力規則
 

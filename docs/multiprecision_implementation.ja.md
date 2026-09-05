@@ -1,4 +1,4 @@
-# mmCal v1.5.2 自作多倍長数値基盤 — 実装解剖
+# mmCal 自作多倍長数値基盤 — 実装解剖
 
 対象は主として次の層である。
 
@@ -25,7 +25,7 @@ DecimalApproximation
 記号積分，Solver，Simplifier，特殊函数そのものの規則は扱わない。
 ただし，それらが多倍長基盤をどう利用しているかを理解するために必要な範囲で，`N[...]`，保証区間，平方根などとの接続は説明する。
 
-> 対象：mmCal v1.5.2
+> 対象：mmCal v1.5.5。v1.5.1〜v1.5.3の導入経緯・当時のbenchmark値は履歴として保持する。
 >
 > この文書はAPIリファレンスではなく，mmCalが外部多倍長ライブラリを使わず，整数・有理数・任意精度2進浮動小数・保証区間をどのように積み上げているかを，実装を読みたい人向けに解剖する文書である。
 > 「多倍長整数とは何を保存しているのか」「丸めはどこで発生するのか」「なぜ`BigFloat`だけでは保証にならないのか」「巨大行列でメモリを食うのはlimbなのかExprなのか」まで扱う。
@@ -1793,7 +1793,7 @@ guard += growth
 
 # 32. `DecimalApproximation`
 
-これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + 二重enclosure metadata**である。v1.5.3ではこの値を数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。演算そのものはDecimal文字列やmachine floatを使わず，保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げて行う。
+これはBigFloatのような反復算法用working valueではなく，ユーザーへ返す**確定済み10進結果 + provenance / enclosure metadata**である。v1.5.3ではこの値を数値leafとして通常の四則演算へ再投入できるため，表示専用の行き止まりではない。ExactValue / CertifiedIntervalは保存済みexact Rational enclosureを`RealInterval` / `ComplexInterval`へ持ち上げてrigorous演算へ利用できる。v1.5.5のVerifiedApproximationは残差等を要求桁まで検証した数値候補点を同じ表示値型で保持するが，そのpointを真値のrigorous enclosureとは扱わない。
 
 保持内容:
 
@@ -1803,7 +1803,7 @@ fractionalDigits          実際の小数部桁数
 requestedFractionalDigits 固定小数表示系で要求された小数部桁数（`:fix`等）
 requestedSignificantDigits `N`系で要求された有効10進桁数
 rounded                   表示値がCertifiedEnclosureに対して丸められたか
-origin                    ExactValue / CertifiedInterval
+origin                    ExactValue / CertifiedInterval / VerifiedApproximation
 displayedValue            表示10進値そのもののexact Rational
 certifiedLower            CertifiedEnclosure下界 Rational
 certifiedUpper            CertifiedEnclosure上界 Rational
@@ -1821,7 +1821,7 @@ informationUpper          InformationEnclosure上界 Rational
 
 ## 32.1 CertifiedEnclosure
 
-`[certifiedLower, certifiedUpper]`は，真値を必ず含むことを計算基盤が証明した区間である。内部guard桁によってユーザー要求より狭くてもよい。
+ExactValue / CertifiedInterval由来では，`[certifiedLower, certifiedUpper]`は真値を必ず含むことを計算基盤が証明した区間である。内部guard桁によってユーザー要求より狭くてもよい。VerifiedApproximationでは内部storage上の候補点をこのfield領域に保持していてもrigorous enclosureとは見なさず，`hasRigorousEnclosure()==false`，`certifiedEnclosureIsPoint()==false`とする。`explain`でもCertifiedEnclosureは`Unavailable`と表示する。
 
 用途は，
 
@@ -1861,7 +1861,7 @@ InformationEnclosureは確率的confidence intervalではない。計算基盤�
 
 ## 32.3 certified approximation同士の四則演算
 
-`DecimalApproximation` / `ComplexDecimalApproximation`を含む`+ - * /`と単項`-`では，CertifiedEnclosureとInformationEnclosureを**別々に同じ演算へ通す**。exact `Number`は双方に同じpoint intervalとして混在する。
+ExactValue / CertifiedIntervalの`DecimalApproximation` / `ComplexDecimalApproximation`を含む`+ - * /`と単項`-`では，CertifiedEnclosureとInformationEnclosureを**別々に同じ演算へ通す**。exact `Number`は双方に同じpoint intervalとして混在する。VerifiedApproximationを含む通常四則では保存された数値候補pointを計算用に利用できるが，結果は必ずVerifiedApproximationへ戻し，rigorous certificationへ昇格させない。
 
 ```text
 N[Pi,20] + 1/3
@@ -2006,7 +2006,7 @@ InformationEnclosureがその情報量を許す？
    └─ no  → guard増加，または保証可能な桁へ保守的に制限
 ```
 
-一方，入力が最初からexact `Number`，つまり整数・有理数・exact複素数なら，一般CertifiedEvaluatorを通さず`DecimalApproximation::fromRealSignificant()`等で直接10進化するfast pathがある。
+一方，入力が最初からexact `Number`，つまり整数・有理数・exact複素数なら，一般CertifiedEvaluatorを通さず`DecimalApproximation::fromRealSignificant()`等で直接10進化するfast pathがある。このExactValue由来approximationがrigorous singletonで，表示値も同じexact integerなら，ユーザー向けtop-level formatterだけ`2.0 -> 2`のように簡潔化する。内部`text` / requested precision / InformationEnclosureは維持し，未評価式内部ではfinite-precision atomであることを示す小数表記を残す。
 
 ## 35.1 v1.5.2のprecision-aware `N`
 
@@ -2037,7 +2037,7 @@ N[svd[A], p]
 N[eigenvalues[A], p]
 ```
 
-は，巨大なexact inverseやradical式を一度完成してから数値化する設計ではない。
+は，巨大なexact inverseやradical式を一度完成してから数値化する設計ではない。ただしSVD / eigenの一般反復算法は，reconstruction residual・直交性・Schur/eigenpair relationを要求桁まで区間監査しても，各componentの唯一の真値をpoint enclosureしたとは限らない。このため出力componentをVerifiedApproximationとし，外側の`N[...,q]`で桁を落としてもCertifiedIntervalへ昇格させない。通常四則はVerifiedのまま継続できるが，CertifiedEvaluatorと比較証明は入力として受理しない。
 
 これはexact-firstと矛盾しない。
 

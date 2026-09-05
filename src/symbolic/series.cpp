@@ -4,6 +4,7 @@
 #include "builtins/special_functions.hpp"
 #include "expression/array_utils.hpp"
 #include "expression/exact_value.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "mathematics/value_facts.hpp"
 #include "mathematics/knowledge_context.hpp"
 #include "numeric/integer_algorithms.hpp"
@@ -1231,6 +1232,31 @@ void trimLeadingZeros(LaurentSeries& series) {
         }
     }
     trimLeadingZeros(result);
+    return result;
+}
+
+[[nodiscard]] LaurentSeries powerZeroValuationSeries(
+    LaurentSeries base,
+    std::uint64_t exponent,
+    std::int64_t ceiling,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    LaurentSeries result = denseSeries(0, ceiling);
+    if (!result.exactZero && !result.coefficients.empty())
+        result.coefficients[0] = integer(1);
+
+    while (exponent != 0) {
+        evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::EvaluationStep);
+        if ((exponent & 1U) != 0U)
+            result = multiplySeries(
+                result, base, ceiling, builtins, mathematics, angles, assumptions);
+        exponent >>= 1U;
+        if (exponent != 0)
+            base = multiplySeries(
+                base, base, ceiling, builtins, mathematics, angles, assumptions);
+    }
     return result;
 }
 
@@ -2648,6 +2674,34 @@ void scaleFormalSeries(
     const std::int64_t outputValuation = baseValuation.exponent * exponent;
     if (outputValuation > ceiling)
         return zeroSeries(ceiling);
+
+    if (baseValuation.exponent == 0) {
+        auto base = expandSeries(
+            baseExpression, variable, center, ceiling,
+            builtins, mathematics, angles, assumptions);
+        if (!base)
+            return std::nullopt;
+
+        const std::uint64_t magnitude = exponent < 0
+            ? static_cast<std::uint64_t>(-(exponent + 1)) + 1U
+            : static_cast<std::uint64_t>(exponent);
+        if (exponent < 0) {
+            const bool leadingNonZeroKnown = seriesCenterValueProvablyNonZero(
+                baseExpression, variable, center,
+                builtins, mathematics, angles, assumptions);
+            auto inverse = inverseSeries(
+                *base, ceiling, builtins, mathematics, angles, assumptions,
+                leadingNonZeroKnown);
+            if (!inverse)
+                return std::nullopt;
+            return powerZeroValuationSeries(
+                std::move(*inverse), magnitude, ceiling,
+                builtins, mathematics, angles, assumptions);
+        }
+        return powerZeroValuationSeries(
+            std::move(*base), magnitude, ceiling,
+            builtins, mathematics, angles, assumptions);
+    }
 
     if (exponent < 0) {
         const std::uint64_t magnitude = static_cast<std::uint64_t>(-(exponent + 1)) + 1U;

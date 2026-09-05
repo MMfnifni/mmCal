@@ -564,11 +564,9 @@ private:
     values.reserve(matrix.values().size());
     for (const BigFloat& value : matrix.values()) {
         const Rational exact = value.toRational();
-        const auto decimal = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-            exact, exact, digits);
-        if (!decimal)
-            return std::nullopt;
-        values.emplace_back(*decimal);
+        const auto decimal = numeric::DecimalApproximation::fromVerifiedValueSignificant(
+            numeric::RealNumber{exact}, digits);
+        values.emplace_back(std::move(decimal));
     }
     return Expr::array({matrix.rows(), matrix.columns()}, std::move(values));
 }

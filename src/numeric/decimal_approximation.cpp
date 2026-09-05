@@ -550,6 +550,28 @@ DecimalApproximation DecimalApproximation::fromRealSignificant(
     };
 }
 
+DecimalApproximation DecimalApproximation::fromVerifiedValueSignificant(
+    const RealNumber& value,
+    std::size_t significantDigits) {
+    const Rational rational = value.toRational();
+    const SignificantDecimal rounded = roundSignificant(rational, significantDigits);
+    const InformationBounds information = defaultInformationBoundsSignificant(
+        rounded, rational, rational);
+    return DecimalApproximation{
+        rounded.text,
+        rounded.fractionalDigits,
+        rounded.roundingFractionalDigits,
+        significantDigits,
+        !rounded.exact,
+        ApproximationOrigin::VerifiedApproximation,
+        rounded.displayed,
+        rational,
+        rational,
+        information.lower,
+        information.upper
+    };
+}
+
 DecimalApproximation DecimalApproximation::fromRealFixed(
     const RealNumber& value,
     std::size_t fractionalDigits) {
@@ -808,6 +830,10 @@ ApproximationOrigin DecimalApproximation::origin() const noexcept {
     return origin_;
 }
 
+bool DecimalApproximation::hasRigorousEnclosure() const noexcept {
+    return origin_ != ApproximationOrigin::VerifiedApproximation;
+}
+
 const Rational& DecimalApproximation::displayedValue() const noexcept {
     return displayedValue_;
 }
@@ -829,7 +855,7 @@ const Rational& DecimalApproximation::informationUpper() const noexcept {
 }
 
 bool DecimalApproximation::certifiedEnclosureIsPoint() const noexcept {
-    return certifiedLower_ == certifiedUpper_;
+    return hasRigorousEnclosure() && certifiedLower_ == certifiedUpper_;
 }
 
 bool DecimalApproximation::informationEnclosureIsPoint() const noexcept {
@@ -865,6 +891,12 @@ DecimalApproximation DecimalApproximation::negated() const {
         -certifiedLower_,
         -informationUpper_,
         -informationLower_};
+}
+
+DecimalApproximation DecimalApproximation::asVerifiedApproximation() const {
+    DecimalApproximation result = *this;
+    result.origin_ = ApproximationOrigin::VerifiedApproximation;
+    return result;
 }
 
 } // namespace mmcal::numeric

@@ -1372,7 +1372,7 @@ Aberth-Ehrlich iteration remains a future candidate-generation experiment. Any c
 
 Repeatedly applying first-derivative rules can cause substantial expression growth for `LambertW`, `polylog`, and `exp[q(x)]`, because piecewise forms, quotient/product rules, and common exponential factors are rebuilt at every order. Since 2026-08-29, direct-variable requests with `n<=64` first use exact family-specific recurrences: the DLMF 4.13.4_1--4.13.4_2 polynomial recurrence for Lambert W, the `theta=xD` / signed-Stirling identity for polylogarithms, and `P_(n+1)=P'_n+q'P_n` for `exp[q]` with quadratic `q`.
 
-These are exact Expr-construction paths, not approximate shortcuts. Orders above 64 or unmatched forms fall back to the generic `D` implementation, leaving the public order budget of 4096 and derivative semantics unchanged. No long benchmark was run for this batch; only compact representative outputs plus targeted compilation/smoke checks were used.
+These are exact Expr-construction paths, not approximate shortcuts. Orders above 64 or unmatched forms fall back to the generic `D` implementation. The former public order-4096 cap has since been removed; repeated work is now charged to the shared `EvaluationStep` budget, with exact-zero early termination. No long benchmark was run for this batch; only compact representative outputs plus targeted compilation/smoke checks were used.
 
 # 36. Hermite reduction and algebraic-log fallback for rational integration
 
@@ -1396,3 +1396,12 @@ produces `sum_r P(r)/Q'(r) Log[x-r]`. Residues are materialized through persiste
 This fallback remains inside the existing degree-12 specialized rational work budget. The bound is a resource-safety policy, not a mathematical domain boundary: it limits all-root isolation, algebraic residue materialization, and output size. Representative GCC Release checks were about 0.25 s for `integrate[1/(x^3+x+1),x]`, 0.56 s for `1/(x^5+x+1)`, and 4.0 s for `1/(x^8+x+1)`. No long-running benchmark suite was executed for this change.
 
 Rothstein-Trager / Lazard-Rioboo-Trager residue grouping remains a future optimization. The current kernel is already exact but explicitly enumerates roots; grouping equal residues and conjugate roots could reduce expression size and recover more compact real `Log/atan` forms without replacing the Hermite/square-free capability added here.
+
+
+### 2026-09-04: high-degree `factor` perfect-power false-positive work
+
+`factor[x^257-1]` exposed a severe dispatch cliff. After the rational root `x-1` was removed, the residual `1+x+...+x^256` was passed to exact perfect-polynomial-power reconstruction for every divisor of degree 256. Instrumentation showed approximately 4.6 s for the `k=64` probe, 7.1 s for `k=32`, 11.0 s for `k=16`, with the `k=8` probe still running when a 40 s diagnostic cutoff was reached. The cyclotomic residual itself and output formatting were not the dominant costs.
+
+Perfect polynomial powers necessarily have repeated roots. The factor engine now first reduces the Rational polynomial modulo the good prime 65521 and computes `gcd(p,p')` in that finite field. If the reduction is provably square-free while preserving degree, nontrivial perfect-power reconstruction is impossible and all expensive exact power-root probes are skipped. If a coefficient denominator is not invertible modulo the probe prime, the degree drops, or the modular gcd is nontrivial, this is treated only as inconclusive and the former exact path is retained. Thus the modular test can skip work but cannot establish a factorization by itself.
+
+Representative GCC Release / LTO-off public-path timings on the audit host changed from about 1.63 s to 0.04 s for `factor[x^255-1]`, from about 0.07 s to 0.02 s for `factor[x^256-1]`, and from more than 45 s to about 0.31 s for `factor[x^257-1]`. Exact perfect-power cases such as `factor[expand[(x+1)^8]]` and `factor[expand[(x^2+x+1)^4]]` continue to reconstruct their powers.

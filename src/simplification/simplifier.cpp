@@ -1063,18 +1063,17 @@ struct PositiveIntegerPower final {
         }
         // (a/b)^n = a^n/b^n は正のexact integer n ならprincipal branchに依存せず安全。
         // sqrt等を含む有理函数の微分後に (u/sqrt[c])^2 をu^2/cへ落とせるようにする。
-        if (const auto exponent = positiveExactInteger(arguments[1]); exponent
+        if (positiveExactInteger(arguments[1])
             && isHead(arguments[0], context.builtins, BuiltinId::Divide)
             && arguments[0].asCall().arguments.size() == 2) {
-            const auto magnitude = numeric::tryToUint64(*exponent);
-            if (magnitude && *magnitude <= 64) {
-                const auto& quotient = arguments[0].asCall().arguments;
-                return Expr::call(context.builtins.symbol(BuiltinId::Divide), {
-                    Expr::call(context.builtins.symbol(BuiltinId::Power),
-                        {quotient[0], arguments[1]}),
-                    Expr::call(context.builtins.symbol(BuiltinId::Power),
-                        {quotient[1], arguments[1]})});
-            }
+            // この変換は指数回の展開を行わずPowerを2個構成するだけなので，
+            // 旧64境界ではなく正整数という数学条件だけで適用できる。
+            const auto& quotient = arguments[0].asCall().arguments;
+            return Expr::call(context.builtins.symbol(BuiltinId::Divide), {
+                Expr::call(context.builtins.symbol(BuiltinId::Power),
+                    {quotient[0], arguments[1]}),
+                Expr::call(context.builtins.symbol(BuiltinId::Power),
+                    {quotient[1], arguments[1]})});
         }
 
         // (c*a)^n でnが正のexact integerなら、exact numeric係数cだけを外へ出す。

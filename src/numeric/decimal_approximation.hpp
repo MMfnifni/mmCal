@@ -11,7 +11,8 @@ namespace mmcal::numeric {
 
 enum class ApproximationOrigin {
     ExactValue,
-    CertifiedInterval
+    CertifiedInterval,
+    VerifiedApproximation
 };
 
 // 明示InformationEnclosureを表示量子とどう合成するかを指定する。
@@ -23,8 +24,9 @@ enum class InformationQuantization {
     PreserveExactPoint
 };
 
-// 厳密実数やcertified区間を、ユーザーへ提示する10進表現として保持する値型。
-// 反復算法の作業値ではなく「確定した表示結果 + certified enclosure」であり、BigFloat/RealIntervalとは責務を分ける。保存enclosureは後続のcertified四則演算へ再利用できる。
+// 厳密実数，certified区間，または検証済み数値候補をユーザーへ提示する10進値型。
+// 反復算法の作業値ではなく「確定した表示結果 + provenance / enclosure metadata」であり，
+// BigFloat/RealIntervalとは責務を分ける。rigorous enclosureを持つoriginだけを証明へ再利用する。
 class DecimalApproximation final {
 public:
     [[nodiscard]] static DecimalApproximation fromReal(
@@ -33,6 +35,12 @@ public:
 
     // N[expr,p]用。pは小数部桁数ではなく有効10進桁数を表す。
     [[nodiscard]] static DecimalApproximation fromRealSignificant(
+        const RealNumber& value,
+        std::size_t significantDigits);
+
+    // 残差等によって要求精度を検証した数値算法の点値。数学的な真値の
+    // rigorous enclosureではないため，certified evaluatorへ再投入してはならない。
+    [[nodiscard]] static DecimalApproximation fromVerifiedValueSignificant(
         const RealNumber& value,
         std::size_t significantDigits);
 
@@ -79,6 +87,7 @@ public:
     [[nodiscard]] std::size_t requestedSignificantDigits() const noexcept;
     [[nodiscard]] bool isRounded() const noexcept;
     [[nodiscard]] ApproximationOrigin origin() const noexcept;
+    [[nodiscard]] bool hasRigorousEnclosure() const noexcept;
     // 表示文字列が表す10進値そのものをexact Rationalで保持する。
     // accuracy/precisionは文字列を再parseせずInformationEnclosureを直接使う。
     [[nodiscard]] const Rational& displayedValue() const noexcept;
@@ -94,6 +103,7 @@ public:
     // 符号反転は数値情報を失う演算ではないため，表示桁・要求精度・両enclosureを
     // 再量子化せずそのまま鏡映する。
     [[nodiscard]] DecimalApproximation negated() const;
+    [[nodiscard]] DecimalApproximation asVerifiedApproximation() const;
 
     [[nodiscard]] bool operator==(const DecimalApproximation&) const = default;
 

@@ -263,6 +263,98 @@ using numeric::Rational;
     return result;
 }
 
+
+[[nodiscard]] std::uint32_t modularPower(
+    std::uint32_t base,
+    std::uint32_t exponent,
+    std::uint32_t modulus) noexcept {
+    std::uint64_t result = 1;
+    std::uint64_t factor = base % modulus;
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0U)
+            result = (result * factor) % modulus;
+        exponent >>= 1U;
+        if (exponent != 0)
+            factor = (factor * factor) % modulus;
+    }
+    return static_cast<std::uint32_t>(result);
+}
+
+void trimModularPolynomial(std::vector<std::uint32_t>& polynomial) {
+    while (!polynomial.empty() && polynomial.back() == 0)
+        polynomial.pop_back();
+}
+
+[[nodiscard]] std::vector<std::uint32_t> modularPolynomialRemainder(
+    std::vector<std::uint32_t> dividend,
+    const std::vector<std::uint32_t>& divisor,
+    std::uint32_t modulus) {
+    trimModularPolynomial(dividend);
+    if (divisor.empty())
+        return {};
+    const std::uint32_t inverseLeading = modularPower(divisor.back(), modulus - 2, modulus);
+    while (dividend.size() >= divisor.size()) {
+        const std::size_t shift = dividend.size() - divisor.size();
+        const std::uint32_t factor = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(dividend.back()) * inverseLeading) % modulus);
+        for (std::size_t i = 0; i < divisor.size(); ++i) {
+            const std::uint32_t product = static_cast<std::uint32_t>(
+                (static_cast<std::uint64_t>(factor) * divisor[i]) % modulus);
+            dividend[shift + i] = dividend[shift + i] >= product
+                ? dividend[shift + i] - product
+                : dividend[shift + i] + modulus - product;
+        }
+        trimModularPolynomial(dividend);
+    }
+    return dividend;
+}
+
+[[nodiscard]] std::optional<std::size_t> perfectPowerExponentUpperBoundModuloPrime(
+    const RationalPolynomial& polynomial) {
+    // p=q^kなら，degreeを保つgood prime上でも gcd(p,p') は少なくとも
+    // q^(k-1) を含む。したがって n/(n-deg(gcd)) はkの安全な上界になる。
+    // square-freeなら上界1となり，exact root reconstructionを丸ごと省略できる。
+    constexpr std::uint32_t modulus = 65'521;
+    if (polynomial.degree() < 2)
+        return std::size_t{1};
+
+    std::vector<std::uint32_t> reduced(polynomial.degree() + 1, 0);
+    for (std::size_t i = 0; i <= polynomial.degree(); ++i) {
+        const Rational& coefficient = polynomial.coefficient(i);
+        const std::uint32_t denominator = coefficient.denominator().modulo(modulus);
+        if (denominator == 0)
+            return std::nullopt;
+        const std::uint32_t numerator = coefficient.numerator().modulo(modulus);
+        reduced[i] = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(numerator)
+                * modularPower(denominator, modulus - 2, modulus)) % modulus);
+    }
+    if (reduced.back() == 0)
+        return std::nullopt;
+
+    std::vector<std::uint32_t> derivative(polynomial.degree(), 0);
+    for (std::size_t i = 1; i <= polynomial.degree(); ++i)
+        derivative[i - 1] = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(i % modulus) * reduced[i]) % modulus);
+    trimModularPolynomial(derivative);
+    if (derivative.empty())
+        return std::nullopt;
+
+    std::vector<std::uint32_t> lhs = std::move(reduced);
+    std::vector<std::uint32_t> rhs = std::move(derivative);
+    while (!rhs.empty()) {
+        auto remainder = modularPolynomialRemainder(std::move(lhs), rhs, modulus);
+        lhs = std::move(rhs);
+        rhs = std::move(remainder);
+    }
+
+    const std::size_t gcdDegree = lhs.size() - 1;
+    const std::size_t squareFreePartDegree = polynomial.degree() - gcdDegree;
+    if (squareFreePartDegree == 0)
+        return std::nullopt;
+    return polynomial.degree() / squareFreePartDegree;
+}
+
 [[nodiscard]] std::optional<RationalPolynomial> exactPolynomialPowerRoot(
     const RationalPolynomial& polynomial,
     std::uint64_t degree) {
@@ -302,8 +394,13 @@ using numeric::Rational;
     const RationalPolynomial& polynomial,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins) {
-    constexpr std::size_t maximumExponent = 64;
-    const std::size_t upper = std::min(polynomial.degree(), maximumExponent);
+    const auto modularUpper = perfectPowerExponentUpperBoundModuloPrime(polynomial);
+    if (modularUpper && *modularUpper < 2)
+        return std::nullopt;
+
+    // modular判定不能時だけdegree全体を候補にする。通常はgcd multiplicityから
+    // 真の完全冪指数を落とさない上界まで絞れるため，旧64固定境界は不要。
+    const std::size_t upper = modularUpper.value_or(polynomial.degree());
     for (std::size_t exponent = upper; exponent >= 2; --exponent) {
         if (polynomial.degree() % exponent != 0)
             continue;

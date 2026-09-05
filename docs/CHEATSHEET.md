@@ -1,6 +1,6 @@
 # mmCal Cheatsheet
 
-Based on the current development tree. For details, see `docs/reference.md`. For quick in-session lookup, use `:help <function-name>`.
+Based on v1.5.5. For details, see `docs/reference.md`. For quick in-session lookup, use `:help <function-name>`.
 
 ## 1. Input syntax
 

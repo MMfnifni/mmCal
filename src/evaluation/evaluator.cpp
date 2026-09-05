@@ -389,6 +389,13 @@ constexpr std::size_t maximumNumericalApproximationRefinements = 16;
     if (available != 0 && precisionDigits >= available)
         return value;
 
+    // VerifiedApproximationは数値算法の候補点でありrigorous enclosureではない。
+    // 精度を下げてもcertified constructorへ通して証明済みに昇格させず，
+    // 元の数値点を低い表示精度へ再量子化したVerified値として保持する。
+    if (!value.hasRigorousEnclosure())
+        return numeric::DecimalApproximation::fromVerifiedValueSignificant(
+            numeric::RealNumber{value.certifiedLower()}, precisionDigits);
+
     // 桁数を下げる場合も元のInformationEnclosureを保持し，
     // 新しい表示丸め量子だけを追加で情報量上限へ反映する。
     if (const auto rounded = numeric::DecimalApproximation::fromCertifiedIntervalWithInformationSignificant(
@@ -1622,8 +1629,11 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
 
     // Nはscalarだけでなく配列・SolutionSet・一般symbolic expressionへ部分的に作用する。
     // whole-expressionのcertificationを最優先し，失敗したときだけnumeric subpart traversalへ落とす。
-    std::function<expression::Expr(const expression::Expr&, bool)> approximate;
-    approximate = [&](const expression::Expr& current, bool allowWarning) -> expression::Expr {
+    std::function<expression::Expr(const expression::Expr&, bool, bool)> approximate;
+    approximate = [&](
+        const expression::Expr& current,
+        bool allowWarning,
+        bool preserveExactInteger) -> expression::Expr {
         // precision-aware builtinが既に近似値を返した場合、外側Nがより低い桁を要求するなら
         // certified enclosureから安全に丸め直す。より高い桁は元情報以上に増やせないため保持する。
         if (current.isDecimalApproximation())
@@ -1662,7 +1672,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             std::vector<expression::Expr> elements;
             elements.reserve(array.size());
             for (std::size_t i = 0; i < array.size(); ++i)
-                elements.push_back(approximate(array.element(i), allowWarning));
+                elements.push_back(approximate(array.element(i), allowWarning, false));
             return expression::Expr::array(array.shape, std::move(elements));
         }
         if (current.isList()) {
@@ -1670,7 +1680,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             std::vector<expression::Expr> elements;
             elements.reserve(list.elements.size());
             for (const expression::Expr& element : list.elements)
-                elements.push_back(approximate(element, allowWarning));
+                elements.push_back(approximate(element, allowWarning, false));
             return expression::braceValue(std::move(elements));
         }
 
@@ -1684,7 +1694,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             const auto approximateBranch = [&](const solver::SolutionBranch& source) {
                 solver::SolutionBranch result = source;
                 for (solver::SolutionBinding& binding : result.bindings)
-                    binding.value = approximate(binding.value, false);
+                    binding.value = approximate(binding.value, false, false);
                 return result;
             };
 
@@ -1730,12 +1740,12 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         // centerと係数だけへNを作用させ，変換後もparseSeriesData可能な形を維持する。
         if (const auto series = symbolic::parseSeriesData(current, registry_)) {
             symbolic::SeriesData transformed = *series;
-            transformed.center = approximate(transformed.center, false);
+            transformed.center = approximate(transformed.center, false, false);
             for (expression::Expr& coefficient : transformed.coefficients)
-                coefficient = approximate(coefficient, false);
+                coefficient = approximate(coefficient, false, false);
             for (auto& layer : transformed.logarithmicCoefficients)
                 for (expression::Expr& coefficient : layer)
-                    coefficient = approximate(coefficient, false);
+                    coefficient = approximate(coefficient, false, false);
             return symbolic::makeSeriesData(std::move(transformed), registry_);
         }
 
@@ -1753,7 +1763,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                     return current;
                 const auto& branch = branchExpression.asCall().arguments;
                 std::vector<expression::Expr> branchArguments{
-                    approximate(branch[0], false)};
+                    approximate(branch[0], false, false)};
                 if (branch.size() == 2)
                     branchArguments.push_back(branch[1]);
                 branches.push_back(expression::Expr::call(
@@ -1771,10 +1781,19 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
             if (definition && definition->id == BuiltinId::UnitApplied
                 && currentCall.arguments.size() == 2 && currentCall.arguments[1].isString()) {
                 return expression::Expr::call(currentCall.head, {
-                    approximate(currentCall.arguments[0], allowWarning),
+                    approximate(currentCall.arguments[0], allowWarning, false),
                     currentCall.arguments[1]
                 });
             }
+        }
+
+        // symbolic callを部分数値化するとき，exact integerは係数だけでなく指数・branch番号・
+        // 個数などの構造parameterにも使われる。意味を2.0へ変えないようatomのまま保持する。
+        // N[2,p]のように値そのものを要求された場合は従来どおりapproximationへ変換する。
+        if (current.isNumber() && preserveExactInteger) {
+            const numeric::Number& number = current.asNumber();
+            if (number.isReal() && number.asReal().isInteger())
+                return current;
         }
 
         // exactなNumberだけは区間算法へ送る必要がない。有限小数なら必要最小桁で表示し、
@@ -1827,7 +1846,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                             arguments.reserve(call.arguments.size());
                             bool changed = false;
                             for (const auto& argument : call.arguments) {
-                                expression::Expr transformed = approximate(argument, false);
+                                expression::Expr transformed = approximate(argument, false, true);
                                 changed = changed || !(transformed == argument);
                                 arguments.push_back(std::move(transformed));
                             }
@@ -1837,7 +1856,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
                                 // numeric childだけが変わっても，親が閉じた未対応式のままなら
                                 // 「部分的に何か変わった」ことを成功扱いしない。再度whole-expressionを試し，
                                 // free symbolがなければ最終的に適切なN warningへ落とす。
-                                return approximate(rebuilt, allowWarning);
+                                return approximate(rebuilt, allowWarning, preserveExactInteger);
                             }
                         }
                     }
@@ -1883,7 +1902,7 @@ expression::Expr Evaluator::finalizeNumericalApproximation(
         return current;
     };
 
-    return approximate(value, warnOnFailure);
+    return approximate(value, warnOnFailure, false);
 }
 
 const approximation::ApproximationContext* Evaluator::currentApproximationContext() const noexcept {

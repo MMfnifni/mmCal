@@ -238,6 +238,25 @@ constexpr std::size_t maximumCertifiedRecursionDepth = 48;
         coefficients, static_cast<std::size_t>(*index));
 }
 
+[[nodiscard]] CertifiedValue encloseComplexAlgebraicRoot(
+    const symbolic::ComplexAlgebraicNumber& algebraic,
+    std::size_t precisionBits) {
+    const symbolic::RationalComplexDisk disk = algebraic.refined(precisionBits);
+    const RealInterval real = RealInterval::fromRationalBounds(
+        disk.real - disk.radius, disk.real + disk.radius, precisionBits);
+
+    // 実係数多項式のisolating diskが実軸対称なら，共役根も同じdiskに入る。
+    // disk内の根は1個と証明済みなので，その根は共役と一致し，虚部はexact zeroである。
+    if (disk.imaginary.isZero())
+        return CertifiedValue{ComplexInterval{
+            real, RealInterval::fromRational(Rational{}, precisionBits)}};
+
+    return CertifiedValue{ComplexInterval{
+        real,
+        RealInterval::fromRationalBounds(
+            disk.imaginary - disk.radius, disk.imaginary + disk.radius, precisionBits)}};
+}
+
 [[nodiscard]] Rational rational(std::int64_t numerator, std::int64_t denominator = 1) {
     return Rational{BigInt{numerator}, BigInt{denominator}};
 }
@@ -624,6 +643,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
 
     if (expression.isDecimalApproximation()) {
         const auto& value = expression.asDecimalApproximation();
+        if (!value.hasRigorousEnclosure())
+            return std::nullopt;
         const Rational& lower = enclosureKind == EnclosureKind::Information
             ? value.informationLower() : value.certifiedLower();
         const Rational& upper = enclosureKind == EnclosureKind::Information
@@ -633,6 +654,8 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseBound(
 
     if (expression.isComplexDecimalApproximation()) {
         const auto& value = expression.asComplexDecimalApproximation();
+        if (!value.real().hasRigorousEnclosure() || !value.imaginary().hasRigorousEnclosure())
+            return std::nullopt;
         const auto component = [&](const numeric::DecimalApproximation& part,
                                    bool exactlyZero,
                                    const Rational& informationLower,
@@ -747,12 +770,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                 const auto* algebraic = call.algebraicValue->asComplex();
                 if (!algebraic)
                     return std::nullopt;
-                const symbolic::RationalComplexDisk disk = algebraic->refined(precisionBits);
-                return CertifiedValue{ComplexInterval{
-                    RealInterval::fromRationalBounds(
-                        disk.real - disk.radius, disk.real + disk.radius, precisionBits),
-                    RealInterval::fromRationalBounds(
-                        disk.imaginary - disk.radius, disk.imaginary + disk.radius, precisionBits)}};
+                return encloseComplexAlgebraicRoot(*algebraic, precisionBits);
             }
             const auto* algebraic = call.algebraicValue->asReal();
             if (!algebraic)
@@ -773,12 +791,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
                         RealInterval::fromRational(exact->first, precisionBits),
                         RealInterval::fromRational(exact->second, precisionBits)}};
             }
-            const symbolic::RationalComplexDisk disk = algebraic->refined(precisionBits);
-            return CertifiedValue{ComplexInterval{
-                RealInterval::fromRationalBounds(
-                    disk.real - disk.radius, disk.real + disk.radius, precisionBits),
-                RealInterval::fromRationalBounds(
-                    disk.imaginary - disk.radius, disk.imaginary + disk.radius, precisionBits)}};
+            return encloseComplexAlgebraicRoot(*algebraic, precisionBits);
         }
         const auto algebraic = algebraicRoot(call);
         if (!algebraic)

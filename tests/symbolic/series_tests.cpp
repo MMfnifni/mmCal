@@ -66,6 +66,15 @@ void runSeriesTests(TestRunner& tests) {
         "Series: negative integer powers use formal inversion rather than differentiation");
 
     tests.expectEqual(
+        eval(session, "series[(1+x)^-4097,{x,0,3}]"),
+        std::string{"seriesData[x, 0, {1, -4097, 8394753, -11470030849}, 0, 4, 1]"},
+        "Series: analytic negative integer powers are not cut off at the former magnitude 4096 boundary");
+    tests.expectEqual(
+        eval(session, "series[(1+x)^-1000000,{x,0,2}]"),
+        std::string{"seriesData[x, 0, {1, -1000000, 500000500000}, 0, 3, 1]"},
+        "Series: truncated integer powers scale logarithmically in the exponent at fixed order");
+
+    tests.expectEqual(
         eval(session, "series[1/(x^2+x^3),{x,0,4}]"),
         std::string{"seriesData[x, 0, {1, -1, 1, -1, 1, -1, 1}, -2, 5, 1]"},
         "Series: Laurent inversion propagates a higher-order pole");

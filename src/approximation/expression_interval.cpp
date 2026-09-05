@@ -54,10 +54,12 @@ namespace {
             RealInterval::fromRational(complex.imaginary.toRational(), precisionBits)}};
     }
 
-    if (value.isDecimalApproximation())
+    if (value.isDecimalApproximation()) {
+        const auto& decimal = value.asDecimalApproximation();
         return CertifiedValue{information
-            ? informationIntervalFromDecimal(value.asDecimalApproximation(), precisionBits)
-            : intervalFromDecimal(value.asDecimalApproximation(), precisionBits)};
+            ? informationIntervalFromDecimal(decimal, precisionBits)
+            : intervalFromDecimal(decimal, precisionBits)};
+    }
 
     if (value.isComplexDecimalApproximation()) {
         const auto& complex = value.asComplexDecimalApproximation();
@@ -80,6 +82,33 @@ namespace {
     }
 
     return std::nullopt;
+}
+
+[[nodiscard]] bool isVerifiedApproximation(const expression::Expr& value) noexcept {
+    if (value.isDecimalApproximation())
+        return !value.asDecimalApproximation().hasRigorousEnclosure();
+    if (!value.isComplexDecimalApproximation())
+        return false;
+    const auto& complex = value.asComplexDecimalApproximation();
+    return !complex.real().hasRigorousEnclosure()
+        || !complex.imaginary().hasRigorousEnclosure();
+}
+
+[[nodiscard]] bool containsVerifiedApproximation(
+    std::span<const expression::Expr> values) noexcept {
+    return std::any_of(values.begin(), values.end(), isVerifiedApproximation);
+}
+
+[[nodiscard]] expression::Expr markVerified(expression::Expr value) {
+    if (value.isDecimalApproximation())
+        return expression::Expr{value.asDecimalApproximation().asVerifiedApproximation()};
+    if (!value.isComplexDecimalApproximation())
+        return value;
+    const auto& complex = value.asComplexDecimalApproximation();
+    return expression::Expr{numeric::ComplexDecimalApproximation::fromComponents(
+        complex.real().asVerifiedApproximation(),
+        complex.imaginary().asVerifiedApproximation(),
+        false, false)};
 }
 
 [[nodiscard]] CertifiedValue normalizeComplex(ComplexInterval value) {
@@ -674,7 +703,10 @@ std::optional<expression::Expr> addApproximateScalars(
         result = addValues(result, *enclosed, precisionBits);
         information = addValues(information, *informationValue, precisionBits);
     }
-    return finalizeApproximateOperation(result, information, context->decimalDigits());
+    auto finalized = finalizeApproximateOperation(result, information, context->decimalDigits());
+    if (finalized && containsVerifiedApproximation(expressions))
+        *finalized = markVerified(std::move(*finalized));
+    return finalized;
 }
 
 std::optional<expression::Expr> subtractApproximateScalars(
@@ -692,10 +724,13 @@ std::optional<expression::Expr> subtractApproximateScalars(
     const auto informationRight = storedNumericInterval(rhs, precisionBits, true);
     if (!left || !right || !informationLeft || !informationRight)
         return std::nullopt;
-    return finalizeApproximateOperation(
+    auto finalized = finalizeApproximateOperation(
         subtractValues(*left, *right, precisionBits),
         subtractValues(*informationLeft, *informationRight, precisionBits),
         context->decimalDigits());
+    if (finalized && containsVerifiedApproximation(expressions))
+        *finalized = markVerified(std::move(*finalized));
+    return finalized;
 }
 
 std::optional<expression::Expr> multiplyApproximateScalars(
@@ -717,7 +752,10 @@ std::optional<expression::Expr> multiplyApproximateScalars(
         result = multiplyValues(result, *enclosed, precisionBits);
         information = multiplyValues(information, *informationValue, precisionBits);
     }
-    return finalizeApproximateOperation(result, information, context->decimalDigits());
+    auto finalized = finalizeApproximateOperation(result, information, context->decimalDigits());
+    if (finalized && containsVerifiedApproximation(expressions))
+        *finalized = markVerified(std::move(*finalized));
+    return finalized;
 }
 
 std::optional<expression::Expr> divideApproximateScalars(
@@ -737,10 +775,13 @@ std::optional<expression::Expr> divideApproximateScalars(
         return std::nullopt;
 
     try {
-        return finalizeApproximateOperation(
+        auto finalized = finalizeApproximateOperation(
             divideValues(*left, *right, precisionBits),
             divideValues(*informationLeft, *informationRight, precisionBits),
             context->decimalDigits());
+        if (finalized && containsVerifiedApproximation(expressions))
+            *finalized = markVerified(std::move(*finalized));
+        return finalized;
     }
     catch (const std::domain_error&) {
         return std::nullopt;

@@ -1,6 +1,7 @@
 // 多項式方程式solver
 #include "polynomial_solver.hpp"
 
+#include "evaluation/evaluation_budget.hpp"
 #include "mathematics/exact_algebra.hpp"
 #include "mathematics/math_ids.hpp"
 #include "mathematics/knowledge_context.hpp"
@@ -479,6 +480,10 @@ void appendDegenerateLinearCases(
     if (rhs.isZero())
         return {branch(variable, Expr{Number{BigInt{0}}}, degree)};
 
+    // root-of-unity表示は次数に依存せずexactに構成できる。固定次数ではなく，
+    // 実際に生成する解枝数をrequest-scoped budgetで制御する。
+    evaluation::consumeEvaluationBudget(evaluation::EvaluationResource::SolverBranch, degree);
+
     const bool negative = rhs < rational(0);
     const Rational magnitude = negative ? -rhs : rhs;
     const Expr radial = principalMagnitudeRoot(magnitude, degree, builtins);
@@ -604,7 +609,7 @@ void appendDegenerateLinearCases(
             std::make_move_iterator(quadratic.end()));
         return branches;
     }
-    if (isBinomial(polynomial) && polynomial.degree() <= 256) {
+    if (isBinomial(polynomial)) {
         auto binomial = solveBinomial(polynomial, variable, builtins, mathematics, angles);
         branches.insert(
             branches.end(),
@@ -632,6 +637,16 @@ struct RationalFunctionPolynomial final {
     symbolic::RationalPolynomial numerator;
     symbolic::RationalPolynomial denominator;
 };
+
+constexpr std::size_t maximumRationalFunctionPolynomialDegree = 4096;
+
+[[nodiscard]] bool poweredDegreeFits(
+    const symbolic::RationalPolynomial& polynomial,
+    std::uint64_t exponent) noexcept {
+    if (polynomial.isZero() || exponent == 0)
+        return true;
+    return polynomial.degree() <= maximumRationalFunctionPolynomialDegree / exponent;
+}
 
 [[nodiscard]] symbolic::RationalPolynomial polynomialOne() {
     return symbolic::RationalPolynomial{{rational(1)}};
@@ -764,18 +779,24 @@ struct RationalFunctionPolynomial final {
 
     if (definition->id == BuiltinId::Power && arguments.size() == 2) {
         const auto exponent = smallExactInteger(arguments[1]);
-        if (!exponent || *exponent < -64 || *exponent > 64)
+        if (!exponent)
             return std::nullopt;
         auto base = toRationalFunctionPolynomial(arguments[0], variable, builtins);
         if (!base)
             return std::nullopt;
-        const auto magnitude = static_cast<std::uint64_t>(
-            *exponent < 0 ? -*exponent : *exponent);
+        const std::uint64_t magnitude = *exponent < 0
+            ? static_cast<std::uint64_t>(-(*exponent + 1)) + 1U
+            : static_cast<std::uint64_t>(*exponent);
+        if (!poweredDegreeFits(base->numerator, magnitude)
+            || !poweredDegreeFits(base->denominator, magnitude))
+            return std::nullopt;
         if (*exponent < 0) {
             if (base->numerator.isZero())
                 return std::nullopt;
             std::swap(base->numerator, base->denominator);
         }
+        // 旧±64境界ではなく，実際に構築する多項式次数で安全性を判定する。
+        // 各powerは二乗法なので指数そのものが大きくても低次数monomial等を不当に拒否しない。
         base->numerator = powerPolynomial(base->numerator, magnitude);
         base->denominator = powerPolynomial(base->denominator, magnitude);
         return base;
@@ -1529,6 +1550,114 @@ struct SymbolicLinearEquation final {
     return simplify(std::move(determinant), builtins, mathematics, angles);
 }
 
+enum class SymbolicTriangularKind : std::uint8_t {
+    Upper,
+    Lower
+};
+
+[[nodiscard]] std::optional<SymbolicTriangularKind> symbolicTriangularKind(
+    const std::vector<std::vector<Expr>>& matrix,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    bool upper = true;
+    bool lower = true;
+    for (std::size_t row = 0; row < matrix.size(); ++row) {
+        for (std::size_t column = 0; column < matrix.size(); ++column) {
+            if (row > column && upper
+                && proveZero(matrix[row][column], builtins, mathematics)
+                    != mathematics::TruthValue::True)
+                upper = false;
+            if (column > row && lower
+                && proveZero(matrix[row][column], builtins, mathematics)
+                    != mathematics::TruthValue::True)
+                lower = false;
+            if (!upper && !lower)
+                return std::nullopt;
+        }
+    }
+    if (upper)
+        return SymbolicTriangularKind::Upper;
+    if (lower)
+        return SymbolicTriangularKind::Lower;
+    return std::nullopt;
+}
+
+[[nodiscard]] SolutionSet solveSymbolicTriangularSystem(
+    const std::vector<std::vector<Expr>>& matrix,
+    const std::vector<Expr>& rhs,
+    std::span<const expression::Symbol> variableSymbols,
+    SymbolicTriangularKind kind,
+    const mathematics::AssumptionSet& domainConditions,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::vector<SolverVariable> variables;
+    variables.reserve(variableSymbols.size());
+    for (const expression::Symbol& variable : variableSymbols)
+        variables.push_back(SolverVariable{variable, mathematics::NumericDomain::Complex});
+
+    std::vector<Expr> values(variableSymbols.size(), zeroExpr());
+    std::vector<Expr> pivots;
+    pivots.reserve(variableSymbols.size());
+
+    auto solveRow = [&](std::size_t row, std::size_t begin, std::size_t end) -> bool {
+        const Expr& pivot = matrix[row][row];
+        if (proveZero(pivot, builtins, mathematics) == mathematics::TruthValue::True)
+            return false;
+        pivots.push_back(pivot);
+
+        Expr numerator = rhs[row];
+        for (std::size_t column = begin; column < end; ++column) {
+            if (column == row
+                || proveZero(matrix[row][column], builtins, mathematics)
+                    == mathematics::TruthValue::True)
+                continue;
+            Expr product = Expr::call(
+                builtins.symbol(BuiltinId::Multiply),
+                {matrix[row][column], values[column]});
+            numerator = Expr::call(
+                builtins.symbol(BuiltinId::Subtract),
+                {std::move(numerator), std::move(product)});
+        }
+        numerator = simplify(std::move(numerator), builtins, mathematics, angles);
+        values[row] = simplify(
+            Expr::call(builtins.symbol(BuiltinId::Divide), {std::move(numerator), pivot}),
+            builtins, mathematics, angles);
+        return true;
+    };
+
+    if (kind == SymbolicTriangularKind::Upper) {
+        for (std::size_t row = variableSymbols.size(); row-- > 0;)
+            if (!solveRow(row, row + 1, variableSymbols.size()))
+                return SolutionSet::unresolved(variables).withAdditionalConditions(domainConditions);
+    }
+    else {
+        for (std::size_t row = 0; row < variableSymbols.size(); ++row)
+            if (!solveRow(row, 0, row))
+                return SolutionSet::unresolved(variables).withAdditionalConditions(domainConditions);
+    }
+
+    SolutionBranch unique;
+    unique.bindings.reserve(variableSymbols.size());
+    for (std::size_t index = 0; index < variableSymbols.size(); ++index)
+        unique.bindings.push_back(SolutionBinding{variableSymbols[index], values[index]});
+
+    Expr pivotProduct = Expr::call(builtins.symbol(BuiltinId::Multiply), std::move(pivots));
+    pivotProduct = simplify(std::move(pivotProduct), builtins, mathematics, angles);
+    const auto pivotsNonZero = proveNonZero(pivotProduct, builtins, mathematics);
+    if (pivotsNonZero == mathematics::TruthValue::True)
+        return SolutionSet::finite(variables, {std::move(unique)})
+            .withAdditionalConditions(domainConditions);
+
+    SolutionSet result = SolutionSet::conditional(
+        variables,
+        {
+            finiteCase(conditions({notEqualZero(pivotProduct)}), {std::move(unique)}),
+            SolutionCase{conditions({equalZero(pivotProduct)}), SolutionSetKind::Unresolved, {}}
+        });
+    return result.withAdditionalConditions(domainConditions);
+}
+
 [[nodiscard]] SolutionSet solveSymbolicLinearSystem(
     std::span<const Expr> equations,
     std::span<const expression::Symbol> variableSymbols,
@@ -1540,10 +1669,7 @@ struct SymbolicLinearEquation final {
     for (const expression::Symbol& variable : variableSymbols)
         variables.push_back(SolverVariable{variable, mathematics::NumericDomain::Complex});
 
-    // Cramerの公式を基準実装にする。式爆発を避けるため、symbolic coefficient版は
-    // まず4元まで。Rational係数系は下のGauss-Jordanが任意元を扱う。
-    if (variableSymbols.empty() || equations.size() != variableSymbols.size()
-        || variableSymbols.size() > 4)
+    if (variableSymbols.empty() || equations.size() != variableSymbols.size())
         return SolutionSet::unresolved(variables);
 
     std::vector<std::vector<Expr>> matrix;
@@ -1560,6 +1686,15 @@ struct SymbolicLinearEquation final {
         matrix.push_back(std::move(linear->coefficients));
         rhs.push_back(std::move(linear->rhs));
     }
+
+    // 三角系は逐次代入なら式爆発を起こしにくいため，元数で一律に打ち切らない。
+    // 一般dense symbolic系だけはCramer展開の上限を維持する。
+    if (const auto triangular = symbolicTriangularKind(matrix, builtins, mathematics))
+        return solveSymbolicTriangularSystem(
+            matrix, rhs, variableSymbols, *triangular, domainConditions,
+            builtins, mathematics, angles);
+    if (variableSymbols.size() > 4)
+        return SolutionSet::unresolved(variables).withAdditionalConditions(domainConditions);
 
     const Expr determinant = symbolicDeterminant(matrix, builtins, mathematics, angles);
     const auto determinantZero = proveZero(determinant, builtins, mathematics);
@@ -2085,7 +2220,7 @@ SolutionSet solvePolynomialEquation(
         *polynomial, variable, builtins, mathematics, angles))
         return SolutionSet::finite(variables, *cube);
 
-    if (isBinomial(*polynomial) && polynomial->degree() <= 256)
+    if (isBinomial(*polynomial))
         return SolutionSet::finite(
             variables,
             solveBinomial(*polynomial, variable, builtins, mathematics, angles));

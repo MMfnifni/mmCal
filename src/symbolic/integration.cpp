@@ -966,9 +966,11 @@ struct FactorSplit final {
         ? polynomialFactors.front()
         : call(builtins, BuiltinId::Multiply, std::move(polynomialFactors));
     const auto polynomial = toRationalPolynomial(
-        polynomialExpression, variable, builtins, PolynomialConversionOptions{128, 1024});
-    if (!polynomial || polynomial->degree() < 8 || polynomial->degree() > 128)
+        polynomialExpression, variable, builtins, PolynomialConversionOptions{4096, 4096});
+    if (!polynomial || polynomial->degree() < 8)
         return std::nullopt;
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate, polynomial->degree() + 1);
 
     const auto exponent = toRationalPolynomial(
         exponential->asCall().arguments[0], variable, builtins,
@@ -1711,6 +1713,11 @@ struct HermitePowerReduction final {
     HermitePowerReduction result;
     const RationalPolynomial derivative = differentiatePolynomial(squareFreeFactor);
     while (denominatorPower > 1 && !numerator.isZero()) {
+        // 旧degree境界の代わりに，各Hermite stepの多項式作業量を要求budgetへ課す。
+        const std::size_t width = squareFreeFactor.degree() + 1;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::IntegrationCandidate, width * width);
+
         PolynomialDivision inverseProduct = dividePolynomials(
             multiplyPolynomials(numerator, inverseDerivativeModuloFactor),
             squareFreeFactor);
@@ -1751,8 +1758,15 @@ struct HermitePowerReduction final {
     const mathematics::AngleSemantics& angles) {
     if (numerator.isZero())
         return integer(0);
-    if (denominator.degree() < 3 || denominator.degree() > 12)
+    if (denominator.degree() < 3)
         return std::nullopt;
+
+    // square-free分母の留数分解はdegree個のRootと各Root上の多項式評価を生成する。
+    // 固定次数で切らず，既存の代数次数budgetと概ねO(n^2)の式構築量を要求budgetへ課す。
+    evaluation::checkEvaluationAlgebraicDegree(denominator.degree());
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate,
+        denominator.degree() * denominator.degree());
 
     const RationalPolynomial derivative = differentiatePolynomial(denominator);
     if (polynomialGcdMonic(denominator, derivative).degree() != 0)
@@ -1818,6 +1832,129 @@ struct HermitePowerReduction final {
     return add(builtins, mathematics, angles, std::move(terms));
 }
 
+[[nodiscard]] bool appendHermitePrimitiveTerms(
+    std::vector<Expr>& primitiveTerms,
+    const std::vector<RationalPolynomial>& rationalNumerators,
+    const RationalPolynomial& squareFreeNumerator,
+    const RationalPolynomial& factor,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const Expr factorExpr = polynomialToExpandedExpr(factor, variable, builtins);
+    for (std::size_t denominatorPower = 1;
+         denominatorPower < rationalNumerators.size(); ++denominatorPower) {
+        if (rationalNumerators[denominatorPower].isZero())
+            continue;
+        Expr rationalNumerator = polynomialToExpandedExpr(
+            rationalNumerators[denominatorPower], variable, builtins);
+        Expr rationalDenominator = power(
+            builtins, mathematics, angles, factorExpr,
+            integer(static_cast<std::int64_t>(denominatorPower)));
+        primitiveTerms.push_back(divide(
+            builtins, mathematics, angles,
+            std::move(rationalNumerator), std::move(rationalDenominator)));
+    }
+
+    if (!squareFreeNumerator.isZero()) {
+        const auto logarithmic = integrateSquareFreeAlgebraicLog(
+            squareFreeNumerator, factor, variable, builtins, mathematics, angles);
+        if (!logarithmic)
+            return false;
+        primitiveTerms.push_back(*logarithmic);
+    }
+    return true;
+}
+
+[[nodiscard]] bool appendSingleFactorPowerPrimitiveTerms(
+    std::vector<Expr>& primitiveTerms,
+    RationalPolynomial numerator,
+    const RationalPolynomial& factor,
+    std::size_t multiplicity,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (numerator.isZero())
+        return true;
+    if (multiplicity == 0 || factor.degree() == 0)
+        return false;
+
+    // degree 1/2ではnumeratorをf進展開して A_k/f^k へ分ける。
+    // factorはYun分解由来のmonic square-free多項式だが，式はleading係数も含め一般形で書く。
+    if (factor.degree() <= 2) {
+        std::vector<RationalPolynomial> partialNumerators(
+            multiplicity + 1, RationalPolynomial{});
+        RationalPolynomial current = std::move(numerator);
+        for (std::size_t powerIndex = multiplicity; powerIndex != 0; --powerIndex) {
+            PolynomialDivision division = dividePolynomials(current, factor);
+            partialNumerators[powerIndex] = std::move(division.remainder);
+            current = std::move(division.quotient);
+        }
+        if (!current.isZero())
+            return false;
+
+        const Expr factorExpr = polynomialToExpandedExpr(factor, variable, builtins);
+        if (factor.degree() == 1) {
+            const Rational slope = factor.coefficient(1);
+            if (slope.isZero())
+                return false;
+            for (std::size_t k = 1; k <= multiplicity; ++k) {
+                if (partialNumerators[k].isZero())
+                    continue;
+                if (partialNumerators[k].degree() != 0)
+                    return false;
+                const Rational coefficient = partialNumerators[k].coefficient(0) / slope;
+                if (k == 1) {
+                    primitiveTerms.push_back(multiply(builtins, mathematics, angles, {
+                        rational(coefficient), call(builtins, BuiltinId::Log, {factorExpr})}));
+                }
+                else {
+                    const Rational exponent{BigInt{1 - static_cast<std::int64_t>(k)}};
+                    primitiveTerms.push_back(multiply(builtins, mathematics, angles, {
+                        rational(coefficient / exponent),
+                        power(builtins, mathematics, angles, factorExpr, rational(exponent))}));
+                }
+            }
+            return true;
+        }
+
+        for (std::size_t k = 1; k <= multiplicity; ++k) {
+            if (partialNumerators[k].isZero())
+                continue;
+            const auto primitive = integrateQuadraticPartialFraction(
+                partialNumerators[k], factor, k, variable, builtins, mathematics, angles);
+            if (!primitive)
+                return false;
+            primitiveTerms.push_back(*primitive);
+        }
+        return true;
+    }
+
+    const RationalPolynomial derivative = differentiatePolynomial(factor);
+    if (polynomialGcdMonic(factor, derivative).degree() != 0)
+        return false;
+    const auto inverseDerivative = polynomialInverseModulo(derivative, factor);
+    if (!inverseDerivative)
+        return false;
+
+    const auto reduced = hermiteReduceSquareFreePower(
+        std::move(numerator), factor, multiplicity, *inverseDerivative);
+    if (!reduced)
+        return false;
+    std::vector<RationalPolynomial> rationalNumerators(
+        multiplicity, RationalPolynomial{});
+    for (const auto& [rationalNumerator, denominatorPower] : reduced->rationalTerms) {
+        if (denominatorPower == 0 || denominatorPower >= rationalNumerators.size())
+            return false;
+        rationalNumerators[denominatorPower] = addPolynomials(
+            rationalNumerators[denominatorPower], rationalNumerator);
+    }
+    return appendHermitePrimitiveTerms(
+        primitiveTerms, rationalNumerators, reduced->squareFreeNumerator,
+        factor, variable, builtins, mathematics, angles);
+}
+
 [[nodiscard]] std::optional<Expr> tryRationalFactored(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -1835,10 +1972,70 @@ struct HermitePowerReduction final {
         numeratorExpr, variable, builtins, PolynomialConversionOptions{256, 2048});
     const auto denominator = toRationalPolynomial(
         denominatorExpr, variable, builtins, PolynomialConversionOptions{64, 1024});
-    if (!numerator || !denominator || denominator->degree() <= 2 || denominator->degree() > 12)
+    if (!numerator || !denominator || denominator->degree() <= 2)
+        return std::nullopt;
+    if (denominator->degree() > 12 && !allowAlgebraicFactors)
         return std::nullopt;
 
     PolynomialDivision division = dividePolynomials(*numerator, *denominator);
+
+    // degree 12を超える有理分母ではdense partial-fraction線形系を作らない。
+    // Yun分解の互いに素な f_i^k をCRTで分離し，各成分を既存のlinear/quadratic
+    // recurrenceまたはHermite reductionへ直接渡す。固定degreeではなく実作業量で制御する。
+    if (allowAlgebraicFactors && denominator->degree() > 12) {
+        std::vector<Expr> primitiveTerms;
+        if (!division.quotient.isZero()) {
+            Expr quotientExpr = polynomialToExpandedExpr(division.quotient, variable, builtins);
+            const auto primitive = integratePolynomial(
+                quotientExpr, variable, builtins, mathematics, angles);
+            if (!primitive)
+                return std::nullopt;
+            primitiveTerms.push_back(*primitive);
+        }
+        if (division.remainder.isZero()) {
+            if (primitiveTerms.empty())
+                return integer(0);
+            return add(builtins, mathematics, angles, std::move(primitiveTerms));
+        }
+
+        const Rational leading = denominator->coefficient(denominator->degree());
+        RationalPolynomial normalizedDenominator = scalePolynomial(
+            *denominator, Rational{BigInt{1}} / leading);
+        RationalPolynomial normalizedRemainder = scalePolynomial(
+            division.remainder, Rational{BigInt{1}} / leading);
+        const auto factors = factorIntoSquareFreePowers(normalizedDenominator);
+        if (!factors)
+            return std::nullopt;
+
+        const std::size_t width = denominator->degree() + 1;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::IntegrationCandidate, width * width);
+
+        for (const RationalFactor& factor : *factors) {
+            RationalPolynomial modulus = powerPolynomial(factor.polynomial, factor.multiplicity);
+            PolynomialDivision cofactorDivision = dividePolynomials(
+                normalizedDenominator, modulus);
+            if (!cofactorDivision.remainder.isZero())
+                return std::nullopt;
+            const auto inverseCofactor = polynomialInverseModulo(
+                cofactorDivision.quotient, modulus);
+            if (!inverseCofactor)
+                return std::nullopt;
+
+            PolynomialDivision reducedNumerator = dividePolynomials(
+                multiplyPolynomials(normalizedRemainder, *inverseCofactor), modulus);
+            if (!appendSingleFactorPowerPrimitiveTerms(
+                    primitiveTerms, std::move(reducedNumerator.remainder),
+                    factor.polynomial, factor.multiplicity,
+                    variable, builtins, mathematics, angles))
+                return std::nullopt;
+        }
+
+        if (primitiveTerms.empty())
+            return integer(0);
+        return add(builtins, mathematics, angles, std::move(primitiveTerms));
+    }
+
     auto factors = factorIntoLinearQuadratic(*denominator);
     if (!factors)
         factors = factorIntoRationalFactorsViaFactorEngine(
@@ -1993,28 +2190,10 @@ struct HermitePowerReduction final {
             }
         }
 
-        for (std::size_t denominatorPower = 1;
-             denominatorPower < rationalNumerators.size(); ++denominatorPower) {
-            if (rationalNumerators[denominatorPower].isZero())
-                continue;
-            Expr rationalNumerator = polynomialToExpandedExpr(
-                rationalNumerators[denominatorPower], variable, builtins);
-            Expr rationalDenominator = power(
-                builtins, mathematics, angles, factorExpr,
-                integer(static_cast<std::int64_t>(denominatorPower)));
-            primitiveTerms.push_back(divide(
-                builtins, mathematics, angles,
-                std::move(rationalNumerator), std::move(rationalDenominator)));
-        }
-
-        if (!squareFreeNumerator.isZero()) {
-            const auto logarithmic = integrateSquareFreeAlgebraicLog(
-                squareFreeNumerator, factor.polynomial,
-                variable, builtins, mathematics, angles);
-            if (!logarithmic)
-                return std::nullopt;
-            primitiveTerms.push_back(*logarithmic);
-        }
+        if (!appendHermitePrimitiveTerms(
+                primitiveTerms, rationalNumerators, squareFreeNumerator,
+                factor.polynomial, variable, builtins, mathematics, angles))
+            return std::nullopt;
     }
 
     if (primitiveTerms.empty())
@@ -2469,9 +2648,11 @@ struct TrigArgument final {
         ? polynomialFactors.front()
         : call(builtins, BuiltinId::Multiply, std::move(polynomialFactors));
     const auto polynomial = toRationalPolynomial(
-        polynomialExpression, variable, builtins, PolynomialConversionOptions{128, 1024});
-    if (!polynomial || polynomial->degree() < 12 || polynomial->degree() > 128)
+        polynomialExpression, variable, builtins, PolynomialConversionOptions{4096, 4096});
+    if (!polynomial || polynomial->degree() < 12)
         return std::nullopt;
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate, polynomial->degree() + 1);
 
     Expr source = function->asCall().arguments[0];
     Rational rate{BigInt{0}};
@@ -2741,7 +2922,8 @@ struct EllipticTrigKernel final {
 
     const auto& powerArguments = expression.asCall().arguments;
     const auto order = negativeIntegerMagnitude(powerArguments[1]);
-    if (!order || *order == 0 || *order > 256)
+    if (!order || *order == 0
+        || *order >= static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
         return std::nullopt;
 
     const Expr& base = powerArguments[0];
@@ -2758,6 +2940,12 @@ struct EllipticTrigKernel final {
         return std::nullopt;
     Expr inverseScale = divide(
         builtins, mathematics, angles, std::move(info.inverseScale), std::move(du));
+
+    // reduction formulaの仕事量は冪指数にほぼ線形なので，固定次数ではなく
+    // request-scoped integration budgetで制御する。
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate,
+        static_cast<std::size_t>(*order));
 
     const bool sine = definition->id == BuiltinId::Sin;
     const BuiltinId reciprocalId = sine ? BuiltinId::Csc : BuiltinId::Sec;
@@ -2817,7 +3005,8 @@ struct EllipticTrigKernel final {
 
     const auto& a = expression.asCall().arguments;
     const auto order = positiveIntegerMagnitude(a[1]);
-    if (!order || *order < 2 || *order > 256)
+    if (!order || *order < 2
+        || *order >= static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
         return std::nullopt;
     const Expr& base = a[0];
     if (!base.isCall() || base.asCall().arguments.size() != 1)
@@ -2827,8 +3016,13 @@ struct EllipticTrigKernel final {
         return std::nullopt;
 
     const BuiltinId id = definition->id;
-    if (id != BuiltinId::Tan && id != BuiltinId::Cot
+    const bool directSinCos = id == BuiltinId::Sin || id == BuiltinId::Cos;
+    if (!directSinCos
+        && id != BuiltinId::Tan && id != BuiltinId::Cot
         && id != BuiltinId::Sec && id != BuiltinId::Csc)
+        return std::nullopt;
+    // 256次以下のsin/cos冪は既存の有限Fourier形の方が平坦なのでそちらを維持する。
+    if (directSinCos && *order <= 256)
         return std::nullopt;
 
     const Expr& sourceArgument = base.asCall().arguments[0];
@@ -2839,12 +3033,43 @@ struct EllipticTrigKernel final {
     Expr inverseScale = divide(
         builtins, mathematics, angles, std::move(info.inverseScale), std::move(du));
 
+    // こちらも漸化式の反復回数を統一budgetへ課し，256という古いpolicy上限を持たない。
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate,
+        static_cast<std::size_t>(*order));
+
     const auto same = [&](BuiltinId function) {
         return call(builtins, function, {sourceArgument});
     };
 
     std::vector<std::optional<Expr>> primitives(static_cast<std::size_t>(*order) + 1);
-    if (id == BuiltinId::Tan || id == BuiltinId::Cot) {
+    if (directSinCos) {
+        const bool sine = id == BuiltinId::Sin;
+        const BuiltinId companion = sine ? BuiltinId::Cos : BuiltinId::Sin;
+        primitives[0] = sourceArgument;
+        primitives[1] = sine
+            ? negate(builtins, mathematics, angles, same(companion))
+            : same(companion);
+
+        // I_n(sin/cos)の標準reduction formula。高次数だけをここへ送り，
+        // 低次数のflat Fourier canonical formは既存経路へ任せる。
+        for (std::uint64_t n = 2; n <= *order; ++n) {
+            Expr boundary = multiply(builtins, mathematics, angles, {
+                power(builtins, mathematics, angles, same(id),
+                    integer(static_cast<std::int64_t>(n - 1))),
+                same(companion)});
+            if (sine)
+                boundary = negate(builtins, mathematics, angles, std::move(boundary));
+            boundary = divide(builtins, mathematics, angles,
+                std::move(boundary), integer(static_cast<std::int64_t>(n)));
+            Expr recurrence = multiply(builtins, mathematics, angles, {
+                rational(Rational{BigInt::fromUnsigned(n - 1), BigInt::fromUnsigned(n)}),
+                *primitives[static_cast<std::size_t>(n - 2)]});
+            primitives[static_cast<std::size_t>(n)] = add(
+                builtins, mathematics, angles, {std::move(boundary), std::move(recurrence)});
+        }
+    }
+    else if (id == BuiltinId::Tan || id == BuiltinId::Cot) {
         primitives[0] = sourceArgument;
         primitives[1] = id == BuiltinId::Tan
             ? negate(builtins, mathematics, angles,
@@ -2937,6 +3162,72 @@ struct EllipticTrigKernel final {
         std::move(amplitude), integer(-1)});
 }
 
+struct RationalMonomialInfo final {
+    Rational coefficient{BigInt{1}};
+    std::uint64_t degree = 0;
+};
+
+[[nodiscard]] std::optional<RationalMonomialInfo> exactRationalMonomial(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    FactorSplit split = splitConstantFactor(
+        expression, variable, builtins, mathematics, angles);
+    const auto coefficient = expression::exact::realRational(split.constant);
+    if (!coefficient)
+        return std::nullopt;
+
+    if (isOne(split.dependent))
+        return RationalMonomialInfo{*coefficient, 0};
+    if (split.dependent.isSymbol()
+        && split.dependent.asSymbol().sameIdentity(variable))
+        return RationalMonomialInfo{*coefficient, 1};
+    if (!isHead(split.dependent, builtins, BuiltinId::Power)
+        || split.dependent.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& arguments = split.dependent.asCall().arguments;
+    if (!arguments[0].isSymbol()
+        || !arguments[0].asSymbol().sameIdentity(variable))
+        return std::nullopt;
+    const auto degree = positiveIntegerMagnitude(arguments[1]);
+    if (!degree)
+        return std::nullopt;
+    return RationalMonomialInfo{*coefficient, *degree};
+}
+
+struct OnePlusMonomialInfo final {
+    Rational beta{BigInt{1}};
+    std::uint64_t degree = 0;
+};
+
+[[nodiscard]] std::optional<OnePlusMonomialInfo> exactOnePlusMonomial(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isHead(expression, builtins, BuiltinId::Add)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+
+    const auto& arguments = expression.asCall().arguments;
+    const Expr* monomial = nullptr;
+    if (isOne(arguments[0]))
+        monomial = &arguments[1];
+    else if (isOne(arguments[1]))
+        monomial = &arguments[0];
+    else
+        return std::nullopt;
+
+    const auto parsed = exactRationalMonomial(
+        *monomial, variable, builtins, mathematics, angles);
+    if (!parsed || parsed->degree == 0 || parsed->coefficient.isZero())
+        return std::nullopt;
+    return OnePlusMonomialInfo{parsed->coefficient, parsed->degree};
+}
+
 [[nodiscard]] std::optional<Expr> integrateBinomialPower2F1(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -2966,22 +3257,33 @@ struct EllipticTrigKernel final {
         && expression.asCall().arguments.size() == 2) {
         const Expr& numeratorExpr = expression.asCall().arguments[0];
         const Expr& denominator = expression.asCall().arguments[1];
-        const auto numerator = toRationalPolynomial(
-            numeratorExpr, variable, builtins, PolynomialConversionOptions{4096, 8192});
-        if (!numerator)
-            return std::nullopt;
-        std::optional<std::size_t> monomialDegree;
-        for (std::size_t i = 0; i <= numerator->degree(); ++i) {
-            if (numerator->coefficient(i).isZero())
-                continue;
-            if (monomialDegree)
+        if (const auto numerator = exactRationalMonomial(
+                numeratorExpr, variable, builtins, mathematics, angles)) {
+            if (numerator->coefficient.isZero())
+                return integer(0);
+            if (numerator->degree > std::numeric_limits<std::size_t>::max())
                 return std::nullopt;
-            monomialDegree = i;
-            outside = numerator->coefficient(i);
+            numeratorDegree = static_cast<std::size_t>(numerator->degree);
+            outside = numerator->coefficient;
         }
-        if (!monomialDegree)
-            return integer(0);
-        numeratorDegree = *monomialDegree;
+        else {
+            const auto polynomialNumerator = toRationalPolynomial(
+                numeratorExpr, variable, builtins, PolynomialConversionOptions{4096, 8192});
+            if (!polynomialNumerator)
+                return std::nullopt;
+            std::optional<std::size_t> monomialDegree;
+            for (std::size_t i = 0; i <= polynomialNumerator->degree(); ++i) {
+                if (polynomialNumerator->coefficient(i).isZero())
+                    continue;
+                if (monomialDegree)
+                    return std::nullopt;
+                monomialDegree = i;
+                outside = polynomialNumerator->coefficient(i);
+            }
+            if (!monomialDegree)
+                return integer(0);
+            numeratorDegree = *monomialDegree;
+        }
 
         if (isHead(denominator, builtins, BuiltinId::Sqrt)
             && denominator.asCall().arguments.size() == 1) {
@@ -2996,24 +3298,35 @@ struct EllipticTrigKernel final {
     if (!base || !exponent)
         return std::nullopt;
 
-    const auto polynomial = toRationalPolynomial(
-        *base, variable, builtins, PolynomialConversionOptions{4096, 8192});
-    if (!polynomial || polynomial->degree() < 2
-        || polynomial->coefficient(0) != Rational{BigInt{1}})
-        return std::nullopt;
-    const std::size_t degree = polynomial->degree();
-    for (std::size_t i = 1; i < degree; ++i)
-        if (!polynomial->coefficient(i).isZero())
+    Rational beta{BigInt{0}};
+    std::uint64_t degree = 0;
+    if (const auto binomial = exactOnePlusMonomial(
+            *base, variable, builtins, mathematics, angles)) {
+        beta = binomial->beta;
+        degree = binomial->degree;
+    }
+    else {
+        const auto polynomial = toRationalPolynomial(
+            *base, variable, builtins, PolynomialConversionOptions{4096, 8192});
+        if (!polynomial || polynomial->degree() < 2
+            || polynomial->coefficient(0) != Rational{BigInt{1}})
             return std::nullopt;
-    const Rational beta = polynomial->coefficient(degree);
-    if (beta.isZero() || degree > 4096)
-        return std::nullopt;
+        const std::size_t polynomialDegree = polynomial->degree();
+        for (std::size_t i = 1; i < polynomialDegree; ++i)
+            if (!polynomial->coefficient(i).isZero())
+                return std::nullopt;
+        beta = polynomial->coefficient(polynomialDegree);
+        if (beta.isZero())
+            return std::nullopt;
+        degree = static_cast<std::uint64_t>(polynomialDegree);
+    }
 
-    const BigInt mPlusOne = BigInt::fromUnsigned(numeratorDegree + 1);
-    const Rational b{mPlusOne, BigInt::fromUnsigned(degree)};
+    const BigInt mPlusOne = BigInt::fromUnsigned(numeratorDegree) + BigInt{1};
+    const BigInt degreeInteger = BigInt::fromUnsigned(degree);
+    const Rational b{mPlusOne, degreeInteger};
     const Rational c = Rational{BigInt{1}} + b;
     Expr xPower = power(builtins, mathematics, angles,
-        Expr{variable}, integer(static_cast<std::int64_t>(degree)));
+        Expr{variable}, Expr{Number{degreeInteger}});
     Expr z = multiply(builtins, mathematics, angles, {
         rational(-beta), std::move(xPower)});
     Expr leading = divide(builtins, mathematics, angles,
@@ -3059,7 +3372,7 @@ struct EllipticTrigKernel final {
         || !powerArguments[0].asSymbol().sameIdentity(variable))
         return std::nullopt;
     const auto order = positiveIntegerMagnitude(powerArguments[1]);
-    if (!order || *order < 2 || *order > 4096)
+    if (!order || *order < 2)
         return std::nullopt;
 
     // Gaussian exp[-a x^2] (a>0 exact Rational) は一般1F1より erf を preferred form とする。
@@ -3110,29 +3423,41 @@ struct EllipticTrigKernel final {
         || arguments[0].asCall().arguments.size() != 1)
         return std::nullopt;
 
-    const auto polynomial = toRationalPolynomial(
-        arguments[0].asCall().arguments[0], variable, builtins,
-        PolynomialConversionOptions{4096, 4096});
-    if (!polynomial || polynomial->degree() < 1
-        || polynomial->coefficient(0) != Rational{BigInt{1}})
-        return std::nullopt;
-    const std::size_t degree = polynomial->degree();
-    for (std::size_t i = 1; i < degree; ++i)
-        if (!polynomial->coefficient(i).isZero())
+    const Expr& logarithmArgument = arguments[0].asCall().arguments[0];
+    Rational beta{BigInt{0}};
+    std::uint64_t degree = 0;
+    if (const auto binomial = exactOnePlusMonomial(
+            logarithmArgument, variable, builtins, mathematics, angles)) {
+        beta = binomial->beta;
+        degree = binomial->degree;
+    }
+    else {
+        const auto polynomial = toRationalPolynomial(
+            logarithmArgument, variable, builtins,
+            PolynomialConversionOptions{4096, 4096});
+        if (!polynomial || polynomial->degree() < 1
+            || polynomial->coefficient(0) != Rational{BigInt{1}})
             return std::nullopt;
-    const Rational beta = polynomial->coefficient(degree);
-    if (beta.isZero() || degree > 4096)
-        return std::nullopt;
+        const std::size_t polynomialDegree = polynomial->degree();
+        for (std::size_t i = 1; i < polynomialDegree; ++i)
+            if (!polynomial->coefficient(i).isZero())
+                return std::nullopt;
+        beta = polynomial->coefficient(polynomialDegree);
+        if (beta.isZero())
+            return std::nullopt;
+        degree = static_cast<std::uint64_t>(polynomialDegree);
+    }
 
+    const BigInt degreeInteger = BigInt::fromUnsigned(degree);
     Expr xPower = power(builtins, mathematics, angles,
-        Expr{variable}, integer(static_cast<std::int64_t>(degree)));
+        Expr{variable}, Expr{Number{degreeInteger}});
     Expr z = multiply(builtins, mathematics, angles, {
         rational(-beta), std::move(xPower)});
     Expr dilogarithm = call(builtins, BuiltinId::Polylog, {
         integer(2), std::move(z)});
     return divide(builtins, mathematics, angles,
         negate(builtins, mathematics, angles, std::move(dilogarithm)),
-        integer(static_cast<std::int64_t>(degree)));
+        Expr{Number{degreeInteger}});
 }
 
 [[nodiscard]] std::optional<Expr> integrateQuadraticFresnel(
@@ -4147,9 +4472,9 @@ struct RationalFunctionForm final {
                 && logFactor.asCall().arguments[0].asSymbol().sameIdentity(variable)))
             continue;
 
-        std::size_t n = 0;
+        std::optional<BigInt> n;
         if (monomial.isSymbol() && monomial.asSymbol().sameIdentity(variable))
-            n = 1;
+            n = BigInt{1};
         else if (isHead(monomial, builtins, BuiltinId::Power)
             && monomial.asCall().arguments.size() == 2
             && monomial.asCall().arguments[0].isSymbol()
@@ -4157,16 +4482,14 @@ struct RationalFunctionForm final {
             const auto exponent = expression::exact::realRational(monomial.asCall().arguments[1]);
             if (!exponent || !exponent->isInteger() || exponent->numerator().isNegative())
                 continue;
-            const auto value = numeric::tryToUint64(exponent->numerator());
-            if (!value || *value > 256)
-                continue;
-            n = static_cast<std::size_t>(*value);
+            n = exponent->numerator();
         }
         else {
             continue;
         }
 
-        const Rational m{BigInt{static_cast<std::int64_t>(n + 1)}};
+        // このprimitiveは指数に対してO(1)で構成できるため，機械語整数へ縮小しない。
+        const Rational m{*n + BigInt{1}};
         Expr xPower = power(builtins, mathematics, angles,
             Expr{variable}, rational(m));
         Expr first = multiply(builtins, mathematics, angles, {
@@ -5834,9 +6157,13 @@ struct LogMomentKernel final {
     // = (-1)^m m!/(a+1)^(m+1), for a>-1.
     if (isExactZeroExpr(lower) && isExactOneExpr(upper)) {
         if (auto moment = logMomentKernel(expression, variable, builtins)) {
-            if (moment->logPower <= 64
-                && proveGreaterThan(moment->exponent, integer(-1),
+            if (proveGreaterThan(moment->exponent, integer(-1),
                     builtins, mathematics, assumptions)) {
+                // 閉形式自体はlog冪次数に制限がない。旧64境界の代わりに，
+                // factorial構築へ必要な実作業量を積分budgetへ直接課す。
+                evaluation::consumeEvaluationBudget(
+                    evaluation::EvaluationResource::IntegrationCandidate,
+                    static_cast<std::size_t>(moment->logPower));
                 BigInt factorial{1};
                 for (std::uint64_t k = 2; k <= moment->logPower; ++k)
                     factorial *= BigInt::fromUnsigned(k);
@@ -5844,11 +6171,13 @@ struct LogMomentKernel final {
                     factorial = -factorial;
                 Expr next = simplify(add(builtins, mathematics, angles, {
                     moment->exponent, integer(1)}), builtins, mathematics, angles);
+                const BigInt denominatorPower =
+                    BigInt::fromUnsigned(moment->logPower) + BigInt{1};
                 return simplification::Simplifier{}.simplify(
                     divide(builtins, mathematics, angles,
                         Expr{Number{factorial}},
                         power(builtins, mathematics, angles, next,
-                            integer(static_cast<std::int64_t>(moment->logPower + 1)))),
+                            Expr{Number{denominatorPower}})),
                     context);
             }
         }

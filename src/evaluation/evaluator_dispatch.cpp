@@ -766,9 +766,6 @@ expression::Expr Evaluator::dispatchBuiltin(
                 if (!parsed)
                     error::throwCalcError(error::CalcErrorType::Domain,
                         "D derivative order must be a nonnegative integer that fits in uint64");
-                if (*parsed > 4096)
-                    error::throwCalcError(error::CalcErrorType::Overflow,
-                        "D derivative order is too large");
                 variable = specVariable.asSymbol();
                 order = *parsed;
             }
@@ -785,6 +782,9 @@ expression::Expr Evaluator::dispatchBuiltin(
                 }
             }
             for (std::uint64_t derivative = 0; derivative < order; ++derivative) {
+                // 高階Dは固定order上限ではなくrequest budgetで制御する。
+                // exact 0へ到達した後は残りorderを反復する必要がない。
+                consumeEvaluationBudget(EvaluationResource::EvaluationStep);
                 result = symbolic::differentiateExpression(
                     result, variable, registry_, mathematics_, angleSemantics_);
                 if (const auto normalized = symbolic::normalizeRationalExpression(
@@ -794,6 +794,8 @@ expression::Expr Evaluator::dispatchBuiltin(
                 if (order > 1)
                     result = symbolic::canonicalizeDerivativeOutput(
                         result, registry_, mathematics_, angleSemantics_);
+                if (result.isNumber() && result.asNumber().isZero())
+                    break;
             }
         }
 

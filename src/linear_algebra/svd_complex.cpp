@@ -592,17 +592,15 @@ private:
     for (const ComplexPoint& value : matrix.values()) {
         const Rational realExact = value.real.toRational();
         const Rational imaginaryExact = value.imaginary.toRational();
-        const auto real = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-            realExact, realExact, digits);
-        const auto imaginary = numeric::DecimalApproximation::fromCertifiedIntervalSignificant(
-            imaginaryExact, imaginaryExact, digits);
-        if (!real || !imaginary)
-            return std::nullopt;
+        const auto real = numeric::DecimalApproximation::fromVerifiedValueSignificant(
+            numeric::RealNumber{realExact}, digits);
+        const auto imaginary = numeric::DecimalApproximation::fromVerifiedValueSignificant(
+            numeric::RealNumber{imaginaryExact}, digits);
         if (imaginaryExact.isZero())
-            values.emplace_back(*real);
+            values.emplace_back(real);
         else
             values.emplace_back(numeric::ComplexDecimalApproximation::fromComponents(
-                *real, *imaginary, realExact.isZero(), false));
+                real, imaginary, false, false));
     }
     return Expr::array({matrix.rows(), matrix.columns()}, std::move(values));
 }

@@ -10,6 +10,7 @@
 #include "numeric/rational.hpp"
 #include "simplification/simplification_context.hpp"
 #include "simplification/simplifier.hpp"
+#include "evaluation/evaluation_budget.hpp"
 #include "evaluation/iterator_spec.hpp"
 #include "expression/array_utils.hpp"
 #include "expression/exact_value.hpp"
@@ -18,7 +19,9 @@
 #include "symbolic/substitution.hpp"
 #include "symbolic/series.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1317,6 +1320,39 @@ using numeric::Rational;
     return unresolvedDerivative(expression, variable, builtins);
 }
 
+[[nodiscard]] std::size_t saturatedTriangularWork(std::uint64_t order) {
+    constexpr std::size_t maximum = std::numeric_limits<std::size_t>::max();
+    if (order > static_cast<std::uint64_t>(maximum))
+        return maximum;
+
+    const std::size_t n = static_cast<std::size_t>(order);
+    if (n == maximum)
+        return maximum;
+    std::size_t lhs = n;
+    std::size_t rhs = n + 1;
+    if ((lhs & 1U) == 0)
+        lhs /= 2;
+    else
+        rhs /= 2;
+    if (lhs != 0 && rhs > maximum / lhs)
+        return maximum;
+    return lhs * rhs;
+}
+
+void chargeRepeatedDerivativeWork(std::uint64_t order) {
+    // 高階微分fast pathの係数漸化式は O(n^2) 個の係数更新を行う。
+    // orderそのものに固定境界を置かず，実更新数をrequest budgetへ先払いして
+    // 巨大orderではvector確保やBigInt生成へ入る前に停止する。
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::EvaluationStep,
+        saturatedTriangularWork(order));
+}
+
+void checkRationalCoefficientBits(const Rational& value) {
+    evaluation::checkEvaluationBigIntegerBits(std::max(
+        value.numerator().bitLength(), value.denominator().bitLength()));
+}
+
 [[nodiscard]] Expr polylogOrderShift(
     const Expr& order,
     std::uint64_t shift,
@@ -1350,7 +1386,7 @@ using numeric::Rational;
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    if (order == 0 || order > 64
+    if (order == 0
         || !isHead(expression, builtins, BuiltinId::Exp)
         || expression.asCall().arguments.size() != 1)
         return std::nullopt;
@@ -1368,6 +1404,7 @@ using numeric::Rational;
         const Rational linear = q->coefficient(1);
         const Rational quadratic = q->coefficient(2);
         const Rational slope = Rational{BigInt{2}} * quadratic;
+        chargeRepeatedDerivativeWork(order);
         std::vector<Rational> coefficients{Rational{BigInt{1}}};
         for (std::uint64_t n = 0; n < order; ++n) {
             std::vector<Rational> next(coefficients.size() + 1, Rational{BigInt{0}});
@@ -1379,6 +1416,8 @@ using numeric::Rational;
             }
             while (next.size() > 1 && next.back().isZero())
                 next.pop_back();
+            for (const Rational& coefficient : next)
+                checkRationalCoefficientBits(coefficient);
             coefficients = std::move(next);
         }
         RationalPolynomial polynomial{std::move(coefficients)};
@@ -1398,6 +1437,7 @@ using numeric::Rational;
     if (!(third.isNumber() && third.asNumber().isZero()))
         return std::nullopt;
 
+    chargeRepeatedDerivativeWork(order);
     // exp[q(x)] with third derivative zero: P_0=1, P_(n+1)=P'_n+q'P_n.
     // The recurrence keeps the common exponential factor outside instead of
     // repeatedly expanding it through the generic product rule.
@@ -1421,7 +1461,8 @@ using numeric::Rational;
     const expression::Symbol& variable,
     std::uint64_t order,
     const evaluation::BuiltinRegistry& builtins) {
-    if (order == 0 || order > 64
+    if (order == 0
+        || order > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
         || !isHead(expression, builtins, BuiltinId::LambertW))
         return std::nullopt;
     const auto& arguments = expression.asCall().arguments;
@@ -1431,6 +1472,7 @@ using numeric::Rational;
         || (arguments.size() == 2 && containsVariable(arguments[0], variable)))
         return std::nullopt;
 
+    chargeRepeatedDerivativeWork(order - 1);
     // DLMF 4.13.4_1--4.13.4_2:
     // D^n W = exp[-n W] p_(n-1)(W)/(1+W)^(2n-1),
     // p_0=1, p_n=(1+W)p'_(n-1)+(1-n(W+3))p_(n-1).
@@ -1450,6 +1492,8 @@ using numeric::Rational;
             next[i - 1] += iBig * coefficient;
             next[i] += iBig * coefficient;
         }
+        for (const BigInt& coefficient : next)
+            evaluation::checkEvaluationBigIntegerBits(coefficient.bitLength());
         coefficients = std::move(next);
     }
 
@@ -1561,7 +1605,8 @@ void appendDerivativeLinearTerms(
     const expression::Symbol& variable,
     std::uint64_t order,
     const evaluation::BuiltinRegistry& builtins) {
-    if (order == 0 || order > 64
+    if (order == 0
+        || order > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
         || !isHead(expression, builtins, BuiltinId::Polylog)
         || expression.asCall().arguments.size() != 2)
         return std::nullopt;
@@ -1571,16 +1616,20 @@ void appendDerivativeLinearTerms(
         || !arguments[1].asSymbol().sameIdentity(variable))
         return std::nullopt;
 
+    chargeRepeatedDerivativeWork(order);
     // D^n = z^-n * theta(theta-1)...(theta-n+1), theta=z D.
     // theta^k Li_s = Li_{s-k}; coefficients are signed Stirling numbers s(n,k).
     std::vector<BigInt> stirling(static_cast<std::size_t>(order + 1), BigInt{0});
     stirling[0] = BigInt{1};
     for (std::uint64_t n = 1; n <= order; ++n) {
         std::vector<BigInt> next(static_cast<std::size_t>(order + 1), BigInt{0});
-        for (std::uint64_t k = 1; k <= n; ++k)
+        for (std::uint64_t k = 1; k <= n; ++k) {
             next[static_cast<std::size_t>(k)] =
                 stirling[static_cast<std::size_t>(k - 1)]
                 - BigInt::fromUnsigned(n - 1) * stirling[static_cast<std::size_t>(k)];
+            evaluation::checkEvaluationBigIntegerBits(
+                next[static_cast<std::size_t>(k)].bitLength());
+        }
         stirling = std::move(next);
     }
 
@@ -1601,8 +1650,10 @@ void appendDerivativeLinearTerms(
         power(builtins, z, integer(static_cast<std::int64_t>(order))));
 
     BigInt factorial{1};
-    for (std::uint64_t k = 2; k <= order; ++k)
+    for (std::uint64_t k = 2; k <= order; ++k) {
         factorial *= BigInt::fromUnsigned(k);
+        evaluation::checkEvaluationBigIntegerBits(factorial.bitLength());
+    }
     Expr atZero = divide(
         builtins, Expr{Number{factorial}},
         power(builtins, Expr{Number{BigInt::fromUnsigned(order)}}, arguments[0]));

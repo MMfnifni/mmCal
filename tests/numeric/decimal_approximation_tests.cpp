@@ -179,6 +179,23 @@ void runDecimalApproximationTests(TestRunner& tests) {
         && !finiteZero.informationExactlyZero(),
         "DecimalApproximation: N-style finite precision zero distinguishes certified truth from reusable information");
 
+    const auto verifiedInteger = DecimalApproximation::fromVerifiedValueSignificant(
+        RealNumber{Rational{BigInt{2}}}, 8);
+    tests.expect(verifiedInteger.origin() == numeric::ApproximationOrigin::VerifiedApproximation
+        && !verifiedInteger.hasRigorousEnclosure()
+        && !verifiedInteger.certifiedEnclosureIsPoint()
+        && verifiedInteger.text() == std::string_view{"2.0"},
+        "DecimalApproximation: verified numerical points are distinct from rigorous enclosures");
+
+    const auto verifiedZero = DecimalApproximation::fromVerifiedValueSignificant(
+        RealNumber{Rational{}}, 8);
+    tests.expect(!verifiedZero.certifiedExactlyZero(),
+        "DecimalApproximation: a verified numerical zero is not promoted to certified exact zero");
+    tests.expectThrows<std::invalid_argument>([&] {
+        static_cast<void>(numeric::ComplexDecimalApproximation::fromComponents(
+            verifiedZero, verifiedInteger, true, false));
+    }, "ComplexDecimalApproximation: exact-zero flags require rigorous zero proof");
+
     const auto exactImaginary = DecimalApproximation::fromRealSignificant(RealNumber{Rational{BigInt{1}}}, 20);
     const auto pureImaginary = numeric::ComplexDecimalApproximation::fromComponents(
         *defaultPointInformation, exactImaginary, true, false);
