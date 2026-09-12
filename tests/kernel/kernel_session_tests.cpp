@@ -1,5 +1,6 @@
 // 定義・履歴・角度・診断を持つセッションの回帰テスト
 #include "kernel_session_tests.hpp"
+#include "../../version.h"
 
 #include "cli/repl_help.hpp"
 #include "cli/repl_layout.hpp"
@@ -10,6 +11,8 @@
 #include "test_framework.hpp"
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -85,6 +88,636 @@ void runKernelSessionTests(TestRunner& tests) {
             && static_cast<int>(cli::ExitCode::Evaluation) == 4
             && static_cast<int>(cli::ExitCode::Internal) == 5,
         "CLI: automation exit-code contract is stable");
+
+    {
+        kernel::KernelSession ruleSession;
+        tests.expectEqual(
+            evaluateAndFormat(ruleSession, "PlotRange:=7"),
+            std::string{"7"},
+            "Rule: option-like identifiers remain ordinary user symbols rather than reserved words");
+        tests.expectEqual(
+            evaluateAndFormat(ruleSession, "PlotRange->PlotRange+1"),
+            std::string{"PlotRange -> 8"},
+            "Rule: held left side is unaffected by an existing symbol definition");
+        tests.expectEqual(
+            evaluateAndFormat(ruleSession, "Rule[PlotRange,PlotRange+2]"),
+            std::string{"PlotRange -> 9"},
+            "Rule: explicit head has the same HoldFirst semantics as arrow syntax");
+        tests.expect(
+            evaluateError(ruleSession, "Rule:=1").type() == error::CalcErrorType::Syntax,
+            "Rule: the builtin head itself remains protected");
+    }
+
+    {
+        kernel::KernelSession plotNormalSession;
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "arrayRank[toNormal[Plot[x^2,{x,-2,2}]]]"),
+            std::string{"2"},
+            "toNormal Plot: one continuous curve materializes as an N x 2 Array");
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "length[toNormal[Plot[1/x,{x,-4,4}]]]"),
+            std::string{"2"},
+            "toNormal Plot: discontinuities preserve independent segment arrays");
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "length[toNormal[Plot[{sin[x],cos[x]},{x,-Pi,Pi}]]]"),
+            std::string{"2"},
+            "toNormal Plot: multiple curves preserve curve identity");
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "arrayRank[at[toNormal[Plot[{sin[x],cos[x]},{x,-Pi,Pi}]],0]]"),
+            std::string{"2"},
+            "toNormal Plot: each continuous curve remains an N x 2 Array");
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "length[toNormal[ParametricPlot[{cos[t],sin[t]},{t,0,2Pi},PlotPoints->200]]]"
+                ">length[toNormal[ParametricPlot[{cos[t],sin[t]},{t,0,2Pi},PlotPoints->100]]]"),
+            std::string{"True"},
+            "toNormal ParametricPlot: exact geometry is sampled on demand and honors PlotPoints density");
+        tests.expectEqual(
+            evaluateAndFormat(
+                plotNormalSession,
+                "length[toNormal[ParametricPlot[{cos[t]+cos[2t]/2,sin[t]+sin[4t]/4},{t,0,4Pi}]]]"
+                "==length[toNormal[ParametricPlot[{cos[t]+cos[2t]/2,sin[t]+sin[4t]/4},{t,0,2Pi}]]]"),
+            std::string{"True"},
+            "toNormal ParametricPlot: proven period reduction is reflected in materialized samples");
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path path{"mmcal_plot_export_test.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi}],\"mmcal_plot_export_test.svg\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_export_test.svg\""
+                && svg.find("width=\"150mm\" height=\"100mm\"") != std::string::npos
+                && svg.find("data-mmcal-kind=\"curve\"") != std::string::npos
+                && svg.find(">0</text>") == std::string::npos,
+            "Plot/Export: canonical Plot syntax writes a fixed 150x100 mm SVG without origin labels");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path squarePath{"mmcal_plot_options_square.svg"};
+        const std::filesystem::path halfPath{"mmcal_plot_options_half.svg"};
+        const std::filesystem::path rangePath{"mmcal_plot_options_range.svg"};
+        const std::filesystem::path ticksTruePath{"mmcal_plot_options_ticks_true.svg"};
+        const std::filesystem::path ticksFalsePath{"mmcal_plot_options_ticks_false.svg"};
+        const std::filesystem::path points100Path{"mmcal_plot_options_points_100.svg"};
+        const std::filesystem::path points200Path{"mmcal_plot_options_points_200.svg"};
+        const std::filesystem::path pointsShowPath{"mmcal_plot_options_points_show.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(squarePath, ignored);
+        std::filesystem::remove(halfPath, ignored);
+        std::filesystem::remove(rangePath, ignored);
+        std::filesystem::remove(ticksTruePath, ignored);
+        std::filesystem::remove(ticksFalsePath, ignored);
+        std::filesystem::remove(points100Path, ignored);
+        std::filesystem::remove(points200Path, ignored);
+        std::filesystem::remove(pointsShowPath, ignored);
+
+        static_cast<void>(plotSession.evaluate("PlotRange:=99"));
+        static_cast<void>(plotSession.evaluate("AspectRatio:=99"));
+        static_cast<void>(plotSession.evaluate("Ticks:=99"));
+        static_cast<void>(plotSession.evaluate("PlotPoints:=999"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},AspectRatio->1],\"mmcal_plot_options_square.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},AspectRatio->0.5],\"mmcal_plot_options_half.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[10x,{x,-1,1},PlotRange->{-1,1}],\"mmcal_plot_options_range.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},Ticks->True],\"mmcal_plot_options_ticks_true.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},Ticks->False],\"mmcal_plot_options_ticks_false.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},PlotPoints->100],\"mmcal_plot_options_points_100.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi},PlotPoints->200],\"mmcal_plot_options_points_200.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[Show[Plot[sin[x],{x,-Pi,Pi},PlotPoints->100],Plot[cos[x],{x,-Pi,Pi},PlotPoints->200]],\"mmcal_plot_options_points_show.svg\"]"));
+
+        const auto readFile = [](const std::filesystem::path& path) {
+            std::ifstream input(path, std::ios::binary);
+            return std::string{
+                std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        };
+        const std::string square = readFile(squarePath);
+        const std::string half = readFile(halfPath);
+        const std::string ranged = readFile(rangePath);
+        const std::string ticksTrue = readFile(ticksTruePath);
+        const std::string ticksFalse = readFile(ticksFalsePath);
+        const std::string points100 = readFile(points100Path);
+        const std::string points200 = readFile(points200Path);
+        const std::string pointsShow = readFile(pointsShowPath);
+
+        tests.expect(
+            square.find("width=\"150mm\" height=\"150mm\"") != std::string::npos
+                && half.find("width=\"150mm\" height=\"75mm\"") != std::string::npos,
+            "Plot options: AspectRatio is height/width, so 1 gives 1:1 and 0.5 gives 1:2 while keeping the 150 mm default width");
+        tests.expect(
+            ranged.find("clip-path=\"url(#mmcal-clip-") != std::string::npos
+                && ranged.find(">-1</text>") != std::string::npos
+                && ranged.find(">1</text>") != std::string::npos,
+            "Plot options: explicit PlotRange fixes the y viewport without Automatic padding and clips curve geometry to the inner plot area");
+        tests.expect(
+            ticksTrue.find("data-mmcal-kind=\"x-tick\"") != std::string::npos
+                && ticksTrue.find("data-mmcal-kind=\"y-tick\"") != std::string::npos
+                && ticksTrue.find("data-mmcal-kind=\"x-tick-label\"") != std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"x-tick\"") == std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"y-tick\"") == std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"x-tick-label\"") == std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"y-tick-label\"") == std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"x-axis\"") != std::string::npos
+                && ticksFalse.find("data-mmcal-kind=\"y-axis\"") != std::string::npos,
+            "Plot options: Ticks->False removes major ticks and their labels while preserving both axes");
+        tests.expect(
+            points200.size() > points100.size()
+                && pointsShow.find("data-mmcal-kind=\"curve\"") != std::string::npos,
+            "Plot options: PlotPoints scales non-exact coarse density and Show permits per-curve density settings");
+        tests.expect(
+            evaluateError(plotSession,
+                "Plot[x,{x,-1,1},PlotRange->{-1,1},PlotRange->{-2,2}]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},Ticks->True,Ticks->False]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},PlotPoints->100,PlotPoints->200]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},UnknownPlotOption->1]").type()
+                    == error::CalcErrorType::Domain,
+            "Plot options: duplicate and unknown option names are rejected without reserving option symbols globally");
+        tests.expect(
+            evaluateError(plotSession,
+                "Export[Plot[x,{x,-1,1},AspectRatio->0],\"mmcal_plot_invalid_ratio.svg\"]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Export[Plot[x,{x,-1,1},PlotRange->{1,-1}],\"mmcal_plot_invalid_range.svg\"]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},Ticks->1]").type()
+                    == error::CalcErrorType::Type
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},PlotPoints->99]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},PlotPoints->1025]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Plot[x,{x,-1,1},PlotPoints->10.5]").type()
+                    == error::CalcErrorType::Type,
+            "Plot options: invalid numeric view options, non-Boolean Ticks, and out-of-range PlotPoints are rejected");
+        tests.expect(
+            evaluateError(plotSession,
+                "Export[Show[Plot[x,{x,-1,1},Ticks->True],Plot[x^2,{x,-1,1},Ticks->False]],\"mmcal_plot_invalid_ticks_show.svg\"]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "toNormal[Show[Plot[x,{x,-1,1},Ticks->True],Plot[x^2,{x,-1,1},Ticks->False]]]").type()
+                    == error::CalcErrorType::Domain,
+            "Plot options: Show consumers preserve conflicting explicit Ticks as a domain error");
+
+        std::filesystem::remove(squarePath, ignored);
+        std::filesystem::remove(halfPath, ignored);
+        std::filesystem::remove(rangePath, ignored);
+        std::filesystem::remove(ticksTruePath, ignored);
+        std::filesystem::remove(ticksFalsePath, ignored);
+        std::filesystem::remove(points100Path, ignored);
+        std::filesystem::remove(points200Path, ignored);
+        std::filesystem::remove(pointsShowPath, ignored);
+        std::filesystem::remove("mmcal_plot_invalid_ratio.svg", ignored);
+        std::filesystem::remove("mmcal_plot_invalid_range.svg", ignored);
+        std::filesystem::remove("mmcal_plot_invalid_ticks_show.svg", ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path circlePath{"mmcal_parametric_circle.svg"};
+        const std::filesystem::path multiPath{"mmcal_parametric_multi.svg"};
+        const std::filesystem::path domainPath{"mmcal_parametric_domain.svg"};
+        const std::filesystem::path optionsPath{"mmcal_parametric_options.svg"};
+        const std::filesystem::path ellipsePath{"mmcal_parametric_ellipse.svg"};
+        const std::filesystem::path harmonicPath{"mmcal_parametric_harmonic.svg"};
+        const std::filesystem::path partialCirclePath{"mmcal_parametric_partial_circle.svg"};
+        const std::filesystem::path quadraticPath{"mmcal_parametric_quadratic.svg"};
+        const std::filesystem::path cubicPath{"mmcal_parametric_cubic.svg"};
+        const std::filesystem::path ellipseEpsPath{"mmcal_parametric_ellipse.eps"};
+        const std::filesystem::path ellipsePdfPath{"mmcal_parametric_ellipse.pdf"};
+        std::error_code ignored;
+        std::filesystem::remove(circlePath, ignored);
+        std::filesystem::remove(multiPath, ignored);
+        std::filesystem::remove(domainPath, ignored);
+        std::filesystem::remove(optionsPath, ignored);
+        std::filesystem::remove(ellipsePath, ignored);
+        std::filesystem::remove(harmonicPath, ignored);
+        std::filesystem::remove(partialCirclePath, ignored);
+        std::filesystem::remove(quadraticPath, ignored);
+        std::filesystem::remove(cubicPath, ignored);
+        std::filesystem::remove(ellipseEpsPath, ignored);
+        std::filesystem::remove(ellipsePdfPath, ignored);
+
+        const std::string held = evaluateAndFormat(
+            plotSession, "ParametricPlot[{cos[u],sin[u]},{u,0,2Pi}]");
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{cos[u],sin[u]},{u,0,2Pi}],\"mmcal_parametric_circle.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{{cos[u],sin[u]},{2cos[u],sin[u]}},{u,0,2Pi}],\"mmcal_parametric_multi.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{u,sqrt[u]},{u,-1,4}],\"mmcal_parametric_domain.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{cos[u],sin[u]},{u,0,2Pi},AspectRatio->1,Ticks->False],\"mmcal_parametric_options.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{3+2cos[u]+sin[u],-1+4cos[u]-2sin[u]},{u,0,2Pi}],\"mmcal_parametric_ellipse.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{cos[u]+cos[2u]/2,sin[u]+sin[4u]/4},{u,0,4Pi}],\"mmcal_parametric_harmonic.svg\"]"));
+        const bool harmonicPeriodInfo = !plotSession.diagnostics().empty()
+            && plotSession.diagnostics().back().severity == evaluation::DiagnosticSeverity::Info
+            && plotSession.diagnostics().back().code == "ParametricPlot::period"
+            && plotSession.diagnostics().back().message.find("[0, 4Pi]") != std::string::npos
+            && plotSession.diagnostics().back().message.find("[0, 2Pi]") != std::string::npos;
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{cos[u],sin[u]},{u,0,5Pi}],\"mmcal_parametric_partial_circle.svg\"]"));
+        const bool partialCircleNotReduced = plotSession.diagnostics().empty();
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{u,u^2},{u,-2,2}],\"mmcal_parametric_quadratic.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{u^3-3u,u^2-1},{u,-2,2}],\"mmcal_parametric_cubic.svg\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{3+2cos[u]+sin[u],-1+4cos[u]-2sin[u]},{u,0,2Pi}],\"mmcal_parametric_ellipse.eps\"]"));
+        static_cast<void>(evaluateAndFormat(
+            plotSession,
+            "Export[ParametricPlot[{3+2cos[u]+sin[u],-1+4cos[u]-2sin[u]},{u,0,2Pi}],\"mmcal_parametric_ellipse.pdf\"]"));
+
+        const auto readFile = [](const std::filesystem::path& path) {
+            std::ifstream input(path, std::ios::binary);
+            return std::string{
+                std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        };
+        const std::string circle = readFile(circlePath);
+        const std::string multi = readFile(multiPath);
+        const std::string domain = readFile(domainPath);
+        const std::string options = readFile(optionsPath);
+        const std::string ellipse = readFile(ellipsePath);
+        const std::string harmonic = readFile(harmonicPath);
+        const std::string partialCircle = readFile(partialCirclePath);
+        const std::string quadratic = readFile(quadraticPath);
+        const std::string cubic = readFile(cubicPath);
+        const std::string ellipseEps = readFile(ellipseEpsPath);
+        const std::string ellipsePdf = readFile(ellipsePdfPath);
+        const auto curveCount = [](const std::string& svg) {
+            std::size_t count = 0;
+            std::size_t position = 0;
+            while ((position = svg.find("data-mmcal-kind=\"curve\"", position)) != std::string::npos) {
+                ++count;
+                ++position;
+            }
+            return count;
+        };
+
+        tests.expect(
+            held == "ParametricPlot[{cos[u], sin[u]}, {u, 0, 2Pi}]"
+                && circle.find("data-mmcal-kind=\"curve\"") != std::string::npos,
+            "ParametricPlot: canonical held request exports a 2D curve");
+        tests.expect(
+            curveCount(multi) == 2,
+            "ParametricPlot: a list of coordinate pairs exports multiple independent curves");
+        tests.expect(
+            domain.find("data-mmcal-kind=\"curve\"") != std::string::npos,
+            "ParametricPlot: coordinate domains are intersected before sampling");
+        tests.expect(
+            options.find("width=\"150mm\" height=\"150mm\"") != std::string::npos
+                && options.find("data-mmcal-kind=\"x-tick\"") == std::string::npos
+                && options.find("data-mmcal-kind=\"y-tick\"") == std::string::npos
+                && options.find("data-mmcal-kind=\"x-axis\"") != std::string::npos
+                && options.find("data-mmcal-kind=\"y-axis\"") != std::string::npos,
+            "ParametricPlot: AspectRatio and Ticks share Plot view semantics");
+        tests.expect(
+            circle.find("<ellipse ") != std::string::npos
+                && circle.find(" rx=\"") != std::string::npos
+                && circle.find(" ry=\"") != std::string::npos
+                && circle.find("vector-effect=\"non-scaling-stroke\"") == std::string::npos
+                && circle.find("transform=\"matrix(") == std::string::npos,
+            "ParametricPlot: complete circles bake affine scale into ellipse radii without non-scaling-stroke");
+        tests.expect(
+            ellipse.find("<ellipse ") != std::string::npos
+                && ellipse.find("transform=\"rotate(") != std::string::npos
+                && ellipse.find("transform=\"matrix(") == std::string::npos
+                && ellipse.find("vector-effect=\"non-scaling-stroke\"") == std::string::npos,
+            "ParametricPlot: general ellipses retain exact geometry with rotation-only SVG transforms");
+        tests.expect(
+            harmonicPeriodInfo
+                && harmonic.find("<path ") != std::string::npos
+                && harmonic.find("<ellipse ") == std::string::npos,
+            "ParametricPlot: mixed harmonics reduce an exactly repeated 2Pi period without false ellipse recognition");
+        tests.expect(
+            partialCircleNotReduced
+                && partialCircle.find("<path ") != std::string::npos
+                && partialCircle.find("<ellipse ") == std::string::npos,
+            "ParametricPlot: non-integral repeated spans preserve traversal topology and are not period-reduced");
+        tests.expect(
+            quadratic.find(" Q ") != std::string::npos
+                || quadratic.find(" Q") != std::string::npos,
+            "ParametricPlot: degree-two polynomial coordinates retain exact quadratic Bezier geometry");
+        tests.expect(
+            cubic.find(" C ") != std::string::npos
+                || cubic.find(" C") != std::string::npos,
+            "ParametricPlot: degree-three polynomial coordinates retain exact cubic Bezier geometry");
+        tests.expect(
+            ellipseEps.find("0 0 1 0 360 arc") != std::string::npos
+                && ellipseEps.find("concat") != std::string::npos,
+            "ParametricPlot: EPS backend owns ellipse lowering through an affine PostScript arc");
+        tests.expect(
+            ellipsePdf.find("%PDF-1.4") == 0
+                && ellipsePdf.find("% mmCal-semantic: curve") != std::string::npos,
+            "ParametricPlot: PDF backend accepts the ellipse primitive and owns its vector lowering");
+        tests.expect(
+            evaluateError(plotSession,
+                "ParametricPlot[{cos[u],sin[u]},{u,0,2Pi},PlotRange->{-2,2}]").type()
+                == error::CalcErrorType::Domain,
+            "ParametricPlot: one-dimensional PlotRange is rejected until 2D range syntax is defined");
+
+        std::filesystem::remove(circlePath, ignored);
+        std::filesystem::remove(multiPath, ignored);
+        std::filesystem::remove(domainPath, ignored);
+        std::filesystem::remove(optionsPath, ignored);
+        std::filesystem::remove(ellipsePath, ignored);
+        std::filesystem::remove(harmonicPath, ignored);
+        std::filesystem::remove(partialCirclePath, ignored);
+        std::filesystem::remove(quadraticPath, ignored);
+        std::filesystem::remove(cubicPath, ignored);
+        std::filesystem::remove(ellipseEpsPath, ignored);
+        std::filesystem::remove(ellipsePdfPath, ignored);
+    }
+
+    {
+        kernel::KernelSession listPlotSession;
+        const std::filesystem::path joinedPath{"mmcal_listplot_joined.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(joinedPath, ignored);
+
+        const std::string held = evaluateAndFormat(
+            listPlotSession, "ListPlot[{1,2,3,4}]");
+        const std::string normal1D = evaluateAndFormat(
+            listPlotSession, "toNormal[ListPlot[{1,2,3}]]");
+        const std::string normal2D = evaluateAndFormat(
+            listPlotSession, "toNormal[ListPlot[{{1,2},{3,4}}]]");
+        static_cast<void>(evaluateAndFormat(
+            listPlotSession,
+            "Export[ListPlot[{{1,2},{3,4},{5,1}},Joined->True],\"mmcal_listplot_joined.svg\"]"));
+
+        std::ifstream input(joinedPath, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        const auto countText = [](const std::string& text, std::string_view needle) {
+            std::size_t count = 0;
+            std::size_t position = 0;
+            while ((position = text.find(needle, position)) != std::string::npos) {
+                ++count;
+                position += needle.size();
+            }
+            return count;
+        };
+
+        tests.expect(
+            held == "ListPlot[{1, 2, 3, 4}]"
+                && normal1D == "{{1, 0}, {2, 0}, {3, 0}}"
+                && normal2D == "{{1, 2}, {3, 4}}",
+            "ListPlot: one-dimensional data normalizes onto the number line and Nx2 data preserves explicit coordinates");
+        tests.expect(
+            svg.find("data-mmcal-kind=\"curve\"") != std::string::npos
+                && countText(svg, "data-mmcal-kind=\"point\"") == 3,
+            "ListPlot: Joined->True preserves point markers and adds one input-order polyline");
+        tests.expect(
+            evaluateError(listPlotSession,
+                "ListPlot[{{1,2,3},{4,5,6}}]").type() == error::CalcErrorType::Type
+                && evaluateError(listPlotSession,
+                    "ListPlot[{{1},{2,3}}]").type() == error::CalcErrorType::Type
+                && evaluateError(listPlotSession,
+                    "ListPlot[{1,2,3},PlotPoints->200]").type() == error::CalcErrorType::Domain,
+            "ListPlot: three-column, ragged, and PlotPoints inputs are rejected rather than guessed");
+
+        std::filesystem::remove(joinedPath, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path path{"mmcal_plot_export_test.eps"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[plot[x^3-x,{x,-2,2}],\"mmcal_plot_export_test.eps\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string eps{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_export_test.eps\""
+                && eps.find("%!PS-Adobe-3.0 EPSF-3.0") == 0
+                && eps.find("%%BoundingBox: 0 0 426 284") != std::string::npos
+                && eps.find("curveto") != std::string::npos
+                && eps.find("clip\n") != std::string::npos
+                && eps.find("% mmCal-semantic: curve 1") != std::string::npos,
+            "Plot/Export: .eps extension selects the EPS vector backend with physical canvas clipping");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path requestedPath{"mmcal_plot_explicit_eps_test.dat"};
+        const std::filesystem::path path{"mmcal_plot_explicit_eps_test.dat.eps"};
+        std::error_code ignored;
+        std::filesystem::remove(requestedPath, ignored);
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[plot[x^2,{x,-2,2}],\"mmcal_plot_explicit_eps_test.dat\",\"EPS\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string eps{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_explicit_eps_test.dat.eps\""
+                && !std::filesystem::exists(requestedPath)
+                && eps.find("%!PS-Adobe-3.0 EPSF-3.0") == 0
+                && eps.find("curveto") != std::string::npos,
+            "Plot/Export: explicit EPS format appends its canonical extension instead of replacing an unrelated suffix");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path path{"mmcal_plot_export_test.pdf"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[plot[x^3-x,{x,-2,2}],\"mmcal_plot_export_test.pdf\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string pdf{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_export_test.pdf\""
+                && pdf.find("%PDF-1.4") == 0
+                && pdf.find("/Title (mmCal " MMCAL_VERSION_STRING " Plot)") != std::string::npos
+                && pdf.find("/Lang (ja-JP)") != std::string::npos
+                && pdf.find("xref\n0 ") != std::string::npos
+                && pdf.find("/Filter") == std::string::npos
+                && pdf.find("% mmCal-semantic: curve 1") != std::string::npos,
+            "Plot/Export: .pdf extension selects the readable native PDF 1.4 vector backend");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path requestedPath{"mmcal_plot_explicit_pdf_test.svg"};
+        const std::filesystem::path path{"mmcal_plot_explicit_pdf_test.svg.pdf"};
+        std::error_code ignored;
+        std::filesystem::remove(requestedPath, ignored);
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[plot[sin[x],{x,-Pi,Pi}],\"mmcal_plot_explicit_pdf_test.svg\",\"PDF\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string pdf{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_explicit_pdf_test.svg.pdf\""
+                && !std::filesystem::exists(requestedPath)
+                && pdf.find("%PDF-1.4") == 0,
+            "Plot/Export: explicit PDF appends .pdf, so an input name ending in .svg becomes .svg.pdf");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession polynomialStepPlotSession;
+        const std::filesystem::path path{"mmcal_plot_floor_x2_export_test.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            polynomialStepPlotSession,
+            "Export[plot[floor[x^2],{x,-Pi,Pi}],\"mmcal_plot_floor_x2_export_test.svg\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_floor_x2_export_test.svg\""
+                && svg.find("data-mmcal-kind=\"curve\"") != std::string::npos
+                && svg.find("data-mmcal-kind=\"curve-endpoint\"") != std::string::npos,
+            "Plot/Export: polynomial floor levels stay within the algebraic refinement budget");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession degreePlotSession;
+        const std::filesystem::path path{"mmcal_plot_degree_export_test.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        const std::string exported = evaluateAndFormat(
+            degreePlotSession,
+            "Export[Show[plot[sin[x],{x,-180Deg,180Deg}]],\"mmcal_plot_degree_export_test.svg\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_degree_export_test.svg\""
+                && svg.find("data-mmcal-kind=\"curve\"") != std::string::npos,
+            "Plot/Export: explicit degree endpoints render through Show without endpoint compile failure");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession parameterPlotSession;
+        static_cast<void>(parameterPlotSession.evaluate("a:=2"));
+        static_cast<void>(parameterPlotSession.evaluate("x:=7"));
+        static_cast<void>(parameterPlotSession.evaluate("f[t]:=t^2"));
+        tests.expectEqual(
+            evaluateAndFormat(parameterPlotSession, "plot[a*x,{x,-a,a}]"),
+            std::string{"plot[2x, {x, -2, 2}]"},
+            "Plot: binder variable remains symbolic while session parameters materialize");
+        tests.expectEqual(
+            evaluateAndFormat(parameterPlotSession, "plot[f[x]+a,{x,-a,a}]"),
+            std::string{"plot[x^2+2, {x, -2, 2}]"},
+            "Plot: user functions and parameterized endpoints materialize under the protected binder");
+    }
+
+    {
+        kernel::KernelSession historyExportSession;
+        const std::filesystem::path path{"mmcal_plot_history_export_test.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        static_cast<void>(historyExportSession.evaluate("plot[x^2,{x,-2,2}]"));
+        const std::string exported = evaluateAndFormat(
+            historyExportSession,
+            "Export[%,\"mmcal_plot_history_export_test.svg\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        tests.expect(
+            exported == "\"mmcal_plot_history_export_test.svg\""
+                && svg.find("data-mmcal-kind=\"curve\"") != std::string::npos,
+            "Plot/Export: held history reference is resolved before nested argument evaluation");
+        std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession showSession;
+        const std::filesystem::path path{"mmcal_plot_show_export_test.svg"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        static_cast<void>(showSession.evaluate("plot[x^2,{x,-2,2}]"));
+        static_cast<void>(showSession.evaluate("plot[tan[x],{x,-Pi,Pi}]"));
+        const std::string shown = evaluateAndFormat(showSession, "Show[%%,%]");
+        const std::string exported = evaluateAndFormat(
+            showSession,
+            "Export[%,\"mmcal_plot_show_export_test.svg\",\"SVG\"]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string svg{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        const bool hasFirstCurve = svg.find(
+            "data-mmcal-kind=\"curve\" data-mmcal-id=\"1\"") != std::string::npos;
+        const bool hasSecondCurve = svg.find(
+            "data-mmcal-kind=\"curve\" data-mmcal-id=\"2\"") != std::string::npos;
+        tests.expect(
+            shown.find("Show[") == 0
+                && shown.find("plot[x^2, {x, -2, 2}]") != std::string::npos
+                && shown.find("plot[tan[x], {x, -Pi, Pi}]") != std::string::npos
+                && exported == "\"mmcal_plot_show_export_test.svg\""
+                && hasFirstCurve && hasSecondCurve,
+            "Show/Export: history plots combine into one exported shared view");
+        std::filesystem::remove(path, ignored);
+    }
 
     {
         kernel::KernelSession layoutSession;
@@ -362,13 +995,41 @@ void runKernelSessionTests(TestRunner& tests) {
         elementarySession, "simplify[abs[x], {x < 0, x > 0}]");
     tests.expect(contradictoryAssumptions.type() == error::CalcErrorType::Domain,
         "KernelSession: contradictory sign assumptions are rejected");
+    {
+        const std::string expanded = evaluateAndFormat(
+            session, "expand[(8x-9)^3+(8x-3)^2+1/9]");
+        tests.expectEqual(
+            evaluateAndFormat(session, expanded), expanded,
+            "KernelSession: evaluated polynomial formatter output is a parse/evaluate/format fixed point");
+        tests.expectEqual(
+            evaluateAndFormat(session, "1-x"), std::string{"1-x"},
+            "KernelSession: polynomial display fixed-point handling preserves simple subtraction order");
+    }
+
     tests.expectEqual(evaluateAndFormat(session, "expand[(x + 1)^3]"), std::string{"x^3+3x^2+3x+1"},
         "KernelSession: Expand distributes a polynomial expression");
+    tests.expectEqual(evaluateAndFormat(session, "expand[x^0]"), std::string{"x^0"},
+        "KernelSession: Expand preserves the undefined base-zero point of a symbolic zero power");
+    tests.expectEqual(evaluateAndFormat(session, "expand[(x-1)^0]"), std::string{"(x-1)^0"},
+        "KernelSession: Expand does not turn a composite symbolic zero power into an everywhere-defined one");
+    tests.expectEqual(evaluateAndFormat(session, "collect[x^0,x]"), std::string{"x^0"},
+        "KernelSession: Collect preserves zero-power definedness through polynomial conversion");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^0*(x+1)]"), std::string{"(x+1)x^0"},
+        "KernelSession: Factor preserves a symbolic zero-power factor");
+    tests.expectEqual(evaluateAndFormat(session, "fullSimplify[x^0*(x+1)]"),
+        std::string{"(x+1)x^0"},
+        "KernelSession: FullSimplify rejects algebra candidates that erase a zero-power domain hole");
     tests.expectEqual(evaluateAndFormat(session, "factor[x^2 - 1]"), std::string{"(x-1)(x+1)"},
         "KernelSession: Factor handles a univariate rational quadratic");
     tests.expectEqual(evaluateAndFormat(session, "factor[x^4 - 5*x^2 + 6]"),
         std::string{"(x^2-2)(x^2-3)"},
         "KernelSession: Factor handles a quadratic polynomial in x^m");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^4-5*x^2+4]"),
+        std::string{"(x-1)(x+1)(x-2)(x+2)"},
+        "KernelSession: Factor does not retain a redundant numeric times-one monomial");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^8+4*x^4+4]"),
+        std::string{"(x^4+2)^2"},
+        "KernelSession: perfect-power factor reconstruction emits canonical numeric constants");
     tests.expectEqual(evaluateAndFormat(session, "collect[(x + 1)^3, x]"), std::string{"x^3+3x^2+3x+1"},
         "KernelSession: Collect uses the shared polynomial representation");
     tests.expectEqual(evaluateAndFormat(session, "solve[x^2 == 1, x]"), std::string{"{x == 1, x == -1}"},
@@ -458,8 +1119,40 @@ void runKernelSessionTests(TestRunner& tests) {
         std::string{"(x-y)(x^2+x y+y^2)"},
         "KernelSession: factor handles a multivariate difference of cubes");
     tests.expectEqual(evaluateAndFormat(session, "factor[x^6 - 1]"),
-        std::string{"(x-1)(x^2+x+1)(x+1)(x^2-x+1)"},
+        std::string{"(x-1)(x+1)(x^2+x+1)(x^2-x+1)"},
         "KernelSession: factor recursively splits higher-degree univariate factors");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^10+1]"),
+        std::string{"(x^2+1)(x^8-x^6+x^4-x^2+1)"},
+        "KernelSession: factor decomposes a positive binomial into exact cyclotomic factors");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^20-1]"),
+        std::string{"(x-1)(x+1)(x^2+1)(x^4+x^3+x^2+x+1)(x^4-x^3+x^2-x+1)(x^8-x^6+x^4-x^2+1)"},
+        "KernelSession: factor does not leave a reducible x^10+1 residual");
+    tests.expectEqual(evaluateAndFormat(session,
+        "factor[(x^12+x+1)(x^12-x+1)]"),
+        std::string{"(x^12-x+1)(x^12+x+1)"},
+        "KernelSession: modular Q[x] factorization recovers high-degree nonlinear factors from an expanded product");
+    tests.expectEqual(evaluateAndFormat(session,
+        "factor[(x^68-5*x^2-x)*(8*x^33-2*x^8)]"),
+        std::string{"2x^9(4x^25-1)(x^67-5x-1)"},
+        "KernelSession: sparse preprocessing factors an expanded degree-101 product beyond the former degree gate");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^4+4]"),
+        std::string{"(x^2-2x+2)(x^2+2x+2)"},
+        "KernelSession: rational binomial factoring applies the exceptional Capelli case");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^9+3*x^6+3*x^3+2]"),
+        std::string{"(x^3+2)(x^6+x^3+1)"},
+        "KernelSession: deflation reinflates and recursively factors every exact child");
+    tests.expectEqual(evaluateAndFormat(session, "factor[6*x^4+5*x^2+1]"),
+        std::string{"(3x^2+1)(2x^2+1)"},
+        "KernelSession: modular Q[x] factorization restores primitive integer factors and global content");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^15-1]"),
+        std::string{"(x-1)(x^2+x+1)(x^4+x^3+x^2+x+1)(x^8-x^7+x^5-x^4+x^3-x+1)"},
+        "KernelSession: cyclotomic factoring takes priority before a partial difference-of-cubes split");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^15+1]"),
+        std::string{"(x+1)(x^2-x+1)(x^4-x^3+x^2-x+1)(x^8+x^7-x^5-x^4-x^3+x+1)"},
+        "KernelSession: positive odd binomials retain every exact cyclotomic factor");
+    tests.expectEqual(evaluateAndFormat(session, "factor[x^8+1]"),
+        std::string{"x^8+1"},
+        "KernelSession: an irreducible cyclotomic binomial remains unchanged");
     tests.expectEqual(evaluateAndFormat(session, "factor[2*x^3 - 3*x^2 - 8*x + 12]"),
         std::string{"(x-2)(x+2)(2x-3)"},
         "KernelSession: factor uses primitive rational-root linear factors without recursion cycles");
@@ -1337,6 +2030,10 @@ void runKernelSessionTests(TestRunner& tests) {
         evaluateAndFormat(fullSimplifySession, "fullSimplify[x^2+2*x+1]"),
         std::string{"(x+1)^2"},
         "KernelSession: FullSimplify searches a factored equivalent with lower cost");
+    tests.expectEqual(
+        evaluateAndFormat(fullSimplifySession, "fullSimplify[(x+1)^1000]"),
+        std::string{"(x+1)^1000"},
+        "KernelSession: FullSimplify forecasts and skips an explosive expansion candidate");
     tests.expectEqual(
         evaluateAndFormat(fullSimplifySession, "fullSimplify[(x^2-1)/(x-1)]"),
         std::string{"(x^2-1)/(x-1)"},

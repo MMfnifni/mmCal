@@ -90,6 +90,38 @@ void runParserTests(TestRunner& tests) {
     }
 
     {
+        const auto tree = parse("a->b->c");
+        const auto* outer = std::get_if<syntax::BinarySyntax>(&tree.root().data);
+        const auto* inner = outer
+            ? std::get_if<syntax::BinarySyntax>(&outer->right->data)
+            : nullptr;
+        tests.expect(
+            outer && outer->operation == syntax::BinaryOperator::Rule
+                && inner && inner->operation == syntax::BinaryOperator::Rule,
+            "parser makes rule arrow right associative");
+    }
+
+    {
+        const auto tree = parse("a:=b->c");
+        const auto* assignment = std::get_if<syntax::AssignmentSyntax>(&tree.root().data);
+        const auto* rule = assignment
+            ? std::get_if<syntax::BinarySyntax>(&assignment->value->data)
+            : nullptr;
+        tests.expect(
+            assignment && rule && rule->operation == syntax::BinaryOperator::Rule,
+            "parser gives rule higher precedence than assignment");
+    }
+
+    {
+        const auto tree = parse("a<b->c");
+        const auto* rule = std::get_if<syntax::BinarySyntax>(&tree.root().data);
+        tests.expect(
+            rule && rule->operation == syntax::BinaryOperator::Rule
+                && std::holds_alternative<syntax::ComparisonSyntax>(rule->left->data),
+            "parser gives comparison higher precedence than rule");
+    }
+
+    {
         const auto tree = parse("-2^2");
         const auto* unary = std::get_if<syntax::UnarySyntax>(&tree.root().data);
         const auto* power = unary
@@ -266,6 +298,15 @@ void runParserTests(TestRunner& tests) {
     expectHostileResourceLimit(
         std::move(additiveChain),
         "parser bounds a huge left-associative chain before lowering");
+
+    std::string ruleChain;
+    ruleChain.reserve(60'001);
+    for (std::size_t index = 0; index < 20'000; ++index)
+        ruleChain += "x->";
+    ruleChain += 'x';
+    expectHostileResourceLimit(
+        std::move(ruleChain),
+        "parser rejects a huge rule chain without recursive descent");
 
     std::string assignmentChain;
     assignmentChain.reserve(60'001);

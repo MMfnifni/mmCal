@@ -4,6 +4,7 @@
 
 #include "builtins/array_vector.hpp"
 #include "builtins/polynomial_ideal.hpp"
+#include "error/error_message.hpp"
 #include "mathematics/assumption_parser.hpp"
 #include "mathematics/definedness.hpp"
 #include "evaluation/evaluation_budget.hpp"
@@ -20,6 +21,7 @@
 #include "simplification/simplifier.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/differentiation.hpp"
+#include "symbolic/integration.hpp"
 #include "symbolic/polynomial.hpp"
 #include "symbolic/series.hpp"
 #include "symbolic/substitution.hpp"
@@ -330,7 +332,8 @@ constexpr std::size_t maximumLHopitalSteps = 12;
                         return std::nullopt;
                     spec.push_back(std::move(*replaced));
                 }
-                arguments[1] = Expr::array({spec.size()}, std::move(spec));
+                const std::size_t specSize = spec.size();
+                arguments[1] = Expr::array({specSize}, std::move(spec));
                 return Expr::rebuildCall(expression.asCall(), std::move(arguments));
             }
             if (definition->id == BuiltinId::Solve && source.size() >= 2
@@ -661,6 +664,48 @@ constexpr std::size_t maximumLHopitalSteps = 12;
     return true;
 }
 
+[[nodiscard]] bool recoverableSpeculativeError(error::CalcErrorType type) {
+    // Limit内部の点代入・Seriesは候補生成であり，特異点に当たっただけなら
+    // 公開評価の失敗にせず別の証明経路へ回す。資源制限と内部不変条件は伝播する。
+    switch (type) {
+    case error::CalcErrorType::Domain:
+    case error::CalcErrorType::Type:
+    case error::CalcErrorType::Overflow:
+    case error::CalcErrorType::Evaluation:
+        return true;
+    case error::CalcErrorType::Syntax:
+    case error::CalcErrorType::Name:
+    case error::CalcErrorType::Internal:
+    case error::CalcErrorType::ResourceLimit:
+        return false;
+    }
+    return false;
+}
+
+[[nodiscard]] std::optional<Expr> substitutedLimitCandidate(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const Expr& point,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    try {
+        auto substituted = substituteLimitFreeSymbol(
+            expression, variable, point, builtins);
+        if (!substituted
+            || !domainConditionsHold(*substituted, builtins, mathematics, assumptions))
+            return std::nullopt;
+        return simplify(
+            std::move(*substituted), builtins, mathematics, angles, assumptions);
+    }
+    catch (const error::CalcError& exception) {
+        if (!recoverableSpeculativeError(exception.type()))
+            throw;
+        return std::nullopt;
+    }
+}
+
 struct LocalPolynomialBehavior final {
     std::size_t zeroOrder = 0;
     Rational leading{};
@@ -731,6 +776,45 @@ struct LocalPolynomialBehavior final {
     return signedInfinity(sign, builtins, mathematics, angles, infinity, assumptions);
 }
 
+[[nodiscard]] bool isRationalExpressionCandidate(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (sameVariable(expression, variable))
+        return true;
+    if (expression::exact::realRational(expression))
+        return true;
+    if (!expression.isCall())
+        return false;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return false;
+    const auto& arguments = expression.asCall().arguments;
+    switch (definition->id) {
+    case BuiltinId::Negate:
+        return arguments.size() == 1
+            && isRationalExpressionCandidate(arguments[0], variable, builtins);
+    case BuiltinId::Add:
+    case BuiltinId::Subtract:
+    case BuiltinId::Multiply:
+    case BuiltinId::Divide:
+        if (arguments.empty()) return false;
+        for (const Expr& argument : arguments)
+            if (!isRationalExpressionCandidate(argument, variable, builtins))
+                return false;
+        return true;
+    case BuiltinId::Power:
+        if (arguments.size() != 2
+            || !isRationalExpressionCandidate(arguments[0], variable, builtins))
+            return false;
+        if (const auto exponent = expression::exact::realRational(arguments[1]))
+            return exponent->isInteger();
+        return false;
+    default:
+        return false;
+    }
+}
+
 [[nodiscard]] std::optional<Expr> rationalFunctionInfiniteLimit(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -740,12 +824,22 @@ struct LocalPolynomialBehavior final {
     const mathematics::AngleSemantics& angles,
     const expression::Symbol& infinity,
     const mathematics::AssumptionSet& assumptions) {
-    Expr numerator = expression;
+    // 1 + 1/x のようにAST上で単一Divideになっていない有理式も，
+    // 既存のexact rational normalizerで通分してから最高次項を比較する。
+    // limit専用に別の通分算法を持たず，積分器と同じ正規形を共有する。
+    Expr normalized = expression;
+    if (isRationalExpressionCandidate(expression, variable, builtins)) {
+        if (auto rationalized = normalizeRationalExpression(
+                expression, variable, builtins, mathematics, angles))
+            normalized = std::move(*rationalized);
+    }
+
+    Expr numerator = normalized;
     Expr denominator = integer(1);
-    if (isHead(expression, builtins, BuiltinId::Divide)
-        && expression.asCall().arguments.size() == 2) {
-        numerator = expression.asCall().arguments[0];
-        denominator = expression.asCall().arguments[1];
+    if (isHead(normalized, builtins, BuiltinId::Divide)
+        && normalized.asCall().arguments.size() == 2) {
+        numerator = normalized.asCall().arguments[0];
+        denominator = normalized.asCall().arguments[1];
     }
 
     const auto np = toRationalPolynomial(numerator, variable, builtins, {256, 2048});
@@ -765,6 +859,84 @@ struct LocalPolynomialBehavior final {
     if (negativeInfinityPoint && (degreeDifference % 2) != 0)
         sign = -sign;
     return signedInfinity(sign, builtins, mathematics, angles, infinity, assumptions);
+}
+
+[[nodiscard]] std::optional<Expr> quadraticRadicalInfiniteLimit(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const expression::Symbol& infinity) {
+    if (!isHead(expression, builtins, BuiltinId::Sqrt)
+        || expression.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const auto polynomial = toRationalPolynomial(
+        expression.asCall().arguments[0], variable, builtins, {2, 16});
+    if (!polynomial || polynomial->degree() != 2
+        || rationalSign(polynomial->coefficient(2)) <= 0)
+        return std::nullopt;
+    // 正の二次先頭係数ならP(x)>0が十分遠方で保証され，principal sqrtは
+    // ±Infinityの双方で非負の大きさInfinityへ発散する。
+    return Expr{infinity};
+}
+
+[[nodiscard]] std::optional<Expr> quadraticRadicalRatioInfiniteLimit(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    bool negativeInfinityPoint,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    if (!isHead(expression, builtins, BuiltinId::Divide)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    const auto quadraticRadicand = [&](const Expr& candidate)
+        -> std::optional<RationalPolynomial> {
+        if (!isHead(candidate, builtins, BuiltinId::Sqrt)
+            || candidate.asCall().arguments.size() != 1)
+            return std::nullopt;
+        auto polynomial = toRationalPolynomial(
+            candidate.asCall().arguments[0], variable, builtins, {2, 16});
+        if (!polynomial || polynomial->degree() != 2
+            || rationalSign(polynomial->coefficient(2)) <= 0)
+            return std::nullopt;
+        return polynomial;
+    };
+
+    bool radicalInNumerator = false;
+    std::optional<RationalPolynomial> quadratic = quadraticRadicand(arguments[0]);
+    std::optional<RationalPolynomial> affine;
+    if (quadratic) {
+        radicalInNumerator = true;
+        affine = toRationalPolynomial(arguments[1], variable, builtins, {1, 8});
+    }
+    else {
+        quadratic = quadraticRadicand(arguments[1]);
+        if (quadratic)
+            affine = toRationalPolynomial(arguments[0], variable, builtins, {1, 8});
+    }
+    if (!quadratic || !affine || affine->degree() != 1
+        || affine->coefficient(1).isZero())
+        return std::nullopt;
+
+    Expr leadingRoot = simplify(
+        call(builtins, BuiltinId::Sqrt,
+            {rational(quadratic->coefficient(2))}),
+        builtins, mathematics, angles, assumptions);
+    Expr result = radicalInNumerator
+        ? divide(
+            std::move(leadingRoot), rational(affine->coefficient(1)),
+            builtins, mathematics, angles, assumptions)
+        : divide(
+            rational(affine->coefficient(1)), std::move(leadingRoot),
+            builtins, mathematics, angles, assumptions);
+    if (negativeInfinityPoint)
+        result = negate(
+            std::move(result), builtins, mathematics, angles, assumptions);
+    return fullSimplify(
+        std::move(result), builtins, mathematics, angles, assumptions);
 }
 
 [[nodiscard]] Expr imaginaryPi(
@@ -815,6 +987,26 @@ struct LocalPolynomialBehavior final {
     return polynomial->coefficient(1);
 }
 
+[[nodiscard]] std::optional<int> polynomialSignAtInfinity(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    bool negativeInfinityPoint,
+    const evaluation::BuiltinRegistry& builtins) {
+    const auto polynomial = toRationalPolynomial(
+        expression, variable, builtins, {256, 2048});
+    if (!polynomial || polynomial->isZero() || polynomial->degree() == 0)
+        return std::nullopt;
+    int sign = rationalSign(polynomial->coefficient(polynomial->degree()));
+    if (negativeInfinityPoint && (polynomial->degree() % 2) != 0)
+        sign = -sign;
+    return sign;
+}
+
+
+[[nodiscard]] bool isExactRealRationalFunction(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins);
 
 [[nodiscard]] bool isSignedInfinity(
     const Expr& expression,
@@ -822,6 +1014,128 @@ struct LocalPolynomialBehavior final {
     const expression::Symbol& infinity) {
     return isInfinity(expression, infinity)
         || isNegativeInfinity(expression, builtins, infinity);
+}
+
+[[nodiscard]] bool isNamedLimitSentinel(
+    const Expr& expression,
+    const expression::Symbol* symbol) {
+    return symbol && expression.isSymbol()
+        && expression.asSymbol().sameIdentity(*symbol);
+}
+
+[[nodiscard]] bool isExceptionalLimitValue(
+    const Expr& expression,
+    const expression::Symbol* complexInfinity,
+    const expression::Symbol* indeterminate) {
+    return isNamedLimitSentinel(expression, complexInfinity)
+        || isNamedLimitSentinel(expression, indeterminate);
+}
+
+[[nodiscard]] bool containsLimitSentinel(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const expression::Symbol& infinity,
+    const expression::Symbol* complexInfinity,
+    const expression::Symbol* indeterminate) {
+    if (isSignedInfinity(expression, builtins, infinity)
+        || isExceptionalLimitValue(expression, complexInfinity, indeterminate))
+        return true;
+    if (expression.isCall()) {
+        for (const Expr& argument : expression.asCall().arguments) {
+            if (containsLimitSentinel(
+                    argument, builtins, infinity, complexInfinity, indeterminate))
+                return true;
+        }
+    }
+    if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            if (containsLimitSentinel(
+                    array.element(i), builtins, infinity, complexInfinity, indeterminate))
+                return true;
+        }
+    }
+    if (expression.isList()) {
+        for (const Expr& element : expression.asList().elements) {
+            if (containsLimitSentinel(
+                    element, builtins, infinity, complexInfinity, indeterminate))
+                return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool isExactOne(const Expr& expression) {
+    const auto value = expression::exact::realRational(expression);
+    return value && *value == Rational{BigInt{1}};
+}
+
+[[nodiscard]] std::optional<Expr> infinitySeriesLimit(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    bool negativeInfinityPoint,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const expression::Symbol& infinity,
+    const mathematics::AssumptionSet& assumptions) {
+    Expr prepared = expression;
+    if (negativeInfinityPoint) {
+        Expr reflectedVariable = simplify(
+            call(builtins, BuiltinId::Negate, {Expr{variable}}),
+            builtins, mathematics, angles, assumptions);
+        auto reflected = substituteLimitFreeSymbol(
+            expression, variable, reflectedVariable, builtins);
+        if (!reflected)
+            return std::nullopt;
+        prepared = simplify(
+            std::move(*reflected), builtins, mathematics, angles, assumptions);
+    }
+
+    constexpr std::size_t kSeriesOrder = 6;
+    auto expanded = seriesExpression(
+        prepared, variable, Expr{infinity}, kSeriesOrder,
+        builtins, mathematics, angles, assumptions);
+    if (!expanded) return std::nullopt;
+    auto data = parseSeriesData(*expanded, builtins);
+    if (!data || data->exponentDenominator == 0)
+        return std::nullopt;
+
+    for (std::size_t i = 0; i < data->coefficients.size(); ++i) {
+        const std::int64_t exponentNumerator =
+            data->minimumExponent + static_cast<std::int64_t>(i);
+        const bool ordinaryNonZero = !isZero(data->coefficients[i]);
+        bool logarithmicNonZero = false;
+        for (const auto& layer : data->logarithmicCoefficients) {
+            if (i < layer.size() && !isZero(layer[i])) {
+                logarithmicNonZero = true;
+                break;
+            }
+        }
+        if (!ordinaryNonZero && !logarithmicNonZero)
+            continue;
+
+        // t=1/x -> 0+なので，負次数は無限大へ発散する。
+        // log層が同じ先頭次数にある場合は符号解析が必要になるため保守的に未解決とする。
+        if (exponentNumerator < 0) {
+            if (logarithmicNonZero)
+                return std::nullopt;
+            const auto coefficient = expression::exact::realRational(data->coefficients[i]);
+            if (!coefficient || coefficient->isZero())
+                return std::nullopt;
+            return signedInfinity(
+                rationalSign(*coefficient),
+                builtins, mathematics, angles, infinity, assumptions);
+        }
+        if (exponentNumerator == 0 && logarithmicNonZero)
+            return std::nullopt;
+        if (exponentNumerator == 0 && ordinaryNonZero)
+            return fullSimplify(
+                data->coefficients[i], builtins, mathematics, angles, assumptions);
+        if (exponentNumerator > 0)
+            return integer(0);
+    }
+    return integer(0);
 }
 
 [[nodiscard]] bool isOscillatoryPeriodicBuiltin(BuiltinId id) {
@@ -843,6 +1157,59 @@ struct LocalPolynomialBehavior final {
     return toRationalPolynomial(expression, variable, builtins, {256, 2048}).has_value();
 }
 
+[[nodiscard]] std::optional<Expr> reduceExponentiallyScaledRationalProductAtInfinity(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    bool negativeInfinityPoint,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(expression, builtins, BuiltinId::Multiply))
+        return std::nullopt;
+
+    std::vector<Expr> exponents;
+    std::vector<Expr> rationalFactors;
+    for (const Expr& factor : expression.asCall().arguments) {
+        if (isHead(factor, builtins, BuiltinId::Exp)
+            && factor.asCall().arguments.size() == 1) {
+            exponents.push_back(factor.asCall().arguments[0]);
+            continue;
+        }
+        // exp(q(x))の減衰は任意のexact実有理函数より速い。分母も
+        // 非零多項式と証明できるものだけを許し，函数係数や近似値へは広げない。
+        if (!isExactRealRationalFunction(factor, variable, builtins))
+            return std::nullopt;
+        rationalFactors.push_back(factor);
+    }
+    if (exponents.empty())
+        return std::nullopt;
+
+    const std::size_t exponentCount = exponents.size();
+    Expr combinedExponent = exponentCount == 1
+        ? exponents.front()
+        : call(builtins, BuiltinId::Add, std::move(exponents));
+    const auto sign = polynomialSignAtInfinity(
+        combinedExponent, variable, negativeInfinityPoint, builtins);
+    if (sign && *sign < 0)
+        return integer(0);
+
+    // exp(p)exp(q)=exp(p+q)はbranch条件のないentire函数恒等式である。
+    // 指数の変数依存性がexactに相殺した場合は，0*Infinityという人工的な
+    // 不定形を避け，残る有理函数（および定数exp）だけを再度limitへ渡す。
+    if (exponentCount < 2)
+        return std::nullopt;
+    const auto exponentPolynomial = toRationalPolynomial(
+        combinedExponent, variable, builtins, {256, 2048});
+    if (!exponentPolynomial || exponentPolynomial->degree() != 0)
+        return std::nullopt;
+    if (!exponentPolynomial->coefficient(0).isZero())
+        rationalFactors.push_back(call(builtins, BuiltinId::Exp, {
+            Expr{Number{exponentPolynomial->coefficient(0)}}}));
+    if (rationalFactors.empty())
+        return integer(1);
+    if (rationalFactors.size() == 1)
+        return rationalFactors.front();
+    return call(builtins, BuiltinId::Multiply, std::move(rationalFactors));
+}
+
 [[nodiscard]] bool isBoundedRealTrigFactor(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -853,6 +1220,216 @@ struct LocalPolynomialBehavior final {
     if (!definition || (definition->id != BuiltinId::Sin && definition->id != BuiltinId::Cos))
         return false;
     return isExactRealRationalFunction(expression.asCall().arguments[0], variable, builtins);
+}
+
+[[nodiscard]] std::optional<Rational> affinePlusBoundedTrigSlope(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (const auto polynomial = toRationalPolynomial(
+            expression, variable, builtins, {1, 8});
+        polynomial && polynomial->degree() <= 1)
+        return polynomial->coefficient(1);
+    if (isBoundedRealTrigFactor(expression, variable, builtins))
+        return Rational{BigInt{0}};
+    if (!expression.isCall())
+        return std::nullopt;
+
+    const auto* definition = builtins.find(expression.asCall().head);
+    const auto& arguments = expression.asCall().arguments;
+    if (!definition)
+        return std::nullopt;
+    if (definition->id == BuiltinId::Negate && arguments.size() == 1) {
+        if (auto slope = affinePlusBoundedTrigSlope(arguments[0], variable, builtins))
+            return -*slope;
+        return std::nullopt;
+    }
+    if ((definition->id == BuiltinId::Add || definition->id == BuiltinId::Subtract)
+        && !arguments.empty()) {
+        Rational slope{BigInt{0}};
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            const auto termSlope = affinePlusBoundedTrigSlope(
+                arguments[i], variable, builtins);
+            if (!termSlope)
+                return std::nullopt;
+            slope = slope + (definition->id == BuiltinId::Subtract && i == 1
+                ? -*termSlope : *termSlope);
+        }
+        return slope;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Expr> rationalizeQuadraticRadicalAtPositiveInfinity(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions,
+    bool scaleForLimit) {
+    const auto signedRadicand = [&](const Expr& term)
+        -> std::optional<std::pair<int, Expr>> {
+        if (isHead(term, builtins, BuiltinId::Sqrt)
+            && term.asCall().arguments.size() == 1)
+            return std::pair<int, Expr>{1, term.asCall().arguments[0]};
+        if (isHead(term, builtins, BuiltinId::Negate)
+            && term.asCall().arguments.size() == 1) {
+            const Expr& inner = term.asCall().arguments[0];
+            if (isHead(inner, builtins, BuiltinId::Sqrt)
+                && inner.asCall().arguments.size() == 1)
+                return std::pair<int, Expr>{-1, inner.asCall().arguments[0]};
+        }
+        return std::nullopt;
+    };
+
+    int radicalSign = 0;
+    std::optional<Expr> radicand;
+    std::optional<Expr> affine;
+    if (isHead(expression, builtins, BuiltinId::Subtract)
+        && expression.asCall().arguments.size() == 2) {
+        const Expr& lhs = expression.asCall().arguments[0];
+        const Expr& rhs = expression.asCall().arguments[1];
+        if (auto lhsRadical = signedRadicand(lhs)) {
+            radicalSign = lhsRadical->first;
+            radicand = lhsRadical->second;
+            affine = simplify(
+                call(builtins, BuiltinId::Negate, {rhs}),
+                builtins, mathematics, angles, assumptions);
+        }
+        else if (auto rhsRadical = signedRadicand(rhs)) {
+            radicalSign = -rhsRadical->first;
+            radicand = rhsRadical->second;
+            affine = lhs;
+        }
+        else {
+            return std::nullopt;
+        }
+    }
+    else if (isHead(expression, builtins, BuiltinId::Add)
+        && expression.asCall().arguments.size() == 2) {
+        const Expr& first = expression.asCall().arguments[0];
+        const Expr& second = expression.asCall().arguments[1];
+        if (auto firstRadical = signedRadicand(first)) {
+            radicalSign = firstRadical->first;
+            radicand = firstRadical->second;
+            affine = second;
+        }
+        else if (auto secondRadical = signedRadicand(second)) {
+            radicalSign = secondRadical->first;
+            radicand = secondRadical->second;
+            affine = first;
+        }
+        else {
+            return std::nullopt;
+        }
+    }
+    else {
+        return std::nullopt;
+    }
+
+    if (!radicand || !affine)
+        return std::nullopt;
+    const Expr& radicandExpr = *radicand;
+    const Expr& affineExpr = *affine;
+    const auto p = toRationalPolynomial(radicandExpr, variable, builtins, {2, 16});
+    const auto a = toRationalPolynomial(affineExpr, variable, builtins, {1, 8});
+    if (!p || !a || p->degree() != 2 || a->degree() != 1)
+        return std::nullopt;
+
+    const Rational affineLeading = a->coefficient(1);
+    if (p->coefficient(2) != affineLeading * affineLeading
+        || rationalSign(affineLeading) != -radicalSign)
+        return std::nullopt;
+
+    // (-x)^2のような未簡約Powerを残すとInfinity-Infinityが再発するため，
+    // 既に証明済みの有理多項式係数上でP-affine^2をexactに作る。
+    std::vector<Rational> residualCoefficients(3, Rational{BigInt{0}});
+    for (std::size_t exponent = 0; exponent < residualCoefficients.size(); ++exponent) {
+        Rational affineSquare{BigInt{0}};
+        for (std::size_t left = 0; left <= exponent; ++left)
+            affineSquare = affineSquare
+                + a->coefficient(left) * a->coefficient(exponent - left);
+        residualCoefficients[exponent] = p->coefficient(exponent) - affineSquare;
+    }
+    RationalPolynomial residualPolynomial{std::move(residualCoefficients)};
+    // P=affine^2で符号条件も満たす場合，principal sqrtは十分大きい正のxで
+    // -radicalSign*affineそのものとなる。0/xという人工的な定義域穴を作らず，
+    // このeventual identityから極限0を直接返す。
+    if (residualPolynomial.isZero())
+        return integer(0);
+    Expr residual = polynomialToExpandedExpr(
+        residualPolynomial, variable, builtins);
+
+    Expr conjugateRadical = call(builtins, BuiltinId::Sqrt, {radicandExpr});
+    if (radicalSign < 0)
+        conjugateRadical = call(
+            builtins, BuiltinId::Negate, {std::move(conjugateRadical)});
+    Expr conjugate = simplify(
+        call(builtins, BuiltinId::Subtract,
+            {std::move(conjugateRadical), affineExpr}),
+        builtins, mathematics, angles, assumptions);
+    if (!scaleForLimit)
+        return call(
+            builtins, BuiltinId::Divide,
+            {std::move(residual), std::move(conjugate)});
+
+    const Expr variableExpr{variable};
+    Expr variableSquared = call(
+        builtins, BuiltinId::Power, {variableExpr, integer(2)});
+    Expr numerator = simplify(
+        divide(std::move(residual), variableExpr,
+            builtins, mathematics, angles, assumptions),
+        builtins, mathematics, angles, assumptions);
+
+    Expr scaledRadicand = divide(
+        radicandExpr, std::move(variableSquared),
+        builtins, mathematics, angles, assumptions);
+    Expr scaledRadical = call(
+        builtins, BuiltinId::Sqrt, {std::move(scaledRadicand)});
+    if (radicalSign < 0)
+        scaledRadical = call(
+            builtins, BuiltinId::Negate, {std::move(scaledRadical)});
+    Expr scaledAffine = divide(
+        affineExpr, variableExpr,
+        builtins, mathematics, angles, assumptions);
+    Expr denominator = simplify(
+        call(builtins, BuiltinId::Subtract,
+            {std::move(scaledRadical), std::move(scaledAffine)}),
+        builtins, mathematics, angles, assumptions);
+    return call(
+        builtins, BuiltinId::Divide,
+        {std::move(numerator), std::move(denominator)});
+}
+
+[[nodiscard]] std::optional<Expr> rationalizeQuadraticRadicalSubexpressionAtPositiveInfinity(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions,
+    bool scaleDirect) {
+    if (auto direct = rationalizeQuadraticRadicalAtPositiveInfinity(
+            expression, variable, builtins, mathematics, angles, assumptions, scaleDirect))
+        return direct;
+    if (!expression.isCall())
+        return std::nullopt;
+
+    const auto& source = expression.asCall();
+    for (std::size_t i = 0; i < source.arguments.size(); ++i) {
+        auto transformed = rationalizeQuadraticRadicalSubexpressionAtPositiveInfinity(
+            source.arguments[i], variable,
+            builtins, mathematics, angles, assumptions, false);
+        if (!transformed)
+            continue;
+        std::vector<Expr> arguments = source.arguments;
+        arguments[i] = std::move(*transformed);
+        return simplify(
+            Expr::rebuildCall(source, std::move(arguments)),
+            builtins, mathematics, angles, assumptions);
+    }
+    return std::nullopt;
 }
 
 [[nodiscard]] Expr limitCore(
@@ -989,6 +1566,40 @@ struct LocalPolynomialBehavior final {
     const bool atPositiveInfinity = isInfinity(point, infinity);
     const bool atNegativeInfinity = isNegativeInfinity(point, builtins, infinity);
 
+    // base->1なら，十分近くではprincipal Logのbranch cutと0を避ける。
+    // 有限点でもbase^exponent=exp(exponent Log(base))へ写し，exponent単独の
+    // 極限が存在しない1^Infinity型を積の極限として証明する。
+    if (isHead(expression, builtins, BuiltinId::Power)
+        && expression.asCall().arguments.size() == 2) {
+        const Expr& base = expression.asCall().arguments[0];
+        const Expr& exponent = expression.asCall().arguments[1];
+        Expr baseLimit = limitCore(
+            base, variable, point, direction,
+            builtins, mathematics, angles, infinity, assumptions,
+            complexInfinity, indeterminate, depth + 1);
+        if (isExactOne(baseLimit)) {
+            Expr logarithmicExponent = simplify(
+                call(builtins, BuiltinId::Multiply,
+                    {exponent, call(builtins, BuiltinId::Log, {base})}),
+                builtins, mathematics, angles, assumptions);
+            Expr exponentResult = limitCore(
+                logarithmicExponent, variable, point, direction,
+                builtins, mathematics, angles, infinity, assumptions,
+                complexInfinity, indeterminate, depth + 1);
+            if (isInfinity(exponentResult, infinity))
+                return Expr{infinity};
+            if (isNegativeInfinity(exponentResult, builtins, infinity))
+                return integer(0);
+            if (!isHead(exponentResult, builtins, BuiltinId::Limit)
+                && !isExceptionalLimitValue(
+                    exponentResult, complexInfinity, indeterminate)) {
+                return fullSimplify(
+                    call(builtins, BuiltinId::Exp, {std::move(exponentResult)}),
+                    builtins, mathematics, angles, assumptions);
+            }
+        }
+    }
+
     // 線形な外側構造は先に分解する。improper integralの原始函数で
     // -exp[-x] や atan[x]-atan[0] を無用に未評価へ落とさない。
     if (expression.isCall()) {
@@ -997,6 +1608,8 @@ struct LocalPolynomialBehavior final {
         if (outer && outer->id == BuiltinId::Negate && arguments.size() == 1) {
             Expr inner = limitCore(arguments[0], variable, point, direction,
                 builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
+            if (isExceptionalLimitValue(inner, complexInfinity, indeterminate))
+                return inner;
             if (!isHead(inner, builtins, BuiltinId::Limit))
                 return negate(std::move(inner), builtins, mathematics, angles, assumptions);
         }
@@ -1006,19 +1619,29 @@ struct LocalPolynomialBehavior final {
             bool decomposable = true;
             bool positiveInfinitySeen = false;
             bool negativeInfinitySeen = false;
-            for (const Expr& argument : arguments) {
+            bool boundedUnresolvedSeen = false;
+            for (std::size_t i = 0; i < arguments.size(); ++i) {
+                const Expr& argument = arguments[i];
                 Expr value = limitCore(argument, variable, point, direction,
                     builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
-                if (isHead(value, builtins, BuiltinId::Limit)) {
+                if (isHead(value, builtins, BuiltinId::Limit)
+                    || isExceptionalLimitValue(value, complexInfinity, indeterminate)) {
+                    if ((atPositiveInfinity || atNegativeInfinity)
+                        && isBoundedRealTrigFactor(argument, variable, builtins)) {
+                        boundedUnresolvedSeen = true;
+                        continue;
+                    }
                     decomposable = false;
                     break;
                 }
-                if (outer->id == BuiltinId::Subtract && values.size() == 1)
+                if (outer->id == BuiltinId::Subtract && i == 1)
                     value = negate(std::move(value), builtins, mathematics, angles, assumptions);
                 positiveInfinitySeen |= isInfinity(value, infinity);
                 negativeInfinitySeen |= isNegativeInfinity(value, builtins, infinity);
                 values.push_back(std::move(value));
             }
+            if (boundedUnresolvedSeen && !positiveInfinitySeen && !negativeInfinitySeen)
+                decomposable = false;
             if (decomposable && !(positiveInfinitySeen && negativeInfinitySeen)) {
                 if (positiveInfinitySeen)
                     return Expr{infinity};
@@ -1038,13 +1661,76 @@ struct LocalPolynomialBehavior final {
                 builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
             const bool numeratorFinite = !isHead(numerator, builtins, BuiltinId::Limit)
                 && !isInfinity(numerator, infinity)
-                && !isNegativeInfinity(numerator, builtins, infinity);
+                && !isNegativeInfinity(numerator, builtins, infinity)
+                && !isExceptionalLimitValue(numerator, complexInfinity, indeterminate);
             const bool denominatorFinite = !isHead(denominator, builtins, BuiltinId::Limit)
                 && !isInfinity(denominator, infinity)
-                && !isNegativeInfinity(denominator, builtins, infinity);
+                && !isNegativeInfinity(denominator, builtins, infinity)
+                && !isExceptionalLimitValue(denominator, complexInfinity, indeterminate);
             if (numeratorFinite && denominatorFinite && !isZero(denominator))
                 return divide(std::move(numerator), std::move(denominator),
                     builtins, mathematics, angles, assumptions);
+
+            const bool denominatorInfinite = isSignedInfinity(
+                denominator, builtins, infinity);
+            if (denominatorInfinite
+                && (numeratorFinite
+                    || isBoundedRealTrigFactor(arguments[0], variable, builtins)))
+                return integer(0);
+
+            if (isSignedInfinity(numerator, builtins, infinity)
+                && denominatorFinite) {
+                if (const auto finiteDenominator = expression::exact::realRational(denominator);
+                    finiteDenominator && !finiteDenominator->isZero()) {
+                    int sign = isNegativeInfinity(numerator, builtins, infinity) ? -1 : 1;
+                    sign *= rationalSign(*finiteDenominator);
+                    return signedInfinity(
+                        sign, builtins, mathematics, angles, infinity, assumptions);
+                }
+            }
+
+            // 共通分母が±Infinityへ走る和は項別の商へ分配し，各項の極限が
+            // すべて証明できた場合だけ再結合する。bounded/xのsqueezeもここで効く。
+            if (denominatorInfinite
+                && (isHead(arguments[0], builtins, BuiltinId::Add)
+                    || isHead(arguments[0], builtins, BuiltinId::Subtract))) {
+                const bool subtraction = isHead(
+                    arguments[0], builtins, BuiltinId::Subtract);
+                std::vector<Expr> values;
+                bool decomposable = true;
+                bool positiveInfinitySeen = false;
+                bool negativeInfinitySeen = false;
+                for (const Expr& term : arguments[0].asCall().arguments) {
+                    Expr quotient = call(
+                        builtins, BuiltinId::Divide, {term, arguments[1]});
+                    Expr value = limitCore(
+                        quotient, variable, point, direction,
+                        builtins, mathematics, angles, infinity, assumptions,
+                        complexInfinity, indeterminate, depth + 1);
+                    if (isHead(value, builtins, BuiltinId::Limit)
+                        || isExceptionalLimitValue(
+                            value, complexInfinity, indeterminate)) {
+                        decomposable = false;
+                        break;
+                    }
+                    if (subtraction && values.size() == 1)
+                        value = negate(
+                            std::move(value), builtins, mathematics, angles, assumptions);
+                    positiveInfinitySeen |= isInfinity(value, infinity);
+                    negativeInfinitySeen |= isNegativeInfinity(value, builtins, infinity);
+                    values.push_back(std::move(value));
+                }
+                if (decomposable && !(positiveInfinitySeen && negativeInfinitySeen)) {
+                    if (positiveInfinitySeen)
+                        return Expr{infinity};
+                    if (negativeInfinitySeen)
+                        return negate(
+                            Expr{infinity}, builtins, mathematics, angles, assumptions);
+                    return simplify(
+                        call(builtins, BuiltinId::Add, std::move(values)),
+                        builtins, mathematics, angles, assumptions);
+                }
+            }
         }
         if (outer && outer->id == BuiltinId::Multiply) {
             // 実有理函数を引数に取るsin/cosは実軸上で絶対値1以下なので，
@@ -1061,25 +1747,61 @@ struct LocalPolynomialBehavior final {
                 }
             }
 
-            // すべてのfactorが有限極限へ収束する場合だけ積を合成する。
-            // 0*Infinity等の不定形はここで決めず、既存の専用ruleへ残す。
+            // すべてのfactorが有限極限へ収束する場合は通常の積へ戻す。
+            // また，±Infinityとexact real rationalな非零有限因子だけから成る場合は，
+            // 符号をexactに合成して無限大を確定する。0*Infinityや符号不明な有限因子は
+            // 不定形として後段のSeries等へ残す。
             std::vector<Expr> values;
             values.reserve(arguments.size());
-            bool finite = true;
+            bool unresolvedFactor = false;
+            std::size_t infinityFactors = 0;
+            int productSign = 1;
+            bool finiteFactorsHaveKnownRealSign = true;
+            bool zeroFactor = false;
+            const mathematics::KnowledgeContext knowledge{
+                builtins, mathematics, assumptions};
             for (const Expr& argument : arguments) {
                 Expr value = limitCore(argument, variable, point, direction,
                     builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
                 if (isHead(value, builtins, BuiltinId::Limit)
-                    || isInfinity(value, infinity)
-                    || isNegativeInfinity(value, builtins, infinity)) {
-                    finite = false;
+                    || isExceptionalLimitValue(value, complexInfinity, indeterminate)) {
+                    unresolvedFactor = true;
                     break;
+                }
+                if (isInfinity(value, infinity)) {
+                    ++infinityFactors;
+                    continue;
+                }
+                if (isNegativeInfinity(value, builtins, infinity)) {
+                    ++infinityFactors;
+                    productSign = -productSign;
+                    continue;
+                }
+                if (const auto rationalValue = expression::exact::realRational(value)) {
+                    if (rationalValue->isZero())
+                        zeroFactor = true;
+                    else
+                        productSign *= rationalSign(*rationalValue);
+                }
+                else {
+                    const auto positive = knowledge.prove(mathematics::relation(
+                        mathematics::RelationKind::Greater, value, integer(0)));
+                    const auto negative = knowledge.prove(mathematics::relation(
+                        mathematics::RelationKind::Less, value, integer(0)));
+                    if (negative == mathematics::TruthValue::True)
+                        productSign = -productSign;
+                    else if (positive != mathematics::TruthValue::True)
+                        finiteFactorsHaveKnownRealSign = false;
                 }
                 values.push_back(std::move(value));
             }
-            if (finite)
+            if (!unresolvedFactor && infinityFactors == 0)
                 return simplify(call(builtins, BuiltinId::Multiply, std::move(values)),
                     builtins, mathematics, angles, assumptions);
+            if (!unresolvedFactor && infinityFactors > 0 && !zeroFactor
+                && finiteFactorsHaveKnownRealSign)
+                return signedInfinity(productSign,
+                    builtins, mathematics, angles, infinity, assumptions);
         }
     }
 
@@ -1088,6 +1810,69 @@ struct LocalPolynomialBehavior final {
                 expression, variable, atNegativeInfinity,
                 builtins, mathematics, angles, infinity, assumptions))
             return *rationalLimit;
+        if (auto exponentialProduct = reduceExponentiallyScaledRationalProductAtInfinity(
+                expression, variable, atNegativeInfinity, builtins)) {
+            Expr result = limitCore(
+                *exponentialProduct, variable, point, direction,
+                builtins, mathematics, angles, infinity, assumptions,
+                complexInfinity, indeterminate, depth + 1);
+            if (!isHead(result, builtins, BuiltinId::Limit))
+                return result;
+        }
+        if (isHead(expression, builtins, BuiltinId::Divide)
+            && expression.asCall().arguments.size() == 2) {
+            const auto numeratorSlope = affinePlusBoundedTrigSlope(
+                expression.asCall().arguments[0], variable, builtins);
+            const auto denominatorSlope = affinePlusBoundedTrigSlope(
+                expression.asCall().arguments[1], variable, builtins);
+            if (numeratorSlope && denominatorSlope && !denominatorSlope->isZero())
+                return rational(*numeratorSlope / *denominatorSlope);
+        }
+        if (auto radicalLimit = quadraticRadicalInfiniteLimit(
+                expression, variable, builtins, infinity))
+            return *radicalLimit;
+        if (auto radicalRatio = quadraticRadicalRatioInfiniteLimit(
+                expression, variable, atNegativeInfinity,
+                builtins, mathematics, angles, assumptions))
+            return *radicalRatio;
+
+        // sqrt[quadratic] +/- affine のInfinity-Infinity型は共役で有理化し，
+        // xでscaleしてから通常のlimit kernelへ戻す。+Infinityではx>0が最終的に
+        // 保証されるため sqrt(P)/x = sqrt(P/x^2) をbranch安全に使える。
+        Expr radicalCandidate = expression;
+        if (atNegativeInfinity) {
+            Expr reflectedVariable = simplify(
+                call(builtins, BuiltinId::Negate, {Expr{variable}}),
+                builtins, mathematics, angles, assumptions);
+            if (auto reflected = substituteLimitFreeSymbol(
+                    expression, variable, reflectedVariable, builtins))
+                radicalCandidate = simplify(
+                    std::move(*reflected), builtins, mathematics, angles, assumptions);
+        }
+        if (auto rationalized = rationalizeQuadraticRadicalSubexpressionAtPositiveInfinity(
+                radicalCandidate, variable,
+                builtins, mathematics, angles, assumptions, true)) {
+            Expr result = limitCore(
+                *rationalized, variable, Expr{infinity}, direction,
+                builtins, mathematics, angles, infinity, assumptions,
+                complexInfinity, indeterminate, depth + 1);
+            if (!isHead(result, builtins, BuiltinId::Limit))
+                return result;
+        }
+
+        // +Infinity seriesはt=1/x, t->0+へ写す既存Series kernelを共有する。
+        // 先頭Laurent/Puiseux項の相殺が有限値へ落ちる場合だけexactに確定する。
+        // -Infinityはx->-xで同じkernelへ送る。
+        try {
+            if (auto seriesLimit = infinitySeriesLimit(
+                    expression, variable, atNegativeInfinity,
+                    builtins, mathematics, angles, infinity, assumptions))
+                return *seriesLimit;
+        }
+        catch (const error::CalcError& exception) {
+            if (!recoverableSpeculativeError(exception.type()))
+                throw;
+        }
 
         // Classical integral functions have branch-sensitive but exact real-axis asymptotics.
         // Ei(x) ~ exp(x)/x for x->+Infinity and tends to zero for x->-Infinity.
@@ -1139,6 +1924,11 @@ struct LocalPolynomialBehavior final {
             const auto* definition = builtins.find(expression.asCall().head);
             const Expr& argument = expression.asCall().arguments[0];
             if (definition) {
+                if (definition->id == BuiltinId::Exp) {
+                    if (const auto sign = polynomialSignAtInfinity(
+                            argument, variable, atNegativeInfinity, builtins))
+                        return *sign > 0 ? Expr{infinity} : integer(0);
+                }
                 const auto slope = affineSlopeAtInfinity(argument, variable, builtins);
                 const int infinitySign = atNegativeInfinity ? -1 : 1;
                 if (slope && !slope->isZero()) {
@@ -1176,7 +1966,7 @@ struct LocalPolynomialBehavior final {
             }
         }
 
-        return unresolved(expression, variable, point, direction, builtins);
+        // ここで確定しない商は，下段の安全な点代入とL'Hopital候補へ回す。
     }
 
     const auto rationalPoint = expression::exact::realRational(point);
@@ -1284,19 +2074,28 @@ struct LocalPolynomialBehavior final {
     // 既存の個別規則で決まらない有限点極限だけを，局所Seriesの先頭項で補完する。
     // 発散項やlog^kの定数次数が残る場合は推測せず，従来kernelへ処理を戻す。
     if (!isInfinity(point, infinity) && !isNegativeInfinity(point, builtins, infinity)) {
-        if (auto seriesLimit = finiteLimitFromLocalSeries(
-                expression, variable, point,
-                builtins, mathematics, angles, assumptions))
-            return *seriesLimit;
+        try {
+            if (auto seriesLimit = finiteLimitFromLocalSeries(
+                    expression, variable, point,
+                    builtins, mathematics, angles, assumptions))
+                return *seriesLimit;
+        }
+        catch (const error::CalcError& exception) {
+            if (!recoverableSpeculativeError(exception.type()))
+                throw;
+        }
     }
 
-    if (auto rawSubstituted = substituteLimitFreeSymbol(
-            expression, variable, point, builtins);
-        rawSubstituted && domainConditionsHold(*rawSubstituted, builtins, mathematics, assumptions)) {
-        Expr substituted = simplify(
-            std::move(*rawSubstituted), builtins, mathematics, angles, assumptions);
-        if (!containsFreeLimitSymbol(substituted, variable, builtins))
-            return fullSimplify(std::move(substituted), builtins, mathematics, angles, assumptions);
+    if (auto substituted = substitutedLimitCandidate(
+            expression, variable, point,
+            builtins, mathematics, angles, assumptions)) {
+        // Infinityを部分式に残した形式代入は極限の証明ではない。
+        // exp[Infinity]/Infinity等を値として漏らさず，不定形解析へ回す。
+        if (!containsFreeLimitSymbol(*substituted, variable, builtins)
+            && !containsLimitSentinel(
+                *substituted, builtins, infinity, complexInfinity, indeterminate))
+            return fullSimplify(
+                std::move(*substituted), builtins, mathematics, angles, assumptions);
     }
 
     if (isHead(expression, builtins, BuiltinId::Divide)
@@ -1304,31 +2103,47 @@ struct LocalPolynomialBehavior final {
         Expr numerator = expression.asCall().arguments[0];
         Expr denominator = expression.asCall().arguments[1];
         for (std::size_t step = 0; step < maximumLHopitalSteps; ++step) {
-            const auto numeratorSubstituted = substituteLimitFreeSymbol(
-                numerator, variable, point, builtins);
-            const auto denominatorSubstituted = substituteLimitFreeSymbol(
-                denominator, variable, point, builtins);
-            if (!numeratorSubstituted || !denominatorSubstituted)
+            try {
+                // 形式代入ではexp[Infinity]等がsentinelへ閉じないため，分子・分母の
+                // 極限を既存kernelで証明し，0/0またはsigned Infinity/Infinityだけに適用する。
+                Expr numeratorAt = limitCore(
+                    numerator, variable, point, direction,
+                    builtins, mathematics, angles, infinity, assumptions,
+                    complexInfinity, indeterminate, depth + 1);
+                Expr denominatorAt = limitCore(
+                    denominator, variable, point, direction,
+                    builtins, mathematics, angles, infinity, assumptions,
+                    complexInfinity, indeterminate, depth + 1);
+                const bool zeroOverZero = isZero(numeratorAt) && isZero(denominatorAt);
+                const bool infinityOverInfinity =
+                    isSignedInfinity(numeratorAt, builtins, infinity)
+                    && isSignedInfinity(denominatorAt, builtins, infinity);
+                if (!zeroOverZero && !infinityOverInfinity)
+                    break;
+
+                numerator = differentiateExpression(
+                    numerator, variable, builtins, mathematics, angles);
+                denominator = differentiateExpression(
+                    denominator, variable, builtins, mathematics, angles);
+                if (isHead(numerator, builtins, BuiltinId::Derivative)
+                    || isHead(denominator, builtins, BuiltinId::Derivative))
+                    break;
+                Expr quotient = divide(numerator, denominator,
+                    builtins, mathematics, angles, assumptions);
+                Expr result = limitCore(
+                    quotient, variable, point, direction,
+                    builtins, mathematics, angles, infinity, assumptions,
+                    complexInfinity, indeterminate, depth + 1);
+                if (!isHead(result, builtins, BuiltinId::Limit)
+                    && !isExceptionalLimitValue(
+                        result, complexInfinity, indeterminate))
+                    return result;
+            }
+            catch (const error::CalcError& exception) {
+                if (!recoverableSpeculativeError(exception.type()))
+                    throw;
                 break;
-            Expr numeratorAt = simplify(*numeratorSubstituted,
-                builtins, mathematics, angles, assumptions);
-            Expr denominatorAt = simplify(*denominatorSubstituted,
-                builtins, mathematics, angles, assumptions);
-            if (!(isZero(numeratorAt) && isZero(denominatorAt)))
-                break;
-            numerator = differentiateExpression(
-                numerator, variable, builtins, mathematics, angles);
-            denominator = differentiateExpression(
-                denominator, variable, builtins, mathematics, angles);
-            if (isHead(numerator, builtins, BuiltinId::Derivative)
-                || isHead(denominator, builtins, BuiltinId::Derivative))
-                break;
-            Expr quotient = divide(numerator, denominator,
-                builtins, mathematics, angles, assumptions);
-            Expr result = limitCore(quotient, variable, point, direction,
-                builtins, mathematics, angles, infinity, assumptions, complexInfinity, indeterminate, depth + 1);
-            if (!isHead(result, builtins, BuiltinId::Limit))
-                return result;
+            }
         }
     }
 

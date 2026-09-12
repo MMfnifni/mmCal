@@ -28,6 +28,17 @@ struct RationalComplexDisk final {
     numeric::Rational radius;
 };
 
+enum class ComplexRootReality {
+    Real,
+    NonReal,
+    Unknown
+};
+
+struct ComplexRootClassification final {
+    ComplexRootReality reality = ComplexRootReality::Unknown;
+    std::optional<RationalRootInterval> realInterval;
+};
+
 // 有理係数多項式の1つの実根をexactに表すspecialized IR。
 // polynomial[i]はx^iの係数。rootIndexは異なる実根を小さい順に数えた1-based index。
 // isolating intervalはその根だけを含むexact Rational区間である。
@@ -53,6 +64,8 @@ public:
     [[nodiscard]] RationalRootInterval refined(std::size_t precisionBits) const;
 
 private:
+    friend class ComplexAlgebraicNumber;
+
     std::vector<numeric::Rational> polynomial_;
     std::size_t rootIndex_ = 0;
     RationalRootInterval interval_;
@@ -84,6 +97,15 @@ public:
     [[nodiscard]] std::size_t degree() const noexcept;
     [[nodiscard]] std::size_t rootIndex() const noexcept;
     [[nodiscard]] const RationalComplexDisk& isolatingDisk() const noexcept;
+
+    // 実係数多項式の共役対称性とcertified isolating diskから，この根が実根か非実根かを判定する。
+    // diskが実軸中心なら一意根性からexact real，実軸から離れていればnon-realである。
+    // どちらも証明できない場合だけbounded refinement後にUnknownを返す。
+    [[nodiscard]] ComplexRootClassification classifyReality() const;
+    // classifyRealityで実根と証明できる根を，Sturm再分離なしでReal Algebraic Rootへ変換する。
+    // realRootIndexは同じdefining polynomialの異なる実根を昇順に数えた1-based index。
+    [[nodiscard]] std::optional<RealAlgebraicNumber> asProvenReal(
+        std::size_t realRootIndex) const;
 
     [[nodiscard]] RationalComplexDisk refined(std::size_t precisionBits) const;
 

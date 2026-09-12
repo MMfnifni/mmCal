@@ -1286,6 +1286,7 @@ using numeric::Rational;
     case BuiltinId::PolynomialReduce:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
+    case BuiltinId::Rule:
     case BuiltinId::Less:
     case BuiltinId::LessEqual:
     case BuiltinId::Greater:
@@ -1313,6 +1314,11 @@ using numeric::Rational;
         break;
     case BuiltinId::Normal:
     case BuiltinId::ToNormal:
+    case BuiltinId::Plot:
+    case BuiltinId::ParametricPlot:
+    case BuiltinId::ListPlot:
+    case BuiltinId::Show:
+    case BuiltinId::Export:
     case BuiltinId::UnitApplied:
         break;
     }
@@ -1454,6 +1460,162 @@ void checkRationalCoefficientBits(const Rational& value) {
     }
     polynomial = expandExpression(polynomial, builtins, mathematics, angles, {256});
     return multiply(builtins, {std::move(polynomial), expression});
+}
+
+
+[[nodiscard]] std::vector<Rational> derivativeCoefficients(
+    const std::vector<Rational>& coefficients) {
+    if (coefficients.size() <= 1)
+        return {Rational{BigInt{0}}};
+    std::vector<Rational> result(coefficients.size() - 1, Rational{BigInt{0}});
+    for (std::size_t i = 1; i < coefficients.size(); ++i)
+        result[i - 1] = Rational{BigInt::fromUnsigned(i)} * coefficients[i];
+    return result;
+}
+
+void trimPolynomialCoefficients(std::vector<Rational>& coefficients) {
+    while (coefficients.size() > 1 && coefficients.back().isZero())
+        coefficients.pop_back();
+}
+
+[[nodiscard]] std::vector<Rational> addCoefficientVectors(
+    const std::vector<Rational>& lhs,
+    const std::vector<Rational>& rhs,
+    int rhsSign = 1) {
+    std::vector<Rational> result(
+        std::max(lhs.size(), rhs.size()), Rational{BigInt{0}});
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        result[i] += lhs[i];
+    for (std::size_t i = 0; i < rhs.size(); ++i)
+        result[i] += rhsSign > 0 ? rhs[i] : -rhs[i];
+    trimPolynomialCoefficients(result);
+    return result;
+}
+
+[[nodiscard]] std::vector<Rational> multiplyCoefficientVectors(
+    const std::vector<Rational>& lhs,
+    const std::vector<Rational>& rhs) {
+    if ((lhs.size() == 1 && lhs[0].isZero())
+        || (rhs.size() == 1 && rhs[0].isZero()))
+        return {Rational{BigInt{0}}};
+    std::vector<Rational> result(
+        lhs.size() + rhs.size() - 1, Rational{BigInt{0}});
+    for (std::size_t i = 0; i < lhs.size(); ++i)
+        for (std::size_t j = 0; j < rhs.size(); ++j)
+            result[i + j] += lhs[i] * rhs[j];
+    trimPolynomialCoefficients(result);
+    return result;
+}
+
+[[nodiscard]] std::vector<Rational> polynomialDerivativeCoefficients(
+    const RationalPolynomial& polynomial) {
+    return derivativeCoefficients(polynomial.coefficients());
+}
+
+[[nodiscard]] std::optional<Expr> repeatedExponentialTrigPolynomialDerivative(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    std::uint64_t order,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    static_cast<void>(mathematics);
+    if (order == 0 || !isHead(expression, builtins, BuiltinId::Multiply)
+        || angles.defaultUnit() != mathematics::AngleUnit::Radian)
+        return std::nullopt;
+
+    const Expr* exponential = nullptr;
+    const Expr* trig = nullptr;
+    BuiltinId trigId = BuiltinId::Sin;
+    Rational scalar{BigInt{1}};
+    std::vector<const Expr*> pendingFactors;
+    pendingFactors.reserve(expression.asCall().arguments.size());
+    for (const Expr& factor : expression.asCall().arguments)
+        pendingFactors.push_back(&factor);
+    while (!pendingFactors.empty()) {
+        const Expr& factor = *pendingFactors.back();
+        pendingFactors.pop_back();
+        if (isHead(factor, builtins, BuiltinId::Multiply)) {
+            for (const Expr& nested : factor.asCall().arguments)
+                pendingFactors.push_back(&nested);
+            continue;
+        }
+        if (factor.isNumber() && factor.asNumber().isReal()) {
+            scalar *= factor.asNumber().asReal().toRational();
+            continue;
+        }
+        if (!exponential && isHead(factor, builtins, BuiltinId::Exp)
+            && factor.asCall().arguments.size() == 1) {
+            exponential = &factor;
+            continue;
+        }
+        if (!trig && (isHead(factor, builtins, BuiltinId::Sin)
+                || isHead(factor, builtins, BuiltinId::Cos))
+            && factor.asCall().arguments.size() == 1) {
+            trig = &factor;
+            trigId = isHead(factor, builtins, BuiltinId::Sin)
+                ? BuiltinId::Sin : BuiltinId::Cos;
+            continue;
+        }
+        return std::nullopt;
+    }
+    if (!exponential || !trig || scalar.isZero())
+        return std::nullopt;
+
+    const Expr& exponent = exponential->asCall().arguments[0];
+    const Expr& phase = trig->asCall().arguments[0];
+    if (explicitAngleUnit(phase, builtins))
+        return std::nullopt;
+    const auto q = toRationalPolynomial(
+        exponent, variable, builtins, PolynomialConversionOptions{3, 16});
+    const auto p = toRationalPolynomial(
+        phase, variable, builtins, PolynomialConversionOptions{3, 16});
+    if (!q || !p || q->degree() > 2 || p->degree() > 2)
+        return std::nullopt;
+
+    // e^q(A sin p + B cos p) を保ったまま
+    // A_(n+1)=A'_n+q'A_n-p'B_n,
+    // B_(n+1)=B'_n+q'B_n+p'A_n を有理係数vector上で更新する。
+    // generic product ruleを反復しないため，式木の指数的膨張を避けられる。
+    chargeRepeatedDerivativeWork(order);
+    const auto qPrime = polynomialDerivativeCoefficients(*q);
+    const auto pPrime = polynomialDerivativeCoefficients(*p);
+    std::vector<Rational> a{trigId == BuiltinId::Sin ? scalar : Rational{BigInt{0}}};
+    std::vector<Rational> b{trigId == BuiltinId::Cos ? scalar : Rational{BigInt{0}}};
+    for (std::uint64_t n = 0; n < order; ++n) {
+        const auto da = derivativeCoefficients(a);
+        const auto db = derivativeCoefficients(b);
+        auto nextA = addCoefficientVectors(da, multiplyCoefficientVectors(qPrime, a));
+        nextA = addCoefficientVectors(nextA, multiplyCoefficientVectors(pPrime, b), -1);
+        auto nextB = addCoefficientVectors(db, multiplyCoefficientVectors(qPrime, b));
+        nextB = addCoefficientVectors(nextB, multiplyCoefficientVectors(pPrime, a));
+        for (const Rational& coefficient : nextA)
+            checkRationalCoefficientBits(coefficient);
+        for (const Rational& coefficient : nextB)
+            checkRationalCoefficientBits(coefficient);
+        a = std::move(nextA);
+        b = std::move(nextB);
+    }
+
+    Expr sinTerm = integer(0);
+    if (!(a.size() == 1 && a[0].isZero()))
+        sinTerm = multiply(builtins, {
+            polynomialToExpandedExpr(RationalPolynomial{a}, variable, builtins),
+            call(builtins, BuiltinId::Sin, {phase})});
+    Expr cosTerm = integer(0);
+    if (!(b.size() == 1 && b[0].isZero()))
+        cosTerm = multiply(builtins, {
+            polynomialToExpandedExpr(RationalPolynomial{b}, variable, builtins),
+            call(builtins, BuiltinId::Cos, {phase})});
+    Expr trigCombination = integer(0);
+    if (a.size() == 1 && a[0].isZero())
+        trigCombination = std::move(cosTerm);
+    else if (b.size() == 1 && b[0].isZero())
+        trigCombination = std::move(sinTerm);
+    else
+        trigCombination = add(builtins, {std::move(sinTerm), std::move(cosTerm)});
+    return multiply(builtins, {exponential ? *exponential : call(builtins, BuiltinId::Exp, {exponent}),
+        std::move(trigCombination)});
 }
 
 [[nodiscard]] std::optional<Expr> repeatedDirectLambertDerivative(
@@ -1676,6 +1838,9 @@ std::optional<Expr> differentiateKnownRepeatedExpression(
     if (auto exponential = repeatedQuadraticExponentialDerivative(
             expression, variable, order, builtins, mathematics, angles))
         return simplify(std::move(*exponential), builtins, mathematics, angles);
+    if (auto exponentialTrig = repeatedExponentialTrigPolynomialDerivative(
+            expression, variable, order, builtins, mathematics, angles))
+        return simplify(std::move(*exponentialTrig), builtins, mathematics, angles);
     if (auto lambert = repeatedDirectLambertDerivative(
             expression, variable, order, builtins))
         return simplify(std::move(*lambert), builtins, mathematics, angles);

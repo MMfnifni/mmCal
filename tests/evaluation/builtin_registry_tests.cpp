@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mmcal::tests {
@@ -83,6 +84,43 @@ namespace {
     return names;
 }
 
+[[nodiscard]] std::vector<std::pair<std::string, std::string>> referenceAliases(
+    const std::filesystem::path& path,
+    std::string_view headingMarker) {
+    std::ifstream stream{path};
+    if (!stream)
+        throw std::runtime_error("Cannot open Reference file: " + path.string());
+
+    std::vector<std::pair<std::string, std::string>> aliases;
+    std::string line;
+    bool inSection = false;
+    while (std::getline(stream, line)) {
+        if (!inSection) {
+            if (line.find(headingMarker) != std::string::npos)
+                inSection = true;
+            continue;
+        }
+        if (line.rfind("## ", 0) == 0)
+            break;
+        if (line.empty() || line.front() != '|')
+            continue;
+
+        const std::size_t firstTick = line.find('`');
+        if (firstTick == std::string::npos)
+            continue;
+        const std::size_t secondTick = line.find('`', firstTick + 1);
+        const std::size_t thirdTick = line.find('`', secondTick + 1);
+        const std::size_t fourthTick = line.find('`', thirdTick + 1);
+        if (secondTick == std::string::npos || thirdTick == std::string::npos
+            || fourthTick == std::string::npos)
+            continue;
+        aliases.emplace_back(
+            line.substr(firstTick + 1, secondTick - firstTick - 1),
+            line.substr(thirdTick + 1, fourthTick - thirdTick - 1));
+    }
+    return aliases;
+}
+
 [[nodiscard]] std::string setDifferenceReport(
     const std::unordered_set<std::string>& registry,
     const std::vector<std::string>& reference) {
@@ -128,7 +166,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
 
     SymbolTable table;
     BuiltinRegistry registry = BuiltinRegistry::defaults(table);
-    tests.expectEqual(registry.size(), std::size_t{278},
+    tests.expectEqual(registry.size(), std::size_t{285},
         "BuiltinRegistry: registers all current builtins");
     tests.expect(registry.contains(builtins::names::sqrt),
         "BuiltinRegistry: contains sqrt");
@@ -197,6 +235,10 @@ void runBuiltinRegistryTests(TestRunner& tests) {
     const BuiltinDefinition* set = registry.find(builtins::names::set);
     tests.expect(set && set->argumentEvaluation == ArgumentEvaluation::HoldFirst,
         "BuiltinRegistry: Set holds its first argument");
+    const BuiltinDefinition* rule = registry.find(builtins::names::rule);
+    tests.expect(rule && rule->sourceCallable && rule->acceptsArity(2)
+        && rule->argumentEvaluation == ArgumentEvaluation::HoldFirst,
+        "BuiltinRegistry: Rule is source-callable and holds only its left argument");
 
     const BuiltinDefinition* ifDefinition = registry.find(builtins::names::ifThenElse);
     tests.expect(ifDefinition && ifDefinition->sourceCallable
@@ -220,7 +262,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         "BuiltinRegistry: table holds the body and binds its iterator specification");
 
     const auto sourceFunctions = registry.sourceFunctionNames();
-    tests.expectEqual(sourceFunctions.size(), std::size_t{258},
+    tests.expectEqual(sourceFunctions.size(), std::size_t{265},
         "BuiltinRegistry: exports the documented source-callable name count");
     tests.expect(sourceFunctions.contains("explain")
         && sourceFunctions.contains("sqrt") && sourceFunctions.contains("sin")
@@ -238,7 +280,8 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("re") && sourceFunctions.contains("im")
         && sourceFunctions.contains("conj") && sourceFunctions.contains("element")
         && sourceFunctions.contains("log") && sourceFunctions.contains("exp")
-        && sourceFunctions.contains("N") && sourceFunctions.contains("if")
+        && sourceFunctions.contains("N") && sourceFunctions.contains("Rule")
+        && sourceFunctions.contains("if")
         && sourceFunctions.contains("In") && sourceFunctions.contains("Out")
         && sourceFunctions.contains("simplify") && sourceFunctions.contains("fullSimplify")
         && sourceFunctions.contains("expand") && sourceFunctions.contains("factor")
@@ -290,6 +333,10 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && sourceFunctions.contains("mdet") && sourceFunctions.contains("minverse")
         && sourceFunctions.contains("mrank")
         && sourceFunctions.contains("angleMode")
+        && sourceFunctions.contains("Plot") && sourceFunctions.contains("plot")
+        && sourceFunctions.contains("ParametricPlot")
+        && sourceFunctions.contains("Show")
+        && sourceFunctions.contains("Export")
         && sourceFunctions.contains("hypergeometric2F1")
         && sourceFunctions.contains("ellipticF")
         && sourceFunctions.contains("ellipticE")
@@ -309,7 +356,7 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         && !sourceFunctions.contains("Sin") && !sourceFunctions.contains("ArcTan")
         && !sourceFunctions.contains("Integrate") && !sourceFunctions.contains("Limit")
         && !sourceFunctions.contains("Solve") && !sourceFunctions.contains("Rationalize"),
-        "BuiltinRegistry: exports canonical source-callable names without Mathematica-style aliases");
+        "BuiltinRegistry: exports canonical source-callable names with the documented Plot compatibility alias");
 
     const BuiltinDefinition* ln = registry.find("ln");
     const BuiltinDefinition* real = registry.find("real");
@@ -345,6 +392,28 @@ void runBuiltinRegistryTests(TestRunner& tests) {
         std::set<std::string>(japaneseReference.begin(), japaneseReference.end())
             == std::set<std::string>(englishReference.begin(), englishReference.end()),
         "BuiltinRegistry: Japanese and English Reference source-callable lists match");
+    tests.expect(japaneseReference == englishReference,
+        "BuiltinRegistry: Japanese and English Reference source-callable lists use the same order");
+    tests.expect(std::is_sorted(japaneseReference.begin(), japaneseReference.end()),
+        "BuiltinRegistry: Reference source-callable list is kept in lexical order");
+    const auto japaneseAliases = referenceAliases(root / "docs/reference.ja.md", "主要alias");
+    const auto englishAliases = referenceAliases(root / "docs/reference.md", "Major aliases");
+    std::vector<std::pair<std::string, std::string>> registryAliases;
+    for (const std::string& name : sourceFunctions) {
+        const BuiltinDefinition* definition = registry.find(name);
+        if (!definition)
+            continue;
+        const std::string canonical = registry.symbol(definition->id).name();
+        if (canonical != name)
+            registryAliases.emplace_back(name, canonical);
+    }
+    std::sort(registryAliases.begin(), registryAliases.end());
+    tests.expect(japaneseAliases == englishAliases,
+        "BuiltinRegistry: Japanese and English Reference alias tables match");
+    tests.expect(std::is_sorted(japaneseAliases.begin(), japaneseAliases.end()),
+        "BuiltinRegistry: Reference alias table is kept in lexical order");
+    tests.expect(japaneseAliases == registryAliases,
+        "BuiltinRegistry: Reference alias table matches source-callable registry aliases");
 
     tests.expectThrows<std::invalid_argument>([&] {
         registry.addAlias("ln", BuiltinId::Log);

@@ -1,6 +1,6 @@
 # mmCal Cheatsheet
 
-Based on v1.5.5. For details, see `docs/reference.md`. For quick in-session lookup, use `:help <function-name>`.
+Based on v1.6.0. For details, see `docs/reference.md`. For quick in-session lookup, use `:help <function-name>`.
 
 ## 1. Input syntax
 
@@ -263,6 +263,13 @@ factor[x^2-1]
 fullSimplify[(x^2-1)/(x-1),x!=1] -> x+1
 ```
 
+`Rule` is a first-class expression and `->` is right-associative.
+
+```text
+PlotRange -> {-1,1}
+Rule[PlotRange,{-1,1}]
+```
+
 ## 10. Series
 
 ```text
@@ -407,6 +414,9 @@ Aggregations:
 ```text
 sum[{1,2,3}]    -> 6
 prod[{1,2,3}]   -> 6
+sum[k^2,{k,1,n}]
+prod[k,{k,1,n}]
+sum[i+j,{{i,1,3},{j,1,4}}]
 min[{1,2,3}]
 max[{1,2,3}]
 mean[{1,2,4}]   -> 7/3
@@ -549,7 +559,35 @@ ellipticF[phi,m]          ellipticE[phi,m]    ellipticPi[n,phi,m]
 
 The amplitude `phi` of `ellipticF/E/Pi` is always interpreted in Radians, regardless of the session angle mode.
 
-## 18. CLI quick reference
+## 18. Plot and Graphics
+
+```text
+Plot[sin[x],{x,-Pi,Pi}]
+Plot[{sin[x],cos[x]},{x,-Pi,Pi},PlotRange->{-1,1}]
+ParametricPlot[{cos[t],sin[t]},{t,0,2Pi},AspectRatio->1]
+ListPlot[{{0,0},{1,1},{2,4}},Joined->True]
+Show[Plot[sin[x],{x,-Pi,Pi}],Plot[cos[x],{x,-Pi,Pi}]]
+```
+
+Main options:
+
+```text
+PlotRange -> {ymin,ymax}
+AspectRatio -> r
+Ticks -> True | False
+PlotPoints -> n        # 100..1024; 100 is the default density
+```
+
+Export:
+
+```text
+Export[Plot[sin[x],{x,-Pi,Pi}],"plot.svg","SVG"]
+Export[ParametricPlot[{cos[t],sin[t]},{t,0,2Pi}],"circle.pdf","PDF"]
+```
+
+`toNormal[Plot[...]]` / `toNormal[ParametricPlot[...]]` materializes the final samples as mathematical-coordinate arrays. Ordinary rendering may retain recognized Line / Bézier / Circle / Ellipse / EllipticArc geometry without sampling.
+
+## 19. CLI quick reference
 
 ```text
 mmCal --angle rad
@@ -580,7 +618,7 @@ REPL:
 :exit
 ```
 
-## 19. Common mistakes
+## 20. Common mistakes
 
 | Incorrect | Correct |
 |---|---|

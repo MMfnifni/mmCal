@@ -254,6 +254,8 @@ using numeric::RealNumber;
         return builtins::names::divide;
     case BinaryOperator::Power:
         return builtins::names::power;
+    case BinaryOperator::Rule:
+        return builtins::names::rule;
     }
 
     return "UnknownBinary";

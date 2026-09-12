@@ -1,6 +1,6 @@
 # mmCal Cheatsheet
 
-v1.5.5基準。詳細は `docs/reference.ja.md`。その場での確認は `:help <函数名>`。
+v1.6.0基準。詳細は `docs/reference.ja.md`。その場での確認は `:help <函数名>`。
 
 ## 1. 入力規則
 
@@ -263,6 +263,13 @@ factor[x^2-1]
 fullSimplify[(x^2-1)/(x-1),x!=1] -> x+1
 ```
 
+Ruleは第一級式であり，`->`は右結合。
+
+```text
+PlotRange -> {-1,1}
+Rule[PlotRange,{-1,1}]
+```
+
 ## 10. Series
 
 ```text
@@ -407,6 +414,9 @@ map[sin,{0,Pi/2,Pi}] -> {0,1,0}
 ```text
 sum[{1,2,3}]    -> 6
 prod[{1,2,3}]   -> 6
+sum[k^2,{k,1,n}]
+prod[k,{k,1,n}]
+sum[i+j,{{i,1,3},{j,1,4}}]
 min[{1,2,3}]
 max[{1,2,3}]
 mean[{1,2,4}]   -> 7/3
@@ -549,7 +559,35 @@ ellipticF[phi,m]          ellipticE[phi,m]    ellipticPi[n,phi,m]
 
 `ellipticF/E/Pi` の振幅 `phi` はsession設定にかかわらずRadianとして扱う。
 
-## 18. CLI早見
+## 18. Plot・Graphics
+
+```text
+Plot[sin[x],{x,-Pi,Pi}]
+Plot[{sin[x],cos[x]},{x,-Pi,Pi},PlotRange->{-1,1}]
+ParametricPlot[{cos[t],sin[t]},{t,0,2Pi},AspectRatio->1]
+ListPlot[{{0,0},{1,1},{2,4}},Joined->True]
+Show[Plot[sin[x],{x,-Pi,Pi}],Plot[cos[x],{x,-Pi,Pi}]]
+```
+
+主要option:
+
+```text
+PlotRange -> {ymin,ymax}
+AspectRatio -> r
+Ticks -> True | False
+PlotPoints -> n        # 100..1024，100が既定密度
+```
+
+Export:
+
+```text
+Export[Plot[sin[x],{x,-Pi,Pi}],"plot.svg","SVG"]
+Export[ParametricPlot[{cos[t],sin[t]},{t,0,2Pi}],"circle.pdf","PDF"]
+```
+
+`toNormal[Plot[...]]` / `toNormal[ParametricPlot[...]]` は最終sampleを数学座標のArrayへmaterializeする。通常描画では認識済みLine / Bézier / Circle / Ellipse / EllipticArcをsamplingせず保持できる。
+
+## 19. CLI早見
 
 ```text
 mmCal --angle rad
@@ -580,7 +618,7 @@ REPL:
 :exit
 ```
 
-## 19. 間違えやすい点
+## 20. 間違えやすい点
 
 | 誤り | 正しい入力 |
 |---|---|

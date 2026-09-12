@@ -13,6 +13,7 @@ enum class TokenKind {
     Identifier,
     Plus,
     Minus,
+    RuleArrow,
     Star,
     Slash,
     Caret,

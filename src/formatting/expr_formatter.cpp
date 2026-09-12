@@ -26,6 +26,7 @@ using expression::Expr;
 
 constexpr int precedenceLowest = 0;
 constexpr int precedenceAssignment = 5;
+constexpr int precedenceRule = 6;
 constexpr int precedenceComparison = 8;
 constexpr int precedenceAdditive = 10;
 constexpr int precedenceMultiplicative = 20;
@@ -547,6 +548,28 @@ void appendBinaryCall(
         output.push_back(')');
 }
 
+void appendRightAssociativeBinaryCall(
+    std::string& output,
+    const CallExpr& call,
+    std::string_view separator,
+    int precedence,
+    unsigned radix,
+    int parentPrecedence) {
+    if (call.arguments.size() != 2)
+        return;
+
+    const bool parenthesize = precedence < parentPrecedence;
+    if (parenthesize)
+        output.push_back('(');
+
+    appendExpr(output, call.arguments[0], radix, precedence + 1);
+    output += separator;
+    appendExpr(output, call.arguments[1], radix, precedence);
+
+    if (parenthesize)
+        output.push_back(')');
+}
+
 void appendDivideCall(
     std::string& output,
     const CallExpr& call,
@@ -941,9 +964,18 @@ void appendCall(
         terms.reserve(2);
         collectSignedTerms(call.arguments[0], false, terms);
         collectSignedTerms(call.arguments[1], true, terms);
-        // a-(-b) は表示上は加法になる。ここだけAddと同じ多項式順を適用して、
-        // formatter -> parser -> formatter の固定点を保つ。通常の 1-x はそのまま残す。
-        if (positiveMagnitudeOfNegative(call.arguments[1]))
+        // 複合加減算でunivariate polynomialが構成される場合はAddと同じ次数降順へ寄せる。
+        // expand[...]の出力を再入力したとき，末尾の負定数によってASTだけSubtractへ戻り
+        // 項順が一度揺れるのを防ぐ。一方，単純な 1-x は従来表示を維持する。
+        const auto isAdditiveChain = [](const Expr& expression) {
+            if (!expression.isCall())
+                return false;
+            const std::string_view nestedHead = expression.asCall().head.view();
+            return nestedHead == builtins::names::add || nestedHead == builtins::names::subtract;
+        };
+        if (positiveMagnitudeOfNegative(call.arguments[1])
+            || isAdditiveChain(call.arguments[0])
+            || isAdditiveChain(call.arguments[1]))
             orderUnivariatePolynomialTermsForDisplay(terms);
         appendSignedTerms(output, terms, radix, parentPrecedence);
         return;
@@ -1014,6 +1046,12 @@ void appendCall(
     if ((head == builtins::names::set || head == builtins::names::setDelayed)
         && call.arguments.size() == 2) {
         appendBinaryCall(output, call, ":=", precedenceAssignment, radix, parentPrecedence, true);
+        return;
+    }
+
+    if (head == builtins::names::rule && call.arguments.size() == 2) {
+        appendRightAssociativeBinaryCall(
+            output, call, " -> ", precedenceRule, radix, parentPrecedence);
         return;
     }
 

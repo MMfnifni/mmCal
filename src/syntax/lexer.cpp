@@ -97,7 +97,12 @@ std::vector<Token> Lexer::tokenize() {
             append(makeToken(TokenKind::Plus, begin));
             break;
         case '-':
-            append(makeToken(TokenKind::Minus, begin));
+            if (current() == '>') {
+                advance();
+                append(makeToken(TokenKind::RuleArrow, begin));
+            }
+            else
+                append(makeToken(TokenKind::Minus, begin));
             break;
         case '*':
             append(makeToken(TokenKind::Star, begin));

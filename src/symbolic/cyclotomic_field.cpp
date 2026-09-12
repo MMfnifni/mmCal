@@ -79,11 +79,6 @@ void trim(Polynomial& polynomial) {
     return polynomial;
 }
 
-[[nodiscard]] std::optional<Polynomial> cyclotomicPolynomial(std::size_t n) {
-    std::unordered_map<std::size_t, Polynomial> cache;
-    return cyclotomicPolynomialImpl(n, cache);
-}
-
 [[nodiscard]] std::vector<Rational> multiplyReduced(
     std::span<const Rational> lhs,
     std::span<const Rational> rhs,
@@ -110,6 +105,12 @@ void trim(Polynomial& polynomial) {
 }
 
 } // namespace
+
+std::optional<std::vector<Rational>> cyclotomicPolynomialCoefficients(
+    std::size_t conductor) {
+    std::unordered_map<std::size_t, Polynomial> cache;
+    return cyclotomicPolynomialImpl(conductor, cache);
+}
 
 std::size_t cyclotomicDegree(std::size_t conductor) noexcept {
     if (conductor == 0)
@@ -143,7 +144,7 @@ std::shared_ptr<const CyclotomicFieldContext> CyclotomicFieldContext::create(
     const std::size_t expectedDegree = cyclotomicDegree(conductor);
     if (conductor == 0 || expectedDegree == 0 || expectedDegree > maximumCyclotomicDegree)
         return {};
-    const auto polynomial = cyclotomicPolynomial(conductor);
+    const auto polynomial = cyclotomicPolynomialCoefficients(conductor);
     if (!polynomial || polynomial->size() != expectedDegree + 1)
         return {};
 

@@ -18,6 +18,9 @@
 #include "simplification/expression_cost.hpp"
 #include "solver/solution_set.hpp"
 #include "symbolic/series.hpp"
+#include "symbolic/finite_sum_product.hpp"
+#include "symbolic/substitution.hpp"
+#include "expression/exact_value.hpp"
 
 #include <algorithm>
 #include <array>
@@ -253,6 +256,24 @@ void scheduleTableIteratorSpecArgument(
         specs.push_back(element);
     }
     return specs;
+}
+
+[[nodiscard]] bool isFiniteAggregateIteratorCall(
+    BuiltinId id,
+    const expression::CallExpr& call) {
+    if ((id != BuiltinId::Sum && id != BuiltinId::Product)
+        || call.arguments.size() != 2)
+        return false;
+    return parseTableIteratorSpec(call.arguments[1]).has_value()
+        || tableIteratorSequence(call.arguments[1]).has_value();
+}
+
+[[nodiscard]] bool exactIteratorBounds(
+    const TableIteratorSpec& spec) {
+    for (const expression::Expr& argument : spec.rangeArguments)
+        if (!expression::exact::realRational(argument))
+            return false;
+    return true;
 }
 
 [[nodiscard]] expression::Expr mapLeafCalls(
@@ -785,6 +806,9 @@ expression::Expr Evaluator::evaluateMachine(
                                     return;
                                 }
 
+                                const bool finiteAggregateIterator =
+                                    isFiniteAggregateIteratorCall(definition->id, call);
+
                                 tasks.emplace_back(DispatchBuiltinTask{
                                     current.expression,
                                     definition,
@@ -793,6 +817,20 @@ expression::Expr Evaluator::evaluateMachine(
                                 });
 
                                 for (std::size_t index = call.arguments.size(); index-- > 0;) {
+                                    if (finiteAggregateIterator) {
+                                        if (index == 0) {
+                                            tasks.emplace_back(PushResultTask{call.arguments[index]});
+                                            continue;
+                                        }
+                                        if (index == 1) {
+                                            scheduleTableIteratorSpecArgument(
+                                                tasks,
+                                                call.arguments[index],
+                                                current.origins,
+                                                current.depth + 1);
+                                            continue;
+                                        }
+                                    }
                                     if (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndIteratorSpec
                                         && index == 1) {
                                         scheduleIteratorSpecArgument(
@@ -906,6 +944,86 @@ expression::Expr Evaluator::evaluateMachine(
                             return;
                         }
 
+                        if ((current.definition->id == BuiltinId::Sum
+                                || current.definition->id == BuiltinId::Product)
+                            && isFiniteAggregateIteratorCall(
+                                current.definition->id, call)) {
+                            // 多重iteratorはtableと同じく左側を外側としてnested callへ落とす。
+                            if (const auto sequence = tableIteratorSequence(arguments[1])) {
+                                expression::Expr nested = arguments[0];
+                                for (auto iterator = sequence->rbegin(); iterator != sequence->rend(); ++iterator)
+                                    nested = expression::Expr::call(
+                                        call.head, {std::move(nested), *iterator});
+                                tasks.emplace_back(EvaluateTask{
+                                    std::move(nested), current.origins, current.depth + 1});
+                                return;
+                            }
+
+                            const auto spec = parseTableIteratorSpec(arguments[1]);
+                            if (!spec)
+                                error::throwCalcError(
+                                    error::CalcErrorType::Type,
+                                    "sum/prod iterator must be {symbol,end}, {symbol,lower,upper}, {symbol,lower,upper,step}, or a brace value of such iterators");
+
+                            // binder変数だけを現在のsession定義から保護し，その他の係数・user symbolは
+                            // 通常どおりmaterializeしてからsymbolic kernelへ渡す。
+                            const std::size_t previousProtectedSize = materializationProtectedSymbols_.size();
+                            if (std::find(materializationProtectedSymbols_.begin(),
+                                    materializationProtectedSymbols_.end(), spec->variable)
+                                == materializationProtectedSymbols_.end())
+                                materializationProtectedSymbols_.push_back(spec->variable);
+                            std::optional<expression::Expr> materializedBody;
+                            try {
+                                materializedBody = evaluate(
+                                    resolveHeldHistoryReferences(arguments[0]));
+                                materializationProtectedSymbols_.resize(previousProtectedSize);
+                            }
+                            catch (...) {
+                                materializationProtectedSymbols_.resize(previousProtectedSize);
+                                throw;
+                            }
+                            expression::Expr body = std::move(*materializedBody);
+
+                            const auto closed = current.definition->id == BuiltinId::Sum
+                                ? symbolic::finiteSymbolicSum(
+                                    body, *spec, registry_, mathematics_, angleSemantics_)
+                                : symbolic::finiteSymbolicProduct(
+                                    body, *spec, registry_, mathematics_, angleSemantics_);
+                            if (closed) {
+                                tasks.emplace_back(EvaluateTask{
+                                    *closed, current.origins, current.depth + 1});
+                                return;
+                            }
+
+                            // 閉形式が無い場合もexact finite rangeなら明示展開して既存builtin評価へ戻す。
+                            // 大きな列はEvaluationBudgetがexactRangeValues側で制御する。
+                            if (exactIteratorBounds(*spec)) {
+                                std::vector<expression::Expr> values = builtins::exactRangeValues(
+                                    spec->rangeArguments,
+                                    current.definition->id == BuiltinId::Sum ? "sum" : "prod");
+                                constexpr std::size_t maximumExplicitTerms = 4096;
+                                if (values.size() <= maximumExplicitTerms) {
+                                    std::vector<expression::Expr> terms;
+                                    terms.reserve(values.size());
+                                    for (const expression::Expr& value : values)
+                                        terms.push_back(symbolic::substituteSymbol(
+                                            body, spec->variable, value));
+                                    expression::Expr expanded = expression::Expr::call(
+                                        call.head, std::move(terms));
+                                    tasks.emplace_back(EvaluateTask{
+                                        std::move(expanded), current.origins, current.depth + 1});
+                                    return;
+                                }
+                            }
+
+                            // unsupported symbolic familyは値を捏造せず，materialize済みbodyで保持する。
+                            expression::Expr held = expression::Expr::call(
+                                call.head, {std::move(body), arguments[1]});
+                            consumeGeneratedExpression(held);
+                            results.push_back(std::move(held));
+                            return;
+                        }
+
                         if (current.definition->id == BuiltinId::Table) {
                             // {{i,...},{j,...},...} は左から外側iteratorとして解釈する。
                             // 既存の単一iterator評価器へ nested table callとして落とすことで，
@@ -970,6 +1088,7 @@ expression::Expr Evaluator::evaluateMachine(
                         const bool pureForPostSimplification =
                             current.definition->id != BuiltinId::Set
                             && current.definition->id != BuiltinId::SetDelayed
+                            && current.definition->id != BuiltinId::Rule
                             && current.definition->id != BuiltinId::If
                             && current.definition->id != BuiltinId::Cases
                             && current.definition->id != BuiltinId::CaseBranch

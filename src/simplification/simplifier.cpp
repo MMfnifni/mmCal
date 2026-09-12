@@ -231,6 +231,54 @@ void visitSignedAddTerms(
     visitor(expression, negative);
 }
 
+[[nodiscard]] std::optional<Expr> simplifyExactPeriodicShift(
+    BuiltinId function,
+    const Expr& argument,
+    const SimplificationContext& context) {
+    const auto* definition = context.mathematics.findFunction(
+        context.builtins.symbol(function));
+    if (!definition || !definition->periodTurns)
+        return std::nullopt;
+
+    Rational exactTurns{BigInt{0}};
+    std::vector<Expr> residualTerms;
+    bool foundExactAngle = false;
+    visitSignedAddTerms(argument, false, context.builtins,
+        [&](const Expr& term, bool negative) {
+            const auto angle = mathematics::extractExactAngle(
+                term, context.builtins, context.mathematics, context.angleSemantics);
+            if (angle) {
+                exactTurns += negative ? -angle->turns : angle->turns;
+                foundExactAngle = true;
+                return;
+            }
+            residualTerms.push_back(negative
+                ? Expr::call(context.builtins.symbol(BuiltinId::Negate), {term})
+                : term);
+        });
+
+    // 全項exactの場合は既存の特殊角表へ任せる。ここでは任意の複素式に
+    // 加わった証明可能な周期だけを除去する。
+    if (!foundExactAngle || residualTerms.empty())
+        return std::nullopt;
+
+    Expr residual = residualTerms.size() == 1
+        ? residualTerms.front()
+        : Expr::call(context.builtins.symbol(BuiltinId::Add), std::move(residualTerms));
+    Expr reduced = Expr::call(context.builtins.symbol(function), {std::move(residual)});
+    if ((exactTurns / *definition->periodTurns).isInteger())
+        return reduced;
+
+    // sin/cos/sec/cscはfull periodの半分で符号反転する。
+    // tan/cotはその半周を自身のperiodとして登録済みである。
+    const bool antiperiodic = function == BuiltinId::Sin || function == BuiltinId::Cos
+        || function == BuiltinId::Sec || function == BuiltinId::Csc;
+    const Rational halfPeriod = *definition->periodTurns / Rational{BigInt{2}};
+    if (antiperiodic && (exactTurns / halfPeriod).isInteger())
+        return Expr::call(context.builtins.symbol(BuiltinId::Negate), {std::move(reduced)});
+    return std::nullopt;
+}
+
 [[nodiscard]] Expr buildProduct(
     std::vector<Expr> factors,
     const evaluation::BuiltinRegistry& builtins) {
@@ -1484,6 +1532,9 @@ struct PositiveIntegerPower final {
 
         if (!mathFunction)
             return expression;
+        if (auto periodic = simplifyExactPeriodicShift(
+            definition->id, arguments[0], context))
+            return std::move(*periodic);
         if (auto composed = simplifyPrincipalInverseComposition(
             definition->id, arguments[0], context))
             return std::move(*composed);
@@ -1929,6 +1980,7 @@ struct PositiveIntegerPower final {
     case BuiltinId::PolynomialReduce:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
+    case BuiltinId::Rule:
     case BuiltinId::Less:
     case BuiltinId::LessEqual:
     case BuiltinId::Greater:
@@ -1950,6 +2002,11 @@ struct PositiveIntegerPower final {
     case BuiltinId::SeriesData:
     case BuiltinId::Normal:
     case BuiltinId::ToNormal:
+    case BuiltinId::Plot:
+    case BuiltinId::ParametricPlot:
+    case BuiltinId::ListPlot:
+    case BuiltinId::Show:
+    case BuiltinId::Export:
     case BuiltinId::UnitApplied:
         return expression;
     }

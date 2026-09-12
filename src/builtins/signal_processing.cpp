@@ -460,6 +460,15 @@ using CyclotomicCoordinateMemo =
             denominator = 8;
         else if (radicand == Rational{BigInt{3}} && field.conductor() % 12 == 0)
             denominator = 12;
+        else if (radicand == Rational{BigInt{6}} && field.conductor() % 24 == 0) {
+            const std::size_t exponent2 = field.conductor() / 8;
+            const std::size_t exponent3 = field.conductor() / 12;
+            const auto sqrt2 = addCoordinates(
+                field.power(exponent2), field.power(field.conductor() - exponent2));
+            const auto sqrt3 = addCoordinates(
+                field.power(exponent3), field.power(field.conductor() - exponent3));
+            return field.multiply(sqrt2, sqrt3);
+        }
         else
             return std::nullopt;
         const std::size_t exponent = field.conductor() / denominator;
@@ -627,7 +636,7 @@ using CyclotomicCoordinateMemo =
     const mathematics::AngleSemantics& angles,
     FourierTransformCache& cache) {
     const std::size_t n = input.size();
-    if (n < 16 || !isPowerOfTwo(n))
+    if (n < 8 || !isPowerOfTwo(n))
         return std::nullopt;
 
     // 純粋な数値spectrumは従来radix-2の方が簡潔である。fft由来のroot-of-unity式が
@@ -703,7 +712,7 @@ using CyclotomicCoordinateMemo =
     const mathematics::AngleSemantics& angles,
     FourierTransformCache& cache) {
     const std::size_t n = input.size();
-    if (n < 5 || isPowerOfTwo(n))
+    if (isPowerOfTwo(n) || n < 3 || (!inverse && n < 5))
         return std::nullopt;
     if (n > std::numeric_limits<std::size_t>::max() / 4)
         return std::nullopt;

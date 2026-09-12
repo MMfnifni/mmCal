@@ -11,6 +11,7 @@
 #include "symbols/symbol_table.hpp"
 #include "symbolic/algebraic_number.hpp"
 #include "symbolic/number_field.hpp"
+#include "symbolic/polynomial.hpp"
 #include "test_framework.hpp"
 
 #include <algorithm>
@@ -410,6 +411,112 @@ void runExactAlgebraTests(TestRunner& tests) {
                     && square->arithmeticElement()->field().get() == fieldIdentity,
                 "NumberField: chained same-field arithmetic reuses the existing context");
         }
+    }
+
+    {
+        const auto q = [](std::int64_t value) {
+            return numeric::Rational{numeric::BigInt{value}};
+        };
+        const auto multiplyPolynomial = [&](
+            const symbolic::RationalPolynomial& lhs,
+            const symbolic::RationalPolynomial& rhs) {
+            std::vector<numeric::Rational> coefficients(
+                lhs.degree() + rhs.degree() + 1, q(0));
+            for (std::size_t i = 0; i <= lhs.degree(); ++i)
+                for (std::size_t j = 0; j <= rhs.degree(); ++j)
+                    coefficients[i + j] += lhs.coefficient(i) * rhs.coefficient(j);
+            return symbolic::RationalPolynomial{std::move(coefficients)};
+        };
+
+        const symbolic::RationalPolynomial first{{q(1), q(0), q(1)}};
+        const symbolic::RationalPolynomial second{{q(2), q(1), q(1)}};
+        const symbolic::RationalPolynomial third{{q(3), q(-1), q(1)}};
+        const symbolic::RationalPolynomial input = multiplyPolynomial(
+            multiplyPolynomial(first, second), third);
+        symbolic::RationalPolynomialFactorOptions options;
+        options.maximumSparseTerms = 0;
+        options.maximumBerlekampMatrixEntries = 0;
+        options.maximumCombinations = 3;
+        const auto partial = symbolic::factorRationalPolynomialOverQ(input, options);
+
+        symbolic::RationalPolynomial reconstructed{{partial.scalar}};
+        for (const auto& factor : partial.factors)
+            reconstructed = multiplyPolynomial(reconstructed, factor);
+        tests.expect(!partial.complete
+                && partial.factors.size() == 2
+                && partial.factors[0].degree() == 2
+                && partial.factors[1].degree() == 4
+                && reconstructed.coefficients() == input.coefficients(),
+            "Polynomial factor: a recombination budget stop retains certified partial factors and an exact residual");
+
+        options.maximumCombinations = 8;
+        const auto complete = symbolic::factorRationalPolynomialOverQ(input, options);
+        tests.expect(complete.complete && complete.factors.size() == 3,
+            "Polynomial factor: Cantor-Zassenhaus and Hensel complete after sufficient recombination budget");
+
+        options.maximumCombinations = 0;
+        options.preferredRecombinationCandidates = 0;
+        options.minimumCldModularFactors = 2;
+        const auto cld = symbolic::factorRationalPolynomialOverQ(input, options);
+        symbolic::RationalPolynomial cldProduct{{cld.scalar}};
+        for (const auto& factor : cld.factors)
+            cldProduct = multiplyPolynomial(cldProduct, factor);
+        tests.expect(cld.complete
+                && cld.factors.size() == 3
+                && cldProduct.coefficients() == input.coefficients(),
+            "Polynomial factor: exact CLD-LLL recombination succeeds with exhaustive subset search disabled");
+
+        options.maximumLllRank = 2;
+        const auto limitedCld = symbolic::factorRationalPolynomialOverQ(
+            input, options);
+        symbolic::RationalPolynomial limitedProduct{{limitedCld.scalar}};
+        for (const auto& factor : limitedCld.factors)
+            limitedProduct = multiplyPolynomial(limitedProduct, factor);
+        tests.expect(!limitedCld.complete
+                && limitedProduct.coefficients() == input.coefficients(),
+            "Polynomial factor: a CLD lattice budget stop remains an exact partial factorization");
+
+        // p=3は重根を持つbad reduction，p=5では各Q-irreducible quadraticが
+        // 二本のlinear modular factorへ分かれる。CLDが4本を2 blockへ戻す必要がある。
+        const symbolic::RationalPolynomial cldFirst{{q(1), q(0), q(1)}};
+        const symbolic::RationalPolynomial cldSecond{{q(10), q(9), q(1)}};
+        const symbolic::RationalPolynomial fourLocalFactors =
+            multiplyPolynomial(cldFirst, cldSecond);
+        symbolic::RationalPolynomialFactorOptions groupedOptions;
+        groupedOptions.maximumSparseTerms = 0;
+        groupedOptions.maximumBerlekampMatrixEntries = 0;
+        groupedOptions.maximumPrimeTrials = 2;
+        groupedOptions.maximumGoodPrimes = 1;
+        groupedOptions.maximumCombinations = 4;
+        groupedOptions.preferredRecombinationCandidates = 0;
+        groupedOptions.minimumCldModularFactors = 2;
+        const auto grouped = symbolic::factorRationalPolynomialOverQ(
+            fourLocalFactors, groupedOptions);
+        tests.expect(grouped.complete
+                && grouped.factors.size() == 2
+                && grouped.factors[0].degree() == 2
+                && grouped.factors[1].degree() == 2,
+            "Polynomial factor: CLD-LLL groups several local factors into exact rational blocks");
+
+        groupedOptions.maximumCldLattices = 0;
+        const auto withoutCld = symbolic::factorRationalPolynomialOverQ(
+            fourLocalFactors, groupedOptions);
+        tests.expect(!withoutCld.complete
+                && withoutCld.factors.size() == 1
+                && withoutCld.factors.front().coefficients()
+                    == fourLocalFactors.coefficients(),
+            "Polynomial factor: the same subset budget exposes the CLD accelerator boundary without losing exactness");
+
+        std::vector<numeric::Rational> highDegreeCoefficients(68, q(0));
+        highDegreeCoefficients[0] = q(-1);
+        highDegreeCoefficients[1] = q(-5);
+        highDegreeCoefficients[67] = q(1);
+        const auto highDegree = symbolic::factorRationalPolynomialOverQ(
+            symbolic::RationalPolynomial{std::move(highDegreeCoefficients)});
+        tests.expect(highDegree.complete
+                && highDegree.factors.size() == 1
+                && highDegree.factors.front().degree() == 67,
+            "Polynomial factor: multiple finite-field primes certify a high-degree irreducible leaf by degree intersection");
     }
 }
 

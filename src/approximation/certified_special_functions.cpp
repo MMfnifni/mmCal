@@ -758,24 +758,26 @@ struct StirlingPlan final {
     const Rational& x,
     bool cosineIntegral,
     std::size_t precisionBits) {
-    // FresnelのMaclaurin級数は大きいxでは巨大な中間項が相殺する。
-    // 旧+48bit固定guardではx=4程度でも高精度時に包含幅が縮まらないため、
-    // x^2に比例したguardを追加して相殺分を明示的に吸収する。
+    // FresnelのMaclaurin級数は大きいxでは中間項が増大してから減衰する。
+    // 最大項のbit成長は概ね O(x^2) なので、固定guardへ4*x^2を丸ごと足す
+    // 旧方式は実Plotの中域で過剰精度になっていた。5*x^2/2を上向きに丸め、
+    // さらに40bitを確保すれば x<8 のseries域で相殺と区間丸めを十分吸収できる。
     const Rational x2ForGuard = x * x;
-    const BigInt guardQuotient = x2ForGuard.numerator() / x2ForGuard.denominator();
+    const Rational scaledGuard = x2ForGuard * rational(5, 2);
+    BigInt guardQuotient = scaledGuard.numerator() / scaledGuard.denominator();
+    if (!(scaledGuard.numerator() % scaledGuard.denominator()).isZero())
+        guardQuotient += BigInt{1};
     const auto guardMagnitude = numeric::tryToUint64(guardQuotient);
     const std::size_t cancellationGuard = guardMagnitude
-        ? static_cast<std::size_t>(std::min<std::uint64_t>(*guardMagnitude, 100'000ULL)) * 4U
-        : 400'000U;
+        ? static_cast<std::size_t>(std::min<std::uint64_t>(*guardMagnitude, 250'000ULL))
+        : 250'000U;
     const std::size_t workBits = checkedAdd(
         precisionBits,
-        checkedAdd(64, cancellationGuard, "Fresnel cancellation guard is too large"),
+        checkedAdd(40, cancellationGuard, "Fresnel cancellation guard is too large"),
         "Fresnel working precision is too large");
     const RealInterval pi = enclosePi(workBits).interval;
-    const Rational piUpper = pi.upper().toRational();
     const Rational x2 = x * x;
     const Rational x4 = x2 * x2;
-    const Rational commonUpper = piUpper * piUpper * x4 / rational(4);
     const RealInterval common = divide(
         multiply(multiply(pi, pi, workBits), exactInterval(x4, workBits), workBits),
         exactInterval(4, workBits), workBits);
@@ -788,6 +790,10 @@ struct StirlingPlan final {
     RealInterval sum = term;
     const Rational target = binaryThreshold(checkedAdd(
         precisionBits, 12, "Fresnel target precision is too large"));
+    const BigFloat targetLower = BigFloat::fromRational(
+        target, workBits, RoundingMode::TowardNegative);
+    const BigFloat one = BigFloat::fromBigInt(
+        BigInt{1}, workBits, RoundingMode::NearestEven);
 
     constexpr std::size_t maximumTerms = 1'000'000;
     for (std::size_t n = 0; n < maximumTerms; ++n) {
@@ -796,24 +802,28 @@ struct StirlingPlan final {
         const std::size_t d0 = cosineIntegral ? 2 * n + 1 : 2 * n + 2;
         const std::size_t d1 = cosineIntegral ? 2 * n + 2 : 2 * n + 3;
         const std::size_t d2 = cosineIntegral ? 4 * n + 5 : 4 * n + 7;
-        const Rational ratioUpper = commonUpper * unsignedRational(numeratorIndex)
-            / (unsignedRational(d0) * unsignedRational(d1) * unsignedRational(d2));
-
-        // 現項より後の比が1未満に入れば以後は単調減少する。
-        // 最初の未加算項を等比級数で上から押さえ、Taylor剰余を明示的に区間へ足す。
-        if (ratioUpper < rational(1)) {
-            const Rational nextBound = intervalAbsUpper(term, workBits) * ratioUpper;
-            const Rational tailBound = nextBound / (rational(1) - ratioUpper);
-            if (tailBound <= target) {
-                sum = add(sum, symmetricError(tailBound, workBits), workBits);
-                return sum.roundedOutward(precisionBits);
-            }
-        }
-
         const RealInterval ratio = divide(
             multiply(common, exactInterval(unsignedRational(numeratorIndex), workBits), workBits),
             exactInterval(unsignedRational(d0) * unsignedRational(d1) * unsignedRational(d2), workBits),
             workBits);
+        const BigFloat& ratioUpper = ratio.upper();
+
+        // 現項より後の比が1未満に入れば以後は単調減少する。
+        // 最初の未加算項を等比級数で上から押さえ、Taylor剰余を明示的に区間へ足す。
+        if (ratioUpper < one) {
+            const BigFloat termUpper = absoluteInterval(term, workBits).upper();
+            const BigFloat nextBound = numeric::multiply(
+                termUpper, ratioUpper, workBits, RoundingMode::TowardPositive);
+            const BigFloat denominator = numeric::subtract(
+                one, ratioUpper, workBits, RoundingMode::TowardNegative);
+            const BigFloat tailBound = numeric::divide(
+                nextBound, denominator, workBits, RoundingMode::TowardPositive);
+            if (tailBound <= targetLower) {
+                sum = add(sum, RealInterval{-tailBound, tailBound}, workBits);
+                return sum.roundedOutward(precisionBits);
+            }
+        }
+
         term = negate(multiply(term, ratio, workBits));
         sum = add(sum, term, workBits);
     }
@@ -923,6 +933,12 @@ struct FresnelPair final {
     const RealInterval& input,
     bool cosineIntegral,
     std::size_t precisionBits) {
+    // Plot/N の点評価では入力幅を伝播させる必要がない。ここで一律 +32 bit して
+    // point backendへ渡すと、中域のMaclaurin級数の全項が不要な高精度演算になる。
+    // pointFresnel 自身が指定精度で包含を返すので、点入力はそのまま評価する。
+    if (input.isPoint())
+        return pointFresnel(input.lower().toRational(), cosineIntegral, precisionBits);
+
     const std::size_t workBits = checkedAdd(
         precisionBits, 32, "Fresnel interval precision is too large");
     const Rational lower = input.lower().toRational();

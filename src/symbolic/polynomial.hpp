@@ -269,6 +269,63 @@ struct RationalRootSearchResult final {
     const RationalPolynomial& polynomial,
     RationalRootSearchOptions options = {});
 
+struct RationalPolynomialFactorOptions final {
+    // 一般Q[x]はsquare-free -> finite-field factorization -> Hensel ->
+    // Zassenhausを主経路とする。degreeだけの一律gateにせず，各phaseが
+    // 実際に消費するresourceへ個別の防壁を置く。
+    std::size_t maximumFiniteFieldDegree = 512;
+    std::size_t maximumBerlekampMatrixEntries = 4096;
+    std::size_t maximumPrimeTrials = 16;
+    std::size_t maximumGoodPrimes = 8;
+    // 2 prime以上を交差後，候補subsetがこの数以下ならliftへ進む。
+    std::size_t preferredRecombinationCandidates = 1024;
+    std::size_t maximumCantorZassenhausAttempts = 64;
+    std::size_t maximumLiftBits = 4096;
+    std::size_t maximumHenselWorkingBits = 8192;
+    std::size_t maximumCombinations = 200'000;
+
+    // modular factorが多くsubset列挙が膨らむ場合だけ，CLD latticeで
+    // rational factorのblockを推定する。LLLはheuristic acceleratorであり，
+    // 候補は必ず元のZ[x]でexact divisionする。
+    std::size_t minimumCldModularFactors = 8;
+    std::size_t maximumCldLiftBits = 4096;
+    std::size_t maximumCldLattices = 4;
+    std::size_t maximumCldCandidates = 256;
+    std::size_t maximumCldCoefficientColumns = 4;
+    std::size_t maximumLllRank = 24;
+    std::size_t maximumLllColumns = 192;
+    std::size_t maximumLllIntermediateBits = 8192;
+    std::size_t maximumLllSwaps = 128;
+    std::size_t maximumLllSizeReductions = 512;
+
+    // exact sparse preprocessing用。候補は必ずQ[x]で割り切れることを
+    // 検証するため，budget到達は「未分解」であって誤因子にはならない。
+    std::size_t maximumSparseTerms = 24;
+    std::size_t maximumSparseCandidates = 8192;
+
+    // bounded Kronecker fallback用。
+    std::size_t maximumKroneckerDegree = 64;
+    std::size_t maximumSampleRadius = 24;
+    std::size_t maximumDivisorsPerSample = 4096;
+};
+
+struct RationalPolynomialFactorization final {
+    // polynomial == scalar * product(factors)。各factorはmonicかつ非定数である。
+    numeric::Rational scalar;
+    std::vector<RationalPolynomial> factors;
+    // trueならmodular/Kroneckerを含む全leafについてQ上既約まで証明済み。
+    // falseでもscalar*product(factors)は常に入力とexactに一致し，証明済みの
+    // partial factorsを捨てずに返す。
+    bool complete = false;
+};
+
+// 一変数Q[x]をbounded modular factorizationでexactに分解する。
+// budget外ではKronecker補間へfallbackする。数値近似rootは用いず，
+// 候補は必ずQ[x]のexact divisionで検証する。
+[[nodiscard]] RationalPolynomialFactorization factorRationalPolynomialOverQ(
+    const RationalPolynomial& polynomial,
+    RationalPolynomialFactorOptions options = {});
+
 // 式中の通常Symbolを構造的に収集する。builtin headは引数ではないため対象外。
 [[nodiscard]] std::vector<expression::Symbol> collectSymbols(
     const expression::Expr& expression);

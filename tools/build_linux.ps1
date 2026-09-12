@@ -81,6 +81,21 @@ if ([string]::IsNullOrWhiteSpace($wslRoot)) {
 }
 $wslRoot = $wslRoot.Trim()
 
+# wslpath can convert a drive-letter path even if that drive is not actually
+# mounted in the active WSL distribution. Check visibility before CMake.
+& $wslExe -e test -d $wslRoot
+if ($LASTEXITCODE -ne 0) {
+    throw @"
+The project directory is not visible from WSL:
+
+    Windows: $root
+    WSL    : $wslRoot
+
+Verify that the drive containing the source tree is mounted in Ubuntu.
+For this project, L: would normally be visible below /mnt/l.
+"@
+}
+
 # ------------------------------------------------------------
 # Check build tools without printing their native output.
 # ------------------------------------------------------------

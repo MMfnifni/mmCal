@@ -37,6 +37,9 @@
 #include "mathematics/value_facts_tests.hpp"
 #include "mathematics/knowledge_context_tests.hpp"
 #include "solver/solution_set_tests.hpp"
+#include "plot/plot_analysis_tests.hpp"
+#include "plot/plot_program_tests.hpp"
+#include "plot/plot_sampling_tests.hpp"
 #include "simplification/simplifier_tests.hpp"
 #include "mathematics/exact_algebra_tests.hpp"
 #include "mathematics/exact_trigonometry_tests.hpp"
@@ -47,6 +50,7 @@
 #include "symbols/symbol_registry_tests.hpp"
 #include "symbols/symbol_table_tests.hpp"
 #include "symbolic/differentiation_tests.hpp"
+#include "symbolic/risch_core_tests.hpp"
 #include "symbolic/series_tests.hpp"
 #include "test_framework.hpp"
 
@@ -113,11 +117,15 @@ int main(int argc, char* argv[]) {
         run("ValueFacts", [&] { mmcal::tests::runValueFactsTests(tests); });
         run("KnowledgeContext", [&] { mmcal::tests::runKnowledgeContextTests(tests); });
         run("SolutionSet", [&] { mmcal::tests::runSolutionSetTests(tests); });
+        run("PlotAnalysis", [&] { mmcal::tests::runPlotAnalysisTests(tests); });
+        run("PlotProgram", [&] { mmcal::tests::runPlotProgramTests(tests); });
+        run("PlotSampling", [&] { mmcal::tests::runPlotSamplingTests(tests); });
         run("Simplifier", [&] { mmcal::tests::runSimplifierTests(tests); });
         run("ExactAlgebra", [&] { mmcal::tests::runExactAlgebraTests(tests); });
         run("ExactTrigonometry", [&] { mmcal::tests::runExactTrigonometryTests(tests); });
         run("ExactTranscendental", [&] { mmcal::tests::runExactTranscendentalTests(tests); });
         run("Differentiation", [&] { mmcal::tests::runDifferentiationTests(tests); });
+        run("RischCore", [&] { mmcal::tests::runRischCoreTests(tests); });
         run("Series", [&] { mmcal::tests::runSeriesTests(tests); });
         run("Environment", [&] { mmcal::tests::runEnvironmentTests(tests); });
         run("UserFunctionRegistry", [&] { mmcal::tests::runUserFunctionRegistryTests(tests); });

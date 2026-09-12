@@ -2517,6 +2517,7 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::CaseBranch:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
+    case BuiltinId::Rule:
     case BuiltinId::Less:
     case BuiltinId::LessEqual:
     case BuiltinId::Greater:
@@ -2534,6 +2535,11 @@ std::optional<CertifiedValue> CertifiedEvaluator::encloseCall(
     case BuiltinId::Definitions:
     case BuiltinId::Undefine:
     case BuiltinId::AngleMode:
+    case BuiltinId::Plot:
+    case BuiltinId::ParametricPlot:
+    case BuiltinId::ListPlot:
+    case BuiltinId::Show:
+    case BuiltinId::Export:
         return std::nullopt;
     }
 

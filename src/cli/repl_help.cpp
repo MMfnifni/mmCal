@@ -96,8 +96,8 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "variable: The expansion symbol.\n"
         "center: The exact expansion point.\n"
         "order: A non-negative integer; terms through that power are retained.",
-        "The TPSA backend covers Taylor/Laurent/Puiseux/logarithmic Series, selected special functions, low-cost trigonometric/hyperbolic/stable-elementary rewrites, and real +Infinity through the reciprocal local variable. Unsupported branches or transseries remain unevaluated rather than being guessed.",
-        "series[(1+x)^3, {x, 0, 5}]\n"
+        "The TPSA backend covers Taylor/Laurent/Puiseux/logarithmic Series, selected special functions, low-cost trigonometric/hyperbolic/stable-elementary rewrites, and real +Infinity through the reciprocal local variable. A symbolic exponent independent of the expansion variable uses the generalized-binomial recurrence at a proven analytic principal-branch center. Unsupported branches or transseries remain unevaluated rather than being guessed.",
+        "series[(1+x)^a, {x, 0, 5}]\n"
         "normal[series[(1+x)^3, {x, 0, 5}]]  ->  x^3+3x^2+3x+1"),
     HELP_NOTE(Normal,
         "Removes the order term from a structured series and returns its truncated expression.",
@@ -108,9 +108,11 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
     HELP_NOTE(ToNormal,
         "Recursively converts supported structured objects to ordinary expressions.",
         "toNormal[expression]",
-        "expression: Any evaluated expression; nested supported objects are converted recursively.",
-        "SeriesData objects are normalized recursively inside calls, lists, arrays, and SolutionSet binding values. Solution conditions, free variables, multiplicity, and domains are preserved; unsupported structures remain unchanged.",
-        "toNormal[{series[(1+x)^2, {x, 0, 3}], series[log[x], {x, 0, 2}]}]  ->  {x^2+2x+1, log[x]}"),
+        "expression: Any evaluated expression. SeriesData is converted recursively; top-level Plot/ParametricPlot/Show requests are materialized as sampled mathematical coordinates, and ListPlot is normalized to explicit N x 2 point coordinates.",
+        "Plot coordinates are returned in data space, never layout-mm or backend coordinates. One continuous curve becomes an N x 2 Array; discontinuities become a list of segment Arrays, and multiple curves become a list preserving curve identity. Exact Bezier/circle/ellipse/arc geometry is sampled only for toNormal, so PlotPoints controls this explicit materialization without changing normal vector export.",
+        "toNormal[{series[(1+x)^2, {x, 0, 3}], series[log[x], {x, 0, 2}]}]  ->  {x^2+2x+1, log[x]}\n"
+        "dimensions[toNormal[Plot[x^2, {x, -2, 2}]]]  ->  {n, 2}\n"
+        "toNormal[ParametricPlot[{cos[t], sin[t]}, {t, 0, 2Pi}, PlotPoints -> 200]]"),
 
     HELP(Floor,
         "Returns the greatest integer not greater than a real value.",
@@ -546,25 +548,37 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "GtoR[200]  ->  Pi"),
 
     HELP_NOTE(Sum,
-        "Adds scalar arguments or all elements of one array.",
+        "Adds values or evaluates a finite symbolic sum.",
         "sum[]\n"
         "sum[x1, x2, ...]\n"
-        "sum[array]",
-        "x1, x2, ...: Scalar expressions, or supply one array to aggregate its elements.",
-        "Symbolic iterator syntax sum[f,{k,a,b}] is not implemented; generate a finite table first.",
+        "sum[array]\n"
+        "sum[expression, {variable, n}]\n"
+        "sum[expression, {variable, a, b}]\n"
+        "sum[expression, {{i, a, b}, {j, c, d}, ...}]",
+        "x1, x2, ...: Scalar expressions, or supply one array to aggregate its elements.\n"
+        "expression: Held with respect to the local iterator variable.\n"
+        "Multiple iterators are nested left-to-right, with the left iterator outermost.",
+        "Symbolic unit-step polynomial, geometric, telescoping, and basic binomial families are closed exactly when proven safe. Rational terms with two equal-slope affine denominator factors are partial-fractioned before a bounded shift search. Empty ranges return 0; otherwise unsupported symbolic families remain unevaluated.",
         "sum[]  ->  0\n"
         "sum[1, 2, 3]  ->  6\n"
-        "sum[{1, 2, 3}]  ->  6"),
+        "sum[i^2, {i, 1, 5}]  ->  55\n"
+        "sum[i+j, {{i,1,3},{j,1,2}}]  ->  21"),
     HELP_NOTE(Product,
-        "Multiplies scalar arguments or all elements of one array.",
+        "Multiplies values or evaluates a finite symbolic product.",
         "prod[]\n"
         "prod[x1, x2, ...]\n"
-        "prod[array]",
-        "x1, x2, ...: Scalar expressions, or supply one array to aggregate its elements.",
-        "Symbolic iterator syntax prod[f,{k,a,b}] is not implemented; generate a finite table first.",
+        "prod[array]\n"
+        "prod[expression, {variable, n}]\n"
+        "prod[expression, {variable, a, b}]\n"
+        "prod[expression, {{i, a, b}, {j, c, d}, ...}]",
+        "x1, x2, ...: Scalar expressions, or supply one array to aggregate its elements.\n"
+        "expression: Held with respect to the local iterator variable.\n"
+        "Multiple iterators are nested left-to-right, with the left iterator outermost.",
+        "Affine-factor products, telescoping products, factorial/rising-factorial forms, and safe exact finite fallback are supported. Empty ranges return 1.",
         "prod[]  ->  1\n"
         "prod[2, 3, 4]  ->  24\n"
-        "prod[{2, 3, 4}]  ->  24"),
+        "prod[i, {i, 1, 5}]  ->  120\n"
+        "prod[i+j, {{i,1,2},{j,1,2}}]  ->  72"),
     HELP_NOTE(Map,
         "Applies a function explicitly to every scalar leaf of an array or brace.",
         "map[function, value]",
@@ -1599,10 +1613,11 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "expression: An algebraic expression; expansion is bounded by resource limits.",
         "expand[(x+1)^3]  ->  x^3+3x^2+3x+1"),
     HELP(Factor,
-        "Factors a polynomial expression over exact supported coefficients.",
+        "Factors a polynomial expression over exact supported coefficients, including bounded general Q[x].",
         "factor[expression]",
-        "expression: A polynomial or rational-algebraic expression in supported exact domains.",
-        "factor[x^2-1]  ->  (x-1)(x+1)"),
+        "expression: A polynomial or rational-algebraic expression in supported exact domains. General univariate Rational factor search is exact and resource-bounded.",
+        "factor[x^2-1]  ->  (x-1)(x+1)\n"
+        "factor[x^4+3x^2+2]  ->  (x^2+2)(x^2+1)"),
     HELP(Collect,
         "Collects like powers of a selected symbol.",
         "collect[expression, variable]",
@@ -1637,11 +1652,12 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "equation: An equality, ordered inequality, or brace of equations.\n"
         "variable: A user symbol, or a brace of symbols for a system.\n"
         "domain: Integer, Rational, Real, or Complex; default equation domain is Complex. A constraint may be used instead.",
-        "The domain-only shorthand infers a variable only when exactly one unknown user symbol exists. Unsupported families remain unresolved rather than being reported as empty.",
+        "The domain-only shorthand infers a variable only when exactly one unknown user symbol exists. Affine Exp/Sin/Cos/Tan equations in the default Complex domain return integer-parameter periodic families; principal Log and tangent omitted values retain their exact image restrictions. Unsupported families remain unresolved rather than being reported as empty.",
         "solve[x^2==1, x]  ->  {x==1, x==-1}\n"
         "solve[x^2+1==0, x, Real]  ->  {}\n"
         "solve[{2x+3y==5, x-2y==9}, {x, y}]  ->  {{x==37/7, y==-13/7}}\n"
-        "solve[sin[x]==0, x, Real]  ->  {x==Pi k where k in Integer}"),
+        "solve[sin[x]==0, x]  ->  {x==Pi k where k in Integer}\n"
+        "solve[exp[x]==1, x]  ->  {x==2I Pi k where k in Integer}"),
 
     HELP(Element,
         "Tests or states membership in a numeric domain.",
@@ -1712,6 +1728,16 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "x := 3\n"
         "f[t] := t^2\n"
         "UnDef[x, f]  ->  2"),
+    HELP_NOTE(Rule,
+        "Constructs a first-class rule expression. The infix form lhs -> rhs is canonical syntax for Rule[lhs,rhs].",
+        "Rule[lhs, rhs]\n"
+        "lhs -> rhs",
+        "lhs: An unevaluated expression.\n"
+        "rhs: An expression evaluated when the Rule itself is evaluated.",
+        "Rule holds only lhs. Arrow is right-associative, has lower precedence than comparisons, and higher precedence than :=. Rule is a general expression head, not an option-only construct.",
+        "x -> 1+2  ->  x -> 3\n"
+        "Rule[x, sin[Pi/2]]  ->  x -> 1\n"
+        "a -> b -> c  ->  a -> b -> c"),
     HELP_NOTE(AngleMode,
         "Shows or changes the session's default angle unit.",
         "angleMode[]\n"
@@ -1723,6 +1749,75 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "angleMode[]  ->  Rad\n"
         "angleMode[Deg]  ->  Deg\n"
         "sin[30]  ->  1/2"),
+    HELP_NOTE(Plot,
+        "Creates a held two-dimensional function-plot request for a finite real interval.",
+        "Plot[expression, {variable, lower, upper}]\n"
+        "Plot[expression, {variable, lower, upper}, PlotRange -> {ymin, ymax}]\n"
+        "Plot[expression, {variable, lower, upper}, AspectRatio -> r]\n"
+        "Plot[expression, {variable, lower, upper}, Ticks -> True|False]\n"
+        "Plot[expression, {variable, lower, upper}, PlotPoints -> n]\n"
+        "Plot[{expression1, expression2, ...}, {variable, lower, upper}]",
+        "expression: A scalar expression in the bound variable; a one-dimensional array plots multiple curves.\n"
+        "variable: The locally bound plot variable.\n"
+        "lower, upper: Finite bounds evaluated before plotting.\n"
+        "PlotRange: Optional finite increasing y range.\n"
+        "AspectRatio: Optional positive finite height/width ratio.\n"
+        "Ticks: True by default; False hides major tick marks and tick labels while keeping the axes.\n"
+        "PlotPoints: Relative coarse-sampling density from 100 through 1024; 100 is the default density.",
+        "Plot is held so the bound variable is not replaced by a session definition. The lowercase plot spelling remains a compatibility alias. Option names remain ordinary symbols rather than reserved words. The default physical canvas is 150x100 mm; an explicit AspectRatio preserves the 150 mm width and changes the height (1 -> 150x150 mm, 0.5 -> 150x75 mm). Explicit PlotRange uses no Automatic padding and curve geometry is clipped to the inner plot area. Ticks -> False suppresses major ticks and their labels but leaves the x/y axes visible. PlotPoints is a density multiplier: 100 preserves the current default coarse mesh, 200 doubles it, and 1024 is the maximum. It does not tighten adaptive chord tolerance or resample exact primitive geometry.",
+        "Plot[sin[x], {x, -Pi, Pi}, PlotRange -> {-1, 1}]\n"
+        "Plot[sin[x], {x, -Pi, Pi}, Ticks -> False]\n"
+        "Plot[sin[40x], {x, -Pi, Pi}, PlotPoints -> 200]\n"
+        "Export[Plot[{sin[x], cos[x]}, {x, -Pi, Pi}, AspectRatio -> 1], \"plot.svg\"]"),
+    HELP_NOTE(ParametricPlot,
+        "Creates a held two-dimensional parametric-curve request over a finite real parameter interval.",
+        "ParametricPlot[{x, y}, {parameter, lower, upper}]\n"
+        "ParametricPlot[{{x1, y1}, {x2, y2}, ...}, {parameter, lower, upper}]\n"
+        "ParametricPlot[{x, y}, {parameter, lower, upper}, AspectRatio -> r]\n"
+        "ParametricPlot[{x, y}, {parameter, lower, upper}, Ticks -> True|False]\n"
+        "ParametricPlot[{x, y}, {parameter, lower, upper}, PlotPoints -> n]",
+        "x, y: Scalar coordinate expressions in the bound parameter.\n"
+        "parameter: The locally bound sampling parameter.\n"
+        "lower, upper: Finite parameter bounds.\n"
+        "AspectRatio: Optional positive finite height/width ratio.\n"
+        "Ticks: True by default; False hides major tick marks and labels while keeping axes.\n"
+        "PlotPoints: Relative coarse-sampling density from 100 through 1024; 100 is the default density.",
+        "Both coordinate expressions are analyzed independently and only their common real domain is sampled. Automatic x/y ranges are inferred from finite 2D samples. PlotRange is intentionally not accepted yet because ParametricPlot requires an unambiguous two-dimensional range syntax. Axis intersections and x/y extrema are preserved as sampled semantic vertices where refinement proves them. PlotPoints scales only non-exact adaptive geometry; exact lines, Beziers, circles, ellipses, and elliptic arcs keep their exact representation.",
+        "ParametricPlot[{cos[t], sin[t]}, {t, 0, 2Pi}]\n"
+        "ParametricPlot[{{cos[t], sin[t]}, {2cos[t], sin[t]}}, {t, 0, 2Pi}]\n"
+        "ParametricPlot[{cos[31t], sin[29t]}, {t, 0, 2Pi}, PlotPoints -> 200]\n"
+        "Export[ParametricPlot[{cos[t]^3, sin[t]^3}, {t, 0, 2Pi}, AspectRatio -> 1], \"astroid.svg\"]"),
+    HELP_NOTE(Show,
+        "Combines Plot and ListPlot requests into one shared two-dimensional view.",
+        "Show[plot1, plot2, ...]",
+        "plot1, plot2, ...: Held Plot[...] or ListPlot[...] requests. Nested Show expressions are flattened in caller order.",
+        "All children share one viewport and one axis layout. Compatible explicit AspectRatio/Ticks values propagate across the composite; conflicting explicit values are rejected. Each Plot curve keeps its own sampling interval and is not extrapolated.",
+        "Show[Plot[x^2, {x, -2, 2}], Plot[tan[x], {x, -Pi, Pi}]]\n"
+        "Export[Show[ListPlot[{{-1,1},{0,0},{1,1}}], Plot[x,{x,-1,1}]], \"plot.svg\"]"),
+    HELP_NOTE(ListPlot,
+        "Plot explicit one- or two-dimensional point data.",
+        "ListPlot[{x1, x2, ...}]\n"
+        "ListPlot[{{x1, y1}, {x2, y2}, ...}]\n"
+        "ListPlot[data, Joined -> True|False]\n"
+        "ListPlot[data, AspectRatio -> r, Ticks -> True|False]",
+        "data: A non-empty 1D array, N x 1 array, or N x 2 array. Options: Joined, AspectRatio, Ticks.",
+        "A one-dimensional array is placed on the number line as {x,0}. Nx1 data is equivalent. Nx2 data is interpreted as explicit 2D points. Higher-rank, three-column, and ragged data are rejected rather than projected implicitly. Joined defaults to False; Joined -> True preserves point markers and adds a polyline in input order. PlotPoints is not accepted because the input points are already explicit.",
+        "ListPlot[{1, 2, 3, 4}]\n"
+        "ListPlot[{{1, 2}, {3, 4}, {5, 1}}, Joined -> True]\n"
+        "toNormal[ListPlot[{1, 2, 3}]]"),
+    HELP_NOTE(Export,
+        "Renders a plot request and writes it to a file.",
+        "Export[object, file]\n"
+        "Export[object, file, \"SVG\"]\n"
+        "Export[object, file, \"EPS\"]\n"
+        "Export[object, file, \"PDF\"]",
+        "object: A Plot[...], ParametricPlot[...], ListPlot[...], or Show[...] request.\n"
+        "file: A string path.\n"
+        "format: Optional explicit format string.",
+        "SVG, EPS, and PDF are supported vector backends. Without an explicit format, .svg, .eps, or .pdf is inferred from the file extension. With an explicit format, its canonical extension is appended when the supplied file name has a different or missing suffix; for example, file.svg with \"PDF\" becomes file.svg.pdf. PDF output is version 1.4 with classic xref and uncompressed readable objects/streams. Export returns the actual destination file string after a successful write.",
+        "Export[Plot[sin[x], {x, -Pi, Pi}], \"plot.svg\"]  ->  \"plot.svg\"\n"
+        "Export[Plot[x^3-x, {x, -2, 2}], \"plot.eps\"]  ->  \"plot.eps\"\n"
+        "Export[Plot[sin[x], {x, -Pi, Pi}], \"plot.svg\", \"PDF\"]  ->  \"plot.svg.pdf\""),
 };
 
 #undef HELP

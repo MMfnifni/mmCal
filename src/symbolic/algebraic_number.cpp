@@ -1919,6 +1919,43 @@ std::size_t ComplexAlgebraicNumber::degree() const noexcept { return polynomial_
 std::size_t ComplexAlgebraicNumber::rootIndex() const noexcept { return rootIndex_; }
 const RationalComplexDisk& ComplexAlgebraicNumber::isolatingDisk() const noexcept { return disk_; }
 
+ComplexRootClassification ComplexAlgebraicNumber::classifyReality() const {
+    const auto classify = [](const RationalComplexDisk& disk) -> ComplexRootClassification {
+        // 実係数多項式で実軸中心のdiskが根を1個だけ含むなら，共役根も同じdiskに入るため
+        // その根は共役と一致してexact realである。diskが実軸から離れていればnon-realである。
+        if (disk.imaginary.isZero())
+            return ComplexRootClassification{
+                ComplexRootReality::Real,
+                RationalRootInterval{disk.real - disk.radius, disk.real + disk.radius}};
+        if (absolute(disk.imaginary) > disk.radius)
+            return ComplexRootClassification{ComplexRootReality::NonReal, std::nullopt};
+        return ComplexRootClassification{};
+    };
+
+    if (const auto initial = classify(disk_); initial.reality != ComplexRootReality::Unknown)
+        return initial;
+
+    // 初期diskが実軸を横切る場合だけbounded refinementする。通常の実根は
+    // certifiedDiskAroundで中心虚部がexact 0へ正規化されるため，この経路は稀である。
+    for (const std::size_t bits : std::array<std::size_t, 5>{256, 512, 1024, 2048, 4096}) {
+        const RationalComplexDisk candidate = refined(bits);
+        if (const auto result = classify(candidate); result.reality != ComplexRootReality::Unknown)
+            return result;
+    }
+    return ComplexRootClassification{};
+}
+
+std::optional<RealAlgebraicNumber> ComplexAlgebraicNumber::asProvenReal(
+    std::size_t realRootIndex) const {
+    if (realRootIndex == 0)
+        return std::nullopt;
+    const ComplexRootClassification classification = classifyReality();
+    if (classification.reality != ComplexRootReality::Real || !classification.realInterval)
+        return std::nullopt;
+    return RealAlgebraicNumber{
+        polynomial_, realRootIndex, *classification.realInterval};
+}
+
 RationalComplexDisk ComplexAlgebraicNumber::refined(std::size_t precisionBits) const {
     evaluation::consumeEvaluationBudget(
         evaluation::EvaluationResource::AlgebraicRefinement);

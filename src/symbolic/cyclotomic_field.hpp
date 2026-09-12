@@ -51,6 +51,11 @@ private:
         std::vector<std::vector<numeric::Rational>> powers);
 };
 
+// Phi_n(x) の係数を昇冪順で返す。FFTの体構成だけでなく，Q[x]上の
+// x^n+/-1 因数分解でも同じexact cyclotomic kernelを共有する。
+[[nodiscard]] std::optional<std::vector<numeric::Rational>>
+cyclotomicPolynomialCoefficients(std::size_t conductor);
+
 [[nodiscard]] std::size_t cyclotomicDegree(std::size_t conductor) noexcept;
 
 } // namespace mmcal::symbolic

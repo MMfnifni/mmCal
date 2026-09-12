@@ -53,6 +53,7 @@ private:
     [[nodiscard]] std::string_view tokenText(const Token& token) const noexcept;
 
     [[nodiscard]] SyntaxNodePtr parseAssignment();
+    [[nodiscard]] SyntaxNodePtr parseRule();
     [[nodiscard]] SyntaxNodePtr parseComparison();
     [[nodiscard]] SyntaxNodePtr parseExpression();
     [[nodiscard]] SyntaxNodePtr parseTerm();

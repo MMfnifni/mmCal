@@ -36,7 +36,7 @@ struct SeriesData final {
     SeriesData data,
     const evaluation::BuiltinRegistry& builtins);
 
-// v1.5.5 WIP: truncated Taylor/Laurent/Puiseux series arithmetic。
+// SeriesData: truncated Taylor/Laurent/Puiseux series arithmetic。
 // 四則・整数冪に加え，exp/log/sin/cos/sinh/cosh，principal sqrt / exact有理冪，
 // erf/Si/Ei/Ciの局所展開をTPSA係数漸化式・primitive compositionで扱う。
 // logはprincipal branch上で展開中心の正則性を証明できる場合だけ展開し，

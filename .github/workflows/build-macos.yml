@@ -1,0 +1,67 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          uname -a
+          clang++ --version
+          cmake --version
+
+      - name: Configure
+        run: |
+          cmake \
+            -S . \
+            -B build/macos/${{ matrix.arch }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMMCAL_NATIVE_OPTIMIZATION=OFF \
+            -DMMCAL_ENABLE_LTO=ON
+
+      - name: Build
+        run: |
+          cmake \
+            --build build/macos/${{ matrix.arch }} \
+            --config Release \
+            --parallel
+
+      - name: Test
+        run: |
+          ctest \
+            --test-dir build/macos/${{ matrix.arch }} \
+            -C Release \
+            --output-on-failure
+
+      - name: Smoke test
+        run: |
+          file build/macos/${{ matrix.arch }}/mmCal
+          build/macos/${{ matrix.arch }}/mmCal --help
+          build/macos/${{ matrix.arch }}/mmCal --eval "1+1"
+
+      - name: Package
+        run: |
+          tar -czf mmCal-v1.6.0-macos-${{ matrix.arch }}.tar.gz \
+            -C build/macos/${{ matrix.arch }} \
+            mmCal
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmCal-v1.6.0-macos-${{ matrix.arch }}
+          path: mmCal-v1.6.0-macos-${{ matrix.arch }}.tar.gz

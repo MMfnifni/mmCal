@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+not yet.
+
+## v1.6.0 — 2026-09-12
+
+v1.6.0 adds **first-class Plot / Graphics infrastructure and expands general `Q[x]` factorization, symbolic integration, finite sums/products, and limits**. The exact-first policy remains unchanged: unsupported or unproved cases stay unevaluated rather than being guessed.
+
+### Plot and Graphics
+
+- Added `Rule[lhs,rhs]` / `lhs -> rhs` together with `Plot`, `ParametricPlot`, `ListPlot`, and `Show`, including `PlotRange`, `AspectRatio`, `Ticks`, and `PlotPoints`.
+- Plotting now analyzes real domains, poles, branch boundaries, and discontinuities before adaptive sampling. Parametric polynomials through degree three become exact Bézier geometry, while same-affine-phase trigonometric curves can remain Circle / Ellipse / EllipticArc primitives. Certified period reduction, viewport clipping, and `toNormal` are also supported.
+- Added backend-independent `GraphicsScene` lowering and vector `Export` to SVG, EPS, and PDF.
+
+### Symbolic algebra
+
+- Extended general univariate `Q[x]` factorization to a bounded modular pipeline using square-free decomposition, Berlekamp / Cantor–Zassenhaus, Hensel lifting, Zassenhaus recombination, and CLD + exact LLL where useful. Candidates are accepted only after exact division; cyclotomic, binomial, and deflation/inflation fast paths were also added.
+- Strengthened assumption-aware cancellation and definedness preservation in `fullSimplify`, with structural-hash memoization and expansion forecasting to suppress oversized candidates. Safe series composition for some variable-dependent exponents and symbolic-coefficient periodic equations was also extended.
+
+### Integration and limits
+
+- Added the first Risch-oriented integration core: exact Hermite reduction, Lazard–Rioboo–Trager residues, `DifferentialTower`, the first-order Risch differential equation over `Q(x)`, and reduction for single `Log` / `Exp` towers. Unproved or budget-limited cases fall back rather than being classified as nonelementary.
+- Added principal-branch `hypergeometric2F1` primitives for exact noninteger Rational powers of affine-phase `sin` / `cos`.
+- Extended `limit` for rational functions at infinity, `1^Infinity`, radical cancellation, exponential decay, and L'Hopital cases, while fixing incorrect `DomainError` propagation during speculative singular substitutions.
+
+### Symbolic finite sums and products
+
+- Generalized `sum` / `prod` to held finite symbolic iterators and multiple iterators, with closed forms for polynomial, geometric, telescoping, and basic binomial / factorial families.
+- Added a bounded Abramov-style rational-difference solver; unsupported or uncertified cases remain unevaluated.
+
+### Numerical performance
+
+- Reduced overhead in real Fresnel evaluation and reused certified odd-symmetry values while plotting.
+- Plot now reuses common subexpressions and parameter-independent values through `PlotProgram`, and skips sampling for exact geometry or certified period reduction. factorization and `fullSimplify` likewise use bounded, structure-sensitive dispatch to avoid unnecessary work.
+
 ## v1.5.5 — 2026-09-05
 
 ### Series and analysis

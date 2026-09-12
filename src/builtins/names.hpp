@@ -246,6 +246,7 @@ inline constexpr std::string_view cases = "cases";
 inline constexpr std::string_view caseBranch = "CaseBranch";
 inline constexpr std::string_view set = "Set";
 inline constexpr std::string_view setDelayed = "SetDelayed";
+inline constexpr std::string_view rule = "Rule";
 inline constexpr std::string_view functionSignature = "FunctionSignature";
 inline constexpr std::string_view less = "Less";
 inline constexpr std::string_view lessEqual = "LessEqual";
@@ -264,6 +265,11 @@ inline constexpr std::string_view clear = "Clear";
 inline constexpr std::string_view definitions = "Defs";
 inline constexpr std::string_view undefine = "UnDef";
 inline constexpr std::string_view angleMode = "angleMode";
+inline constexpr std::string_view plot = "Plot";
+inline constexpr std::string_view parametricPlot = "ParametricPlot";
+inline constexpr std::string_view listPlot = "ListPlot";
+inline constexpr std::string_view show = "Show";
+inline constexpr std::string_view exportFile = "Export";
 inline constexpr std::string_view unitApplied = "UnitApplied";
 
 

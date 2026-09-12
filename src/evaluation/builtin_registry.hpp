@@ -258,6 +258,7 @@ enum class BuiltinId {
     CaseBranch,
     Set,
     SetDelayed,
+    Rule,
     Less,
     LessEqual,
     Greater,
@@ -275,6 +276,11 @@ enum class BuiltinId {
     Definitions,
     Undefine,
     AngleMode,
+    Plot,
+    ParametricPlot,
+    ListPlot,
+    Show,
+    Export,
     UnitApplied
 };
 

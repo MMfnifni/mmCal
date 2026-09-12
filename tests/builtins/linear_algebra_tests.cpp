@@ -4,6 +4,7 @@
 #include "error/error_message.hpp"
 #include "formatting/expr_formatter.hpp"
 #include "kernel/kernel_session.hpp"
+#include "linear_algebra/exact_lll.hpp"
 #include "linear_algebra/fraction_free_elimination.hpp"
 #include "linear_algebra/modular_linear_algebra.hpp"
 #include "numeric/big_int.hpp"
@@ -40,6 +41,23 @@ linear_algebra::IntegerMatrixBuffer denseIntegerMatrix(
     return linear_algebra::IntegerMatrixBuffer{rows, columns, std::move(elements)};
 }
 
+linear_algebra::IntegerLatticeBasis applyRowTransformation(
+    const linear_algebra::IntegerLatticeBasis& transformation,
+    const linear_algebra::IntegerLatticeBasis& basis) {
+    if (transformation.empty() || basis.empty())
+        return {};
+    linear_algebra::IntegerLatticeBasis result(
+        transformation.size(),
+        linear_algebra::IntegerLatticeRow(
+            basis.front().size(), numeric::BigInt{}));
+    for (std::size_t row = 0; row < transformation.size(); ++row)
+        for (std::size_t source = 0; source < basis.size(); ++source)
+            for (std::size_t column = 0; column < basis.front().size(); ++column)
+                result[row][column] += transformation[row][source]
+                    * basis[source][column];
+    return result;
+}
+
 std::string denseShiftedIdentity(std::size_t order) {
     std::string result{"{"};
     for (std::size_t row = 0; row < order; ++row) {
@@ -73,6 +91,91 @@ std::string repeatedIntegerVector(std::size_t count, std::size_t value) {
 void runLinearAlgebraTests(TestRunner& tests) {
     using numeric::BigInt;
     using numeric::Rational;
+
+    {
+        const linear_algebra::IntegerLatticeBasis basis{
+            {BigInt{1}, BigInt{1}, BigInt{1}},
+            {BigInt{-1}, BigInt{0}, BigInt{2}},
+            {BigInt{3}, BigInt{5}, BigInt{6}}};
+        const auto reduced = linear_algebra::exactLllReduceRows(basis);
+        const linear_algebra::IntegerLatticeBasis expected{
+            {BigInt{0}, BigInt{1}, BigInt{0}},
+            {BigInt{1}, BigInt{0}, BigInt{1}},
+            {BigInt{-1}, BigInt{0}, BigInt{2}}};
+        tests.expect(reduced.reduced()
+                && reduced.basis == expected
+                && applyRowTransformation(reduced.transformation, basis)
+                    == reduced.basis,
+            "Exact LLL: nearest-even row reduction is deterministic and preserves the exact unimodular transform");
+    }
+    {
+        const linear_algebra::IntegerLatticeBasis basis{
+            {BigInt{1}, BigInt{0}, BigInt{0}},
+            {BigInt{0}, BigInt{1}, BigInt{0}},
+            {BigInt{0}, BigInt{0}, BigInt{1}}};
+        linear_algebra::ExactLllOptions options;
+        options.maximumRank = 2;
+        const auto rankLimited = linear_algebra::exactLllReduceRows(
+            basis, options);
+        tests.expect(rankLimited.status
+                == linear_algebra::ExactLllStatus::RankLimitExceeded
+                && applyRowTransformation(
+                    rankLimited.transformation, basis) == rankLimited.basis,
+            "Exact LLL: rank budget stops before reduction");
+        options.maximumRank = 3;
+        options.maximumColumns = 2;
+        const auto columnLimited = linear_algebra::exactLllReduceRows(
+            basis, options);
+        tests.expect(columnLimited.status
+                == linear_algebra::ExactLllStatus::ColumnLimitExceeded
+                && applyRowTransformation(
+                    columnLimited.transformation, basis)
+                    == columnLimited.basis,
+            "Exact LLL: column budget is independent from rank");
+    }
+    {
+        linear_algebra::ExactLllOptions options;
+        options.maximumIntermediateBits = 3;
+        const linear_algebra::IntegerLatticeBasis bitBasis{
+            {BigInt{8}, BigInt{0}}};
+        const auto bitLimited = linear_algebra::exactLllReduceRows(
+            bitBasis, options);
+        tests.expect(bitLimited.status
+                == linear_algebra::ExactLllStatus::IntermediateBitLimitExceeded
+                && applyRowTransformation(
+                    bitLimited.transformation, bitBasis) == bitLimited.basis,
+            "Exact LLL: intermediate BigInt and Rational height is budgeted");
+
+        options = {};
+        options.maximumSwaps = 0;
+        const linear_algebra::IntegerLatticeBasis swapBasis{
+            {BigInt{100}, BigInt{1}}, {BigInt{1}, BigInt{0}}};
+        const auto swapLimited = linear_algebra::exactLllReduceRows(
+            swapBasis, options);
+        tests.expect(swapLimited.status
+                == linear_algebra::ExactLllStatus::SwapLimitExceeded
+                && applyRowTransformation(
+                    swapLimited.transformation, swapBasis)
+                    == swapLimited.basis,
+            "Exact LLL: swap budget stops a still-exact working basis");
+
+        options = {};
+        options.maximumSizeReductions = 0;
+        const linear_algebra::IntegerLatticeBasis reductionBasis{
+            {BigInt{1}, BigInt{0}}, {BigInt{100}, BigInt{1}}};
+        const auto reductionLimited = linear_algebra::exactLllReduceRows(
+            reductionBasis, options);
+        tests.expect(reductionLimited.status
+                == linear_algebra::ExactLllStatus::SizeReductionLimitExceeded
+                && applyRowTransformation(
+                    reductionLimited.transformation, reductionBasis)
+                    == reductionLimited.basis,
+            "Exact LLL: size-reduction budget prevents an unbounded inner loop");
+    }
+    tests.expect(linear_algebra::exactLllReduceRows(
+            {{BigInt{1}, BigInt{0}}, {BigInt{2}, BigInt{0}}}).status
+            == linear_algebra::ExactLllStatus::RankDeficient,
+        "Exact LLL: dependent input rows are rejected exactly");
 
     // modular backendはword-sized imageからCRTで整数を一意復元し，
     // solveではrational reconstruction後に元の整数系でexact verificationする。

@@ -5,7 +5,7 @@ An exact-first CLI calculator and compact CAS for engineering, research, and man
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**Latest release: v1.5.5 — Superior BugFix**
+**Latest release: v1.6.0**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -76,21 +76,20 @@ For function specifications and implementation details, see the [reference](docs
 
 Finite-precision results retain provenance and information metadata rather than only display text. `ExactValue` and `CertifiedInterval` approximations carry rigorous enclosures and can participate in certified arithmetic, while residual-verified SVD / eigen candidates are explicitly tagged `VerifiedApproximation` instead of being promoted to mathematical point enclosures.
 
-## v1.5.5
+## v1.6.0
 
-v1.5.5 adds Series and Vector Calculus while focusing primarily on **cross-cutting bug fixes, composition between existing symbolic frontends, finite-precision semantics, performance cliffs, and removal of obsolete fixed limits**.
+v1.6.0 adds **first-class plotting/export infrastructure and moves the exact symbolic core toward broader general algorithms**. It keeps the certified numerical and branch/domain semantics established in v1.5.x while connecting plotting, factorization, integration, symbolic finite sums/products, and limits to substantially wider input families.
 
 Major changes include:
 
-- **Series and asymptotics**: added `SeriesData` / TPSA-based Taylor, Laurent, Puiseux, and logarithmic series, `+Infinity` expansions, and `toNormal`, connected directly to `D`, `integrate`, and `limit`
-- **Array and Vector**: regularized the Vector API around Hermitian inner products and added Cartesian Vector Calculus including `grad`, `divergence`, `curl`, `laplacian`, `jacobian`, and `hessian`
-- **Symbolic composition**: fixed Solver definedness, principal inverses, `cases` boundaries, Limit binder capture, nested `D` / `integrate` / `series` / `solve`, and transform-front-end combinations that previously produced unevaluated or semantically damaged expressions
-- **Certified `N` and formatting**: fixed finite-precision signs, parentheses, and polynomial ordering; preserved structural exact integers; and split approximation provenance into `ExactValue`, `CertifiedInterval`, and `VerifiedApproximation` so rigorous enclosures are not conflated with residual-verified numerical candidates
-- **Integration, differentiation, and algebra**: extended higher-degree Rational-function integration through Yun decomposition, polynomial CRT, Hermite reduction, and exact residues, while strengthening dedicated recurrences for higher derivatives and polynomial-times-elementary integrals
-- **Performance and limits**: removed perfect-power false-positive cliffs such as `factor[x^257-1]`, and replaced obsolete fixed 64 / 128 / 256 / 4096 boundaries with closed forms, structural fast paths, or shared `EvaluationBudget` limits where safe
-- **CLI and validation**: added `:quit` / `:exit` / `:layout` and expanded certification-boundary, performance-cliff, and cross-feature regression coverage
+- **Plot and Graphics**: added `Plot`, `ParametricPlot`, `ListPlot`, `Show`, `PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`, and SVG / EPS / PDF export. Parametric polynomials through degree three are recognized as exact Bézier geometry, while same-phase `C+A cos+B sin` forms become exact circles, ellipses, or elliptic arcs before sampling
+- **Rules and language composition**: added first-class `Rule[lhs,rhs]` and the right-associative `lhs -> rhs` operator, allowing Plot options to remain ordinary Symbols interpreted by their consumer
+- **General factorization**: connected `Q[x]` square-free decomposition, Berlekamp / Cantor–Zassenhaus, multi-good-prime factor-degree filtering, quadratic Hensel lifting, Zassenhaus recombination, and CLD + exact LLL as a bounded pipeline
+- **Symbolic integration**: extended Hermite reduction / compact LRT residues, the Risch differential equation over `Q(x)`, single primitive/exponential differential towers, and primitive rational cases with exact reconstruction certificates
+- **Symbolic sums/products and limits**: added finite symbolic iterators for `sum[expr,{i,a,b}]` / `prod[...]`, bounded Abramov-style Rational antidifferences, and broader rules for rational limits at infinity, `1^Infinity`, radical cancellation, and related exact forms
+- **Performance**: factorization adaptively selects finite-field algorithms, good primes, lifting, and recombination; `fullSimplify` uses structural-hash memoization and expansion forecasting to reject oversized candidates before construction; Plot reuses common-expression registers and invariants and avoids sampling through exact geometry, certified period reduction, and Fresnel odd-symmetry caching
 
-See **v1.5.5** in [`CHANGELOG.md`](CHANGELOG.md) for the detailed release history. README and Reference describe the v1.5.5 behavior; release-by-release history remains in the changelog.
+See **v1.6.0** in [`CHANGELOG.md`](CHANGELOG.md) for the detailed release history. README, Reference, and Cheatsheet describe the v1.6.0 behavior; release-by-release history remains in the changelog.
 
 ## 1. Getting started
 
@@ -169,7 +168,7 @@ Arrays and general brace containers use `{...}`.
 {{1,2},{3,4}}
 ```
 
-See the Cheatsheet / Reference for assignment, comparisons, conditions, implicit multiplication, literals, and operator precedence.
+See the Cheatsheet / Reference for assignment, comparisons, conditions, implicit multiplication, literals, and operator precedence. The first-class `Rule` expression used by options and similar consumers is written as `Rule[lhs,rhs]` or the right-associative `lhs -> rhs`.
 
 ## 4. Angles
 
@@ -314,13 +313,27 @@ Random numbers: `randSeed`, `rand`, `randint`, `choice`, `randn`
 
 Random generators keep session state and reproduce the same sequence when reseeded with the same value. They are not cryptographic generators.
 
-## 10. About Warnings
+
+## 10. Plot, Graphics, and Export
+
+Plotting, composition, and vector output: `Plot`, `ParametricPlot`, `ListPlot`, `Show`, `Export`
+
+```text
+Plot[sin[x],{x,-Pi,Pi}]
+ParametricPlot[{cos[t],sin[t]},{t,0,2Pi}]
+ListPlot[{{0,0},{1,1},{2,4}},Joined -> True]
+Export[Plot[sin[x],{x,-Pi,Pi}],"sin.svg"]
+```
+
+The main options are `PlotRange`, `AspectRatio`, `Ticks`, and `PlotPoints`, passed as `lhs -> rhs` rules. SVG, EPS, and PDF export are supported. See the Reference for exact geometry, sampling, discontinuities, canvas dimensions, `toNormal`, and backend details.
+
+## 11. About Warnings
 
 `D`, `integrate`, `limit`, `solve`, `N`, and other operations may return a Warning and leave an expression unevaluated when the current implementation cannot establish a safe result.
 
 A Warning does not mean that the unevaluated expression is the mathematical answer. It reports conditions such as unresolved evaluation, insufficient assumptions or precision, or an unsupported backend. See the Reference for the detailed classification.
 
-## 11. CLI help and display settings
+## 12. CLI help and display settings
 
 ```text
 :help
@@ -341,7 +354,7 @@ A Warning does not mean that the unevaluated expression is the mathematical answ
 
 `:fix` changes decimal presentation only, `:layout` changes interactive REPL composition only, and `:status` reports current session state.
 
-## 12. Naming
+## 13. Naming
 
 Ordinary mathematical functions use lowercase canonical names.
 
@@ -357,7 +370,7 @@ D N In Out Exit Clear Defs UnDef
 
 Use `:help functions` for the current complete name list including aliases.
 
-## 13. Detailed documentation
+## 14. Detailed documentation
 
 - `docs/reference.md` — Detailed function, syntax, and current-behavior reference
 - `docs/mathematics.md` — Mathematical policy for domains, principal values, and numerical evaluation
@@ -368,7 +381,7 @@ Use `:help functions` for the current complete name list including aliases.
 - `docs/multiprecision_implementation.ja.md` — Detailed Japanese notes on the multiprecision / certified numerical backend
 - `CHANGELOG.md` — Major changes by release
 
-## 14. License and trademarks
+## 15. License and trademarks
 
 The source code is distributed under the **BSD 3-Clause License**. See `LICENSE` for the copyright permissions governing commercial use, modification, redistribution, and incorporation into other software.
 
@@ -379,9 +392,9 @@ The source code is distributed under the **BSD 3-Clause License**. See `LICENSE`
 
 If mmCal is used in an academic publication or product, attribution beyond the BSD requirements is not mandatory, but a factual acknowledgement is appreciated.
 
-## 15. Tests and development environment
+## 16. Tests and development environment
 
-v1.5.5 has been verified with **3428 / 3428** internal regression tests and **2465 / 2465** black-box tests passing.
+v1.6.0 has been verified on a Release (LTO-off) validation build with **3938 / 3938** internal regression tests, **2512 / 2512** black-box tests, and **19 / 19** CLI automation contracts passing.
 They focus especially on exact arithmetic, boundary values, domains, error classification, formatter round-trip parsing, and certified numerical enclosures. A separate `mmCal.Benchmarks` project provides fixed-seed randomized correctness checks, algorithm-threshold sweeps, and performance comparisons without mixing benchmark workloads into the ordinary test suite.
 
 Primary Windows development environment:
@@ -394,14 +407,14 @@ Builds and tests are also performed on Linux with GCC and Clang.
 
 LLMs are used as an auxiliary tool for documentation organization, implementation-policy review, test design, and organizing MathKnowledge such as integration rules.
 
-## 16. Notes
+## 17. Notes
 
 This project aims to combine rigorous operator semantics with practical expression evaluation.
 It also aims to remain easy to run as a lightweight CLI in research, design, and manufacturing environments.
 
 And, ultimately, I am building the tool I want to use.
 
-## 17. Disclaimer
+## 18. Disclaimer
 
 This software is provided **AS IS**, as stated in the BSD 3-Clause License.
 No express or implied warranties are made, including warranties of merchantability, fitness for a particular purpose, or non-infringement.

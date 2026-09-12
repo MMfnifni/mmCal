@@ -79,6 +79,14 @@ void runLexerTests(TestRunner& tests) {
         "lexer tokenizes input/output history shorthands");
 
     tests.expect(
+        tokenKinds("a->b") == std::vector<TokenKind>{
+            TokenKind::Identifier,
+            TokenKind::RuleArrow,
+            TokenKind::Identifier,
+            TokenKind::End},
+        "lexer tokenizes rule arrow as one longest-match token");
+
+    tests.expect(
         tokenKinds("a<=b!=c==d>=e") == std::vector<TokenKind>{
             TokenKind::Identifier,
             TokenKind::LessEqual,

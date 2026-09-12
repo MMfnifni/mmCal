@@ -467,6 +467,21 @@ MathRegistry MathRegistry::defaults(
     registry.setRealInverseKnowledge(FunctionId::Tan, FunctionId::Atan, false,
         RealMonotonicity::Unknown, RealRangeRule::AllReal);
 
+    // real-domain内の値域だけで証明できる合成函数のdomain条件に利用する。
+    // injectiveは各函数の実定義域上での性質であり，complex continuationとは独立。
+    registry.setRealBehaviorKnowledge(FunctionId::Sqrt, true,
+        RealMonotonicity::Increasing, RealRangeRule::NonNegative);
+    registry.setRealBehaviorKnowledge(FunctionId::Abs, false,
+        RealMonotonicity::Unknown, RealRangeRule::NonNegative);
+    registry.setRealBehaviorKnowledge(FunctionId::Cbrt, true,
+        RealMonotonicity::Increasing, RealRangeRule::AllReal);
+    registry.setRealBehaviorKnowledge(FunctionId::Cosh, false,
+        RealMonotonicity::Unknown, RealRangeRule::OneToInfinity);
+    registry.setRealBehaviorKnowledge(FunctionId::Acosh, true,
+        RealMonotonicity::Increasing, RealRangeRule::NonNegative);
+    registry.setRealBehaviorKnowledge(FunctionId::Log1p, true,
+        RealMonotonicity::Increasing, RealRangeRule::AllReal);
+
     // DLMF 7.10.1より，実軸上ではerf' = 2 exp(-x^2)/sqrt(Pi) > 0。
     // DLMF 7.2.2のerfc=1-erfと実軸端点値からerf(R)=(-1,1)，
     // erfc(R)=(0,2)を得る。逆函数をpublic builtinとして持たなくても，

@@ -21,6 +21,9 @@ RCa11144
 *.obj
 *.lib
 *.exe
+/projects/**/*.svg
+/projects/**/*.eps
+/projects/**/*.pdf
 
 # CMake generators
 Makefile

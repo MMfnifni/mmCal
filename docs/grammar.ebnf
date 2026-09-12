@@ -22,9 +22,11 @@ radix_digit    ::= digit | letter ;
 
 string         ::= '"' , { ? escapeを含む文字 ? } , '"' ;
 assign         ::= ":=" ;
+rule           ::= "->" ;
 
 Input          ::= Assignment ;
-Assignment     ::= Compare , [ assign , Assignment ] ;
+Assignment     ::= RuleExpr , [ assign , Assignment ] ;
+RuleExpr       ::= Compare , [ rule , RuleExpr ] ;
 Compare        ::= Expression , { CompareOp , Expression } ;
 CompareOp      ::= "<" | "<=" | ">" | ">=" | "==" | "!=" ;
 Expression     ::= Term , { ( "+" | "-" ) , Term } ;
@@ -58,6 +60,8 @@ ImplicitMul    ::= (* 隣接規則によりParserが生成する。 *) ;
 (* 波括弧は配列専用とする。 *)
 (* Iだけを虚数単位として扱い、iは通常の識別子とする。 *)
 (* True / False はLowererでBooleanへ変換する。 *)
+(* -> はRule[lhs,rhs]へloweringする一般演算子で，option専用構文ではない。 *)
+(* option名はidentifierのまま扱い，Lexer keywordを追加しない。 *)
 (* 未定義identifierと未登録函数はEvaluatorでNameErrorとする。 *)
 (* 0x / 0b / 0oを読み始めた後は識別子や暗黙乗算へ後戻りしない。 *)
 (* decimal直後のe/Eは、後続に符号付き/符号なしの数字がある場合だけ指数部とする。 *)

@@ -40,23 +40,7 @@ namespace mmcal::solver {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 
-// Q上で複数因子へ分かれるReal polynomialだけを因子単位で解く高速経路。
-// 一般の既約多項式はnulloptとして既存のproof / radical経路を優先する。
-[[nodiscard]] std::optional<SolutionSet> solveFactoredRealAlgebraicPolynomialEquation(
-    const expression::Expr& equation,
-    const expression::Symbol& variable,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles);
 
-// 高次入力がrepeated factorを持つ場合だけReal Algebraic Root fallbackを優先する。
-// minimal factorが二次へ落ちても，元が高次fallbackだったという表現契約を保持する。
-[[nodiscard]] std::optional<SolutionSet> solveRepeatedRealAlgebraicPolynomialEquation(
-    const expression::Expr& equation,
-    const expression::Symbol& variable,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles);
 
 [[nodiscard]] SolutionSet solvePolynomialEquation(
     const expression::Expr& equation,

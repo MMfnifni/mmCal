@@ -1,6 +1,8 @@
 // 一変数実函数の定義域・単調性・値域解析
 #include "real_function_analysis.hpp"
 
+#include "expression/exact_value.hpp"
+
 #include "mathematics/knowledge_context.hpp"
 #include "polynomial_solver.hpp"
 #include "radical_solver.hpp"
@@ -31,6 +33,7 @@ using mathematics::NumericDomain;
 using mathematics::RealSign;
 using mathematics::RelationKind;
 using mathematics::TruthValue;
+using numeric::BigInt;
 
 [[nodiscard]] Expr negativeInfinity(
     const evaluation::BuiltinRegistry& builtins,
@@ -190,9 +193,28 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
             arguments[1], variable, builtins, mathematics, assumptions);
         if (numerator.state != DomainRequirements::State::Supported)
             return numerator;
-        if (denominator.state != DomainRequirements::State::Supported
-            || denominator.hasNonRealContinuation)
+        if (denominator.state != DomainRequirements::State::Supported)
             return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        if (denominator.hasNonRealContinuation) {
+            // 実かつ非零の分子を複素分母で割った値が実になるのは，分母自身が実のときだけ。
+            // したがってこの場合は分母の実domainをそのまま採用し，zeroだけ除外できる。
+            // 分子が0になり得る場合は，複素側でも0へ戻る孤立点を除外できないため保守的にUnknownとする。
+            if (!numerator.hasNonRealContinuation) {
+                const mathematics::KnowledgeContext knowledge{
+                    builtins, mathematics, assumptions};
+                if (knowledge.prove(mathematics::relation(
+                        RelationKind::NotEqual, arguments[0], integerExpr(0)))
+                    == TruthValue::True) {
+                    DomainRequirements result = mergeRequirements(
+                        std::move(numerator), std::move(denominator));
+                    result.hasNonRealContinuation = false;
+                    appendPredicate(result, mathematics::relation(
+                        RelationKind::NotEqual, arguments[1], integerExpr(0)));
+                    return result;
+                }
+            }
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        }
         DomainRequirements result = mergeRequirements(
             std::move(numerator), std::move(denominator));
         appendPredicate(result, mathematics::relation(
@@ -201,20 +223,117 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
     }
 
     case BuiltinId::Power: {
-        if (arguments.size() != 2 || !arguments[1].isNumber()
-            || !arguments[1].asNumber().isReal()
-            || !arguments[1].asNumber().asReal().isInteger())
+        if (arguments.size() != 2)
             return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
-        DomainRequirements result = collectRealDomainRequirements(
+
+        DomainRequirements baseRequirements = collectRealDomainRequirements(
             arguments[0], variable, builtins, mathematics, assumptions);
-        if (result.state != DomainRequirements::State::Supported)
-            return result;
-        if (result.hasNonRealContinuation)
+        DomainRequirements exponentRequirements = collectRealDomainRequirements(
+            arguments[1], variable, builtins, mathematics, assumptions);
+        if (baseRequirements.state != DomainRequirements::State::Supported)
+            return baseRequirements;
+        if (exponentRequirements.state != DomainRequirements::State::Supported)
+            return exponentRequirements;
+
+        // 部分式が実domain外でも複素値として継続し，その後Powerで実軸へ戻る点まで
+        // 同時に証明する一般算法はまだ持たない。不完全なdomainを捏造しない。
+        if (baseRequirements.hasNonRealContinuation
+            || exponentRequirements.hasNonRealContinuation)
             return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
-        if (arguments[1].asNumber().asReal().asInteger().isNegative())
+
+        DomainRequirements result = mergeRequirements(
+            std::move(baseRequirements), std::move(exponentRequirements));
+        const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+        const mathematics::ValueFacts baseFacts = knowledge.facts(arguments[0]);
+        const mathematics::ValueFacts exponentFacts = knowledge.facts(arguments[1]);
+
+        const auto signIsNonZero = [](RealSign sign) {
+            return sign == RealSign::Positive || sign == RealSign::Negative
+                || sign == RealSign::NonZero;
+        };
+        const auto signIsNonPositive = [](RealSign sign) {
+            return sign == RealSign::Negative || sign == RealSign::Zero
+                || sign == RealSign::NonPositive;
+        };
+
+        const TruthValue exponentIntegerKnowledge = knowledge.prove(
+            mathematics::elementOf(arguments[1], NumericDomain::Integer));
+        const bool exponentInteger = exponentIntegerKnowledge == TruthValue::True;
+        const bool exponentNonInteger = exponentIntegerKnowledge == TruthValue::False;
+
+        // 実整数指数なら負の底も常に実数。0だけは指数の符号で定義性が変わる。
+        if (exponentInteger) {
+            if (exponentFacts.sign == RealSign::Positive)
+                return result;
+            if (signIsNonZero(baseFacts.sign))
+                return result;
+            if (signIsNonPositive(exponentFacts.sign)) {
+                appendPredicate(result, mathematics::relation(
+                    RelationKind::NotEqual, arguments[0], integerExpr(0)));
+                return result;
+            }
+            // integer-valuedだが符号未知，かつbaseが0を取り得る場合は
+            // 0^positiveだけを残す相関条件が必要になるため，現表現では完全化しない。
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        }
+
+        // 正の実数底ならprincipal Logが実数なので，任意の実指数を安全に扱える。
+        if (baseFacts.sign == RealSign::Positive)
+            return result;
+
+        // identically zeroな底は0^qの規則だけで完全に記述できる。
+        if (baseFacts.sign == RealSign::Zero) {
             appendPredicate(result, mathematics::relation(
-                RelationKind::NotEqual, arguments[0], integerExpr(0)));
-        return result;
+                RelationKind::Greater, arguments[1], integerExpr(0)));
+            return result;
+        }
+
+        // 非負底まで証明できる場合は，指数の符号だけでzeroを含めるか決まる。
+        if (baseFacts.sign == RealSign::NonNegative) {
+            if (exponentFacts.sign == RealSign::Positive)
+                return result;
+            if (signIsNonPositive(exponentFacts.sign)) {
+                appendPredicate(result, mathematics::relation(
+                    RelationKind::Greater, arguments[0], integerExpr(0)));
+                return result;
+            }
+            if (exponentNonInteger
+                && exponentFacts.sign == RealSign::NonNegative)
+                return result; // 非整数かつ>=0なら0ではないので実際には正。
+            if (arguments[0] == arguments[1]
+                && exponentFacts.sign == RealSign::NonNegative) {
+                // x^x型ではbase=0なら指数も必ず0なので，0^0だけを除けばよい。
+                appendPredicate(result, mathematics::relation(
+                    RelationKind::Greater, arguments[0], integerExpr(0)));
+                return result;
+            }
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        }
+
+        // principal Power(b,q)=Exp(q principal Log(b))では，実非整数qに対し
+        // b<0は複素値になる。q>0ならb=0を含み，q<0ならstrict positiveだけ。
+        // ここでprovablyNonIntegerを要求するのは，負側の孤立した整数指数点を
+        // 誤って落とさないためである。
+        if (exponentNonInteger) {
+            if (exponentFacts.sign == RealSign::Positive
+                || exponentFacts.sign == RealSign::NonNegative) {
+                appendPredicate(result, mathematics::relation(
+                    RelationKind::GreaterEqual, arguments[0], integerExpr(0)));
+                result.hasNonRealContinuation = true;
+                return result;
+            }
+            if (exponentFacts.sign == RealSign::Negative
+                || exponentFacts.sign == RealSign::NonPositive) {
+                appendPredicate(result, mathematics::relation(
+                    RelationKind::Greater, arguments[0], integerExpr(0)));
+                result.hasNonRealContinuation = true;
+                return result;
+            }
+        }
+
+        // x^x等は負側に離散的な実値点を持つ。intervalだけで完全domainを
+        // 表せない現段階では，正側だけを描いて「完全」とは主張しない。
+        return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
     }
 
     case BuiltinId::Sqrt: {
@@ -254,6 +373,35 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
             return result;
         appendPredicate(result, mathematics::relation(
             RelationKind::Greater, arguments[0], integerExpr(-1)));
+        result.hasNonRealContinuation = true;
+        return result;
+    }
+
+    case BuiltinId::ExponentialIntegralEi: {
+        if (arguments.size() != 1)
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        DomainRequirements result = collectRealDomainRequirements(
+            arguments[0], variable, builtins, mathematics, assumptions);
+        if (result.state != DomainRequirements::State::Supported
+            || result.hasNonRealContinuation)
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        // Principal Ei is real on both real half-axes and singular only at zero.
+        appendPredicate(result, mathematics::relation(
+            RelationKind::NotEqual, arguments[0], integerExpr(0)));
+        return result;
+    }
+
+    case BuiltinId::CosineIntegralCi: {
+        if (arguments.size() != 1)
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        DomainRequirements result = collectRealDomainRequirements(
+            arguments[0], variable, builtins, mathematics, assumptions);
+        if (result.state != DomainRequirements::State::Supported)
+            return result;
+        // Principal Ci(x) is real only for x>0. On x<0 it acquires the
+        // principal-log branch offset +i Pi, so a real Plot must not draw it.
+        appendPredicate(result, mathematics::relation(
+            RelationKind::Greater, arguments[0], integerExpr(0)));
         result.hasNonRealContinuation = true;
         return result;
     }
@@ -311,6 +459,19 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
             return result;
         // cbrtはmmCalではReal専用。非実argumentでは未定義なのでnon-real continuationを持たない。
         result.hasNonRealContinuation = false;
+        return result;
+    }
+
+    case BuiltinId::Floor:
+    case BuiltinId::Ceil:
+    case BuiltinId::Sign: {
+        if (arguments.size() != 1)
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
+        DomainRequirements result = collectRealDomainRequirements(
+            arguments[0], variable, builtins, mathematics, assumptions);
+        if (result.state != DomainRequirements::State::Supported
+            || result.hasNonRealContinuation)
+            return DomainRequirements{DomainRequirements::State::Unknown, {}, false};
         return result;
     }
 
@@ -395,6 +556,25 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
     if (knowledge.prove(mathematics::relation(RelationKind::Greater, lhs, rhs))
         == TruthValue::True)
         return 1;
+
+    // 同じglobal monotone函数の値同士なら，引数の順序へexactに戻す。
+    // asinh[-1] < asinh[1]のようなdomain境界を数値近似へ落とさず比較できる。
+    if (lhs.isCall() && rhs.isCall()
+        && lhs.asCall().head.sameIdentity(rhs.asCall().head)
+        && lhs.asCall().arguments.size() == 1
+        && rhs.asCall().arguments.size() == 1) {
+        if (const auto* function = mathematics.findFunction(lhs.asCall().head);
+            function && function->realGloballyInjective
+            && function->realMonotonicity != mathematics::RealMonotonicity::Unknown) {
+            const auto inner = compareFinite(
+                lhs.asCall().arguments.front(), rhs.asCall().arguments.front(),
+                builtins, mathematics, assumptions);
+            if (!inner)
+                return std::nullopt;
+            return function->realMonotonicity == mathematics::RealMonotonicity::Decreasing
+                ? -*inner : *inner;
+        }
+    }
     return std::nullopt;
 }
 
@@ -577,18 +757,57 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
     return result;
 }
 
+[[nodiscard]] SolutionSet solveDomainRelation(
+    const Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    SolveConstraints realConstraint;
+    realConstraint.domain = NumericDomain::Real;
+    const auto constrain = [&](SolutionSet solutions) {
+        return applySolveConstraints(
+            std::move(solutions), realConstraint, builtins, mathematics, angles);
+    };
+
+    // 既存のdomain解析は多項式を最優先にする。ここで解けないrelationだけ，
+    // solver側で既にexactな実反転を持つ限定familyへfallbackする。
+    SolutionSet polynomial = constrain(solveUnivariatePolynomialRelation(
+        relation, variable, builtins, mathematics, angles));
+    if (polynomial.kind() != SolutionSetKind::Unresolved)
+        return polynomial;
+
+    if (auto radical = solveRadicalRelation(
+            relation, variable, builtins, mathematics, angles, assumptions)) {
+        SolutionSet constrained = constrain(std::move(*radical));
+        if (constrained.kind() != SolutionSetKind::Unresolved)
+            return constrained;
+    }
+    if (auto exponential = solveRealExponentialRelation(
+            relation, variable, builtins, mathematics, angles, assumptions)) {
+        SolutionSet constrained = constrain(std::move(*exponential));
+        if (constrained.kind() != SolutionSetKind::Unresolved)
+            return constrained;
+    }
+    if (auto injective = solveRealInjectiveFunctionRelation(
+            relation, variable, builtins, mathematics, angles, assumptions)) {
+        SolutionSet constrained = constrain(std::move(*injective));
+        if (constrained.kind() != SolutionSetKind::Unresolved)
+            return constrained;
+    }
+    return polynomial;
+}
+
 [[nodiscard]] std::optional<std::vector<Expr>> finiteRealRoots(
     Expr equality,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    SolutionSet roots = solveUnivariatePolynomialRelation(
-        equality, variable, builtins, mathematics, angles);
-    SolveConstraints realConstraint;
-    realConstraint.domain = NumericDomain::Real;
-    roots = applySolveConstraints(
-        std::move(roots), realConstraint, builtins, mathematics, angles);
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    SolutionSet roots = solveDomainRelation(
+        equality, variable, builtins, mathematics, angles, assumptions);
     if (roots.kind() == SolutionSetKind::Empty)
         return std::vector<Expr>{};
     if (roots.kind() != SolutionSetKind::Finite)
@@ -615,7 +834,7 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
         relationExpr(RelationKind::Equal, predicate.lhs, predicate.rhs, builtins),
         builtins, mathematics, angles, assumptions);
     auto roots = finiteRealRoots(
-        std::move(equality), variable, builtins, mathematics, angles);
+        std::move(equality), variable, builtins, mathematics, angles, assumptions);
     if (!roots)
         return std::nullopt;
     if (roots->empty())
@@ -652,6 +871,369 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
     return result;
 }
 
+
+[[nodiscard]] bool exactRationalEquals(const Expr& expression, std::int64_t value) {
+    const auto rational = expression::exact::realRational(expression);
+    return rational && *rational == numeric::Rational{BigInt{value}};
+}
+
+[[nodiscard]] std::optional<TruthValue> relationTruthFromRealRange(
+    const mathematics::FunctionDefinition& definition,
+    RelationKind relation,
+    const Expr& rhs) {
+    const auto target = expression::exact::realRational(rhs);
+    if (!target)
+        return std::nullopt;
+
+    struct Bound final {
+        std::optional<numeric::Rational> lower;
+        bool lowerInclusive = false;
+        std::optional<numeric::Rational> upper;
+        bool upperInclusive = false;
+    } range;
+
+    switch (definition.realRangeRule) {
+    case mathematics::RealRangeRule::Unknown:
+        return std::nullopt;
+    case mathematics::RealRangeRule::AllReal:
+        return std::nullopt;
+    case mathematics::RealRangeRule::Positive:
+        range.lower = numeric::Rational{BigInt{0}};
+        range.lowerInclusive = false;
+        break;
+    case mathematics::RealRangeRule::NonNegative:
+        range.lower = numeric::Rational{BigInt{0}};
+        range.lowerInclusive = true;
+        break;
+    case mathematics::RealRangeRule::OpenMinusOneToOne:
+        range.lower = numeric::Rational{BigInt{-1}};
+        range.upper = numeric::Rational{BigInt{1}};
+        break;
+    case mathematics::RealRangeRule::OpenZeroToTwo:
+        range.lower = numeric::Rational{BigInt{0}};
+        range.upper = numeric::Rational{BigInt{2}};
+        break;
+    case mathematics::RealRangeRule::ClosedMinusOneToOne:
+        range.lower = numeric::Rational{BigInt{-1}};
+        range.lowerInclusive = true;
+        range.upper = numeric::Rational{BigInt{1}};
+        range.upperInclusive = true;
+        break;
+    case mathematics::RealRangeRule::OneToInfinity:
+        range.lower = numeric::Rational{BigInt{1}};
+        range.lowerInclusive = true;
+        break;
+    }
+
+    const auto belowLower = [&] {
+        return range.lower && (*target < *range.lower
+            || (*target == *range.lower && !range.lowerInclusive));
+    };
+    const auto aboveUpper = [&] {
+        return range.upper && (*target > *range.upper
+            || (*target == *range.upper && !range.upperInclusive));
+    };
+    const auto allGreater = [&] {
+        return range.lower && (*range.lower > *target
+            || (*range.lower == *target && !range.lowerInclusive));
+    };
+    const auto allGreaterEqual = [&] {
+        return range.lower && *range.lower >= *target;
+    };
+    const auto allLess = [&] {
+        return range.upper && (*range.upper < *target
+            || (*range.upper == *target && !range.upperInclusive));
+    };
+    const auto allLessEqual = [&] {
+        return range.upper && *range.upper <= *target;
+    };
+    const auto noneGreater = [&] {
+        return range.upper && *range.upper <= *target;
+    };
+    const auto noneGreaterEqual = [&] {
+        return range.upper && (*range.upper < *target
+            || (*range.upper == *target && !range.upperInclusive));
+    };
+    const auto noneLess = [&] {
+        return range.lower && *range.lower >= *target;
+    };
+    const auto noneLessEqual = [&] {
+        return range.lower && (*range.lower > *target
+            || (*range.lower == *target && !range.lowerInclusive));
+    };
+
+    switch (relation) {
+    case RelationKind::Greater:
+        if (allGreater()) return TruthValue::True;
+        if (noneGreater()) return TruthValue::False;
+        break;
+    case RelationKind::GreaterEqual:
+        if (allGreaterEqual()) return TruthValue::True;
+        if (noneGreaterEqual()) return TruthValue::False;
+        break;
+    case RelationKind::Less:
+        if (allLess()) return TruthValue::True;
+        if (noneLess()) return TruthValue::False;
+        break;
+    case RelationKind::LessEqual:
+        if (allLessEqual()) return TruthValue::True;
+        if (noneLessEqual()) return TruthValue::False;
+        break;
+    case RelationKind::Equal:
+        if (belowLower() || aboveUpper()) return TruthValue::False;
+        break;
+    case RelationKind::NotEqual:
+        if (belowLower() || aboveUpper()) return TruthValue::True;
+        break;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool exactRationalInsideRealRange(
+    const mathematics::FunctionDefinition& definition,
+    const numeric::Rational& value) {
+    const numeric::Rational zero{BigInt{0}};
+    const numeric::Rational one{BigInt{1}};
+    const numeric::Rational minusOne{BigInt{-1}};
+    const numeric::Rational two{BigInt{2}};
+
+    switch (definition.realRangeRule) {
+    case mathematics::RealRangeRule::Unknown:
+        return false;
+    case mathematics::RealRangeRule::AllReal:
+        return true;
+    case mathematics::RealRangeRule::Positive:
+        return value > zero;
+    case mathematics::RealRangeRule::NonNegative:
+        return value >= zero;
+    case mathematics::RealRangeRule::OpenMinusOneToOne:
+        return value > minusOne && value < one;
+    case mathematics::RealRangeRule::OpenZeroToTwo:
+        return value > zero && value < two;
+    case mathematics::RealRangeRule::ClosedMinusOneToOne:
+        return value >= minusOne && value <= one;
+    case mathematics::RealRangeRule::OneToInfinity:
+        return value >= one;
+    }
+    return false;
+}
+
+[[nodiscard]] std::optional<mathematics::RelationPredicate> reduceKnownDomainRelation(
+    const mathematics::RelationPredicate& predicate,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    mathematics::RelationPredicate reduced = predicate;
+
+    const auto constantTruth = [&](bool truth) {
+        return mathematics::RelationPredicate{
+            RelationKind::Equal, integerExpr(0), integerExpr(truth ? 0 : 1)};
+    };
+
+    // c/f(x) R t を，divisionのdefinedness（f!=0）と組み合わせて分母側へ戻す。
+    // 特にsqrt[1/log[x]]やasin[1/sqrt[x]]のような入子で，
+    // 一般rational-transcendental inequality solverを起動せずexactにdomainを絞れる。
+    if (builtins.isCallTo(reduced.lhs, BuiltinId::Divide)
+        && reduced.lhs.asCall().arguments.size() == 2) {
+        const Expr& numeratorExpr = reduced.lhs.asCall().arguments[0];
+        const Expr& denominator = reduced.lhs.asCall().arguments[1];
+        const auto numerator = expression::exact::realRational(numeratorExpr);
+        const auto target = expression::exact::realRational(reduced.rhs);
+        if (numerator && target && !numerator->isZero()) {
+            const bool numeratorPositive = numerator->numerator().isPositive();
+
+            if (target->isZero()) {
+                switch (reduced.relation) {
+                case RelationKind::Greater:
+                case RelationKind::GreaterEqual:
+                    return mathematics::RelationPredicate{
+                        numeratorPositive ? RelationKind::Greater : RelationKind::Less,
+                        denominator, integerExpr(0)};
+                case RelationKind::Less:
+                case RelationKind::LessEqual:
+                    return mathematics::RelationPredicate{
+                        numeratorPositive ? RelationKind::Less : RelationKind::Greater,
+                        denominator, integerExpr(0)};
+                case RelationKind::Equal:
+                    return constantTruth(false);
+                case RelationKind::NotEqual:
+                    return constantTruth(true);
+                }
+            }
+
+            bool denominatorPositiveWhenDefined = false;
+            if (denominator.isCall() && denominator.asCall().arguments.size() == 1) {
+                if (const auto* function = mathematics.findFunction(denominator.asCall().head)) {
+                    switch (function->realRangeRule) {
+                    case mathematics::RealRangeRule::Positive:
+                    case mathematics::RealRangeRule::NonNegative:
+                    case mathematics::RealRangeRule::OpenZeroToTwo:
+                    case mathematics::RealRangeRule::OneToInfinity:
+                        denominatorPositiveWhenDefined = true;
+                        break;
+                    default:
+                        break;
+                    }
+                }
+            }
+
+            if (denominatorPositiveWhenDefined) {
+                const bool targetPositive = target->numerator().isPositive();
+                const bool targetNegative = target->numerator().isNegative();
+                if (numeratorPositive && targetNegative) {
+                    switch (reduced.relation) {
+                    case RelationKind::Greater:
+                    case RelationKind::GreaterEqual:
+                    case RelationKind::NotEqual:
+                        return constantTruth(true);
+                    case RelationKind::Less:
+                    case RelationKind::LessEqual:
+                    case RelationKind::Equal:
+                        return constantTruth(false);
+                    }
+                }
+                if (!numeratorPositive && targetPositive) {
+                    switch (reduced.relation) {
+                    case RelationKind::Less:
+                    case RelationKind::LessEqual:
+                    case RelationKind::NotEqual:
+                        return constantTruth(true);
+                    case RelationKind::Greater:
+                    case RelationKind::GreaterEqual:
+                    case RelationKind::Equal:
+                        return constantTruth(false);
+                    }
+                }
+
+                if ((numeratorPositive && targetPositive)
+                    || (!numeratorPositive && targetNegative)) {
+                    const numeric::Rational boundary = *numerator / *target;
+                    RelationKind denominatorRelation = reduced.relation;
+                    switch (reduced.relation) {
+                    case RelationKind::Greater: denominatorRelation = RelationKind::Less; break;
+                    case RelationKind::GreaterEqual: denominatorRelation = RelationKind::LessEqual; break;
+                    case RelationKind::Less: denominatorRelation = RelationKind::Greater; break;
+                    case RelationKind::LessEqual: denominatorRelation = RelationKind::GreaterEqual; break;
+                    case RelationKind::Equal: break;
+                    case RelationKind::NotEqual: break;
+                    }
+                    return mathematics::RelationPredicate{
+                        denominatorRelation, denominator, Expr{numeric::Number{boundary}}};
+                }
+            }
+        }
+    }
+
+    // f-g R 0 は f R g へ戻す。solverの個別familyはこのrelation形を契約にしている。
+    if (exactRationalEquals(reduced.rhs, 0)
+        && builtins.isCallTo(reduced.lhs, BuiltinId::Subtract)
+        && reduced.lhs.asCall().arguments.size() == 2) {
+        reduced.rhs = reduced.lhs.asCall().arguments[1];
+        reduced.lhs = reduced.lhs.asCall().arguments[0];
+        return reduced;
+    }
+    if (exactRationalEquals(reduced.lhs, 0)
+        && builtins.isCallTo(reduced.rhs, BuiltinId::Subtract)
+        && reduced.rhs.asCall().arguments.size() == 2) {
+        reduced.lhs = reduced.rhs.asCall().arguments[1];
+        reduced.rhs = reduced.rhs.asCall().arguments[0];
+        return reduced;
+    }
+
+    if (!reduced.lhs.isCall() || reduced.lhs.asCall().arguments.size() != 1
+        || symbolic::containsSymbol(reduced.rhs, variable))
+        return std::nullopt;
+    const auto* definition = builtins.find(reduced.lhs.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const Expr& argument = reduced.lhs.asCall().arguments.front();
+
+    std::optional<Expr> target;
+    RelationKind relation = reduced.relation;
+    switch (definition->id) {
+    case BuiltinId::Log:
+    case BuiltinId::Log2:
+    case BuiltinId::Log10:
+        if (exactRationalEquals(reduced.rhs, 0)) {
+            target = integerExpr(1);
+        }
+        break;
+    case BuiltinId::Cbrt: {
+        const auto rhs = expression::exact::realRational(reduced.rhs);
+        if (rhs)
+            target = Expr{numeric::Number{*rhs * *rhs * *rhs}};
+        break;
+    }
+    case BuiltinId::Log1p:
+    case BuiltinId::Expm1:
+    case BuiltinId::Sinh:
+    case BuiltinId::Tanh:
+    case BuiltinId::Asinh:
+    case BuiltinId::Atanh:
+    case BuiltinId::Asin:
+    case BuiltinId::Atan:
+    case BuiltinId::Erf:
+        if (exactRationalEquals(reduced.rhs, 0))
+            target = integerExpr(0);
+        break;
+    case BuiltinId::Sqrt: {
+        const auto rhs = expression::exact::realRational(reduced.rhs);
+        if (rhs && !rhs->numerator().isNegative()) {
+            // sqrt[g]は実domainで非負かつ単調なので，非負exact境界との比較は
+            // squaringしてg側へexactに戻せる。domain条件g>=0は別predicateで保持される。
+            target = Expr{numeric::Number{*rhs * *rhs}};
+        }
+        break;
+    }
+    case BuiltinId::Exp:
+        if (exactRationalEquals(reduced.rhs, 1)) {
+            target = integerExpr(0);
+        }
+        break;
+    case BuiltinId::Acos:
+        if (exactRationalEquals(reduced.rhs, 0)) {
+            target = integerExpr(1);
+            relation = reversedRelation(relation);
+        }
+        break;
+    case BuiltinId::Acosh:
+        if (exactRationalEquals(reduced.rhs, 0)) {
+            target = integerExpr(1);
+        }
+        break;
+    case BuiltinId::Erfc:
+        if (exactRationalEquals(reduced.rhs, 1)) {
+            target = integerExpr(0);
+            relation = reversedRelation(relation);
+        }
+        break;
+    default:
+        break;
+    }
+
+    // MathRegistryで実軸上のglobal injectivity・単調性・inverseが証明済みなら，
+    // exact rational境界をinverse側へ戻す。周期函数やbranchごとのinverseには使わない。
+    if (!target) {
+        const auto* function = mathematics.findFunction(reduced.lhs.asCall().head);
+        const auto rhs = expression::exact::realRational(reduced.rhs);
+        if (function && rhs && function->realGloballyInjective
+            && function->inverseFunction
+            && function->realMonotonicity != mathematics::RealMonotonicity::Unknown
+            && exactRationalInsideRealRange(*function, *rhs)) {
+            const auto* inverse = mathematics.findFunction(*function->inverseFunction);
+            if (inverse) {
+                target = Expr::call(inverse->symbol, {reduced.rhs});
+                if (function->realMonotonicity == mathematics::RealMonotonicity::Decreasing)
+                    relation = reversedRelation(relation);
+            }
+        }
+    }
+
+    if (!target)
+        return std::nullopt;
+    return mathematics::RelationPredicate{relation, argument, std::move(*target)};
+}
+
 [[nodiscard]] std::optional<std::vector<RealDomainInterval>> intervalsForPredicate(
     const mathematics::Predicate& predicate,
     const expression::Symbol& variable,
@@ -668,6 +1250,68 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
             return std::vector<RealDomainInterval>{};
         return std::nullopt;
     }
+
+    if (relation->lhs.isCall() && relation->lhs.asCall().arguments.size() == 1) {
+        if (const auto* definition = mathematics.findFunction(relation->lhs.asCall().head)) {
+            if (const auto truth = relationTruthFromRealRange(
+                    *definition, relation->relation, relation->rhs)) {
+                if (*truth == TruthValue::True)
+                    return std::vector<RealDomainInterval>{RealDomainInterval{}};
+                if (*truth == TruthValue::False)
+                    return std::vector<RealDomainInterval>{};
+            }
+        }
+    }
+
+    if (const auto reduced = reduceKnownDomainRelation(
+            *relation, variable, builtins, mathematics);
+        reduced && !(*reduced == *relation)) {
+        return intervalsForPredicate(
+            mathematics::Predicate{*reduced}, variable,
+            builtins, mathematics, angles, assumptions);
+    }
+
+    auto directVariableBound = [&](
+        const Expr& variableSide, const Expr& bound, RelationKind relationKind)
+        -> std::optional<std::vector<RealDomainInterval>> {
+        if (!variableSide.isSymbol() || !variableSide.asSymbol().sameIdentity(variable)
+            || symbolic::containsSymbol(bound, variable))
+            return std::nullopt;
+        const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+        if (knowledge.prove(mathematics::elementOf(bound, NumericDomain::Real))
+            != TruthValue::True)
+            return std::nullopt;
+
+        switch (relationKind) {
+        case RelationKind::Greater:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{bound, false, std::nullopt, false}};
+        case RelationKind::GreaterEqual:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{bound, true, std::nullopt, false}};
+        case RelationKind::Less:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{std::nullopt, false, bound, false}};
+        case RelationKind::LessEqual:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{std::nullopt, false, bound, true}};
+        case RelationKind::Equal:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{bound, true, bound, true}};
+        case RelationKind::NotEqual:
+            return std::vector<RealDomainInterval>{
+                RealDomainInterval{std::nullopt, false, bound, false},
+                RealDomainInterval{bound, false, std::nullopt, false}};
+        }
+        return std::nullopt;
+    };
+
+    if (auto direct = directVariableBound(
+            relation->lhs, relation->rhs, relation->relation))
+        return direct;
+    if (auto direct = directVariableBound(
+            relation->rhs, relation->lhs, reversedRelation(relation->relation)))
+        return direct;
 
     if (!symbolic::containsSymbol(relation->lhs, variable)
         && !symbolic::containsSymbol(relation->rhs, variable)) {
@@ -686,12 +1330,8 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
     Expr relationExpression = normalizeForSolve(
         relationExpr(relation->relation, relation->lhs, relation->rhs, builtins),
         builtins, mathematics, angles, assumptions);
-    SolutionSet solutions = solveUnivariatePolynomialRelation(
-        relationExpression, variable, builtins, mathematics, angles);
-    SolveConstraints realConstraint;
-    realConstraint.domain = NumericDomain::Real;
-    solutions = applySolveConstraints(
-        std::move(solutions), realConstraint, builtins, mathematics, angles);
+    SolutionSet solutions = solveDomainRelation(
+        relationExpression, variable, builtins, mathematics, angles, assumptions);
     return intervalsFromSolutionSet(solutions, variable);
 }
 
@@ -1125,15 +1765,14 @@ void appendPredicate(DomainRequirements& requirements, mathematics::Predicate pr
 
 } // namespace
 
-RealFunctionAnalysis analyzeRealFunction(
+RealDomainAnalysis analyzeRealDomain(
     const Expr& expression,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles,
-    const expression::Symbol& infinitySymbol,
     const mathematics::AssumptionSet& assumptions) {
-    RealFunctionAnalysis result;
+    RealDomainAnalysis result;
     if (expressionNodeCount(expression, limits::realAnalysisNodes) > limits::realAnalysisNodes)
         return result;
 
@@ -1143,17 +1782,39 @@ RealFunctionAnalysis analyzeRealFunction(
         expression, variable, builtins, mathematics, angles, realAssumptions);
     if (!domain)
         return result;
-    result.domainComplete = true;
-    result.domain = *domain;
-    if (domain->empty())
+    result.complete = true;
+    result.intervals = std::move(*domain);
+    return result;
+}
+
+RealFunctionAnalysis analyzeRealFunction(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const expression::Symbol& infinitySymbol,
+    const mathematics::AssumptionSet& assumptions) {
+    RealFunctionAnalysis result;
+    const RealDomainAnalysis domainAnalysis = analyzeRealDomain(
+        expression, variable, builtins, mathematics, angles, assumptions);
+    if (!domainAnalysis.complete)
         return result;
+
+    const mathematics::AssumptionSet realAssumptions = withRealVariable(
+        assumptions, variable);
+    result.domainComplete = true;
+    result.domain = domainAnalysis.intervals;
+    if (result.domain.empty())
+        return result;
+    const auto& domain = result.domain;
 
     Expr derivative = symbolic::differentiateExpression(
         expression, variable, builtins, mathematics, angles);
     if (containsBuiltinCall(derivative, BuiltinId::Derivative, builtins)
         || expressionNodeCount(derivative, limits::realAnalysisNodes) > limits::realAnalysisNodes) {
         // domainだけは完全に分かっているため，pieceをmonotonicity unknownで返す。
-        for (const RealDomainInterval& interval : *domain)
+        for (const RealDomainInterval& interval : domain)
             result.pieces.push_back(RealIntervalFunctionAnalysis{
                 interval, RealIntervalMonotonicity::Unknown,
                 std::nullopt, std::nullopt, std::nullopt});
@@ -1164,12 +1825,12 @@ RealFunctionAnalysis analyzeRealFunction(
     result.derivative = derivative;
 
     auto points = criticalPoints(
-        derivative, *domain, variable,
+        derivative, domain, variable,
         builtins, mathematics, angles, realAssumptions);
-    std::vector<RealDomainInterval> pieces = *domain;
+    std::vector<RealDomainInterval> pieces = domain;
     if (points) {
         if (auto split = splitAtCriticalPoints(
-                *domain, std::move(*points), builtins, mathematics, realAssumptions))
+                domain, std::move(*points), builtins, mathematics, realAssumptions))
             pieces = std::move(*split);
     }
 

@@ -95,6 +95,16 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "ifft[fft[{1+I,2-I,3+2I,4-3I}]]"),
         std::string{"{1+I, 2-I, 3+2I, 4-3I}"},
         "exact radix-2 FFT round trip is lossless");
+    tests.expectEqual(eval(session, "ifft[fft[{1,-6,-6}]]"),
+        std::string{"{1, -6, -6}"},
+        "three-point exact FFT round trip re-enters the cyclotomic field for asymmetric data");
+    tests.expectEqual(eval(session, "ifft[fft[{4,-8,3,-8,0,-4,-1,3}]]"),
+        std::string{"{4, -8, 3, -8, 0, -4, -1, 3}"},
+        "eight-point exact FFT round trip re-enters the power-of-two cyclotomic field");
+    tests.expectEqual(eval(session,
+        "ifft[fft[{-12,11,1,-7,12,0,1,-12,-2,-7,5,2,7,-10,-2,-8,-9,3,-6,-11,-11,10,4,2}]]"),
+        std::string{"{-12, 11, 1, -7, 12, 0, 1, -12, -2, -7, 5, 2, 7, -10, -2, -8, -9, 3, -6, -11, -11, 10, 4, 2}"},
+        "twenty-four-point exact FFT round trip re-embeds mixed sqrt2/sqrt3 cyclotomic radicals");
     tests.expectEqual(eval(session,
         "ifft[fft[{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}]]"),
         std::string{"{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}"},

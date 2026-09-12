@@ -255,56 +255,56 @@ struct RationalRange final {
         relation = reverseRelation(relation);
 
     const numeric::Rational bound = boundExpression.asNumber().asReal().toRational();
-    const auto lowerComparison = range->lower
-        ? std::optional<int>{range->lower->value < bound ? -1
-            : range->lower->value > bound ? 1 : 0}
-        : std::nullopt;
-    const auto upperComparison = range->upper
-        ? std::optional<int>{range->upper->value < bound ? -1
-            : range->upper->value > bound ? 1 : 0}
-        : std::nullopt;
+    const bool hasLower = range->lower.has_value();
+    const bool hasUpper = range->upper.has_value();
+    const int lowerComparison = hasLower
+        ? (range->lower->value < bound ? -1 : range->lower->value > bound ? 1 : 0)
+        : 0;
+    const int upperComparison = hasUpper
+        ? (range->upper->value < bound ? -1 : range->upper->value > bound ? 1 : 0)
+        : 0;
 
     switch (relation) {
     case RelationKind::Less:
-        if (upperComparison && (*upperComparison < 0
-                || (*upperComparison == 0 && !range->upper->inclusive)))
+        if (hasUpper && (upperComparison < 0
+                || (upperComparison == 0 && !range->upper->inclusive)))
             return TruthValue::True;
-        if (lowerComparison && *lowerComparison >= 0)
+        if (hasLower && lowerComparison >= 0)
             return TruthValue::False;
         return TruthValue::Unknown;
     case RelationKind::LessEqual:
-        if (upperComparison && *upperComparison <= 0)
+        if (hasUpper && upperComparison <= 0)
             return TruthValue::True;
-        if (lowerComparison && (*lowerComparison > 0
-                || (*lowerComparison == 0 && !range->lower->inclusive)))
+        if (hasLower && (lowerComparison > 0
+                || (lowerComparison == 0 && !range->lower->inclusive)))
             return TruthValue::False;
         return TruthValue::Unknown;
     case RelationKind::Greater:
-        if (lowerComparison && (*lowerComparison > 0
-                || (*lowerComparison == 0 && !range->lower->inclusive)))
+        if (hasLower && (lowerComparison > 0
+                || (lowerComparison == 0 && !range->lower->inclusive)))
             return TruthValue::True;
-        if (upperComparison && *upperComparison <= 0)
+        if (hasUpper && upperComparison <= 0)
             return TruthValue::False;
         return TruthValue::Unknown;
     case RelationKind::GreaterEqual:
-        if (lowerComparison && *lowerComparison >= 0)
+        if (hasLower && lowerComparison >= 0)
             return TruthValue::True;
-        if (upperComparison && (*upperComparison < 0
-                || (*upperComparison == 0 && !range->upper->inclusive)))
+        if (hasUpper && (upperComparison < 0
+                || (upperComparison == 0 && !range->upper->inclusive)))
             return TruthValue::False;
         return TruthValue::Unknown;
     case RelationKind::Equal: {
-        const bool below = lowerComparison && (*lowerComparison > 0
-            || (*lowerComparison == 0 && !range->lower->inclusive));
-        const bool above = upperComparison && (*upperComparison < 0
-            || (*upperComparison == 0 && !range->upper->inclusive));
+        const bool below = hasLower && (lowerComparison > 0
+            || (lowerComparison == 0 && !range->lower->inclusive));
+        const bool above = hasUpper && (upperComparison < 0
+            || (upperComparison == 0 && !range->upper->inclusive));
         return below || above ? TruthValue::False : TruthValue::Unknown;
     }
     case RelationKind::NotEqual: {
-        const bool below = lowerComparison && (*lowerComparison > 0
-            || (*lowerComparison == 0 && !range->lower->inclusive));
-        const bool above = upperComparison && (*upperComparison < 0
-            || (*upperComparison == 0 && !range->upper->inclusive));
+        const bool below = hasLower && (lowerComparison > 0
+            || (lowerComparison == 0 && !range->lower->inclusive));
+        const bool above = hasUpper && (upperComparison < 0
+            || (upperComparison == 0 && !range->upper->inclusive));
         return below || above ? TruthValue::True : TruthValue::Unknown;
     }
     }

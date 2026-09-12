@@ -1368,13 +1368,13 @@ Additional probes showed no algorithmic discontinuity at the former 64-degree bo
 Aberth-Ehrlich iteration remains a future candidate-generation experiment. Any comparison should reuse the same Newton-polygon multi-radius initialization and measure ordinary, clustered, and scale-separated roots. If adopted, Aberth would replace only approximate candidate generation; Rouché certification, disk separation, and deterministic ordering remain the exact acceptance contract.
 
 
-# 35. Direct construction of repeated symbolic derivatives
+# 37. Direct construction of repeated symbolic derivatives
 
 Repeatedly applying first-derivative rules can cause substantial expression growth for `LambertW`, `polylog`, and `exp[q(x)]`, because piecewise forms, quotient/product rules, and common exponential factors are rebuilt at every order. Since 2026-08-29, direct-variable requests with `n<=64` first use exact family-specific recurrences: the DLMF 4.13.4_1--4.13.4_2 polynomial recurrence for Lambert W, the `theta=xD` / signed-Stirling identity for polylogarithms, and `P_(n+1)=P'_n+q'P_n` for `exp[q]` with quadratic `q`.
 
 These are exact Expr-construction paths, not approximate shortcuts. Orders above 64 or unmatched forms fall back to the generic `D` implementation. The former public order-4096 cap has since been removed; repeated work is now charged to the shared `EvaluationStep` budget, with exact-zero early termination. No long benchmark was run for this batch; only compact representative outputs plus targeted compilation/smoke checks were used.
 
-# 36. Hermite reduction and algebraic-log fallback for rational integration
+# 38. Hermite reduction and algebraic-log fallback for rational integration
 
 The exact rational integrator was already fast and compact when a denominator reduced to linear and irreducible quadratic factors, but it stopped at higher-degree factors such as `x^3+x+1` and at repeated powers of those factors. Running a full Complex Root decomposition too early is also undesirable: it would replace elementary results such as `x/(1+x^4) -> atan[x^2]/2` with a much larger Root/Log sum. The higher-degree algebraic path therefore runs only after the elementary search has failed.
 
@@ -1393,15 +1393,54 @@ P(x)/Q(x) = sum_r P(r)/(Q'(r)(x-r))
 
 produces `sum_r P(r)/Q'(r) Log[x-r]`. Residues are materialized through persistent exact algebraic-number arithmetic; approximate roots are not used to justify the identity.
 
-This fallback remains inside the existing degree-12 specialized rational work budget. The bound is a resource-safety policy, not a mathematical domain boundary: it limits all-root isolation, algebraic residue materialization, and output size. Representative GCC Release checks were about 0.25 s for `integrate[1/(x^3+x+1),x]`, 0.56 s for `1/(x^5+x+1)`, and 4.0 s for `1/(x^8+x+1)`. No long-running benchmark suite was executed for this change.
+The former degree-12 value was subsequently changed from a user-visible boundary into an algorithm-selection threshold for the dense partial-fraction path. Higher degrees use Yun decomposition, polynomial CRT, and Hermite steps, while shared evaluation budgets bound all-root isolation, algebraic residue materialization, and output size. Exhaustion is therefore never interpreted as a proof of non-elementarity.
 
-Rothstein-Trager / Lazard-Rioboo-Trager residue grouping remains a future optimization. The current kernel is already exact but explicitly enumerates roots; grouping equal residues and conjugate roots could reduce expression size and recover more compact real `Log/atan` forms without replacing the Hermite/square-free capability added here.
+On 2026-09-11, Lazard-Rioboo-Trager was implemented in the independent Risch core. A fraction-free Bareiss determinant computes `resultant_x(D,A-zD')`; a subresultant PRS yields each square-free residue polynomial `Q(z)` and corresponding `S(z,x)`. Before materialization, `S` is reverified to divide both `D` and `A-zD'` over `Q[z]/(Q)`, after which each certified root `a` contributes `a Log[S(a,x)]`. The frontend currently tries LRT through degree eight. Thus the Bronstein example `(x^4-3x^2+6)/(x^6-5x^4+5x^2+4)` uses two algebraic-residue logarithms rather than six pole-by-pole logarithms. Any degree, PRS-step, resultant-matrix, coefficient-count, or intermediate-height stop falls back to the established exact pole-residue representation.
+
+The same tranche adds differential polynomials over `K[t]`, with `K=Q(x)`. Primitive derivations use `Dt=eta`, exponential derivations use `Dt=eta t`, and `gcd(f,Df)` classifies factors as normal, special, or mixed. A normal power `f^k` is lowered by a Hermite step using `(Df)^(-1) mod f`; every step and the final reconstruction are checked exactly.
+
+On 2026-09-12, the base-field Risch differential equation `Dy+f y=g` over `Q(x)` was added. The solver applies weak normalization from positive-integer LRT residues, a normal denominator, an infinity degree bound with resonance handling, and exact Rational RREF. Degree, matrix entries, row operations, intermediate bit length, and residue candidates have independent budgets. Resource exhaustion is distinct from a completed proof that no rational solution exists, and every successful result is substituted into the original equation for exact verification.
+
+The primitive polynomial case lowers leading coefficients through limited integration. The exponential Laurent-polynomial case separates each exponent `i` into `Dv+i eta v=a_i`. Public `integrate` now connects these reductions to a recognized single `Log` or `Exp` tower and sends its lower-field remainder back through the existing `Q(x)` integrator. Recursive mixed towers, RDEs over algebraic coefficient fields, and parametric RDEs remain unsupported.
+
+The primitive rational case algebraically square-free decomposes a `K[t]` denominator and uses extended-GCD CRT to separate coprime multiplicity blocks. Differential Hermite reduction lowers each normal-factor power to one. A remaining residue becomes `c Log[f]` only when every coefficient exactly verifies the identity `residue=c Df/f` for a Rational constant `c`. Constant-coefficient factors are refined by the existing bounded `Q[t]` factorizer. A final cross-multiplication certificate reconstructs the complete input including any residual; public `integrate` accepts the closed form only when that residual is empty. Degree, coefficient-field Rational-function degree, intermediate bit height, and differential-operation count have independent budgets.
+
+The affine trigonometric rational-power rule has output size independent of the exponent numerator, so all exact noninteger Rational exponents share one 2F1 representation. Its branch claim is deliberately local to a connected region where `sin(theta)` or `cos(theta)` keeps its sign; no global Piecewise phase correction is synthesized across sign boundaries. `sqrt[sin(theta)]` is the clearest example of this branch constraint, not a separate elliptic kernel.
 
 
-### 2026-09-04: high-degree `factor` perfect-power false-positive work
+# 39. v1.6.0 adaptive dispatch for general `Q[x]` factorization
 
 `factor[x^257-1]` exposed a severe dispatch cliff. After the rational root `x-1` was removed, the residual `1+x+...+x^256` was passed to exact perfect-polynomial-power reconstruction for every divisor of degree 256. Instrumentation showed approximately 4.6 s for the `k=64` probe, 7.1 s for `k=32`, 11.0 s for `k=16`, with the `k=8` probe still running when a 40 s diagnostic cutoff was reached. The cyclotomic residual itself and output formatting were not the dominant costs.
 
 Perfect polynomial powers necessarily have repeated roots. The factor engine now first reduces the Rational polynomial modulo the good prime 65521 and computes `gcd(p,p')` in that finite field. If the reduction is provably square-free while preserving degree, nontrivial perfect-power reconstruction is impossible and all expensive exact power-root probes are skipped. If a coefficient denominator is not invertible modulo the probe prime, the degree drops, or the modular gcd is nontrivial, this is treated only as inconclusive and the former exact path is retained. Thus the modular test can skip work but cannot establish a factorization by itself.
 
 Representative GCC Release / LTO-off public-path timings on the audit host changed from about 1.63 s to 0.04 s for `factor[x^255-1]`, from about 0.07 s to 0.02 s for `factor[x^256-1]`, and from more than 45 s to about 0.31 s for `factor[x^257-1]`. Exact perfect-power cases such as `factor[expand[(x+1)^8]]` and `factor[expand[(x^2+x+1)^4]]` continue to reconstruct their powers.
+
+
+## 39.1 Finite-field factorization, good-prime selection, Hensel lifting, and recombination
+
+The v1.6.0 general `Q[x]` factorizer does not force every input through one algorithm. Finite-field factorization uses Berlekamp only when the degree-squared matrix fits `maximumBerlekampMatrixEntries`; larger cases switch to Cantor–Zassenhaus.
+
+Factor-degree subset masks from multiple good primes are intersected before lifting. If no proper factor degree survives, irreducibility over Q is proved immediately. When factorization remains necessary, mmCal does not blindly use the first good prime: `estimatedAllowedSubsets` estimates the surviving recombination count and selects the prime with the smallest candidate space. This is only a performance heuristic; every returned factor is still certified by exact division in the original integer polynomial.
+
+Hensel lifting first attempts the product-tree quadratic path and falls back to linear lifting when needed. When many modular factors would push Zassenhaus subset enumeration beyond `preferredRecombinationCandidates`, the factorizer may try a CLD lattice. Small lattices can justify raising the Hensel precision; larger lattices are first probed at the existing precision to avoid amplifying LLL work. CLD relations are rechecked against the full coefficient vector and by exact polynomial division. LLL failure or budget exhaustion is never reused as an irreducibility proof.
+
+The resulting v1.6.0 performance work is therefore not merely “higher-degree support”: the implementation adaptively decides whether to build a finite-field matrix, gather another prime, increase lift precision, invoke CLD, or return to subset recombination. No fresh standalone benchmark was run for this documentation audit, so no unmeasured speedup is claimed here.
+
+# 40. v1.6.0 candidate-explosion control in `FullSimplify`
+
+`FullSimplify` now uses a structural hash only as a bucket key and performs full structural equality inside each bucket, giving collision-safe duplicate suppression. Local `Simplifier` results for repeated candidates are memoized with the same scheme; a hash collision can never make two expressions semantically identical.
+
+Before constructing `expand`, `factor`, or `collect` candidates, the implementation forecasts expansion size across Add, Multiply, Divide, and positive-integer Power nodes using saturating arithmetic. The allowance scales as sixteen times the current expression-node count, clamped to a minimum of 64 and a maximum of 4096 terms. Candidates predicted to exceed the allowance are never materialized, avoiding the CPU and memory cliff of constructing a huge equivalent expression only to reject it afterwards.
+
+This is search policy, not an algebraic shortcut. Other exact candidates remain available, and the overall search still obeys the existing candidate and generated-node budgets.
+
+# 41. v1.6.0 Plot reuse and sampling avoidance
+
+Plot evaluation compiles expressions into a `PlotProgram` rather than restarting the general evaluator at every sample. Compilation shares repeated Expr nodes through `registersByIdentity`, while `BigFloatPlotExecutor::initializeInvariants()` evaluates variable-independent instructions once and reuses them for every sample.
+
+`ParametricPlot` also applies certified period reduction and `ExactCurveGeometry` recognition before sampling. Parametric polynomials through degree three and recognized circles, ellipses, and elliptic arcs can therefore remain exact primitives in ordinary rendering; they do not enter adaptive sampling and are not densified by `PlotPoints`. Only consumers such as `toNormal` that explicitly require a polyline force materialization.
+
+For real Fresnel C/S, the Plot executor caches the certified value by `|x|` and obtains the negative side by odd symmetry. Symmetric domains therefore do not send equal-magnitude positive and negative samples through the special-function backend independently.
+
+None of these paths weaken the plotting contract. Exact geometry remains exact geometry, period reduction is restricted to certified whole-period repetition, and curves that still require BigFloat sampling retain the existing domain, landmark, and clipping analysis.

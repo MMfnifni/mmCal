@@ -7,7 +7,7 @@
 **文書種別:** アーキテクチャ評価・リファクタリング方針  
 **Status:** Design proposal / not an implementation specification
 
-実装状況は [`../refactoring_status.ja.md`](../refactoring_status.ja.md) / [`../refactoring_status.md`](../refactoring_status.md) を参照。
+現在の実装状況は [`../architecture.md`](../architecture.md)，[`../performance_optimization.ja.md`](../performance_optimization.ja.md)，[`../roadmap.md`](../roadmap.md) を参照。本書自体はv1.5.1時点の設計提案として保存する。
 
 ---
 

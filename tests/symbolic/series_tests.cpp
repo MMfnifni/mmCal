@@ -31,6 +31,15 @@ void runSeriesTests(TestRunner& tests) {
         "Series: TPSA expands a polynomial power without repeated differentiation");
 
     tests.expectEqual(
+        eval(session, "series[(1+x)^x,{x,0,5}]"),
+        std::string{"seriesData[x, 0, {1, 0, 1, -1/2, 5/6, -3/4}, 0, 6, 1]"},
+        "Series: variable exponents compose through the regular principal Exp-Log representation");
+    tests.expectEqual(
+        eval(session, "series[x^x,{x,0,5}]"),
+        std::string{"series[x^x, {x, 0, 5}]"},
+        "Series: a variable exponent at a singular principal-Log center remains unevaluated");
+
+    tests.expectEqual(
         eval(session, "normal[series[(1+x)^3,{x,0,5}]]"),
         std::string{"x^3+3x^2+3x+1"},
         "Series: normal removes the order term and returns the truncated exact expression");

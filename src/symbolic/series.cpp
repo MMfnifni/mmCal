@@ -833,12 +833,20 @@ struct Valuation final {
             return Valuation::finite(base.exponent * *exponent);
         }
 
-        if (!exactRational(arguments[1])) return Valuation::unknown();
+        // principal Power[z,w]=Exp[w Log[z]]は、zがprincipal Logのcutを
+        // 避け、wが中心で正則なら変数依存指数でも正則かつ非零である。
         Expr centerBase = simplify(
             substituteSymbol(arguments[0], variable, center),
             builtins, mathematics, angles, assumptions);
         if (!principalPowerAnalyticAt(centerBase, builtins, mathematics, assumptions))
             return Valuation::unknown();
+        if (containsSymbol(arguments[1], variable)) {
+            const auto exponentValuation = childValuation(arguments[1]);
+            if (exponentValuation.state == Valuation::State::Unknown
+                || (exponentValuation.state == Valuation::State::Finite
+                    && exponentValuation.exponent < 0))
+                return Valuation::unknown();
+        }
         return Valuation::finite(0);
     }
     case BuiltinId::Sqrt: {
@@ -2775,18 +2783,18 @@ void scaleFormalSeries(
             builtins, mathematics, angles, assumptions);
     }
 
-    const Expr exponentPlusOne = add(
-        exponent, integer(1), builtins, mathematics, angles, assumptions);
     for (std::int64_t n = 1; n <= ceiling; ++n) {
         Expr sum = integer(0);
         for (std::int64_t k = 1; k <= n; ++k) {
             const Expr ak = coefficientAt(base, k);
             if (isZero(ak)) continue;
 
-            Expr weight = subtract(
-                multiply(exponentPlusOne, integer(k),
+            // k(a+1)-n = k a+(k-n) と先に整数部をまとめる。
+            // 記号aで a+1-2 のような未整理形を係数へ残さない。
+            Expr weight = add(
+                multiply(exponent, integer(k),
                     builtins, mathematics, angles, assumptions),
-                integer(n), builtins, mathematics, angles, assumptions);
+                integer(k - n), builtins, mathematics, angles, assumptions);
             Expr term = multiply(
                 multiply(weight, ak, builtins, mathematics, angles, assumptions),
                 result.coefficients[static_cast<std::size_t>(n - k)],
@@ -3073,7 +3081,29 @@ void scaleFormalSeries(
                 arguments[0], *exponent, variable, center, ceiling,
                 builtins, mathematics, angles, assumptions);
 
-        if (!exactRational(arguments[1])) return std::nullopt;
+        if (containsSymbol(arguments[1], variable)) {
+            // principal Powerの定義をそのまま用いてbranchを変えない。
+            // base中心がprincipal Logのcutを避けると証明できる場合だけ
+            // Exp[exponent Log[base]]を既存TPSAへ合成する。
+            Expr centerBase = simplify(
+                substituteSymbol(arguments[0], variable, center),
+                builtins, mathematics, angles, assumptions);
+            if (!principalPowerAnalyticAt(
+                    centerBase, builtins, mathematics, assumptions))
+                return std::nullopt;
+            Expr logarithm = call(BuiltinId::Log, {arguments[0]}, builtins);
+            Expr exponentTimesLog = call(
+                BuiltinId::Multiply, {arguments[1], std::move(logarithm)}, builtins);
+            Expr rewritten = call(
+                BuiltinId::Exp, {std::move(exponentTimesLog)}, builtins);
+            return expandSeries(
+                rewritten, variable, center, ceiling,
+                builtins, mathematics, angles, assumptions);
+        }
+
+        // generalized binomial/Taylor recurrenceは指数の数値性を必要としない。
+        // 展開変数から独立したexact Exprを定数指数として扱い，中心での
+        // principal Powerの正則性はexpandRationalPowerSeries側で検証する。
         auto base = expandSeries(
             arguments[0], variable, center, ceiling,
             builtins, mathematics, angles, assumptions);
@@ -3686,6 +3716,22 @@ struct PuiseuxSeries final {
                 result = std::move(*next);
             }
             return result;
+        }
+        if (containsSymbol(arguments[1], variable)) {
+            Expr centerBase = simplify(
+                substituteSymbol(arguments[0], variable, center),
+                builtins, mathematics, angles, assumptions);
+            if (!principalPowerAnalyticAt(
+                    centerBase, builtins, mathematics, assumptions))
+                return std::nullopt;
+            Expr logarithm = call(BuiltinId::Log, {arguments[0]}, builtins);
+            Expr exponentTimesLog = call(
+                BuiltinId::Multiply, {arguments[1], std::move(logarithm)}, builtins);
+            Expr rewritten = call(
+                BuiltinId::Exp, {std::move(exponentTimesLog)}, builtins);
+            return expandPuiseuxSeries(
+                rewritten, variable, center, integerCeiling,
+                builtins, mathematics, angles, assumptions);
         }
         if (!smallRational(arguments[1])) return std::nullopt;
         auto base = expandPuiseuxSeries(arguments[0], variable, center, integerCeiling + 4,

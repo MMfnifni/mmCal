@@ -3,7 +3,7 @@
 © 2021–2026 mmKreutzef (aka Daiki.NIIMI)  
 Licensed under the BSD 3-Clause License
 
-**最新リリース: v1.5.5**
+**最新リリース: v1.6.0**
 
 [English](README.md) | [日本語](README.ja.md)
 
@@ -72,21 +72,20 @@ Out[13]> {1, 2, 3, 4, 5, 6, 7}
 以下では概要のみを示す。
 各函数の仕様や内部の詳細は[リファレンス](docs/reference.ja.md)または`docs`フォルダ内の文書を参照。
 
-## v1.5.5
+## v1.6.0
 
-v1.5.5は，SeriesとVector Calculusを追加しつつ，主眼を**横断的なbug fix，既存frontend間の接続，有限precision意味論，性能の崖，古い固定制限の整理**へ置いた版である。
+v1.6.0は，**描画・Export基盤を正式機能として追加し，exact symbolic coreを一般算法へ拡張した版**である。v1.5.xで固めたcertified numerical evaluationとbranch/domain安全性を維持したまま，Plot，因数分解，積分，記号和積，極限を一段広い入力へ接続した。
 
 主な変更点:
 
-- **Series・漸近展開**: `SeriesData` / TPSAを核にTaylor / Laurent / Puiseux / logarithmic Series，`+Infinity`展開，`toNormal`を追加し，`D` / `integrate` / `limit`へ接続
-- **Array・Vector**: Hermitian内積を基準にVector APIを整理し，`grad` / `divergence` / `curl` / `laplacian` / `jacobian` / `hessian`等のCartesian Vector Calculusを追加
-- **記号計算の接続**: Solve definedness，principal inverse，`cases`境界，Limit binder capture，nested `D` / `integrate` / `series` / `solve`，式変形frontendの組合せで生じる未評価・意味論破壊を横断修正
-- **保証付き `N` と表示**: finite-precision formatterの符号・括弧・多項式順を修正し，exact integerの構造parameterを保護。近似値由来を`ExactValue` / `CertifiedInterval` / `VerifiedApproximation`へ分離し，証明用enclosureと残差検証済み数値を区別
-- **積分・微分・代数**: 高次有理函数積分をYun分解・polynomial CRT・Hermite reduction・exact residueへ拡張し，高階`D`や多項式×初等函数積分の専用漸化式を強化
-- **性能と制限**: `factor[x^257-1]`等のperfect-power空振りを除去し，古い64 / 128 / 256 / 4096等の固定境界を，閉形式・構造fast path・共通`EvaluationBudget`へ置換できる範囲で撤廃
-- **CLI・検証**: `:quit` / `:exit` / `:layout`を追加し，certification境界・performance cliff・cross-feature regressionを拡充
+- **Plot・Graphics**: `Plot` / `ParametricPlot` / `ListPlot` / `Show`，`PlotRange` / `AspectRatio` / `Ticks` / `PlotPoints`，SVG / EPS / PDF Exportを追加。3次以下のparametric polynomialはexact Bézier，同一affine phaseの`C+A cos+B sin`は円・楕円・楕円弧としてsampling前に認識する
+- **Ruleと言語接続**: 第一級式`Rule[lhs,rhs]`と右結合`lhs -> rhs`を追加し，Plot option等を通常Symbolのままconsumer側で解釈する
+- **一般因数分解**: `Q[x]`のsquare-free分解，Berlekamp / Cantor–Zassenhaus，複数good primeのfactor-degree絞込み，quadratic Hensel，Zassenhaus再結合，CLD + exact LLLをbounded pipelineとして接続した
+- **記号積分**: Hermite reduction / LRT compact residue，`Q(x)`上のRisch differential equation，単一primitive / exponential differential tower，primitive rational caseをexact certificate付きで拡張した
+- **記号和・積と極限**: `sum[expr,{i,a,b}]` / `prod[...]`のfinite symbolic iterator，bounded Abramov型有理差分求解，無限遠有理函数・`1^Infinity`・radical相殺等のLimit規則を追加・強化した
+- **性能**: `factor`は有限体算法・good prime・Hensel・再結合を入力構造に応じて選択し，`fullSimplify`は構造hash memoと展開量予測で巨大候補を生成前に抑止する。Plotは共通部分式register，変数非依存値の一度だけ評価，exact geometry / 周期短縮，Fresnel奇対称cacheでsampling workを削減する
 
-詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)の**v1.5.5**を参照。READMEとReferenceはv1.5.5の現在仕様を記述し，旧版固有の変更説明はCHANGELOGへ集約する。
+詳細な変更履歴は[`CHANGELOG.ja.md`](CHANGELOG.ja.md)の**v1.6.0**を参照。README，Reference，Cheatsheetはv1.6.0の現行仕様を記述し，旧版固有の変更説明はCHANGELOGへ集約する。
 
 ## 1. まず使う
 
@@ -165,7 +164,7 @@ Arrayや一般のbrace containerは`{...}`を使う。
 {{1,2},{3,4}}
 ```
 
-代入・比較・条件式，暗黙乗算，literal，演算子優先順位などの詳細はCheatsheet / Referenceを参照。
+代入・比較・条件式，暗黙乗算，literal，演算子優先順位などの詳細はCheatsheet / Referenceを参照。option等に使う第一級式`Rule`は`Rule[lhs,rhs]`または右結合の`lhs -> rhs`で記述する。
 
 ## 4. 角度
 
@@ -310,13 +309,27 @@ Array・線形代数・統計のexact / finite-precision挙動やshape条件はR
 
 乱数はセッション状態を持ち，同じseedで同じ列を再現できる。暗号用途ではない。
 
-## 10. Warningについて
+
+## 10. Plot・Graphics・Export
+
+描画・合成・vector出力: `Plot`, `ParametricPlot`, `ListPlot`, `Show`, `Export`
+
+```text
+Plot[sin[x],{x,-Pi,Pi}]
+ParametricPlot[{cos[t],sin[t]},{t,0,2Pi}]
+ListPlot[{{0,0},{1,1},{2,4}},Joined -> True]
+Export[Plot[sin[x],{x,-Pi,Pi}],"sin.svg"]
+```
+
+主なoptionは`PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`で，`lhs -> rhs`のRuleとして渡す。SVG / EPS / PDFへ出力できる。exact geometry，sampling，不連続点，canvas寸法，`toNormal`等の詳細はReferenceを参照。
+
+## 11. Warningについて
 
 `D`, `integrate`, `limit`, `solve`, `N`などは，現在の実装で安全に結果を確定できない場合，誤った値を作らずWarningと未評価式を返すことがある。
 
 Warningは「その式が答え」という意味ではなく，未解決・条件不足・precision不足・backend未対応などを利用者へ通知するためのものである。分類の詳細はReferenceを参照。
 
-## 11. CLI help / 表示設定
+## 12. CLI help / 表示設定
 
 ```text
 :help
@@ -337,7 +350,7 @@ Warningは「その式が答え」という意味ではなく，未解決・条�
 
 `:fix`は表示上の小数桁，`:layout`はREPLの組版だけを変更する。`:status`は現在のsession状態を表示する。
 
-## 12. 名前について
+## 13. 名前について
 
 通常の数学函数は小文字をcanonical名とする。
 
@@ -353,7 +366,7 @@ D N In Out Exit Clear Defs UnDef
 
 aliasを含む現在の名前一覧は`:help functions`を参照。
 
-## 13. 詳細資料
+## 14. 詳細資料
 
 - `docs/reference.ja.md` — 函数・構文・現在仕様の詳細
 - `docs/mathematics.md` — 定義域，主値，数値計算の数学方針
@@ -364,7 +377,7 @@ aliasを含む現在の名前一覧は`:help functions`を参照。
 - `docs/evaluation_budget.ja.md` — 評価資源上限，cancellation，telemetry，diagnostic契約
 - `CHANGELOG.ja.md` — releaseごとの主要変更
 
-## 14. ライセンスと商標
+## 15. ライセンスと商標
 
 ソースコードは**BSD 3-Clause License**で提供する。商用利用，改変，再配布，組込み利用を含む著作権上の許諾条件は`LICENSE`を参照。
 
@@ -376,9 +389,9 @@ aliasを含む現在の名前一覧は`:help functions`を参照。
 
 学術論文や製品等でmmCalを利用した場合，ライセンス上の追加義務ではないが，使用した旨を記載していただけると嬉しい。
 
-## 15. テスト・制作環境
+## 16. テスト・制作環境
 
-v1.5.5では，内部回帰テスト **3428 / 3428**，ブラックボックステスト **2465 / 2465** の通過を確認している。
+v1.6.0では，Release（LTO off）検証buildで内部回帰テスト **3938 / 3938**，ブラックボックステスト **2512 / 2512**，CLI automation contract **19 / 19** の通過を確認している。
 exact算術，境界値，定義域，エラー分類，formatterの再入力性，数値近似の保証区間などを重点的に検証している。
 さらに`mmCal.Benchmarks`を独立projectとして用意し，固定seedのランダム正当性試験，算法閾値 sweep，巨大数・高精度函数の性能比較を通常testから分離して実行できる。
 
@@ -392,14 +405,14 @@ LinuxではGCCおよびClangによるビルド・テストも行っている。
 
 ドキュメント整理，実装方針の検討，テスト設計，および積分規則などのMathKnowledge整理にはLLMを補助的に利用している。
 
-## 16. 備考
+## 17. 備考
 
 本プロジェクトは，厳密な演算子意味論と実用的な数式評価の両立を目指している。
 研究・設計・製造現場などで，軽量なCLIとして簡便に利用できることも目的としている。
 
 そして，私が欲しいものを作っているだけである。
 
-## 17. 免責事項
+## 18. 免責事項
 
 本ソフトウェアはBSD 3-Clause Licenseに定めるとおり，**現状のまま（AS IS）** 提供される。
 商業的利用の適合性，特定目的への適合性，非侵害など，明示または黙示の保証は一切ありません。

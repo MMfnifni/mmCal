@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+ﾏﾀﾞﾅｲﾖ
+
+## v1.6.0 — 2026-09-12
+
+v1.6.0は，**Plot / Graphics基盤を追加し，一般`Q[x]`因数分解・記号積分・記号和積・極限を拡張した版**である。exact-firstと証明できない場合に未評価を保つ方針は維持する。
+
+### Plot・Graphics
+
+- `Rule[lhs,rhs]` / `lhs -> rhs`と，`Plot` / `ParametricPlot` / `ListPlot` / `Show`を追加した。`PlotRange`，`AspectRatio`，`Ticks`，`PlotPoints`に対応する。
+- 実定義域・pole・branch境界・不連続を解析してadaptive samplingし，3次以下のparametric polynomialはexact Bézier，同一affine phaseの三角曲線はCircle / Ellipse / EllipticArcとして保持する。証明可能な周期短縮，viewport clipping，`toNormal`にも対応した。
+- backend非依存の`GraphicsScene`からSVG / EPS / PDFへExportするvector backendを追加した。
+
+### 記号代数
+
+- 一変数`Q[x]`の一般因数分解をbounded modular pipelineへ拡張した。square-free分解，Berlekamp / Cantor–Zassenhaus，Hensel lift，Zassenhaus再結合，必要に応じてCLD + exact LLLを用い，候補はexact divisionで検証する。cyclotomic，binomial，deflation/inflationのfast pathも追加した。
+- `fullSimplify`の仮定付き約分とdefinedness保持を強化し，構造hash memoと展開量予測で巨大候補の生成を抑止した。variable-dependent exponentの安全なseries合成や，一部の記号係数付き周期方程式も拡張した。
+
+### 積分・極限
+
+- Risch系積分の基盤として，exact Hermite reduction，Lazard–Rioboo–Trager residue，`DifferentialTower`，`Q(x)`上の一階Risch differential equation，単一`Log` / `Exp` towerのreductionを追加した。未証明・budget停止は非初等性とはみなさず従来経路へfallbackする。
+- affine位相の`sin` / `cos`の非整数有理冪をprincipal-branch `hypergeometric2F1`原始函数へ接続した。
+- `limit`は無限遠有理函数，`1^Infinity`，radical相殺，指数減衰，L'Hopital等を拡張し，特異点探索中の誤った`DomainError`伝播を修正した。
+
+### 記号和・積
+
+- `sum` / `prod`を有限記号iteratorと多重iteratorへ一般化し，多項式・幾何級数・telescoping・基本binomial / factorial族を閉形式化する。
+- bounded Abramov型有理差分求解を追加し，exact certificateが得られない場合は未評価を保持する。
+
+### 数値・性能
+
+- 実Fresnel評価を軽量化し，Plotでは奇函数対称性を利用したcertified値の再利用を追加した。
+- Plotは`PlotProgram`で共通部分式とparameter非依存値を再利用し，exact geometryと証明済み周期短縮ではsampling自体を省略する。factor / `fullSimplify`も入力構造に応じたbounded dispatchで不要計算を抑える。
+
 ## v1.5.5 — 2026-09-05
 
 ### Series・解析

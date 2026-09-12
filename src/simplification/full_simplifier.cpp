@@ -10,14 +10,20 @@
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 #include "simplifier.hpp"
+#include "solver/solution_set.hpp"
 #include "symbolic/algebra_transforms.hpp"
+#include "symbolic/polynomial.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <functional>
+#include <limits>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -66,6 +72,23 @@ using expression::Expr;
     return Expr::call(builtins.symbol(evaluation::BuiltinId::Multiply), std::move(factors));
 }
 
+[[nodiscard]] bool exactPolynomialEquivalent(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (lhs == rhs)
+        return true;
+
+    const auto lhsPolynomial = symbolic::toMultivariateRationalPolynomial(lhs, builtins);
+    const auto rhsPolynomial = symbolic::toMultivariateRationalPolynomial(rhs, builtins);
+    if (!lhsPolynomial || !rhsPolynomial
+        || lhsPolynomial->terms().size() != rhsPolynomial->terms().size())
+        return false;
+    return std::equal(
+        lhsPolynomial->terms().begin(), lhsPolynomial->terms().end(),
+        rhsPolynomial->terms().begin());
+}
+
 [[nodiscard]] std::optional<Expr> cancelProvablyNonzeroCommonFactor(
     const Expr& expression,
     const SimplificationContext& context) {
@@ -85,12 +108,18 @@ using expression::Expr;
     const mathematics::KnowledgeContext knowledge = context.knowledge();
     for (std::size_t i = 0; i < numeratorFactors.size(); ++i) {
         for (std::size_t j = 0; j < denominatorFactors.size(); ++j) {
-            if (!(numeratorFactors[i] == denominatorFactors[j]))
+            // Factor等が同じ多項式を Add と Subtract の別ASTで構成しても，
+            // exactな有理係数正規形が一致すれば共通因子として扱える。ただし
+            // x^0と1のような定義域差を約分へ持ち込まないよう，両側のdefinednessを
+            // 仮定の下で別々に証明する。
+            if (!exactPolynomialEquivalent(
+                    numeratorFactors[i], denominatorFactors[j], context.builtins))
                 continue;
             if (!provablyDefined(numeratorFactors[i], context)
+                || !provablyDefined(denominatorFactors[j], context)
                 || knowledge.prove(mathematics::relation(
                     mathematics::RelationKind::NotEqual,
-                    numeratorFactors[i], integer(0))) != mathematics::TruthValue::True)
+                    denominatorFactors[j], integer(0))) != mathematics::TruthValue::True)
                 continue;
 
             numeratorFactors.erase(numeratorFactors.begin() + static_cast<std::ptrdiff_t>(i));
@@ -337,10 +366,160 @@ using expression::Expr;
         < std::tie(rhs.nodes, rhs.depth, rhs.leaves);
 }
 
-[[nodiscard]] bool contains(
-    const std::vector<Expr>& expressions,
-    const Expr& candidate) {
-    return std::find(expressions.begin(), expressions.end(), candidate) != expressions.end();
+void hashCombine(std::size_t& seed, std::size_t value) noexcept {
+    seed ^= value + static_cast<std::size_t>(0x9e3779b97f4a7c15ULL)
+        + (seed << 6U) + (seed >> 2U);
+}
+
+[[nodiscard]] std::size_t structuralHash(const Expr& expression) {
+    std::size_t seed = static_cast<std::size_t>(expression.kind()) + 1;
+    const auto hashText = [&](std::string_view value) {
+        hashCombine(seed, std::hash<std::string_view>{}(value));
+    };
+    switch (expression.kind()) {
+    case expression::ExprKind::Number:
+        hashText(expression.asNumber().toString());
+        break;
+    case expression::ExprKind::DecimalApproximation:
+        hashText(expression.asDecimalApproximation().text());
+        break;
+    case expression::ExprKind::ComplexDecimalApproximation:
+        hashText(expression.asComplexDecimalApproximation().text());
+        break;
+    case expression::ExprKind::Boolean:
+        hashCombine(seed, expression.asBoolean() ? 1U : 0U);
+        break;
+    case expression::ExprKind::String:
+        hashText(expression.asString());
+        break;
+    case expression::ExprKind::Symbol:
+        hashText(expression.asSymbol().view());
+        break;
+    case expression::ExprKind::Array: {
+        const auto& array = expression.asArray();
+        hashCombine(seed, static_cast<std::size_t>(array.storageKind()));
+        for (const std::size_t extent : array.shape)
+            hashCombine(seed, extent);
+        for (std::size_t i = 0; i < array.size(); ++i)
+            hashCombine(seed, structuralHash(array.element(i)));
+        break;
+    }
+    case expression::ExprKind::List:
+        for (const Expr& element : expression.asList().elements)
+            hashCombine(seed, structuralHash(element));
+        break;
+    case expression::ExprKind::Call:
+        hashText(expression.asCall().head.view());
+        for (const Expr& argument : expression.asCall().arguments)
+            hashCombine(seed, structuralHash(argument));
+        break;
+    case expression::ExprKind::SolutionSet:
+        // SolutionSetの内部にはPredicate/AssumptionSetも含まれる。ここではkindと
+        // variable数だけをbucket keyにし、衝突は必ずExpr::operator==で解消する。
+        hashCombine(seed, static_cast<std::size_t>(expression.asSolutionSet().kind()));
+        hashCombine(seed, expression.asSolutionSet().variables().size());
+        break;
+    }
+    return seed;
+}
+
+class StructuralBuckets final {
+public:
+    [[nodiscard]] bool contains(const Expr& candidate) const {
+        const auto iterator = expressions_.find(structuralHash(candidate));
+        if (iterator == expressions_.end())
+            return false;
+        return std::find(iterator->second.begin(), iterator->second.end(), candidate)
+            != iterator->second.end();
+    }
+
+    void insert(const Expr& candidate) {
+        expressions_[structuralHash(candidate)].push_back(candidate);
+    }
+
+private:
+    std::unordered_map<std::size_t, std::vector<Expr>> expressions_;
+};
+
+[[nodiscard]] std::size_t saturatingAdd(
+    std::size_t lhs,
+    std::size_t rhs,
+    std::size_t ceiling) noexcept {
+    if (lhs >= ceiling || rhs >= ceiling || lhs > ceiling - rhs)
+        return ceiling;
+    return lhs + rhs;
+}
+
+[[nodiscard]] std::size_t saturatingMultiply(
+    std::size_t lhs,
+    std::size_t rhs,
+    std::size_t ceiling) noexcept {
+    if (lhs == 0 || rhs == 0)
+        return 0;
+    if (lhs >= ceiling || rhs >= ceiling || lhs > ceiling / rhs)
+        return ceiling;
+    return lhs * rhs;
+}
+
+[[nodiscard]] std::size_t expansionTermForecast(
+    const Expr& expression,
+    const SimplificationContext& context,
+    std::size_t ceiling) {
+    if (!expression.isCall())
+        return 1;
+    const auto* definition = context.builtins.find(expression.asCall().head);
+    if (!definition)
+        return 1;
+    const auto& arguments = expression.asCall().arguments;
+    if (definition->id == evaluation::BuiltinId::Add
+        || definition->id == evaluation::BuiltinId::Subtract) {
+        std::size_t result = 0;
+        for (const Expr& argument : arguments)
+            result = saturatingAdd(
+                result, expansionTermForecast(argument, context, ceiling), ceiling);
+        return result;
+    }
+    if (definition->id == evaluation::BuiltinId::Multiply
+        || definition->id == evaluation::BuiltinId::Divide) {
+        std::size_t result = 1;
+        for (const Expr& argument : arguments)
+            result = saturatingMultiply(
+                result, expansionTermForecast(argument, context, ceiling), ceiling);
+        return result;
+    }
+    if (definition->id == evaluation::BuiltinId::Power && arguments.size() == 2) {
+        const auto exponent = positiveIntegerExponent(arguments[1]);
+        if (!exponent)
+            return 1;
+        std::size_t result = 1;
+        std::size_t base = expansionTermForecast(arguments[0], context, ceiling);
+        std::uint64_t power = *exponent;
+        while (power != 0) {
+            if ((power & 1U) != 0)
+                result = saturatingMultiply(result, base, ceiling);
+            power >>= 1U;
+            if (power != 0)
+                base = saturatingMultiply(base, base, ceiling);
+        }
+        return result;
+    }
+    return 1;
+}
+
+[[nodiscard]] bool polynomialTransformWithinBudget(
+    const Expr& expression,
+    const SimplificationContext& context) {
+    constexpr std::size_t maximumExpansionTerms = 4096;
+    constexpr std::size_t maximumExpansionGrowth = 16;
+    constexpr std::size_t minimumAllowance = 64;
+    const std::size_t nodes = measureExpressionCost(expression).nodes;
+    const std::size_t relative = saturatingMultiply(
+        std::max<std::size_t>(nodes, 1), maximumExpansionGrowth,
+        maximumExpansionTerms + 1);
+    const std::size_t allowance = std::min(
+        maximumExpansionTerms,
+        std::max(minimumAllowance, relative));
+    return expansionTermForecast(expression, context, allowance + 1) <= allowance;
 }
 
 [[nodiscard]] std::vector<expression::Symbol> collectVariables(
@@ -385,16 +564,18 @@ using expression::Expr;
     const Expr& expression,
     const SimplificationContext& context) {
     std::vector<Expr> variants;
-    variants.push_back(symbolic::expandExpression(
-        expression, context.builtins, context.mathematics, context.angleSemantics));
-    variants.push_back(symbolic::factorExpression(
-        expression, context.builtins, context.mathematics, context.angleSemantics));
+    if (polynomialTransformWithinBudget(expression, context)) {
+        variants.push_back(symbolic::expandExpression(
+            expression, context.builtins, context.mathematics, context.angleSemantics));
+        variants.push_back(symbolic::factorExpression(
+            expression, context.builtins, context.mathematics, context.angleSemantics));
 
-    const auto variables = collectVariables(expression, context.mathematics);
-    for (const expression::Symbol& variable : variables)
-        variants.push_back(symbolic::collectExpression(
-            expression, variable,
-            context.builtins, context.mathematics, context.angleSemantics));
+        const auto variables = collectVariables(expression, context.mathematics);
+        for (const expression::Symbol& variable : variables)
+            variants.push_back(symbolic::collectExpression(
+                expression, variable,
+                context.builtins, context.mathematics, context.angleSemantics));
+    }
     if (const auto cancelled = cancelProvablyNonzeroCommonFactor(expression, context))
         variants.push_back(*cancelled);
 
@@ -406,8 +587,9 @@ using expression::Expr;
         variants.push_back(*deepProof);
         // tan^2 -> sec^2-1 のようなproof恒等式は積の中では展開後に相殺が見える。
         // candidate上限を探索順だけで浪費しないよう、この安全なproof候補だけ直接expandも試す。
-        variants.push_back(symbolic::expandExpression(
-            *deepProof, context.builtins, context.mathematics, context.angleSemantics));
+        if (polynomialTransformWithinBudget(*deepProof, context))
+            variants.push_back(symbolic::expandExpression(
+                *deepProof, context.builtins, context.mathematics, context.angleSemantics));
     }
 
     // 高次三角冪を常時展開すると式が大きくなるためSimplifierの既定規則にはしない。
@@ -482,14 +664,34 @@ Expr fullSimplify(
     Expr best = initial;
     ExpressionCost bestCost = measureExpressionCost(best);
 
-    std::vector<Expr> seen;
-    seen.reserve(options.maximumCandidates);
-    seen.push_back(initial);
+    StructuralBuckets seen;
+    seen.insert(initial);
+    std::size_t seenCount = 1;
     std::deque<Expr> queue;
     queue.push_back(initial);
 
+    struct MemoEntry final {
+        Expr input;
+        Expr output;
+    };
+    std::unordered_map<std::size_t, std::vector<MemoEntry>> simplifyMemo;
+    simplifyMemo[structuralHash(expression)].push_back(MemoEntry{expression, initial});
+    const auto simplifyCached = [&](const Expr& candidate) {
+        const std::size_t hash = structuralHash(candidate);
+        auto& bucket = simplifyMemo[hash];
+        const auto iterator = std::find_if(
+            bucket.begin(), bucket.end(), [&](const MemoEntry& entry) {
+                return entry.input == candidate;
+            });
+        if (iterator != bucket.end())
+            return iterator->output;
+        Expr result = simplifier.simplify(candidate, context);
+        bucket.push_back(MemoEntry{candidate, result});
+        return result;
+    };
+
     auto consider = [&](Expr candidate) {
-        if (seen.size() >= options.maximumCandidates)
+        if (seenCount >= options.maximumCandidates)
             return;
         if (context.budget)
             context.budget->consume(
@@ -504,8 +706,8 @@ Expr fullSimplify(
         else
             evaluation::consumeEvaluationBudget(
                 evaluation::EvaluationResource::GeneratedNode, generatedCost.nodes);
-        candidate = simplifier.simplify(candidate, context);
-        if (contains(seen, candidate))
+        candidate = simplifyCached(candidate);
+        if (seen.contains(candidate))
             return;
 
         const ExpressionCost cost = measureExpressionCost(candidate);
@@ -513,11 +715,12 @@ Expr fullSimplify(
             best = candidate;
             bestCost = cost;
         }
-        seen.push_back(candidate);
+        seen.insert(candidate);
+        ++seenCount;
         queue.push_back(std::move(candidate));
     };
 
-    while (!queue.empty() && seen.size() < options.maximumCandidates) {
+    while (!queue.empty() && seenCount < options.maximumCandidates) {
         Expr current = std::move(queue.front());
         queue.pop_front();
         for (Expr candidate : rootVariants(current, context))

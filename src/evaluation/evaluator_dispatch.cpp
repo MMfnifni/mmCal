@@ -49,9 +49,16 @@
 #include "symbolic/limit.hpp"
 #include "symbolic/series.hpp"
 #include "numeric/integer_algorithms.hpp"
+#include "numeric/real_number.hpp"
+#include "graphics/graphics_backend.hpp"
+#include "formatting/expr_formatter.hpp"
+#include "plot/plot_pipeline.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -485,23 +492,848 @@ void consumeSolverSolutionBranches(const solver::SolutionSet& solutions) {
         std::max<std::size_t>(1, branches));
 }
 
-[[nodiscard]] bool containsComplexAlgebraicRoot(
-    const solver::SolutionSet& solutions,
-    const BuiltinRegistry& registry) {
-    if (solutions.kind() != solver::SolutionSetKind::Finite)
+[[nodiscard]] std::optional<std::pair<expression::Expr, expression::Expr>>
+plotRangePair(const expression::Expr& expression) {
+    if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        if (array.rank() != 1 || array.size() != 2)
+            return std::nullopt;
+        return std::pair{array.element(0), array.element(1)};
+    }
+    if (expression.isList() && expression.asList().elements.size() == 2)
+        return std::pair{
+            expression.asList().elements[0], expression.asList().elements[1]};
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<bool> plotBooleanOptionValue(
+    const expression::Expr& expression) noexcept {
+    if (!expression.isBoolean())
+        return std::nullopt;
+    return expression.asBoolean();
+}
+
+[[nodiscard]] plot::PlotRequestOptions parsePlotOptions(
+    std::span<const expression::Expr> arguments,
+    const BuiltinRegistry& builtins) {
+    plot::PlotRequestOptions options;
+    for (std::size_t i = 2; i < arguments.size(); ++i) {
+        const auto& option = arguments[i];
+        if (!builtins.isCallTo(option, BuiltinId::Rule)
+            || option.asCall().arguments.size() != 2)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Plot options must be rules such as PlotRange -> {min,max}");
+
+        const auto& ruleArguments = option.asCall().arguments;
+        if (!ruleArguments[0].isSymbol())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Plot option names must be symbols");
+
+        const std::string_view name = ruleArguments[0].asSymbol().view();
+        if (name == "PlotRange") {
+            if (options.plotRange)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "Duplicate option 'PlotRange' for Plot");
+            const auto pair = plotRangePair(ruleArguments[1]);
+            if (!pair)
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "PlotRange expects {minimum,maximum}");
+            options.plotRange = plot::PlotRangeOption{pair->first, pair->second};
+        }
+        else if (name == "AspectRatio") {
+            if (options.aspectRatio)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "Duplicate option 'AspectRatio' for Plot");
+            options.aspectRatio = ruleArguments[1];
+        }
+        else if (name == "Ticks") {
+            if (options.ticks)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "Duplicate option 'Ticks' for Plot");
+            const auto value = plotBooleanOptionValue(ruleArguments[1]);
+            if (!value)
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "Ticks expects True or False");
+            options.ticks = *value;
+        }
+        else if (name == "PlotPoints") {
+            if (options.plotPoints)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "Duplicate option 'PlotPoints' for Plot");
+            const auto& value = ruleArguments[1];
+            if (!value.isNumber() || !value.asNumber().asReal().isInteger())
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "PlotPoints expects an integer from 100 through 1024");
+            const auto parsed = numeric::tryToUint64(value.asNumber().asReal().asInteger());
+            if (!parsed || *parsed < 100 || *parsed > 1024)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "PlotPoints expects an integer from 100 through 1024");
+            options.plotPoints = static_cast<std::size_t>(*parsed);
+        }
+        else
+            error::throwCalcError(
+                error::CalcErrorType::Domain,
+                "Unknown option '" + std::string{name} + "' for Plot");
+    }
+    return options;
+}
+
+[[nodiscard]] std::optional<plot::PlotRequestSet> parsePlotRequest(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins) {
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::Plot)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if (arguments.size() < 2)
+        return std::nullopt;
+
+    const auto iterator = parseRangeIteratorSpec(arguments[1]);
+    if (!iterator)
+        return std::nullopt;
+
+    std::vector<expression::Expr> curves;
+    if (arguments[0].isArray()) {
+        const auto& array = arguments[0].asArray();
+        if (array.rank() != 1 || array.size() == 0)
+            return std::nullopt;
+        curves = array.materialize();
+    }
+    else if (arguments[0].isList()) {
+        if (arguments[0].asList().elements.empty())
+            return std::nullopt;
+        curves = arguments[0].asList().elements;
+    }
+    else
+        curves.push_back(arguments[0]);
+
+    return plot::PlotRequestSet{
+        std::move(curves), iterator->variable, iterator->lower, iterator->upper,
+        parsePlotOptions(arguments, builtins)};
+}
+
+[[nodiscard]] bool appendPlotRequests(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins,
+    std::vector<plot::PlotRequest>& requests) {
+    if (const auto requestSet = parsePlotRequest(expression, builtins)) {
+        auto split = plot::splitPlotRequests(*requestSet);
+        requests.insert(requests.end(), split.begin(), split.end());
+        return true;
+    }
+
+    if (!expression.isCall())
         return false;
-    for (const solver::SolutionBranch& branch : solutions.branches()) {
-        for (const solver::SolutionBinding& binding : branch.bindings) {
-            if (!binding.value.isCall())
-                continue;
-            const auto* definition = registry.find(binding.value.asCall().head);
-            const auto& arguments = binding.value.asCall().arguments;
-            if (definition && definition->id == BuiltinId::Root && arguments.size() == 3
-                && arguments[2].isSymbol() && arguments[2].asSymbol().view() == "Complex")
-                return true;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::Show)
+        return false;
+
+    for (const auto& argument : expression.asCall().arguments)
+        if (!appendPlotRequests(argument, builtins, requests))
+            return false;
+    return !requests.empty();
+}
+
+[[nodiscard]] std::optional<std::vector<plot::PlotRequest>> parsePlotRequests(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins) {
+    std::vector<plot::PlotRequest> requests;
+    if (!appendPlotRequests(expression, builtins, requests) || requests.empty())
+        return std::nullopt;
+    return requests;
+}
+
+
+[[nodiscard]] std::optional<std::pair<expression::Expr, expression::Expr>>
+parametricCoordinatePair(const expression::Expr& expression) {
+    if (expression.isArray()) {
+        const auto& array = expression.asArray();
+        if (array.rank() != 1 || array.size() != 2)
+            return std::nullopt;
+        return std::pair{array.element(0), array.element(1)};
+    }
+    if (expression.isList() && expression.asList().elements.size() == 2)
+        return std::pair{expression.asList().elements[0], expression.asList().elements[1]};
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<plot::ParametricPlotRequestSet> parseParametricPlotRequest(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins) {
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::ParametricPlot)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if (arguments.size() < 2)
+        return std::nullopt;
+    const auto iterator = parseRangeIteratorSpec(arguments[1]);
+    if (!iterator)
+        return std::nullopt;
+
+    std::vector<std::pair<expression::Expr, expression::Expr>> curves;
+    if (arguments[0].isArray() && arguments[0].asArray().rank() == 2) {
+        const auto& array = arguments[0].asArray();
+        if (array.extent(0) == 0 || array.extent(1) != 2)
+            return std::nullopt;
+        curves.reserve(array.extent(0));
+        for (std::size_t row = 0; row < array.extent(0); ++row)
+            curves.emplace_back(array.element(row * 2), array.element(row * 2 + 1));
+    }
+    else {
+        std::vector<expression::Expr> entries;
+        if (arguments[0].isList())
+            entries = arguments[0].asList().elements;
+        bool allEntriesArePairs = !entries.empty();
+        if (allEntriesArePairs)
+            for (const auto& entry : entries)
+                if (!parametricCoordinatePair(entry)) {
+                    allEntriesArePairs = false;
+                    break;
+                }
+        if (allEntriesArePairs) {
+            for (const auto& entry : entries)
+                curves.push_back(*parametricCoordinatePair(entry));
+        }
+        else if (const auto single = parametricCoordinatePair(arguments[0]))
+            curves.push_back(*single);
+        else
+            return std::nullopt;
+    }
+
+    auto options = parsePlotOptions(arguments, builtins);
+    if (options.plotRange)
+        error::throwCalcError(
+            error::CalcErrorType::Domain,
+            "ParametricPlot does not yet support PlotRange; use Automatic range");
+    return plot::ParametricPlotRequestSet{
+        std::move(curves), iterator->variable, iterator->lower, iterator->upper,
+        std::move(options)};
+}
+
+
+struct ParsedListPlot final {
+    std::vector<std::pair<expression::Expr, expression::Expr>> points;
+    bool joined = false;
+    bool joinedSpecified = false;
+    std::optional<expression::Expr> aspectRatio;
+    std::optional<bool> ticks;
+};
+
+[[nodiscard]] expression::Expr exactZeroExpr() {
+    return expression::Expr{numeric::Number{numeric::BigInt{0}}};
+}
+
+[[nodiscard]] std::optional<ParsedListPlot> parseListPlotRequest(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins) {
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::ListPlot)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    if (arguments.empty())
+        return std::nullopt;
+
+    ParsedListPlot request;
+    const auto zero = exactZeroExpr();
+    const auto appendRows = [&](const std::vector<std::vector<expression::Expr>>& rows)
+        -> bool {
+        if (rows.empty())
+            return false;
+        const std::size_t width = rows.front().size();
+        if (width != 1 && width != 2)
+            return false;
+        for (const auto& row : rows) {
+            if (row.size() != width)
+                return false;
+            request.points.emplace_back(row[0], width == 1 ? zero : row[1]);
+        }
+        return true;
+    };
+
+    const auto& data = arguments[0];
+    if (data.isArray()) {
+        const auto& array = data.asArray();
+        if (array.rank() == 1) {
+            if (array.size() == 0)
+                return std::nullopt;
+            request.points.reserve(array.size());
+            for (std::size_t i = 0; i < array.size(); ++i)
+                request.points.emplace_back(array.element(i), zero);
+        }
+        else if (array.rank() == 2) {
+            const std::size_t rows = array.extent(0);
+            const std::size_t columns = array.extent(1);
+            if (rows == 0 || (columns != 1 && columns != 2))
+                return std::nullopt;
+            request.points.reserve(rows);
+            for (std::size_t row = 0; row < rows; ++row)
+                request.points.emplace_back(
+                    array.element(row * columns),
+                    columns == 1 ? zero : array.element(row * columns + 1));
+        }
+        else
+            return std::nullopt;
+    }
+    else if (data.isList()) {
+        const auto& elements = data.asList().elements;
+        if (elements.empty())
+            return std::nullopt;
+        bool nested = false;
+        for (const auto& element : elements)
+            nested = nested || element.isArray() || element.isList();
+        if (!nested) {
+            request.points.reserve(elements.size());
+            for (const auto& element : elements)
+                request.points.emplace_back(element, zero);
+        }
+        else {
+            std::vector<std::vector<expression::Expr>> rows;
+            rows.reserve(elements.size());
+            for (const auto& element : elements) {
+                if (element.isArray()) {
+                    const auto& row = element.asArray();
+                    if (row.rank() != 1)
+                        return std::nullopt;
+                    rows.push_back(row.materialize());
+                }
+                else if (element.isList())
+                    rows.push_back(element.asList().elements);
+                else
+                    return std::nullopt;
+            }
+            if (!appendRows(rows))
+                return std::nullopt;
         }
     }
-    return false;
+    else
+        return std::nullopt;
+
+    for (std::size_t i = 1; i < arguments.size(); ++i) {
+        const auto& option = arguments[i];
+        if (!builtins.isCallTo(option, BuiltinId::Rule)
+            || option.asCall().arguments.size() != 2
+            || !option.asCall().arguments[0].isSymbol())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ListPlot options must be rules such as Joined -> True");
+        const auto& rule = option.asCall().arguments;
+        const std::string_view name = rule[0].asSymbol().view();
+        if (name == "Joined") {
+            if (request.joinedSpecified)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "Duplicate option 'Joined' for ListPlot");
+            const auto value = plotBooleanOptionValue(rule[1]);
+            if (!value)
+                error::throwCalcError(error::CalcErrorType::Type,
+                    "Joined expects True or False");
+            request.joined = *value;
+            request.joinedSpecified = true;
+        }
+        else if (name == "AspectRatio") {
+            if (request.aspectRatio)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "Duplicate option 'AspectRatio' for ListPlot");
+            request.aspectRatio = rule[1];
+        }
+        else if (name == "Ticks") {
+            if (request.ticks)
+                error::throwCalcError(error::CalcErrorType::Domain,
+                    "Duplicate option 'Ticks' for ListPlot");
+            const auto value = plotBooleanOptionValue(rule[1]);
+            if (!value)
+                error::throwCalcError(error::CalcErrorType::Type,
+                    "Ticks expects True or False");
+            request.ticks = *value;
+        }
+        else if (name == "PlotPoints")
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "ListPlot does not support PlotPoints because input points are explicit");
+        else if (name == "PlotRange")
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "ListPlot does not yet support PlotRange");
+        else
+            error::throwCalcError(error::CalcErrorType::Domain,
+                "Unknown option '" + std::string{name} + "' for ListPlot");
+    }
+    return request;
+}
+
+[[nodiscard]] expression::Expr listPlotNormalCoordinates(const ParsedListPlot& request) {
+    std::vector<expression::Expr> values;
+    values.reserve(request.points.size() * 2);
+    for (const auto& [x, y] : request.points) {
+        values.push_back(x);
+        values.push_back(y);
+    }
+    return expression::Expr::array({request.points.size(), 2}, std::move(values));
+}
+
+[[nodiscard]] std::optional<numeric::BigFloat> listPlotCoordinateValue(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t precisionBits = 64) {
+    const expression::Symbol dummy{"__mmcal_listplot_parameter"};
+    const auto compiled = plot::compilePlotProgram(expression, dummy, builtins, mathematics);
+    if (!compiled || !compiled.program)
+        return std::nullopt;
+    plot::BigFloatPlotExecutor executor(*compiled.program, precisionBits, angles);
+    const auto zero = numeric::BigFloat::fromBigInt(
+        numeric::BigInt{0}, precisionBits, numeric::RoundingMode::NearestEven);
+    const auto value = executor.evaluate(zero);
+    if (!value.finite())
+        return std::nullopt;
+    return value.value;
+}
+
+[[nodiscard]] std::optional<double> listPlotPositiveDouble(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto value = listPlotCoordinateValue(expression, builtins, mathematics, angles);
+    if (!value || !value->isPositive())
+        return std::nullopt;
+    const auto rational = value->toRational();
+    try {
+        const long double numerator = std::stold(rational.numerator().toString());
+        const long double denominator = std::stold(rational.denominator().toString());
+        const double result = static_cast<double>(numerator / denominator);
+        if (!std::isfinite(result) || !(result > 0.0))
+            return std::nullopt;
+        return result;
+    }
+    catch (...) {
+        return std::nullopt;
+    }
+}
+
+struct PreparedListPlotGraphics final {
+    plot::PlotScene plotScene;
+    plot::CurveViewRange2D range;
+    plot::PlotViewportMm viewport;
+    std::size_t precisionBits = 64;
+    bool ticks = true;
+};
+
+[[nodiscard]] std::optional<PreparedListPlotGraphics> prepareListPlotGraphics(
+    const ParsedListPlot& request,
+    const BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    constexpr std::size_t precisionBits = 64;
+    std::vector<std::pair<numeric::BigFloat, numeric::BigFloat>> points;
+    points.reserve(request.points.size());
+    for (const auto& [xExpression, yExpression] : request.points) {
+        auto x = listPlotCoordinateValue(xExpression, builtins, mathematics, angles, precisionBits);
+        auto y = listPlotCoordinateValue(yExpression, builtins, mathematics, angles, precisionBits);
+        if (!x || !y)
+            return std::nullopt;
+        points.emplace_back(std::move(*x), std::move(*y));
+    }
+
+    const auto zeroExpression = exactZeroExpr();
+    plot::SampledCurve2D sampled;
+    sampled.precisionBits = precisionBits;
+    plot::SampledCurveSegment2D sampledSegment{
+        plot::PlotInterval{zeroExpression, plot::PlotEndpointInclusion::Closed,
+            zeroExpression, plot::PlotEndpointInclusion::Closed},
+        {}, plot::PlotSegmentGeometryKind::Polyline,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        false, false, std::nullopt, std::nullopt,
+        std::nullopt, std::nullopt, false, false};
+    sampledSegment.samples.reserve(points.size());
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const auto parameter = numeric::BigFloat::fromBigInt(
+            numeric::BigInt{static_cast<std::int64_t>(i)}, precisionBits,
+            numeric::RoundingMode::NearestEven);
+        sampledSegment.samples.emplace_back(
+            parameter, points[i].first, points[i].second,
+            plot::PlotNumericStatus::Finite, plot::PlotPointTag::Coarse);
+    }
+    sampled.segments.push_back(std::move(sampledSegment));
+
+    const auto xRange = plot::estimateCurveCoordinateRange(
+        sampled, plot::CurveCoordinate2D::X);
+    const auto yRange = plot::estimateCurveCoordinateRange(
+        sampled, plot::CurveCoordinate2D::Y);
+    if (!xRange || !yRange)
+        return std::nullopt;
+
+    plot::PlotViewportMm viewport;
+    if (request.aspectRatio) {
+        const auto ratio = listPlotPositiveDouble(
+            *request.aspectRatio, builtins, mathematics, angles);
+        if (!ratio)
+            return std::nullopt;
+        viewport.heightMm = viewport.widthMm * *ratio;
+    }
+    plot::PlotScene scene;
+    plot::PlotSceneCurve curve;
+    curve.id = 1;
+    if (request.joined && points.size() >= 2) {
+        plot::PlotSceneSegment segment{
+            plot::PlotInterval{zeroExpression, plot::PlotEndpointInclusion::Closed,
+                zeroExpression, plot::PlotEndpointInclusion::Closed},
+            plot::PlotSegmentGeometryKind::Polyline, {},
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+            false, false, std::nullopt, std::nullopt};
+        segment.vertices.reserve(points.size());
+        for (const auto& [x, y] : points)
+            segment.vertices.push_back(plot::PlotSceneVertex{x, y, std::nullopt});
+        curve.segments.push_back(std::move(segment));
+    }
+    for (const auto& [x, y] : points) {
+        plot::PlotSceneSegment marker{
+            plot::PlotInterval{zeroExpression, plot::PlotEndpointInclusion::Closed,
+                zeroExpression, plot::PlotEndpointInclusion::Closed},
+            plot::PlotSegmentGeometryKind::Polyline, {},
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+            false, false, std::nullopt, std::nullopt};
+        marker.vertices.push_back(plot::PlotSceneVertex{x, y, std::nullopt});
+        marker.markLowerEndpoint = true;
+        curve.segments.push_back(std::move(marker));
+    }
+    scene.curves.push_back(std::move(curve));
+
+    const bool ticks = request.ticks.value_or(true);
+    return PreparedListPlotGraphics{
+        std::move(scene), plot::CurveViewRange2D{*xRange, *yRange},
+        viewport, precisionBits, ticks};
+}
+
+[[nodiscard]] std::optional<graphics::GraphicsScene> buildListPlotGraphics(
+    const ParsedListPlot& request,
+    const BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    auto prepared = prepareListPlotGraphics(request, builtins, mathematics, angles);
+    if (!prepared)
+        return std::nullopt;
+    const auto transform = plot::makePlotViewTransform(
+        prepared->range, prepared->precisionBits, prepared->viewport);
+    if (!transform)
+        return std::nullopt;
+
+    plot::PlotAxisLayoutOptions axisOptions;
+    axisOptions.generateMajorTicks = prepared->ticks;
+    const auto axes = plot::layoutPlotAxes(*transform, axisOptions);
+    if (!axes || !axes.layout)
+        return std::nullopt;
+    plot::PlotGraphicsLoweringOptions loweringOptions;
+    loweringOptions.showMajorTicks = prepared->ticks;
+    loweringOptions.showMajorTickLabels = prepared->ticks;
+    const auto lowered = plot::lowerPlotToGraphics(
+        prepared->plotScene, *axes.layout, *transform, loweringOptions);
+    if (!lowered || !lowered.scene)
+        return std::nullopt;
+    return *lowered.scene;
+}
+
+enum class CompositeFirstDrawable {
+    Plot,
+    ListPlot
+};
+
+struct ParsedCompositeDrawable final {
+    std::vector<plot::PlotRequest> plots;
+    std::vector<ParsedListPlot> listPlots;
+    std::optional<CompositeFirstDrawable> first;
+};
+
+[[nodiscard]] bool appendCompositeDrawable(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins,
+    ParsedCompositeDrawable& result) {
+    if (const auto request = parsePlotRequest(expression, builtins)) {
+        if (!result.first)
+            result.first = CompositeFirstDrawable::Plot;
+        auto split = plot::splitPlotRequests(*request);
+        result.plots.insert(result.plots.end(), split.begin(), split.end());
+        return true;
+    }
+    if (const auto request = parseListPlotRequest(expression, builtins)) {
+        if (!result.first)
+            result.first = CompositeFirstDrawable::ListPlot;
+        result.listPlots.push_back(*request);
+        return true;
+    }
+    if (!expression.isCall())
+        return false;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition || definition->id != BuiltinId::Show
+        || expression.asCall().arguments.empty())
+        return false;
+    for (const auto& argument : expression.asCall().arguments)
+        if (!appendCompositeDrawable(argument, builtins, result))
+            return false;
+    return true;
+}
+
+[[nodiscard]] std::optional<ParsedCompositeDrawable> parseCompositeDrawable(
+    const expression::Expr& expression,
+    const BuiltinRegistry& builtins) {
+    ParsedCompositeDrawable result;
+    if (!appendCompositeDrawable(expression, builtins, result)
+        || (!result.first)
+        || (result.plots.empty() && result.listPlots.empty()))
+        return std::nullopt;
+    return result;
+}
+
+[[nodiscard]] plot::CurveRangeEstimate1D transformAxisRange(
+    const numeric::BigFloat& minimum,
+    const numeric::BigFloat& maximum) {
+    return plot::CurveRangeEstimate1D{
+        minimum, maximum, minimum, maximum, minimum, maximum,
+        0, 0, false, false};
+}
+
+[[nodiscard]] plot::CurveViewRange2D unionCompositeRanges(
+    const std::vector<plot::CurveViewRange2D>& ranges) {
+    plot::CurveViewRange2D result = ranges.front();
+    const auto merge = [](plot::CurveRangeEstimate1D& destination,
+                           const plot::CurveRangeEstimate1D& source) {
+        if (source.observedMinimum < destination.observedMinimum)
+            destination.observedMinimum = source.observedMinimum;
+        if (source.observedMaximum > destination.observedMaximum)
+            destination.observedMaximum = source.observedMaximum;
+        if (source.dataMinimum < destination.dataMinimum)
+            destination.dataMinimum = source.dataMinimum;
+        if (source.dataMaximum > destination.dataMaximum)
+            destination.dataMaximum = source.dataMaximum;
+        if (source.viewMinimum < destination.viewMinimum)
+            destination.viewMinimum = source.viewMinimum;
+        if (source.viewMaximum > destination.viewMaximum)
+            destination.viewMaximum = source.viewMaximum;
+        destination.includedFiniteSamples += source.includedFiniteSamples;
+        destination.excludedFiniteSamples += source.excludedFiniteSamples;
+        destination.boundaryTrimmed =
+            destination.boundaryTrimmed || source.boundaryTrimmed;
+        destination.flatExpanded = destination.flatExpanded || source.flatExpanded;
+    };
+    for (std::size_t i = 1; i < ranges.size(); ++i) {
+        merge(result.x, ranges[i].x);
+        merge(result.y, ranges[i].y);
+    }
+    return result;
+}
+
+struct CompositeGraphicsResult final {
+    plot::PlotPipelineStatus status = plot::PlotPipelineStatus::EmptyRequest;
+    std::optional<graphics::GraphicsScene> scene;
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return status == plot::PlotPipelineStatus::Success && scene.has_value();
+    }
+};
+
+[[nodiscard]] CompositeGraphicsResult buildCompositeGraphics(
+    const ParsedCompositeDrawable& request,
+    const BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const expression::Symbol& infinitySymbol) {
+    std::optional<plot::PlotPipelineOutput> plotOutput;
+    if (!request.plots.empty()) {
+        auto built = plot::buildPlotPipeline(
+            request.plots, builtins, mathematics, angles, infinitySymbol);
+        if (!built || !built.output)
+            return CompositeGraphicsResult{built.status, std::nullopt};
+        plotOutput = std::move(*built.output);
+    }
+
+    std::vector<PreparedListPlotGraphics> listOutputs;
+    listOutputs.reserve(request.listPlots.size());
+    for (const ParsedListPlot& listPlot : request.listPlots) {
+        auto prepared = prepareListPlotGraphics(listPlot, builtins, mathematics, angles);
+        if (!prepared)
+            return CompositeGraphicsResult{
+                plot::PlotPipelineStatus::SamplingFailed, std::nullopt};
+        listOutputs.push_back(std::move(*prepared));
+    }
+
+    std::vector<plot::CurveViewRange2D> ranges;
+    std::size_t precisionBits = 64;
+    plot::PlotViewportMm viewport;
+    bool ticks = true;
+    plot::PlotScene combinedScene;
+    plot::PlotSceneCurveId maximumCurveId = 0;
+    if (plotOutput) {
+        precisionBits = plotOutput->transform.precisionBits();
+        ranges.push_back(plot::CurveViewRange2D{
+            transformAxisRange(
+                plotOutput->transform.xMinimum(), plotOutput->transform.xMaximum()),
+            transformAxisRange(
+                plotOutput->transform.yMinimum(), plotOutput->transform.yMaximum())});
+        viewport = plotOutput->transform.viewport();
+        ticks = !plotOutput->axes.xAxis.majorTicks.empty()
+            || !plotOutput->axes.yAxis.majorTicks.empty();
+        combinedScene = plotOutput->plotScene;
+        for (const auto& curve : combinedScene.curves)
+            maximumCurveId = std::max(maximumCurveId, curve.id);
+    }
+    for (PreparedListPlotGraphics& listOutput : listOutputs) {
+        ranges.push_back(listOutput.range);
+        if (!plotOutput && ranges.size() == 1) {
+            precisionBits = listOutput.precisionBits;
+            viewport = listOutput.viewport;
+            ticks = listOutput.ticks;
+        }
+        for (auto& curve : listOutput.plotScene.curves) {
+            curve.id = ++maximumCurveId;
+            combinedScene.curves.push_back(std::move(curve));
+        }
+    }
+    if (ranges.empty() || combinedScene.curves.empty())
+        return CompositeGraphicsResult{
+            plot::PlotPipelineStatus::SceneBuildFailed, std::nullopt};
+
+    // Showの先頭がListPlotなら，先頭graphicsの物理縦横比とtick指定を継承する。
+    if (request.first == CompositeFirstDrawable::ListPlot && !listOutputs.empty()) {
+        viewport = listOutputs.front().viewport;
+        ticks = listOutputs.front().ticks;
+    }
+    const plot::CurveViewRange2D range = unionCompositeRanges(ranges);
+    const auto transform = plot::makePlotViewTransform(range, precisionBits, viewport);
+    if (!transform)
+        return CompositeGraphicsResult{
+            plot::PlotPipelineStatus::ViewTransformFailed, std::nullopt};
+    plot::PlotAxisLayoutOptions axisOptions;
+    axisOptions.generateMajorTicks = ticks;
+    const auto axes = plot::layoutPlotAxes(*transform, axisOptions);
+    if (!axes || !axes.layout)
+        return CompositeGraphicsResult{
+            axes.status == plot::PlotAxisLayoutStatus::InvalidOptions
+                ? plot::PlotPipelineStatus::InvalidOptions
+                : plot::PlotPipelineStatus::AxisLayoutFailed,
+            std::nullopt};
+    plot::PlotGraphicsLoweringOptions loweringOptions;
+    loweringOptions.showMajorTicks = ticks;
+    loweringOptions.showMajorTickLabels = ticks;
+    const auto lowered = plot::lowerPlotToGraphics(
+        combinedScene, *axes.layout, *transform, loweringOptions);
+    if (!lowered || !lowered.scene)
+        return CompositeGraphicsResult{
+            lowered.status == plot::PlotGraphicsLoweringStatus::InvalidOptions
+                ? plot::PlotPipelineStatus::InvalidOptions
+                : plot::PlotPipelineStatus::GraphicsLoweringFailed,
+            std::nullopt};
+    return CompositeGraphicsResult{
+        plot::PlotPipelineStatus::Success, std::move(*lowered.scene)};
+}
+
+[[noreturn]] void throwPlotPipelineFailure(
+    plot::PlotPipelineStatus status,
+    std::string evaluationMessage) {
+    if (status == plot::PlotPipelineStatus::InvalidOptions)
+        error::throwCalcError(
+            error::CalcErrorType::Domain,
+            "Plot options are invalid for the requested plot");
+    error::throwCalcError(
+        error::CalcErrorType::Evaluation, std::move(evaluationMessage));
+}
+
+struct ExportGraphicsTarget final {
+    std::filesystem::path path;
+    graphics::GraphicsFormat format = graphics::GraphicsFormat::Svg;
+};
+
+[[nodiscard]] std::optional<ExportGraphicsTarget> exportGraphicsTarget(
+    const std::filesystem::path& path,
+    const std::optional<std::string>& explicitFormat) {
+    if (!explicitFormat) {
+        const auto format = graphics::graphicsFormatFromExtension(path.extension().string());
+        if (!format)
+            return std::nullopt;
+        return ExportGraphicsTarget{path, *format};
+    }
+
+    const auto format = graphics::parseGraphicsFormat(*explicitFormat);
+    if (!format)
+        return std::nullopt;
+
+    std::filesystem::path outputPath = path;
+    const auto extensionFormat = graphics::graphicsFormatFromExtension(path.extension().string());
+    if (!extensionFormat || *extensionFormat != *format)
+        outputPath += graphics::graphicsFormatExtension(*format);
+    return ExportGraphicsTarget{std::move(outputPath), *format};
+}
+
+[[nodiscard]] std::size_t plotCoordinateDigits(std::size_t precisionBits) noexcept {
+    // Plot内部の64-bit BigFloatは作業値であり，その全bitを利用者向け精度として主張しない。
+    // 約8 guard bitを落として10進化するため，既定64 bitでは16桁になる。
+    if (precisionBits <= 8)
+        return 1;
+    constexpr double decimalDigitsPerBit = 0.3010299956639812;
+    return std::max<std::size_t>(
+        1, static_cast<std::size_t>(
+            static_cast<double>(precisionBits - 8) * decimalDigitsPerBit));
+}
+
+[[nodiscard]] numeric::DecimalApproximation plotCoordinateValue(
+    const numeric::BigFloat& value,
+    std::size_t significantDigits) {
+    return numeric::DecimalApproximation::fromVerifiedValueSignificant(
+        numeric::RealNumber{value.toRational()}, significantDigits);
+}
+
+[[nodiscard]] expression::Expr sampledSegmentCoordinates(
+    const plot::SampledCurveSegment2D& segment,
+    std::size_t precisionBits) {
+    const std::size_t significantDigits = plotCoordinateDigits(precisionBits);
+    std::vector<numeric::DecimalApproximation> values;
+    values.reserve(segment.samples.size() * 2);
+    std::size_t pointCount = 0;
+    for (const auto& sample : segment.samples) {
+        if (!sample.finite())
+            continue;
+        values.push_back(plotCoordinateValue(sample.x, significantDigits));
+        values.push_back(plotCoordinateValue(sample.y, significantDigits));
+        ++pointCount;
+    }
+    return expression::Expr::decimalArray({pointCount, 2}, std::move(values));
+}
+
+[[nodiscard]] expression::Expr sampledCurveCoordinates(
+    const plot::SampledCurve2D& curve) {
+    if (curve.segments.size() == 1)
+        return sampledSegmentCoordinates(curve.segments.front(), curve.precisionBits);
+
+    std::vector<expression::Expr> segments;
+    segments.reserve(curve.segments.size());
+    for (const auto& segment : curve.segments)
+        segments.push_back(sampledSegmentCoordinates(segment, curve.precisionBits));
+    return expression::Expr::list(std::move(segments));
+}
+
+[[nodiscard]] expression::Expr sampledCurvesCoordinates(
+    const std::vector<plot::SampledCurve2D>& curves) {
+    if (curves.size() == 1)
+        return sampledCurveCoordinates(curves.front());
+
+    std::vector<expression::Expr> result;
+    result.reserve(curves.size());
+    for (const auto& curve : curves)
+        result.push_back(sampledCurveCoordinates(curve));
+    return expression::Expr::list(std::move(result));
 }
 
 } // namespace
@@ -1029,6 +1861,62 @@ expression::Expr Evaluator::dispatchBuiltin(
         if (arguments.size() != 1)
             error::throwCalcError(error::CalcErrorType::Type,
                 "toNormal expects one expression");
+
+        const auto* infinity = symbolRegistry_.find("Infinity");
+        if (!infinity)
+            error::throwCalcError(
+                error::CalcErrorType::Internal,
+                "Infinity symbol is not registered");
+
+        plot::PlotPipelineOptions plotOptions;
+        plotOptions.forceSampledGeometry = true;
+        if (const auto requests = parsePlotRequests(arguments.front(), registry_)) {
+            const auto built = plot::buildPlotPipeline(
+                *requests, registry_, mathematics_, angleSemantics_, infinity->symbol,
+                {}, plotOptions);
+            if (!built || !built.output)
+                throwPlotPipelineFailure(
+                    built.status,
+                    "toNormal could not materialize Plot coordinates");
+            return sampledCurvesCoordinates(built.output->curves);
+        }
+
+        if (registry_.isCallTo(arguments.front(), BuiltinId::Show)) {
+            if (const auto composite = parseCompositeDrawable(arguments.front(), registry_)) {
+                std::vector<expression::Expr> coordinates;
+                if (!composite->plots.empty()) {
+                    const auto built = plot::buildPlotPipeline(
+                        composite->plots, registry_, mathematics_, angleSemantics_,
+                        infinity->symbol, {}, plotOptions);
+                    if (!built || !built.output)
+                        throwPlotPipelineFailure(
+                            built.status,
+                            "toNormal could not materialize Show Plot coordinates");
+                    for (const auto& curve : built.output->curves)
+                        coordinates.push_back(sampledCurveCoordinates(curve));
+                }
+                for (const auto& listPlot : composite->listPlots)
+                    coordinates.push_back(listPlotNormalCoordinates(listPlot));
+                if (coordinates.size() == 1)
+                    return coordinates.front();
+                return expression::Expr::list(std::move(coordinates));
+            }
+        }
+
+        if (const auto request = parseParametricPlotRequest(arguments.front(), registry_)) {
+            const auto built = plot::buildParametricPlotPipeline(
+                *request, registry_, mathematics_, angleSemantics_, infinity->symbol,
+                {}, plotOptions);
+            if (!built || !built.output)
+                throwPlotPipelineFailure(
+                    built.status,
+                    "toNormal could not materialize ParametricPlot coordinates");
+            return sampledCurvesCoordinates(built.output->curves);
+        }
+
+        if (const auto request = parseListPlotRequest(arguments.front(), registry_))
+            return listPlotNormalCoordinates(*request);
+
         return symbolic::toNormalExpression(
             arguments.front(), registry_, mathematics_, angleSemantics_);
     }
@@ -1796,6 +2684,12 @@ expression::Expr Evaluator::dispatchBuiltin(
                     relation, variables.front(), registry_, mathematics_,
                     angleSemantics_, constraints.assumptions))
                 return *principalLambert;
+            if (!realSolveDomain) {
+                if (auto complexPeriodic = solver::solveComplexExponentialLogRelation(
+                        relation, variables.front(), registry_, mathematics_,
+                        angleSemantics_, constraints.assumptions))
+                    return *complexPeriodic;
+            }
             if (realSolveDomain) {
                 consumeEvaluationBudget(EvaluationResource::SolverBranch, 3);
                 if (auto exponential = solver::solveRealExponentialRelation(
@@ -1815,12 +2709,9 @@ expression::Expr Evaluator::dispatchBuiltin(
                     error::throwCalcError(
                         error::CalcErrorType::Internal,
                         "Infinity symbol is not registered");
-                // 高次repeated polynomialは一般函数proofより先にalgebraic Root fallbackへ渡す。
-                // proof layerが同じ零点をsqrt等へ再表現してfallbackのcanonical契約を奪わない。
-                if (auto repeatedAlgebraic = solver::solveRepeatedRealAlgebraicPolynomialEquation(
-                        relation, variables.front(), registry_, mathematics_, angleSemantics_))
-                    return *repeatedAlgebraic;
-                if (auto algebraic = solver::solveFactoredRealAlgebraicPolynomialEquation(
+                // 高次exact polynomial等式は一般函数proofより先に共通algebraic Root経路へ渡す。
+                // Complex/Realで同じcertified complex isolationを使い，Realでは証明済み実根だけを返す。
+                if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
                         relation, variables.front(), registry_, mathematics_, angleSemantics_))
                     return *algebraic;
                 if (auto proved = solver::solveRealEquationByProof(
@@ -1831,12 +2722,6 @@ expression::Expr Evaluator::dispatchBuiltin(
             solver::SolutionSet polynomial = solver::solveUnivariatePolynomialRelation(
                 relation, variables.front(), registry_, mathematics_, angleSemantics_);
             consumeSolverSolutionBranches(polynomial);
-            if (realSolveDomain && (polynomial.kind() == solver::SolutionSetKind::Unresolved
-                    || containsComplexAlgebraicRoot(polynomial, registry_))) {
-                if (auto algebraic = solver::solveRealAlgebraicPolynomialEquation(
-                        relation, variables.front(), registry_, mathematics_, angleSemantics_))
-                    return *algebraic;
-            }
             return polynomial;
         };
 
@@ -1925,6 +2810,9 @@ expression::Expr Evaluator::dispatchBuiltin(
         return evaluateSet(arguments);
     case BuiltinId::SetDelayed:
         return evaluateSetDelayed(call, arguments);
+    case BuiltinId::Rule:
+        return expression::Expr::rebuildCall(
+            call, {arguments[0], arguments[1]});
     case BuiltinId::Less:
     case BuiltinId::LessEqual:
     case BuiltinId::Greater:
@@ -2013,6 +2901,272 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "angleMode requires a mutable kernel session");
         context_->angleSemantics->setDefaultUnit(unit);
         return angleSymbol(unit);
+    }
+    case BuiltinId::ListPlot: {
+        if (arguments.empty())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ListPlot expects ListPlot[data, options...]");
+        const expression::Expr held = expression::Expr::rebuildCall(
+            call, std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+        if (!parseListPlotRequest(held, registry_))
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ListPlot expects a non-empty 1D array, Nx1 array, or Nx2 array");
+        return held;
+    }
+    case BuiltinId::ParametricPlot: {
+        if (arguments.size() < 2)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ParametricPlot expects ParametricPlot[{x,y},{parameter,lower,upper},options...]");
+        const auto iterator = parseRangeIteratorSpec(arguments[1]);
+        if (!iterator)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ParametricPlot expects ParametricPlot[{x,y},{parameter,lower,upper},options...]");
+
+        const std::size_t previousProtectedSize = materializationProtectedSymbols_.size();
+        if (std::find(materializationProtectedSymbols_.begin(),
+                materializationProtectedSymbols_.end(), iterator->variable)
+            == materializationProtectedSymbols_.end())
+            materializationProtectedSymbols_.push_back(iterator->variable);
+
+        std::optional<expression::Expr> materializedExpression;
+        std::optional<expression::Expr> materializedIterator;
+        try {
+            materializedExpression = evaluate(resolveHeldHistoryReferences(arguments[0]));
+            materializedIterator = evaluate(resolveHeldHistoryReferences(arguments[1]));
+            materializationProtectedSymbols_.resize(previousProtectedSize);
+        }
+        catch (...) {
+            materializationProtectedSymbols_.resize(previousProtectedSize);
+            throw;
+        }
+
+        std::vector<expression::Expr> heldArguments;
+        heldArguments.reserve(arguments.size());
+        heldArguments.push_back(std::move(*materializedExpression));
+        heldArguments.push_back(std::move(*materializedIterator));
+        heldArguments.insert(heldArguments.end(), arguments.begin() + 2, arguments.end());
+        const expression::Expr held = expression::Expr::rebuildCall(call, std::move(heldArguments));
+        if (!parseParametricPlotRequest(held, registry_))
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "ParametricPlot expects {x,y} or {{x1,y1},{x2,y2},...} with {parameter,lower,upper}");
+        return held;
+    }
+    case BuiltinId::Plot: {
+        if (arguments.size() < 2)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Plot expects Plot[expression,{variable,lower,upper},options...]");
+        const auto iterator = parseRangeIteratorSpec(arguments[1]);
+        if (!iterator)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Plot expects Plot[expression,{variable,lower,upper},options...]");
+
+        // Plotはbinder変数だけをsymbolicに保持し，parameter・user function・endpointは
+        // 現在のsession環境で一度materializeする。x:=5の下でもplot[a*x,{x,...}]のxは
+        // 保護される一方，a:=2は2へ解決される。
+        const std::size_t previousProtectedSize = materializationProtectedSymbols_.size();
+        if (std::find(materializationProtectedSymbols_.begin(),
+                materializationProtectedSymbols_.end(), iterator->variable)
+            == materializationProtectedSymbols_.end())
+            materializationProtectedSymbols_.push_back(iterator->variable);
+
+        std::optional<expression::Expr> materializedExpression;
+        std::optional<expression::Expr> materializedIterator;
+        try {
+            materializedExpression = evaluate(resolveHeldHistoryReferences(arguments[0]));
+            materializedIterator = evaluate(resolveHeldHistoryReferences(arguments[1]));
+            materializationProtectedSymbols_.resize(previousProtectedSize);
+        }
+        catch (...) {
+            materializationProtectedSymbols_.resize(previousProtectedSize);
+            throw;
+        }
+
+        std::vector<expression::Expr> heldArguments;
+        heldArguments.reserve(arguments.size());
+        heldArguments.push_back(std::move(*materializedExpression));
+        heldArguments.push_back(std::move(*materializedIterator));
+        heldArguments.insert(heldArguments.end(), arguments.begin() + 2, arguments.end());
+        const expression::Expr heldPlot = expression::Expr::rebuildCall(
+            call, std::move(heldArguments));
+        if (!parsePlotRequest(heldPlot, registry_))
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Plot expects Plot[expression,{variable,lower,upper},options...]");
+        // PlotSceneをExprへ押し込まず，公開Plotは描画要求として保持する。
+        // Export等のconsumerが必要なbackendへloweringする。
+        return heldPlot;
+    }
+    case BuiltinId::Show: {
+        if (arguments.empty())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Show expects one or more Plot or ListPlot expressions");
+
+        // Showは描画済みmm geometryではなくPlot requestを合成する。各Plotの指定区間は
+        // 保持し，viewportだけを全区間の包絡へ統一するため，ここではflattenだけ行う。
+        std::vector<expression::Expr> resolvedArguments;
+        resolvedArguments.reserve(arguments.size());
+        for (const auto& argument : arguments)
+            resolvedArguments.push_back(resolveHeldHistoryReferences(argument));
+
+        std::vector<expression::Expr> flattened;
+        for (const auto& resolved : resolvedArguments) {
+            expression::Expr evaluated = evaluate(resolved);
+            if (evaluated.isCall()) {
+                const auto* nested = registry_.find(evaluated.asCall().head);
+                if (nested && nested->id == BuiltinId::Show) {
+                    flattened.insert(
+                        flattened.end(),
+                        evaluated.asCall().arguments.begin(),
+                        evaluated.asCall().arguments.end());
+                    continue;
+                }
+            }
+            flattened.push_back(std::move(evaluated));
+        }
+
+        const expression::Expr heldShow = expression::Expr::call(
+            registry_.symbol(BuiltinId::Show), flattened);
+        if (!parseCompositeDrawable(heldShow, registry_))
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Show expects only Plot or ListPlot expressions");
+        return heldShow;
+    }
+    case BuiltinId::Export: {
+        const EvaluationContext* exportEvaluationContext = context_;
+        if (arguments.size() < 2 || arguments.size() > 3)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Export expects Export[object,file] or Export[object,file,format]");
+
+        // HoldAllの引数を一つずつnested evaluateすると現在のEvaluationContextが
+        // 一時的に置き換わる。%/Out参照はcontextが生きているうちに全て解決する。
+        std::vector<expression::Expr> resolvedArguments;
+        resolvedArguments.reserve(arguments.size());
+        for (const auto& argument : arguments)
+            resolvedArguments.push_back(resolveHeldHistoryReferences(argument));
+
+        expression::Expr drawableExpression = evaluate(resolvedArguments[0]);
+        // nested evaluateは独立contextを使うため，Export自身のdiagnostic sinkへ戻す。
+        context_ = exportEvaluationContext;
+        const auto requests = parsePlotRequests(drawableExpression, registry_);
+        const auto parametricRequest = parseParametricPlotRequest(drawableExpression, registry_);
+        const auto listPlotRequest = parseListPlotRequest(drawableExpression, registry_);
+        const auto compositeRequest = registry_.isCallTo(drawableExpression, BuiltinId::Show)
+            ? parseCompositeDrawable(drawableExpression, registry_)
+            : std::nullopt;
+        if (!requests && !parametricRequest && !listPlotRequest && !compositeRequest)
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Export currently expects a Plot, ParametricPlot, ListPlot, or Show expression as its first argument");
+
+        expression::Expr destination = evaluate(resolvedArguments[1]);
+        context_ = exportEvaluationContext;
+        if (!destination.isString())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Export file name must evaluate to a string");
+
+        std::optional<std::string> format;
+        if (resolvedArguments.size() == 3) {
+            expression::Expr evaluatedFormat = evaluate(resolvedArguments[2]);
+            context_ = exportEvaluationContext;
+            if (!evaluatedFormat.isString())
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "Export format must evaluate to a string");
+            format = evaluatedFormat.asString();
+        }
+
+        const std::filesystem::path requestedPath{destination.asString()};
+        const auto target = exportGraphicsTarget(requestedPath, format);
+        if (!target)
+            error::throwCalcError(
+                error::CalcErrorType::Domain,
+                "Export currently supports SVG, EPS, and PDF plot output");
+
+        const auto* infinity = symbolRegistry_.find("Infinity");
+        if (!infinity)
+            error::throwCalcError(
+                error::CalcErrorType::Internal,
+                "Infinity symbol is not registered");
+
+        std::optional<graphics::GraphicsScene> graphicsScene;
+        plot::PlotPipelineStatus buildStatus = plot::PlotPipelineStatus::EmptyRequest;
+        if (compositeRequest) {
+            auto built = buildCompositeGraphics(
+                *compositeRequest, registry_, mathematics_, angleSemantics_, infinity->symbol);
+            buildStatus = built.status;
+            if (built)
+                graphicsScene = std::move(built.scene);
+        }
+        else if (requests) {
+            const auto built = plot::buildPlotPipeline(
+                *requests, registry_, mathematics_, angleSemantics_, infinity->symbol);
+            buildStatus = built.status;
+            if (built && built.output)
+                graphicsScene = built.output->graphicsScene;
+        }
+        else if (parametricRequest) {
+            const auto built = plot::buildParametricPlotPipeline(
+                *parametricRequest, registry_, mathematics_, angleSemantics_, infinity->symbol);
+            buildStatus = built.status;
+            if (built && built.output) {
+                graphicsScene = built.output->graphicsScene;
+                for (const auto& reduction : built.output->periodReductions) {
+                    if (!reduction)
+                        continue;
+                    emitInfo(
+                        "ParametricPlot::period",
+                        "ParametricPlot reduced a repeated periodic parameter interval from ["
+                            + formatting::formatExpr(reduction->originalLower) + ", "
+                            + formatting::formatExpr(reduction->originalUpper) + "] to ["
+                            + formatting::formatExpr(reduction->originalLower) + ", "
+                            + formatting::formatExpr(reduction->effectiveUpper)
+                            + "] (proven period " + formatting::formatExpr(reduction->period)
+                            + ", repetitions " + std::to_string(reduction->repetitions) + ").");
+                }
+            }
+        }
+        else if (listPlotRequest) {
+            graphicsScene = buildListPlotGraphics(
+                *listPlotRequest, registry_, mathematics_, angleSemantics_);
+            buildStatus = graphicsScene
+                ? plot::PlotPipelineStatus::Success
+                : plot::PlotPipelineStatus::SamplingFailed;
+        }
+        if (!graphicsScene)
+            throwPlotPipelineFailure(
+                buildStatus, "Export could not build the plot graphics scene");
+
+        const auto rendered = graphics::renderGraphics(
+            *graphicsScene, target->format);
+        if (!rendered || !rendered.data)
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                rendered.status == graphics::GraphicsRenderStatus::UnsupportedFeature
+                    ? "Export format does not support a graphics feature used by this plot"
+                    : "Export could not render the plot in the requested format");
+
+        std::ofstream output(target->path, std::ios::binary | std::ios::trunc);
+        if (!output)
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "Export could not open the output file");
+        output.write(rendered.data->data(), static_cast<std::streamsize>(rendered.data->size()));
+        if (!output)
+            error::throwCalcError(
+                error::CalcErrorType::Evaluation,
+                "Export could not write the output file");
+        return expression::Expr{target->path.string()};
     }
     case BuiltinId::UnitApplied: {
         if (arguments.size() != 2 || !arguments[1].isString())

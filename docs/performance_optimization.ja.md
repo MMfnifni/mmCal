@@ -1680,13 +1680,13 @@ mod 3 : factor degrees 1 + 15  -> proper factor候補 {1}
 次の候補生成改善としてAberth–Ehrlich法を残す。比較する場合はNewton-polygon multi-radius seedを共通条件とし，通常根・clustered roots・scale-separated rootsで反復回数とwall timeをDurand-Kernerと比較する。採用してもcandidate generationだけを置換し，最終Rouché certification，disk separation，deterministic orderingの契約は維持する。
 
 
-# 35. 高階symbolic derivativeの直接構成
+# 37. 高階symbolic derivativeの直接構成
 
 `D[expr,{x,n}]`を一階微分の反復だけで処理すると，`LambertW`，`polylog`，`exp[q(x)]`で`cases`・積商則・共通指数因子が毎回再展開され，数学的には単純な高階導函数でも式木が急増する。2026-08-29から，direct variableかつ`n<=64`では函数族ごとのexact recurrenceを先に試す。Lambert WはDLMF 4.13.4_1--4.13.4_2の多項式`p_n(W)`，polylogは`theta=xD`とsigned Stirling number，二次`q`の`exp[q]`は`P_(n+1)=P'_n+q'P_n`を使う。
 
 この経路は近似fast pathではなくexact Expr構成である。64を超えた場合や形が一致しない場合は従来の一般`D`へ代替経路する。その後，旧公開order 4096境界は撤廃され，一般`D`の反復workは共通`EvaluationStep` budgetで制御し，exact 0到達時は早期終了する仕様へ移行した。今回の作業では長時間benchmarkを行わず，代表式のcompact outputとtargeted compile/smoke testだけを確認した。
 
-# 36. 有理函数積分のHermite reductionとalgebraic-log 代替経路
+# 38. 有理函数積分のHermite reductionとalgebraic-log 代替経路
 
 従来のexact rational integratorは，一次因子と既約二次因子へ分解できる場合には高速でcompactであったが，`x^3+x+1`のようなQ上既約な高次因子，およびその重複冪で停止していた。単純にComplex Rootへ全分解する経路を早期に置くと，`x/(1+x^4)`のようにreverse-chainで`atan[x^2]/2`へ閉じる式まで大きなRoot/Log和へ退行する。そのため高次algebraic pathはelementary探索後の代替経路とする。
 
@@ -1705,6 +1705,52 @@ P(x)/Q(x) = sum_r P(r)/(Q'(r)(x-r))
 
 から`sum_r P(r)/Q'(r) Log[x-r]`を構成する。residue自体もpersistent algebraic-number arithmeticでexactにmaterializeする。近似rootは候補や恒等式判定には使わない。
 
-この代替経路は既存のdegree 12 specialized rational work budget内でのみ実行する。これは数学的定義域境界ではなく，全複素根isolation，algebraic residue materialization，出力項数を無制限化しないための計算量制限付き policyである。代表的なGCC Release確認では`integrate[1/(x^3+x+1),x]`約0.25 s，`1/(x^5+x+1)`約0.56 s，`1/(x^8+x+1)`約4.0 sであった。長時間benchmarkは実施していない。
+その後，degree 12は利用者向け境界からdense partial-fractionを選ぶalgorithm境界へ変更した。高次側はYun分解，polynomial CRT，Hermite stepを用い，全複素根isolation，algebraic residue materialization，出力項数は共通evaluation budgetで制御する。したがってbudget停止は非初等性証明ではなく，exact fallbackを選ぶか未評価を保持する理由である。
 
-将来の改善候補はRothstein–Trager / Lazard–Rioboo–Tragerである。現kernelは各rootを明示するためcorrectnessは閉じているが，等しいresidueや共役rootをgroupingして実`Log/atan`へまとめれば，式サイズとalgebraic materialization量を減らせる可能性がある。これは表現・性能改善であり，今回追加したHermite / square-free capabilityを置換する必要はない。
+2026-09-11にLazard–Rioboo–Tragerを独立Risch coreへ実装した。`resultant_x(D,A-zD')`をfraction-free Bareissで計算し，subresultant PRSから各square-free residue polynomial `Q(z)`と対応する`S(z,x)`を得る。`Q[z]/(Q)`上で`S`が`D`と`A-zD'`の双方を割ることを再検証し，公開式では各certified root `a`について`a Log[S(a,x)]`を生成する。frontendは現在degree 8以下でLRTを先に試すため，Bronstein例`(x^4-3x^2+6)/(x^6-5x^4+5x^2+4)`は6個のpole別Logでなく2個のalgebraic-residue Logへ縮む。LRTのdegree，PRS step，resultant matrix，係数数，中間bit長のいずれかが停止した場合は，従来のpole別exact residue表示へ戻る。
+
+同時に`K[t]`（`K=Q(x)`）の微分多項式層を追加した。primitiveでは`Dt=eta`，exponentialでは`Dt=eta t`を係数微分と組み合わせ，`gcd(f,Df)`からnormal / special / mixedを分類する。normal factor `f^k`は`(Df)^(-1) mod f`を用いるHermite stepで下げ，各段と最終再構成をexactに検証する。
+
+2026-09-12には基礎微分体`Q(x)`上のRisch微分方程式`Dy+f y=g`を追加した。LRT留数から正整数residueを抽出するweak normalization，normal denominator，infinityでのresonanceを含む多項式degree bound，Rational係数のexact RREFを順に適用する。degree，matrix entry数，row operation数，中間bit長，residue候補数を独立budget化し，budget停止と解なしを区別する。成功結果は必ず元のRDEへ代入して再検証する。
+
+primitive polynomial caseはlimited integrationにより最高次係数を段階的に下げ，exponential Laurent polynomial caseは各指数`i`について`Dv+i eta v=a_i`へ分解する。公開`integrate`は認識済みの単一`Log` / `Exp` towerへこのreductionを接続し，下位体の残差を既存の`Q(x)`積分器へ戻す。再帰的mixed tower，代数拡大を係数体とするRDE，parametric RDEは未対応である。
+
+primitive rational caseは`K[t]`分母を代数的にsquare-free分解し，重複度ごとの互いに素なblockをextended GCDによるCRTで分離する。各normal factorの冪を微分Hermite reductionで1次まで下げ，残る留数がRational定数`c`に対して`c Df/f`であることを係数ごとにexact検証できた場合だけ`c Log[f]`へ変換する。定数係数factorは既存のbounded `Q[t]`因数分解で細分する。未解決留数を含めた分解全体を元入力へcross multiplicationで戻すcertificateを必須とし，公開`integrate`は残差が空の場合だけ閉形式を採用する。degree，係数体Rational函数のdegree，中間bit長，微分演算数は独立budgetである。
+
+affine trigonometric rational-power ruleは式サイズが指数の分子値に比例しないため，正負非整数のexact Rational指数を一つの2F1表示へ落とす。枝の正しさは`sin(theta)`または`cos(theta)`の符号が一定な連結領域に限定し，符号境界をまたぐPiecewise位相生成は行わない。`sqrt[sin(theta)]`はこの枝制約が最も見えやすい例であり，別の楕円積分kernelではない。
+
+
+# 39. v1.6.0 一般 `Q[x]` 因数分解の適応dispatch
+
+`factor[x^257-1]`では，rational root `x-1`除去後の`1+x+...+x^256`に対してperfect-polynomial-power reconstructionを多数試すdispatch cliffがあった。perfect polynomial powerは必ず重根を持つため，現在はgood prime 65521上へ還元し，degreeを保ったまま`gcd(p,p')=1`を証明できた場合に限って高価なexact power-root probeを全て省略する。prime上で判定不能なら従来のexact経路へ戻るため，このmodular testは仕事を省くためだけに使い，因数分解の正しさを推測で決めない。
+
+2026-09-04のGCC Release / LTO-off監査では，public `factor`経路が`x^255-1`で約1.63 s→0.04 s，`x^256-1`で約0.07 s→0.02 s，`x^257-1`で45 s超→約0.31 sへ低下した。`expand[(x+1)^8]`や`expand[(x^2+x+1)^4]`のような真のperfect-power caseは引き続きexactに冪を復元する。
+
+
+## 39.1 有限体factorization・good prime・Hensel・再結合の選択
+
+v1.6.0の一般`Q[x]`因数分解では，単一算法へ固定せず，入力degreeと候補数に応じて高価な段階を後ろへ送る。有限体因数分解は`degree^2`のBerlekamp matrixが`maximumBerlekampMatrixEntries`内に収まる場合だけBerlekampを使い，それを超える場合はCantor–Zassenhausへ切り替える。
+
+さらに複数good prime上のfactor degree subsetを交差し，proper factor degreeが一つも残らなければQ上の既約性をそこで証明する。分解が必要な場合も，最初に見つかったprimeをそのまま使わず，許されるsubset数を`estimatedAllowedSubsets`で見積もって再結合候補が最少になるprimeを選ぶ。この選択は性能上のheuristicであり，最終factorは常に元の整数多項式に対するexact divisionで検証する。
+
+Hensel liftはproduct treeを使うquadratic liftを先に試し，適用できない場合だけlinear liftへ戻る。modular factor数が多く，degree maskだけではZassenhaus subset列挙が`preferredRecombinationCandidates`を超える場合にはCLD latticeを試す。小dimensionでは必要に応じてHensel precisionを上げ，大dimensionでは既存precisionでprobeしてLLL workの逆増幅を避ける。CLD候補も全coefficient vectorと元多項式へのexact divisionで再検証し，LLL失敗やbudget停止を既約性証明へ流用しない。
+
+このためv1.6.0の`factor`性能は，単なる「高次数対応」ではなく，**有限体行列を作るか，追加primeを試すか，lift精度を上げるか，CLDを使うか，subset再結合へ戻るかを候補数と独立budgetで決める構成**になっている。今回の文書監査ではこの追加部分だけの新規benchmarkは採っていないため，未測定値を性能値として記載しない。
+
+# 40. v1.6.0 `FullSimplify` の候補爆発抑止
+
+`FullSimplify`は候補式を大量に生成してから重複を捨てるのではなく，構造hashをbucket keyとして使い，同一bucket内では完全な構造比較を行うcollision-safe集合を持つ。同じ候補への局所`Simplifier`適用も同じ方式でmemoizeし，hash collisionだけで式を同一視しない。
+
+`expand` / `factor` / `collect`候補については，候補を実際に構築する前に`Add` / `Multiply` / `Divide` / 正整数Powerを走査して展開項数をsaturating arithmeticで予測する。許容量は式node数の16倍を基準に最小64，最大4096項とし，予測値が超える場合はtransform自体を生成しない。したがって巨大候補を一度作ってからexpression-costで捨てる旧型のメモリ・CPU cliffを避けられる。
+
+この判定は数学的同値性のshortcutではなく候補探索policyである。生成しなかった候補が必要なら`FullSimplify`は他のexact候補を探索し，探索全体は既存のcandidate / generated-node budgetに従う。
+
+# 41. v1.6.0 Plot実行系の重複計算・sampling回避
+
+Plotの数値実行は一般Evaluatorを各sample点で最初から再評価するのではなく，式を`PlotProgram`へcompileする。compile時にはExpr node identityを`registersByIdentity`で共有し，同じsubexpressionを複数registerへ重複生成しない。`BigFloatPlotExecutor`はvariable-dependentでないinstructionをconstructor時に一度だけ`initializeInvariants()`で評価し，全sample点で再利用する。
+
+`ParametricPlot`ではsampling前に`PeriodCertificate`による安全な周期短縮と`ExactCurveGeometry`認識を行う。3次以下のparameter polynomial，円・楕円・楕円弧等がexact geometryへ落ちた場合，通常描画ではadaptive samplingへ入らず，`PlotPoints`による増密も行わない。Polylineが必要な`toNormal`等だけ`forceSampledGeometry`でmaterializeする。
+
+実Fresnel C/SはPlot executor内部で`|x|`ごとのcertified評価をcacheし，奇函数性から負側を符号反転して再利用する。対称domainで`fresnelc[x]` / `fresnels[x]`を描く際，同じ大きさの正負点を別々に特殊函数backendへ送らない。
+
+これらはview上の近似を粗くする高速化ではない。exact geometryはexact primitiveとして保持し，周期短縮は証明済みの整数周回だけに限定し，BigFloat samplingが必要な曲線では従来のdomain / landmark / clipping contractを維持する。

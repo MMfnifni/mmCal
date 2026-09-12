@@ -3,7 +3,7 @@
 この文書は **mmCalの実装そのもの** を基準にした詳細仕様書である。
 ユーザー向けの導入はルートの`README.ja.md`を参照する。
 
-> 対象: **v1.5.5**
+> 対象: **v1.6.0**
 
 この文書はバージョンごとに常に変動するため，過去バージョンはgitより引っ張り出してください。
 
@@ -54,9 +54,9 @@ N[Pi,30]
 
 ---
 
-# 2. 数値・式の内部モデル
+## 2. 数値・式の内部モデル
 
-## 2.1 Integer
+### 2.1 Integer
 
 任意長整数`BigInt`。
 
@@ -70,7 +70,7 @@ N[Pi,30]
 
 固定64bit整数へ丸めない。
 
-## 2.2 Rational
+### 2.2 Rational
 
 有限小数も最初からexact Rationalとしてparseする。
 
@@ -87,7 +87,7 @@ N[Pi,30]
 
 したがってIEEE 754由来の`0.30000000000000004`問題は通常評価には存在しない。
 
-## 2.3 exact complex
+### 2.3 exact complex
 
 実部・虚部ともexactな`Number`として保持する。
 
@@ -99,7 +99,7 @@ I^2
 -> 3/5 + 4/5I
 ```
 
-## 2.4 Symbolic expression
+### 2.4 Symbolic expression
 
 exactに閉じない式はASTのまま保持する。
 
@@ -116,7 +116,7 @@ gamma[1/3]
 
 ここで`sin[1]`の1は **1 radian**。既定角度はRadianである。
 
-## 2.5 certified approximation
+### 2.5 certified approximation
 
 任意精度の作業値は`BigFloat`，証明付き区間は`RealInterval` / `ComplexInterval`。
 
@@ -133,7 +133,7 @@ N[sqrt[2],30]
 
 ---
 
-# 3. predefined symbols
+## 3. predefined symbols
 
 現在の保護されたpredefined symbol:
 
@@ -156,9 +156,9 @@ N[sqrt[2],30]
 
 ---
 
-# 4. 入力構文
+## 4. 入力構文
 
-## 4.1 function call
+### 4.1 function call
 
 函数呼出には**角括弧 `[]` だけ**を使用する。丸括弧 `()` はgrouping専用であり，函数呼出delimiterにはしない。
 
@@ -170,7 +170,7 @@ f[x]
 
 既知の函数名に `sin(x)` のような旧丸括弧構文を使うとSyntaxError。通常identifierの `x(x+1)` は暗黙乗算として受理するが，Formatterは `x*(x+1)` と明示する。グルーピングは丸括弧を使い，単独の`[x+1]`はgroupではない。ユーザー函数の定義も `f[x] := ...` の形式に限定する。
 
-## 4.2 配列
+### 4.2 配列
 
 ```text
 {1,2,3}
@@ -179,7 +179,7 @@ f[x]
 
 内部ではdense `ArrayExpr`として扱う。numeric値をimmutableなpacked pageへ保持し，shape / offset / stridesを別に持つため，transposeや一部reshape/sliceはbackingを共有できる。これは内部最適化であり，ユーザーからは通常のArrayとして見える。
 
-## 4.3 変数・ユーザー函数
+### 4.3 変数・ユーザー函数
 
 ```text
 x := 3
@@ -218,7 +218,31 @@ UnDef[x,y,f]
 
 `Defs[]`は現在のglobal user variableとuser function definitionを式の配列として返す。`UnDef[...]`は指定した名前について変数定義と函数定義を削除し，実際に変更した名前数を返す。
 
-## 4.4 履歴
+### 4.4 Rule と `->`
+
+`->` はPlot専用のoption構文ではなく，第一級式 `Rule[lhs,rhs]` の中置記法である。
+
+```text
+x -> 1+2
+-> x -> 3
+
+Rule[x,sin[Pi/2]]
+-> x -> 1
+```
+
+`Rule`は左辺だけを保持し，右辺は通常評価する。したがって既存の変数定義があってもRuleのkey側は置換されない。
+
+```text
+PlotRange := 7
+PlotRange -> PlotRange+1
+-> PlotRange -> 8
+```
+
+`->`は右結合で，比較より弱く`:=`より強い。従って`a<b->c`は`Rule[a<b,c]`，`a:=b->c`は`a:=Rule[b,c]`，`a->b->c`は`Rule[a,Rule[b,c]]`となる。`Rule[a,b]`を直接入力してもFormatterはcanonicalな`a -> b`を出力する。
+
+将来のoption名（`PlotRange`等）は**Lexerの予約語にもpredefined symbolにも増やさない**。通常のidentifier / Symbolとして扱い，optionを受け取る函数側がRule左辺のSymbol名を検証する。したがってoption追加数が増えても言語の予約語集合は増えない。`Rule`自身はbuiltin headなので保護名である。
+
+### 4.5 履歴
 
 短縮記法は次のとおり。
 
@@ -271,7 +295,7 @@ Out[4]> 6
 
 評価エラーになった入力でもparse/lowerまで成功していれば絶対入力slot自体は残るが，対応する正の`Out[n]`は存在しない。
 
-## 4.5 比較
+### 4.6 比較
 
 ```text
 <  <=  >  >=  ==  !=
@@ -279,7 +303,7 @@ Out[4]> 6
 
 確定できれば`True/False`，symbolicに未確定ならPredicate式を保持する。
 
-## 4.6 演算子優先順位
+### 4.7 演算子優先順位
 
 実装上の重要点:
 
@@ -289,7 +313,8 @@ Out[4]> 6
 4. `* /` と暗黙乗算 — 同じtermレベルで左から処理
 5. `+ -`
 6. comparison
-7. assignment `:=`
+7. rule `->` — 右結合
+8. assignment `:=`
 
 ```text
 2^3^2
@@ -299,7 +324,7 @@ Out[4]> 6
 -> -4
 ```
 
-## 4.7 暗黙乗算
+### 4.8 暗黙乗算
 
 ```text
 2Pi
@@ -312,7 +337,7 @@ Out[4]> 6
 
 函数名と数値の直接結合は函数呼出とは解釈せず，暗黙乗算として扱う。数値直後の`e/E`は，その後ろに指数の数字が実際に続く場合だけ科学表記へ取り込む。
 
-## 4.8 基数付き数値literal
+### 4.9 基数付き数値literal
 
 現在のLowererは次を扱う。
 
@@ -329,7 +354,7 @@ Out[4]> 6
 
 ---
 
-# 5. 条件分岐・数学的場合分け
+## 5. 条件分岐・数学的場合分け
 
 ```text
 if[condition,trueExpr,falseExpr]
@@ -350,7 +375,7 @@ simplify[cases[1/x if x!=0; 0 if x==0],x!=0]
 
 ---
 
-# 6. 角度仕様
+## 6. 角度仕様
 
 **既定はRadian。**
 
@@ -411,7 +436,7 @@ GtoR[200] -> Pi
 
 ---
 
-# 7. `N` — numerical approximation
+## 7. `N` — numerical approximation
 
 ```text
 N[expr]
@@ -458,7 +483,7 @@ accuracy[N[Pi/10^20,20]]
 
 exact Rationalが有限10進になる場合，表示は必要以上に0埋めしない。例えば `N[1/2,10] -> 0.5` である。ExactValue由来の近似値がrigorousに同じexact integer pointである場合，top-level値表示では小数点自体を省略し，`N[2,20] -> 2`とする。これは内部値をexact `Number`へ戻す処理ではなく，式内部ではfinite-precision markerを保持する。非整数のcertified interval由来結果では，要求桁に対応する末尾0の連続だけを圧縮し，最後に1個の0を残す。要求桁数とinformation metadataは保持され，表示上の0の個数を精度保証そのものとして扱わない。
 
-## 7.1 CertifiedEnclosure / InformationEnclosure
+### 7.1 CertifiedEnclosure / InformationEnclosure
 
 `DecimalApproximation` / `ComplexDecimalApproximation`は，rigorous enclosureを持つ近似と，残差検証済みの数値候補を区別する。
 
@@ -543,9 +568,9 @@ N[N[Pi,20],100]
 
 ---
 
-# 8. precision / accuracy / rationalize
+## 8. precision / accuracy / rationalize
 
-## 8.1 `accuracy[x]`
+### 8.1 `accuracy[x]`
 
 `DecimalApproximation`について，真値に対する**保証可能な絶対10進桁数の整数下限**を返す。
 
@@ -569,7 +594,7 @@ accuracy[1/3] -> Infinity
 accuracy[Pi]  -> Infinity
 ```
 
-## 8.2 `precision[x]`
+### 8.2 `precision[x]`
 
 同じabsolute error boundを，InformationEnclosureから得られる値絶対値の正の下限で割り，**保証可能な相対10進桁数の整数下限**を返す。
 
@@ -580,7 +605,7 @@ precision[N[1/3,20]]
 
 これは要求した20有効桁を機械的に返す函数ではない。`1/3`近傍では有効20桁の丸め量子が`10^-20`なので，InformationEnclosureの相対的不確かさから保証できる整数桁数は19になる。InformationEnclosureが0を含む場合は値絶対値の正の下限を得られないため0を返す。exact expressionは`Infinity`。近接減算ではabsolute Accuracyを多く残したまま結果scaleだけが小さくなるため，Precisionだけが大きく落ちることがある。
 
-## 8.3 `rationalize[x]`
+### 8.3 `rationalize[x]`
 
 近似値が持つInformationEnclosure内から，**分母が最小になるexact Rational**を求める。探索はexact Rational上のcontinued-fraction型interval recursionで行い，doubleへ変換しない。これにより，CertifiedEnclosureだけが保持している隠れた保護桁やhidden exact pointから，ユーザーへ宣言していない情報を`rationalize`で掘り返さない。
 
@@ -607,7 +632,7 @@ rationalize[N[1/3,20],0]
 
 mmCalではソースの`0.1`自体が最初から`1/10`なので，`rationalize[0.1]`は単に`1/10`のままである。Arrayや式内部のDecimalApproximationも再帰的にRational化する。
 
-## 8.4 `explain[value]`
+### 8.4 `explain[value]`
 
 評価済みの値が**既に保持している情報だけ**を構造化して返す軽量introspection函数。対象を改めて`det` / `matrixRank` / LU / Eigen等へ掛けたり，Generic Arrayを全走査して性質を推論したりはしない。したがって`explain`自体のために高価な数学計算は開始しない。
 
@@ -708,7 +733,7 @@ explain[value,"internal"]
 
 ---
 
-# 9. 基本演算・代数
+## 9. 基本演算・代数
 
 通常の演算子:
 
@@ -749,7 +774,7 @@ simplify[sqrt[x^2], x >= 0]
 
 ---
 
-# 10. 基本数学・複素函数
+## 10. 基本数学・複素函数
 
 | 函数          | 概要                    | 例                               |
 | ------------- | ----------------------- | -------------------------------- |
@@ -778,7 +803,7 @@ rect -> polar
 
 ---
 
-# 11. 指数・対数
+## 11. 指数・対数
 
 | 函数       | 仕様                        |
 | ---------- | --------------------------- |
@@ -815,7 +840,7 @@ log[1,10]
 
 ---
 
-# 12. 三角函数
+## 12. 三角函数
 
 実装済み:
 
@@ -838,7 +863,7 @@ atan2[1,-1] -> 3Pi/4
 
 ---
 
-# 13. 双曲線函数
+## 13. 双曲線函数
 
 実装済み:
 
@@ -852,7 +877,7 @@ csch sech coth
 
 ---
 
-# 14. Cardinal・安定初等函数
+## 14. Cardinal・安定初等函数
 
 ```text
 sinc[x]
@@ -886,17 +911,18 @@ sinc[90 Deg]
 
 ---
 
-# 15. 丸め・整数補助函数
+## 15. 丸め・整数・scalar補助函数
+
+### 15.1 丸め
 
 ```text
-floor ceil trunc round frac
-gcd lcm mod rem quotient
-bitand bitor bitxor bitnot
-bitshiftl bitshiftr bitlength bitcount bitget
-fma clamp proj
+floor[x]
+ceil[x]
+trunc[x]
+round[x]
+round[x,n]
+frac[x]
 ```
-
-例:
 
 ```text
 floor[-3/2] -> -2
@@ -906,14 +932,45 @@ round[5/2]  -> 2       // nearest-even
 round[125,-1] -> 120
 round[135,-1] -> 140
 frac[-3/2]  -> 1/2
+```
 
+`round[x,n]`は`10^-n`単位のnearest-even丸めで，負の`n`も許す。approximation入力ではInformationEnclosure全体が同じ丸め値へ入る場合だけ確定する。
+
+### 15.2 整数商・剰余・GCD/LCM
+
+```text
+gcd[a,b,...]
+lcm[a,b,...]
+quotient[a,b]
+rem[a,b]
+mod[a,m]
+```
+
+```text
 gcd[84,126,210] -> 42
 lcm[6,8,9] -> 72
-
 quotient[-5,3] -> -1
 rem[-5,3]      -> -2
 mod[-5,3]      -> 1
+```
 
+`mod`はfloor quotient，`rem`はtruncate-toward-zero quotientに対応する。
+
+### 15.3 bit演算
+
+```text
+bitand[a,b,...]
+bitor[a,b,...]
+bitxor[a,b,...]
+bitnot[n]
+bitshiftl[n,count]
+bitshiftr[n,count]
+bitlength[n]
+bitcount[n]
+bitget[n,index]
+```
+
+```text
 bitand[-1,5] -> 5
 bitor[-8,3]  -> -5
 bitxor[-1,5] -> -6
@@ -922,17 +979,21 @@ bitshiftr[-3,1] -> -2
 bitget[-2,100]  -> 1
 ```
 
-`round[x,n]`は`10^-n`単位のnearest-even丸めで，負の`n`も許す。approximation入力ではInformationEnclosure全体が同じ丸め値へ入る場合だけ確定する。
-
 bitwise函数は任意長BigIntに対して**無限長2の補数**として定義する。したがって負数は上位bitを1でsign-extensionする。`bitshiftr`はuser-facingには算術右shift，`bitcount`は無限個の1を持つ負数には定義せず非負整数だけを受ける。現段階ではlexerへ`& | << >>`等のinfix構文を追加せず，函数APIへ意味論を一意に集約している。
+
+### 15.4 scalar補助
+
+```text
+fma[a,b,c]
+clamp[x,lo,hi]
+proj[z]
+```
 
 `fma[a,b,c]`はexact入力ではexactに`a*b+c`を返し，certified approximationを含む場合は中間DecimalApproximationへ一度丸めず一つのCertified/Information評価へ入れる。`clamp[x,lo,hi]`は実数用で，approximationではInformationEnclosureから境界順序を保証できる範囲だけ確定する。`proj[z]`は現在の有限exact/certified複素値に対して恒等写像であり，完全な複素Infinity/Riemann球面意味論はextended-real体系と同時に扱う。
 
-`mod`はfloor quotient，`rem`はtruncate-toward-zero quotientに対応する。
-
 ---
 
-# 16. 組合せ・軽量数論
+## 16. 組合せ・軽量数論
 
 ```text
 perm[n,r]
@@ -973,9 +1034,9 @@ totient[9]     -> 6
 
 ---
 
-# 17. 特殊函数
+## 17. 特殊函数
 
-## 17.1 Gamma / LogGamma
+### 17.1 Gamma / LogGamma
 
 ```text
 gamma[5]
@@ -1001,7 +1062,7 @@ N[gamma[1+I],20]
 
 `lgamma[x]`は現在 **実軸上の`log[abs[gamma[x]]]`**。複素`LogGamma`とは分離している。
 
-## 17.2 Erf
+### 17.2 Erf
 
 ```text
 erf[x]
@@ -1018,7 +1079,7 @@ N[erf[1+I],20]
 
 複素入力は整級数を`ComplexInterval`上で評価し，明示的な剰余上界で要求桁を保証する。
 
-## 17.3 Beta
+### 17.3 Beta
 
 現在は正実数域に限定。
 
@@ -1030,7 +1091,7 @@ betaln[1/2,1/2] -> log[Pi]
 
 一般Gamma比へ無条件展開して極の相殺を壊さない。
 
-## 17.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
+### 17.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
 
 ```text
 zeta[s]
@@ -1077,7 +1138,7 @@ N[ibeta[N[1/3,8],N[2/3,8],1/4],8] -> 0.53302858
 
 polygamma高階と複素パラメータを持つ`ibeta`は引き続き未実装である。
 
-## 17.5 generalized factorial系
+### 17.5 generalized factorial系
 
 ```text
 binom[x,n]
@@ -1093,7 +1154,7 @@ fallingfact[5,3] -> 60
 risingfact[5,3] -> 210
 ```
 
-## 17.6 Fresnel C / S
+### 17.6 Fresnel C / S
 
 mmCalでは標準Fresnel積分を
 
@@ -1103,6 +1164,8 @@ fresnels[x] = integral_0^x sin[Pi t^2/2] dt
 ```
 
 に対応する整な奇函数として扱う。exactに閉じない引数は記号式を保持し，`N`では実数に加えて複素入力も`ComplexInterval`上でcertifyする。複素経路に固定の`|z|`境界は設けず，中程度の引数や対角方向は整函数のMaclaurin級数，軸近傍の大引数はDLMF 7.12の`f/g`漸近展開と最初の未使用項による剰余保証を使う。90度回転対称性`C[i z]=i C[z]`，`S[i z]=-i S[z]`で任意の軸近傍を同じ保証wedgeへ写し，漸近証明が閉じない領域はMaclaurin級数へ切り替える。停止はterm capと共通`EvaluationBudget`で制御する。実数経路も大引数用の保証付き漸近算法を持つ。
+
+実数の点評価では，中域Maclaurin級数の剰余をdirected-rounded BigFloat上で保証し，巨大なexact Rationalへの逐次変換を避ける。`Plot`の同一executor内では奇函数性を使って同じ`|x|`の`fresnelc` / `fresnels`評価を再利用するため，対称な広区間でもcertificationを重複しにくい。
 
 ```text
 fresnelc[0] -> 0
@@ -1118,7 +1181,7 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 微分の位相には`Rad`を明示する。Fresnel函数の定義自体はsessionの既定角度単位に依存しないためである。
 
-## 17.7 合流型超幾何函数 1F1
+### 17.7 合流型超幾何函数 1F1
 
 Kummerの合流型超幾何函数を
 
@@ -1163,7 +1226,7 @@ integrate[exp[x^6],x]
 
 より一般に正整数`n`について`exp[c x^n]`を同じ系列へ還元できる。
 
-## 17.8 Gauss超幾何函数 2F1
+### 17.8 Gauss超幾何函数 2F1
 
 Gaussの超幾何函数を
 
@@ -1203,7 +1266,7 @@ integrate[1/(1+x^5),x]
 
 のようなbinomial-power familyへ利用する。一般の2F1を`Solve`で逆函数化する規則は持たない。大域単射性を証明できないためであり，停止級数やexact退化で既存代数式へ落ちた場合だけ通常のSolverへ渡す。
 
-## 17.9 不完全楕円積分 F / E / Pi
+### 17.9 不完全楕円積分 F / E / Pi
 
 mmCalではLegendre形の不完全楕円積分を
 
@@ -1265,7 +1328,7 @@ integrate[1/sqrt[1-x^4],x]
 
 最後のquartic reductionは正しい局所primitiveである。`sin[asin[x]]`自体は主値逆函数の安全な向きとして縮約できるが，derivative-backで現れる主値square rootまで含む恒等式は局所branch条件を必要とする場合があるため，証明できないケースはResolutionOnlyとして監視する。一般の楕円函数方程式も，逆楕円函数族をまだ持たないため`Solve`は未解決を保持する。`m=0`等でexactに通常式へ退化した場合だけ既存Solverが解く。
 
-## 17.10 Ei / Si / Ci / li / Polylogarithm
+### 17.10 Ei / Si / Ci / li / Polylogarithm
 
 積分で頻出する主値 special functionsを次の名前で表す。
 
@@ -1341,7 +1404,7 @@ integrate[log[1-x]/x,x] -> -polylog[2, x]
 
 を返す。一般の`Ei/Si/Ci/li/polylog`方程式に主値 inverseを一個だけ返す`Solve`規則は持たない。大域単射性・分岐を証明できないためであり，`polylog[0,z]`や`polylog[1,z]`のように既存の代数函数・`log`へexact退化した場合だけ既存Solverへ渡す。
 
-## 17.11 Lambert W
+### 17.11 Lambert W
 
 ```text
 lambertw[z]
@@ -1374,9 +1437,9 @@ N[lambertw[-1,-1/E+I/10^8],20] -> -1.0001648721257003724-0.000164890250318274180
 
 ---
 
-# 18. Array
+## 18. Array
 
-## 18.1 Array基盤
+### 18.1 Array基盤
 
 Arrayはrankごとに別Value型を増やさず，共通のdense `ArrayExpr`を使う。physical storageをimmutable packed page，logical layoutをshape / offset / stridesへ分離している。
 公開リテラルは従来どおり `{...}` / `{{...},...}` とし，Matrix演算へ渡せるArrayは常にdense rectangularである。
@@ -1392,7 +1455,6 @@ zeros[rows,cols]
 rows[A]
 cols[A]
 diag[A]
-trace[A]
 ```
 
 indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。さらにfinite `SolutionSet`にも同じ0始まりindexを使える。`at[solutions,i]`は第`i` branchだけを含む`SolutionSet`を返し，branchの条件，自由変数，multiplicity，solver変数domainを保持する。`at[solutions,i,x]`は第`i` branchにおける`x`のbinding右辺だけを返す。後者は条件metadataを返さないため，条件付き解を後段へ渡す場合は2引数版を使う。`Conditional` / `Universal` / `Unresolved`集合はexplicit branch indexを一意に定義できないため対象外である。
@@ -1432,7 +1494,9 @@ dimensions[zeros[0,3]]
 
 評価後にArray要素がArrayへ変わる場合も，同一shapeなら自動的に一段flattenして共通Arrayへ正規化する。scalar/Array混在またはchild shape不一致はTypeError。
 
-# 19. 集約函数
+## 19. 集約・有限列操作
+
+### 19.1 集約函数
 
 ```text
 sum
@@ -1459,9 +1523,41 @@ min[x,3]
 -> min[x, 3]
 ```
 
-`sum[f,{k,a,b}]`型の記号有限和はまだ未実装である。有限列を明示的に生成する場合は`table`と`sum`を組み合わせられる。
+`sum` / `prod` は従来の可変長集約に加え，held iteratorを持つ有限記号和・積を受ける。
 
-## 19.1 `range` / `table` / `map`
+```text
+sum[expr,{i,n}]
+sum[expr,{i,a,b}]
+sum[expr,{i,a,b,step}]
+prod[expr,{i,n}]
+prod[expr,{i,a,b}]
+prod[expr,{i,a,b,step}]
+```
+
+unit stepのsymbolic boundでは，有限多項式和を一般のexact差分kernelで閉じ，幾何級数，telescoping，binomial基本族，affine factor productをexactに扱う。有理函数`P(i)/Q(i)`には，shift分散からuniversal denominatorを構成し，exact線形系を解くbounded Abramov型前処理も適用する。得られた差分はcross multiplicationでexactに検証し，分散32，分母次数96，方程式256の安全境界内で証明できない場合は未評価に保つ。empty rangeの恒等元は`sum -> 0`，`prod -> 1`であり，symbolic boundsでnonemptyを証明できない場合は`cases[...]`に条件を保持する。stepがunitでない場合も，exact finite boundsなら既存の有限列kernelへ安全に展開する。
+
+```text
+sum[i^2,{i,1,5}] -> 55
+sum[1/i-1/(i+1),{i,1,n}] -> cases[1-1/(n+1) if 1 <= n; 0]
+sum[(2i+1)/(i^2(i+1)^2),{i,1,n}] -> cases[1-1/(n+1)^2 if 1 <= n; 0]
+sum[comb[n,i] z^i,{i,0,n}] -> cases[(z+1)^n if 0 <= n; 0]
+prod[i,{i,1,n}] -> cases[n! if 1 <= n; 1]
+prod[2i+3,{i,1,n}] -> cases[2^n risingfact[5/2, n] if 1 <= n; 1]
+```
+
+多重iteratorは`table`と同じく左側が外側，右側が内側である。
+
+```text
+sum[f,{{i,a,b},{j,c,d}}]
+== sum[sum[f,{j,c,d}],{i,a,b}]
+
+sum[i+j,{{i,1,3},{j,1,2}}] -> 21
+prod[i+j,{{i,1,2},{j,1,2}}] -> 72
+```
+
+iterator symbolはbody内で局所binderとして扱われ，sessionに同名定義があっても反復中だけshadowする。閉形式を証明できず，かつ安全な有限展開にも落とせないsymbolic familyは未評価のまま保持する。
+
+### 19.2 `range` / `table` / `map`
 
 exactな有限列の生成と明示的なelement-wise適用には次を使う。
 
@@ -1500,12 +1596,12 @@ map[sin,{0,Pi/2,Pi}] -> {0, 1, 0}
 
 ---
 
-# 20. 記述統計
+## 20. 記述統計
 
 統計函数は原則 **exact real data** を受け，Rationalで閉じる量はRationalのまま返す。
 1個のrank-1 Arrayまたはscalar列を受けるものが多い。
 
-## 20.1 順序統計
+### 20.1 順序統計
 
 ```text
 median
@@ -1526,7 +1622,7 @@ iqr[1,2,3,4] -> 3/2
 
 `mode`が複数ならArrayを返し，全値が1回ずつなら空Array。
 
-## 20.2 分散・標準偏差
+### 20.2 分散・標準偏差
 
 ```text
 var      // population variance
@@ -1542,7 +1638,7 @@ stddev[1,2,3] -> sqrt[6]/3
 stddevs[1,2,3] -> 1
 ```
 
-## 20.3 その他
+### 20.3 その他
 
 ```text
 geomean harmmean rms
@@ -1564,7 +1660,7 @@ corr[{1,2,3},{2,4,6}] -> 1
 
 ---
 
-# 21. Assumption / 定義域
+## 21. Assumption / 定義域
 
 ```text
 element[x,Real]
@@ -1596,7 +1692,9 @@ element[root[{-2,0,1},2],Rational] -> False
 
 ---
 
-# 22. 式変形
+## 22. 式変形
+
+### 22.1 `simplify` / `fullSimplify` / `expand` / `factor` / `collect`
 
 ```text
 simplify[expr]
@@ -1622,11 +1720,23 @@ expand[(x+1)^3]
 
 factor[x^2-1]
 -> (x-1)(x+1)
+
+factor[(x^12+x+1)(x^12-x+1)]
+-> (x^12-x+1)(x^12+x+1)
+
+factor[(x^68-5x^2-x)(8x^33-2x^8)]
+-> 2x^9(4x^25-1)(x^67-5x-1)
 ```
+
+一般の一変数`Q[x]`因数分解は，square-free分解，複数good prime上のBerlekampまたはCantor–Zassenhaus分解，product-tree型quadratic Hensel lift，CLD–LLLまたはbounded Zassenhaus再結合を組み合わせ，最後に元の多項式とのexact積証明を行う。小素数体でsquare-freeを証明できる場合は係数膨張しやすい`Q[x]` GCDを省略する。primeごとのlocal factor次数から可能な真因子次数を交差し，既約性証明と再結合pruningに共有する。疎多項式ではbinomial候補のexact除算，Capelliの二項式判定，deflationも先に試す。
+
+CLD経路はlocal factor数からsubset列挙の膨張が予測される場合だけ起動する。各Hensel factor `f_i`について`f_i' (f/f_i) mod M`の係数をlatticeへ埋め込み，budget付きexact row-LLLで短関係を探す。選択した係数窓だけでなく全CLD係数を使って関係を再検査し，得られたfactor blockが元の整数多項式をexactに割り切る場合だけ採用する。LLLのrank，列数，中間bit長，swap，size reduction，CLD窓数，候補数は独立budgetである。budget停止は未分解を意味するだけで，既約性や誤った因子を推測しない。
+
+防壁は一律次数ではなくphase別であり，既定では有限体次数512，Berlekamp行列4096要素，good prime最大8個，lift 4096 bit（作業8192 bit），再結合200000 subset，Kronecker次数64である。budget停止時も既発見因子を捨てず，`input = scalar * product(factors)`を満たす未分解残差付きpartial resultを内部で保持する。非monic入力ではprimitive整数因子と全体scalarを復元する。
 
 一変数Rational多項式の完全冪復元では，完全冪指数に固定64次上限を設けない。good prime上の`gcd[p,p']`から真の指数を落とさない上界を求め，その候補だけをexactに検証する。高次数のsquare-free多項式はこの有限体判定でperfect-power探索を省略する。
 
-`fullSimplify`はbounded candidate search。短い式を選ぶために定義域を変えてよいわけではない。
+`fullSimplify`はbounded candidate searchであり，衝突時に構造等価性も確認するstructural hash memoizationを使う。`expand`系候補を作る前に項数の飽和予測を行い，許容量`min(4096,max(64,16*nodeCount))`を超える候補を生成しない。短い式を選ぶために定義域を変えてよいわけではない。
 
 ```text
 fullSimplify[(x^2-1)/(x-1)]
@@ -1662,7 +1772,7 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 
 `Power`のdefinednessはexact Rational指数まで区別する。正の非整数Rational指数ではbase=0を許す一方，負のRational指数はbase非零を要求する。`zeta[s]`は一般に「definedness不明」とせず，唯一の極 `s=1`を` s != 1 `として扱える。
 
-## 22.1 `series` / `normal` / `toNormal`（v1.5.5）
+### 22.2 `series` / `normal` / `toNormal`
 
 ```text
 series[expr,{x,a,n}]
@@ -1671,9 +1781,21 @@ normal[seriesExpr]
 toNormal[expr]
 ```
 
-`series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，finite/conditional `SolutionSet`のbinding右辺も再帰変換し，集合構造，branch条件，自由変数，multiplicity，domain metadataは保持する。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。TPSA基盤で定数，展開変数，和，差，積，除算，整数冪，`exp` / `log` / `sin` / `cos` / `sinh` / `cosh`，`tan/cot/sec/csc`，`tanh/coth/sech/csch`，`expm1/log1p`，`sinc/cosc/tanc`，`sinhc/tanhc/expc`，`log2/log10`，principal `sqrt` / exact有理冪を合成し，Taylor，有限principal partを持つLaurent，およびexact有理指数格子を持つPuiseux展開へ対応する。`log2/log10`は一般の`log[base,x] = log[x]/log[base]`として有限点および`+Infinity`のlog層へ接続する。analytic函数は高階`D`の反復ではなく係数漸化式で処理する。異なるPuiseux分母はLCM格子へexactに再配置する。記号的な先頭係数を逆数化する場合は非零性を証明できるときだけ展開し，principal `log`は展開中心が正の実数または非実数であることを証明できる場合に限る。direct trigは現在の角度modeと明示`Rad` / `Deg` / `Grad`を尊重する。分岐点上の非整数有理冪は，現在正の先頭係数を持つsimple zero/pole，または既にbranchを明示したPuiseux式に限定する。`sqrt[x^2]`のような高重複零点や負向きのprincipal branchを一意に証明できない形は推測せず未評価にする。
+```text
+dimensions[toNormal[Plot[x^2,{x,-2,2}]]]
+-> {n, 2}
+
+length[toNormal[Plot[1/x,{x,-4,4}]]]
+-> 2
+```
+
+`series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，finite/conditional `SolutionSet`のbinding右辺も再帰変換し，集合構造，branch条件，自由変数，multiplicity，domain metadataは保持する。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。
+
+トップレベルの`Plot` / `ParametricPlot`に対する`toNormal`は，描画要求を数学座標のsample列へmaterializeする。1本の連続曲線は`N×2` Array，不連続で複数segmentに分かれる1曲線はsegment Arrayのlist，複数曲線はcurveごとのlistとして返す。返すのはdata spaceの`{x,y}`であり，150×100 mm等のlayout座標やSVG/PDF座標ではない。通常描画ではexact primitiveとして保持されるLine / Bézier / Circle / Ellipse / EllipticArcも，`toNormal`を明示した場合だけPolylineへ離散化する。この明示的materializeには`PlotPoints`のsampling密度倍率を適用するが，通常のvector Exportのexact geometryには影響しない。 `toNormal[ListPlot[...]]`はsamplingを行わず，受理済み1D/N×1/N×2点列を明示的な`N×2` Arrayへ正規化する。TPSA基盤で定数，展開変数，和，差，積，除算，整数冪，`exp` / `log` / `sin` / `cos` / `sinh` / `cosh`，`tan/cot/sec/csc`，`tanh/coth/sech/csch`，`expm1/log1p`，`sinc/cosc/tanc`，`sinhc/tanhc/expc`，`log2/log10`，principal `sqrt` / exact有理冪を合成し，Taylor，有限principal partを持つLaurent，およびexact有理指数格子を持つPuiseux展開へ対応する。`log2/log10`は一般の`log[base,x] = log[x]/log[base]`として有限点および`+Infinity`のlog層へ接続する。analytic函数は高階`D`の反復ではなく係数漸化式で処理する。異なるPuiseux分母はLCM格子へexactに再配置する。記号的な先頭係数を逆数化する場合は非零性を証明できるときだけ展開し，principal `log`は展開中心が正の実数または非実数であることを証明できる場合に限る。direct trigは現在の角度modeと明示`Rad` / `Deg` / `Grad`を尊重する。分岐点上の非整数有理冪は，現在正の先頭係数を持つsimple zero/pole，または既にbranchを明示したPuiseux式に限定する。`sqrt[x^2]`のような高重複零点や負向きのprincipal branchを一意に証明できない形は推測せず未評価にする。
 
 valuation 0のanalytic baseに対する整数冪は，必要打切り次数の`SeriesData`上で二乗法を使うため，指数4096の固定境界を持たない。したがって`series[(1+x)^-1000000,{x,0,2}]`のように要求orderが小さい場合は大きなexact整数指数でも対数的な冪乗回数で処理する。非零valuationを持つLaurent/Puiseux冪は内部指数gridの安全境界を別途維持する。
+
+展開変数に依存する指数は，baseの中心値がprincipal `Log`のcutを避けると証明できる場合に限り，定義を変えず`Power[B(x),E(x)] = Exp[E(x) Log[B(x)]]`へ書き換えて既存TPSA/Puiseux演算へ渡す。これにより`series[(1+x)^x,{x,0,5}]`や`series[(1+x)^(1/x),{x,0,5}]`を扱える。一方，`x^x`や負実軸上の中心のようにprincipal branchを一意に証明できない形は未評価に保つ。展開変数に依存しない記号指数にはgeneralized binomial recurrenceを使うため，`series[(1+x)^a,{x,0,5}]`もexact係数を保つ。
 
 展開中心には`Infinity`も指定できる。ここで`Infinity`は複素無限遠一般ではなく実軸の`+Infinity`を意味し，内部では`t=1/x`として`t->0+`の局所展開へ写す。したがって`seriesData[x,Infinity,...]`の指数`r`は`(1/x)^r`，log係数層は`log[1/x]^k`を表す。例えば`series[1/(x+1),{x,Infinity,4}]`は`x^-1-x^-2+x^-3-x^-4+O[x^-5]`に対応し，`normal` / `toNormal`は`(1/x)^(-m)`のような中間形を残さず通常の`x`冪へ戻す。`D`では`dt/dx=-t^2`，`integrate`では`dx=-t^-2 dt`を係数演算へ反映し，`1/x`項の積分は`-log[1/x]`としてlog層へ閉じる。ただし打切り剰余がちょうど`O(1/x)`の場合，積分後の未知剰余がlog型になり得て現在の`O(t^r)`metadataだけでは表せないため未評価へ戻す。初期対応は有理函数，多項式成長，`exp[1/x]`，Puiseux冪，`log[1/x]`等である。`sin[x]`の無限振動，`exp[x]`のessential growth，直接の`log[x]`等は別のasymptotic providerを必要とするため未評価に保つ。
 
@@ -1885,9 +2007,9 @@ integrate[series[sqrt[x],{x,0,4}],x]
 
 ---
 
-# 23. 記号微分と数値微分
+## 23. 記号微分と数値微分
 
-## 23.1 `D`
+### 23.1 `D`
 
 ```text
 D[expr,x]
@@ -1959,7 +2081,7 @@ D[integrate[t^2,{t,0,x}],x]
 
 可変上下端や積分内部に微分変数が現れる一般形ではLeibniz ruleを形式的に構築する。分母が微分変数に依存しない商は，一般quotient ruleへ膨張させず`f'/c`を直接使う。
 
-## 23.2 `diff`
+### 23.2 `diff`
 
 ```text
 diff[expr,x,at]
@@ -1976,9 +2098,9 @@ diff[x^2,x,3]
 
 ---
 
-# 24. 記号積分とcertified数値積分
+## 24. 記号積分とcertified数値積分
 
-## 24.1 `integrate` — exact/symbolic積分
+### 24.1 `integrate` — exact/symbolic積分
 
 ```text
 integrate[expr,x]
@@ -2006,15 +2128,16 @@ integrate[1/(2x+3),x]
 
 - 定数，`x`，任意の有限多項式
 - affine baseの有理冪。指数`-1`はLogへ送る
-- Rational係数の有理函数。1次/2次因子はexact partial fractionへ分解し，重複既約2次因子`(a x^2+b x+c)^k`も平方完成に基づくexact recurrenceで処理する。次数3以上を含む分母はQ[x]上のsquare-free decompositionとHermite reductionで重複度を落とし，残るsquare-free因子をcertified Complex `root[...,k,Complex]`とexact residue `P(r)/Q'(r)`によるalgebraic-log和へ分解する。elementary reverse-chainを先に試すため，`x/(1+x^4)`等の簡潔な`atan/asin`表現を優先する。degree 12を超える有理分母はdense partial-fraction線形系を使わず，Yun square-free decompositionで得た互いに素な`f_i^k`をpolynomial CRTでexactに分離する。1次/2次成分は既存recurrenceへ，高次反復成分は`f_i'`のmodular inverseによるHermite reductionへ，square-free残差は留数公式へ直接渡す。そのため旧degree 12は利用者向けの可解性境界ではなく，degree 12以下で従来のcompact partial-fraction出力を優先するalgorithm選択値になった。高次側は既存のPolynomial conversion・algebraic degree・共通積分budgetで制御する。`x^m/(1+x^n)`型は必要に応じ`hypergeometric2F1` primitiveへも接続する
+- Rational係数の有理函数。1次/2次因子はexact partial fractionへ分解し，重複既約2次因子`(a x^2+b x+c)^k`も平方完成に基づくexact recurrenceで処理する。次数3以上を含む分母はQ[x]上のsquare-free decompositionとHermite reductionで重複度を落とす。低～中次数のsquare-free残差はLazard–Rioboo–Tragerで代数的留数を`Q(z),S(z,x)`へgroupingし，source identityを再検証した後に`sum_a a log[S(a,x)]`へmaterializeする。LRTが停止した場合はcertified Complex `root[...,k,Complex]`とexact residue `P(r)/Q'(r)`によるpole別algebraic-log和へ戻る。elementary reverse-chainを先に試すため，`x/(1+x^4)`等の簡潔な`atan/asin`表現を優先する。degree 12を超える有理分母はdense partial-fraction線形系を使わず，Yun square-free decompositionで得た互いに素な`f_i^k`をpolynomial CRTでexactに分離する。旧degree 12は利用者向けの可解性境界ではなく，compact partial-fraction出力を優先するalgorithm選択値である。高次側はPolynomial conversion・algebraic degree・共通積分budgetで制御する。`x^m/(1+x^n)`型は必要に応じ`hypergeometric2F1` primitiveへも接続する
 - 正のRational scaleを証明できる二次逆平方根型の`asin/asinh` primitive，およびexact Rational係数二次式`q(x)`の`sqrt[q(x)]` primitive
 - `sin^m/cos^n`の有限Fourier reduction。混合積や低次数pure powerでは正整数総次数256までを明示的に展開可能。pure `sin[x]^n` / `cos[x]^n`は256を超える場合，固定次数上限ではなく標準reduction recurrenceと共通積分budgetへ切り替える
 - `sin[u]^(-n)` / `cos[u]^(-n)`を`csc/sec`の標準漸化式で積分。固定256次上限は持たず，反復workは共通積分budgetで制御する
 - `tan/cot/sec/csc`の正整数冪を標準reduction formulaで積分。固定256次上限は持たず，反復workは共通積分budgetで制御する
+- affine位相`theta=a x+b`を持つ`sin[theta]^r` / `cos[theta]^r`のexact非整数有理冪を局所principal-branch `hypergeometric2F1`表示へ還元する。`sqrt[sin[theta]]` / `sqrt[cos[theta]]`も同じ族である。結果は`sin(theta)`または`cos(theta)`の符号が一定な連結領域上の原始函数であり，符号をまたぐ大域的な位相補正はPiecewiseとして生成しない。記号的`a`は一般位置`a!=0`として扱う
 - 和・差・符号反転，積分変数に依存しない係数の線形性
 - `exp/sin/cos/tan/cot/sec/csc`の安全な標準原始函数
 - `sinh/cosh/tanh/coth/sech/csch`の安全な標準原始函数
-- `log/log1p/expm1/sqrt/cbrt`。`log[x]/x`や`1/(x log[x])`は対数微分Knowledgeから認識
+- `log/log1p/expm1/sqrt/cbrt`。`log[x]/x`や`1/(x log[x])`は対数微分Knowledgeから認識する。affine `u=a x+b`に対する`1/log[u]^n`（exact整数`2<=n<=32`）はprimitive differential extensionのnormal Hermite reductionで有理部分と`li[u]`へexactに落とす。さらに単一の`Log[u]`をgeneratorとする`K(t)=Q(x)(Log[u])`有理函数は，分母のsquare-free分解と重複度blockのCRT分離を行い，normal-factor Hermite reduction，`K[t]`多項式のlimited integration，exactな`c Df/f`判定を合成する。定数係数分母はboundedな`Q[t]`因数分解で細分する。未証明残差は保持し，構成した結果はsourceへcross multiplicationで再検証する。単一`Exp[u]`の有限Laurent式は各次数の`Q(x)` RDEをexactに解く。既存のcompactな標準規則を先に用い，それらが閉じない有理函数係数towerだけをRisch fallbackへ渡す
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
 - `fresnelc/fresnels`。exact Rational係数の`sin/cos[a x^2+b x+c]`を平方完成して標準Fresnel積分へ還元。`Pi*x^2/2`の定義核も直接認識
@@ -2163,7 +2286,7 @@ WARN: integrate partially evaluated the expression; remaining subintegral(s) are
 
 解けない部分だけを保持し，既に求まった項まで巻き戻さない。
 
-### 未評価理由の診断
+#### 未評価理由の診断
 
 未評価を単一のWARNへ潰さず，現在は次のdiagnostic codeを区別する。
 
@@ -2190,7 +2313,7 @@ WARN: integrate recognized a family with no known finite closed form in mmCal's 
 
 `noKnownClosedForm`も「あらゆる数学的表現で不可能」という判定ではない。級数，新しい特殊函数，より広い函数classを許せば表現できる場合がある。mmCalが主張する範囲を現在サポートする有限標準函数語彙に限定する。
 
-### nested square-root substitution
+#### nested square-root substitution
 
 現在は次のclassも扱う。
 
@@ -2203,7 +2326,7 @@ integrate[sqrt[x + sqrt[x]],x]
 
 これは単発公式ではなく，`t=sqrt[x]`により`2 t sqrt[q(t)]`へ落ちる，`q`がexact Rational係数2次式で正leadingのclassを処理する。主値分岐上の局所置換則であり，一般のradical substitution探索ではない。
 
-### exact/symbolic定積分
+#### exact/symbolic定積分
 
 原始函数を安全に得られた場合，上下端へexact substitutionして差を取る。定義域条件がある函数は，可能ならCertifiedEvaluatorで**区間全体**をpreflightし，途中の極や分岐上の不成立を見逃さない。
 
@@ -2233,7 +2356,7 @@ integrate[tan[x],{x,0,2}]
 
 Cauchy 主値を自動的に意味することもない。
 
-### assumptions と improper integral
+#### assumptions と improper integral
 
 第3引数にassumptionを渡せる。既存の`KnowledgeContext`へ統合され，`abs`や`sqrt[x^2]`のbranch-sensitive簡約に利用する。
 
@@ -2299,7 +2422,7 @@ integrate[1/(x-2),{x,1,Infinity}]
 -> WARN + unevaluated integrate[...]
 ```
 
-## 24.2 `limit` — exact/symbolic limit
+### 24.2 `limit` — exact/symbolic limit
 
 ```text
 limit[expr,x,a]
@@ -2404,7 +2527,7 @@ limit[1/x,x,0]
 -> WARN + limit[1 / x, x, 0]
 ```
 
-## 24.3 `nintegrate` — certified数値積分
+### 24.3 `nintegrate` — certified数値積分
 
 ```text
 nintegrate[expr,{x,a,b}]
@@ -2425,7 +2548,9 @@ nintegrate[x^2,{x,0,1},12]
 
 ---
 
-# 25. Solver
+## 25. Solver
+
+### 25.1 `solve` — 基本仕様
 
 ```text
 solve[equation,x]
@@ -2464,7 +2589,7 @@ solve[sqrt[x]==y,x]
 `SolutionSet`はEmpty / Finite / Universal / Conditional / Unresolvedを区別する。
 対応外の式を「解なし」と誤認しない。
 
-### 多変数多項式・Gröbner basis
+### 25.2 多変数多項式・Gröbner basis
 
 exact Rational係数の多変数多項式は`Q[x1,...,xn]`の専用ring representationへ変換する。公開接口は次である。
 
@@ -2506,7 +2631,7 @@ rational-functionをpolynomial sign chartへ変換するPowerには固定の`±6
 
 Gammaの極集合のように現Predicateで完全表現できない条件は，不完全な条件を捏造せずunresolvedのまま扱う。
 
-### 実軸global inverse solve
+### 25.3 実軸global inverse solve
 
 MathRegistryは主値 inverseだけでなく，実軸上のglobal injectivity・単調性・実値域をmetadataとして持つ。`solve`は**Realまたはそのsubdomain**で，globalに一対一であることを証明できる函数だけを安全に反転する。
 
@@ -2554,7 +2679,7 @@ solve[acosh[x]==y,x,Real]
 
 principal `asin` / `acos` / `atan` / `acosh`を右辺から反転する場合も，主値の実値域をSolutionBranch条件として保持する。`asin` / `acos` / `atan`の端点は現在の`angleMode[]`に従い，`atan`だけは両端を含まない。定数同士の端点比較はcertified enclosureで判定し，範囲外を偽の条件付きbranchとして残さない。
 
-### Real-定義域 nonexistence / uniqueness proof
+### 25.4 Real-定義域 nonexistence / uniqueness proof
 
 Real equalityには，具体的な逆函数解法の後段にexact proof layerを持つ。この層は「根を数値探索して見つからなかった」ことを非存在証明には使わない。現在は次を低コスト順に試す。
 
@@ -2600,7 +2725,7 @@ solve[x^x==2,x,Real] -> {x == exp[lambertw[log[2]]]}
 
 Complex 定義域へこの証明を流用しない。たとえば`solve[exp[x]-x+5==0,x,Complex]`はReal非存在証明だけを理由に`{}`へしない。
 
-### 絶対値方程式・不等式
+### 25.5 絶対値方程式・不等式
 
 Real relationでは`abs[u]`の値域`[0,Infinity)`を保ったままexactに変形する。ordered inequalityはReal semanticsなので，右辺の符号を証明した後に`u^2`のpolynomial inequalityへ帰着できる場合だけ既存solverへ渡す。等式`abs[u]==a`は**明示的なReal 定義域**でのみ`u==a`または`u==-a`へ分岐する。既定Complex 定義域の`abs[z]==a`は一般に円周などのlocusであり，有限2点へ潰さず`UnresolvedSolutionSet`を維持する。
 
@@ -2627,7 +2752,7 @@ solve[abs[x]==2,x]
 -> UnresolvedSolutionSet[x]
 ```
 
-### 実指数函数とLambert W
+### 25.6 実指数函数とLambert W
 
 Real 定義域で`a>0`と指数が実数であることを証明できれば，主値 `a^u = exp[u log[a]]`は常に正である。
 このため零方程式は数値探索なしに空集合へ確定する。
@@ -2670,7 +2795,7 @@ N[solve[1.1^x == x^2,x,Real],20]
 一般の`a^(b x+c)==P(x)`，Complex全branch，Lambert Wを含む不等式はまだ一般化しない。
 branch条件を証明できない場合は条件付きbranchまたは`UnresolvedSolutionSet`を保持する。
 
-### 主値 radical equation solve
+### 25.7 主値 radical equation solve
 
 `sqrt` / `cbrt`等式は，単純に両辺を冪乗して終わらせず，**変換後多項式の候補生成**と**元radicalの値域検証**を分離する。
 
@@ -2702,7 +2827,7 @@ solve[cbrt[x]==a,x]         -> {x == a^3 if a in Real}
 
 また，`cbrt[z]^3 -> z`は`z in Real`が証明できる場合だけSimplifierが適用する。これはreal `cbrt`の定義域 conditionを消さないための制約である。
 
-### 実軸周期函数のパラメータ付き solution family
+### 25.8 実軸周期函数のパラメータ付き solution family
 
 `sin/cos/tan`はglobal injectiveではないため主値 inverse一個へ潰さず，実軸で周期を保った整数パラメータ familyを返す。
 formal パラメータは`where k in Integer`で局所的に束縛され，relation内に`k`が既に現れる場合は`k1`等のfresh nameを選ぶ。
@@ -2718,9 +2843,12 @@ solve[tan[x]==1,x,Real]
 -> {x==Pi/4+Pi k where k in Integer}
 ```
 
-初版は`sin/cos/tan`の1引数函数で，引数がsolve変数に対する**exact非零一次係数を持つaffine式**の場合に限定する。
-targetの実値域は既存Knowledgeで検証し，`sin[x]==2`等は空集合へ落とす。
-非線形argumentやComplex全解を主値 inverseだけから捏造しない。
+`sin/cos/tan`の1引数函数で，引数がsolve変数に対するaffine式`a x+b`なら，symbolic係数`a`も条件付きで扱う。`a!=0`では整数パラメータ族，`a==0 && f(b)==c`では`All`，`a==0 && f(b)!=c`では空集合を返す。Real領域では係数・targetの実性と値域を既存Knowledgeで保持し，`sin[x]==2`等は空集合へ落とす。Complex領域でも`sin/cos/tan/exp`の完全なaffine周期族を返し，`exp`ではtarget非零，`tan`では省略値`+I/-I`を除外する。非線形argumentは主値 inverseだけから解を捏造せず未解決に保つ。
+
+```text
+solve[exp[a*x+b]==c,x,Complex]
+-> cases[{x == (2I Pi k+log[c]-b)/a where k in Integer if c in Complex && c != 0} if a != 0; All if a == 0 && exp[b] == c; {} if a == 0 && exp[b] != c]
+```
 
 periodはsessionの角度modeに従う。初版のperiodic Solverはargument全体への明示`Rad` / `Deg` / `Grad` suffixをまだaffine polynomialとして正規化しないため，その形は未解決のまま保持する。
 
@@ -2730,9 +2858,7 @@ solve[sin[x]==0,x,Real]
 -> {x==180k where k in Integer}
 ```
 
-Complex領域でも主値 inverseだけから全解を捏造しない。
-
-### exact代数根 `root` / `AlgebraicNumber`
+### 25.9 exact代数根 `root` / `AlgebraicNumber`
 
 一般高次多項式の根はradicalへ無理に展開せず，実数・複素数ともexactな`root`表現で保持できる。
 
@@ -2897,15 +3023,16 @@ resultant・primitive-element双方の次数爆発を避けるため，現在の
 
 ---
 
-# 26. 線形代数
+## 26. 線形代数
 
-## 26.1 exact-first線形代数
+### 26.1 Matrix・exact-first線形代数
 
 canonical API:
 
 ```text
 transpose[A]
 conjugateTranspose[A]
+madd[A,B,...]
 dot[A,B]
 det[A]
 inverse[A]
@@ -2922,14 +3049,13 @@ leastSquares[A,b]
 eigenvalues[A]
 eigenvectors[A]
 eigensystem[A]
-norm[v]
-normalize[v]
 trace[A]
 ```
 
-`dot` はrank-1/rank-2を扱う。
+`madd`は同一shapeのrank-2 Matrixを2個以上，element-wiseに加算する明示APIである。Arrayの同shape `+` と数学的意味は同じだが，matrix専用callとしてshapeを要求する。`dot`は加算ではなくrank-1/rank-2のcontractionを扱う。
 
 ```text
+madd[{{1,2},{3,4}},{{5,6},{7,8}}] -> {{6,8},{10,12}}
 dot[{1,2,3},{4,5,6}] -> 32
 dot[{{1,2},{3,4}},{5,6}] -> {17, 39}
 dot[{5,6},{{1,2},{3,4}}] -> {23, 34}
@@ -3004,7 +3130,7 @@ norm[{3+4I}] -> 5
 normalize[{3,4}] -> {3/5, 4/5}
 ```
 
-### precision-aware `N`
+#### precision-aware `N`
 
 FFTと同じ `ApproximationContext` / certified interval変換を共有する。したがって例えば
 
@@ -3027,7 +3153,7 @@ N[norm[v],100]
 
 は，巨大なexact中間式を完成させてから近似するのではなく，対応するBigFloat/interval 計算基盤へ要求精度を渡して直接評価できる。exact入力を外側`N`が直接数値計算基盤へ送る場合，入力区間は要求精度に応じて再精密化できる。これに対し，行列要素が既に`DecimalApproximation` / `ComplexDecimalApproximation`なら，値計算にはCertifiedEnclosure，pivot・零／非零・階数等の判定にはInformationEnclosureを使い，入力が宣言していない情報を復活させない。`solveLinear` / `inverse` / `rref` / `matrixRank` / `nullSpace`はInformationEnclosureからpivot構造を証明できる場合だけ結果を返し，証明不能なcaseをepsilonや内部の点値で補わない。`det` / `dot` / `norm`等の連続量はCertified/Information両区間を並行伝播し，相殺時には出力Precisionを自然に下げる。現在の`luDecomposition` / `qrDecomposition` / `svd` / `conditionNumber` / `pseudoInverse` / `leastSquares` / `eigen*`は，**既に有限precisionの行列**に対する摂動保証が未完成なため，その場合は保守的に未評価へ戻す。一方，exact行列に対する`N[...,p]`では従来どおり対応する保証付き数値計算基盤を利用する。
 
-## 26.2 Vector・内積・直交化
+### 26.2 Vector・内積・直交化
 
 rank-1 Arrayをvectorとして扱う。row / column orientationはvector自体には持たせず，`dot`がrankに応じたcontractionを行う。Vector専用の基本APIは次である。
 
@@ -3097,6 +3223,8 @@ gramSchmidt[{{1,1},{1,-1}}]
 
 旧Vector convenience函数`vadd` / `vsub` / `vscalar` / `vsum`は公開登録から外した。Arrayの`+` / `-` / scalar multiplicationと`sum`を直接使う。旧`vcross` / `vmanhattan` / `veuclidean` / `vproject` / `vangle` / `vreflect` / `vreflect_axis`も公開名から外し，それぞれ`cross` / `manhattanDistance` / `distance` / `projection` / `vectorAngle` / `reflectNormal` / `reflectAxis`を正式名とする。Vector処理に別算法を持つ互換aliasは置かない。
 
+### 26.3 Vector Calculus
+
 ベクトル解析はCartesian座標を明示して使う。
 
 ```text
@@ -3125,7 +3253,7 @@ directionalDerivative[x^2+y^2,{1,2},{x,y}] -> 2x+4y
 
 ---
 
-# 27. Signal processing
+## 27. Signal processing
 
 ```text
 dft[v]
@@ -3155,12 +3283,12 @@ exact入力では2冪長FFTはradix-2 Cooley–Tukeyを使い，forwardの公開
 
 ---
 
-# 28. 乱数
+## 28. 乱数
 
 乱数だけはstateful builtin。
 RNG stateはKernelSessionごとに独立する。
 
-## 28.1 seed
+### 28.1 `randSeed` — seed
 
 ```text
 randSeed[42]
@@ -3179,7 +3307,7 @@ rand[] == a
 
 `randSeed[]`はentropyから再seedし，その再現用整数seedを返す。
 
-## 28.2 uniform real
+### 28.2 `rand` — uniform real
 
 ```text
 rand[]
@@ -3204,7 +3332,7 @@ rand[hi]     : [0,hi), hi >= 0
 rand[lo,hi]  : [lo,hi), lo <= hi
 ```
 
-## 28.3 integer
+### 28.3 `randint` — integer
 
 ```text
 randint[]
@@ -3221,7 +3349,7 @@ randint[1,6] : [1,6] inclusive
 
 BigInt範囲に対応。modulo biasを避けるrejection sampling。
 
-## 28.4 choice
+### 28.4 `choice`
 
 ```text
 choice[2,3,5,7]
@@ -3230,7 +3358,7 @@ choice[{2,3,5,7}]
 
 rank-1 arrayまたはvariadic listから1要素。
 
-## 28.5 normal
+### 28.5 `randn` — normal distribution
 
 ```text
 randn[]
@@ -3254,74 +3382,129 @@ N[randn[],8]
 
 ---
 
-# 29. 主要alias
+## 29. Graphics・Plot・Export
 
-| alias                    | canonical    |
-| ------------------------ | ------------ |
-| `pow`                    | `Power`      |
-| `fact`                   | `Factorial`  |
-| `fract`                  | `frac`       |
-| `ln`                     | `log`        |
-| `real`                   | `re`         |
-| `imag`                   | `im`         |
-| `mag`                    | `abs`        |
-| `unit`, `csgn`           | `sign`       |
-| `rect`                   | `polar`      |
-| `ave`                    | `mean`       |
-| `matmul`, `mmul`         | `dot`        |
-| `mtranspose`             | `transpose`  |
-| `mget`                   | `at`         |
-| `singularValueDecomposition` | `svd` |
-| `mdet`                   | `det`        |
-| `minverse`               | `inverse`    |
-| `rank`, `mrank`          | `matrixRank` |
-| `mtrace`                 | `trace`      |
-| `mrows`                  | `rows`       |
-| `mcols`                  | `cols`       |
-| `mdiag`                  | `diag`       |
+### 29.1 公開構文とheld request
 
-aliasは別実装ではなく同一`BuiltinId`へ束ねる。数学metadataやSolver規則を二重管理しない。
+```text
+Plot[expression,{x,a,b}]
+Plot[expression,{x,a,b},PlotRange->{ymin,ymax}]
+Plot[expression,{x,a,b},AspectRatio->r]
+Plot[expression,{x,a,b},Ticks->True|False]
+Plot[expression,{x,a,b},PlotPoints->n]
+Plot[{expression1,expression2,...},{x,a,b}]
+ParametricPlot[{xExpression,yExpression},{t,a,b}]
+ParametricPlot[{{x1,y1},{x2,y2},...},{t,a,b}]
+ParametricPlot[{xExpression,yExpression},{t,a,b},AspectRatio->r,Ticks->True|False,PlotPoints->n]
+ListPlot[{x1,x2,...}]
+ListPlot[{{x1,y1},{x2,y2},...},Joined->True|False]
+Show[Plot[...],Plot[...],...]
+Export[Plot[...],"file.svg"]
+Export[Plot[...],"file.eps"]
+Export[Plot[...],"file.pdf"]
+```
 
-mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりalias（`Sin`, `ArcTan`, `Integrate`, `Solve`等）を削除した。数学函数はlowercase canonicalを原則とする。`D`, `N`, `In`, `Out`, `Exit`, `Clear`, `Defs`, `UnDef`は記号演算・Kernel操作の固有名として例外的に維持する。互換構文が必要になった場合は，default namespaceへaliasを増やすのではなく独立したimport/compatibility層として検討する。
+`Plot`は有限実区間上の2次元函数plot要求を保持するcanonical名で，旧`plot`は互換aliasである。bound variableはsession定義から保護され，parameter・user function・区間端はplot要求を作る時点のsession環境でmaterializeする。複素値の軌跡は`Plot`へ混在させず，将来の`ComplexPlot`等へ分離する。
+
+`ParametricPlot`は`{x(t),y(t)}`を有限実parameter区間上の2次元曲線として保持する。x/y成分は独立に実定義域解析し，共通実domainだけを描画する。`AspectRatio`と`Ticks`は`Plot`と同じ意味を持つ。現時点では1次元`PlotRange->{min,max}`の意味を曖昧化しないため`ParametricPlot`では受理せず，将来の2次元range仕様へ分離する。
+
+### 29.2 exact geometry・周期解析
+
+parameterについて3次以下の多項式座標はsamplingせずexact geometryへ落とし，一次はline，二次はquadratic Bézier，三次はcubic Bézierとして保持する。また，同一affine phaseを持つ`C + A cos(q t+b) + B sin(q t+b)`型の2座標curveは完全周回ならexactなCircle/Ellipse，部分周回ならEllipticArcとしてGraphicsSceneへ保持し，各backendがSVG ellipse/arc，PostScript arc，PDF vector pathへloweringする。一般曲線は2Dのmm空間でadaptive samplingする。
+
+`ParametricPlot`は証明可能な共通parameter周期も解析する。要求spanがそのperiodのexact整数倍かつ2周以上である場合に限り，始点を保ったまま1周期へsampling区間を短縮し，`ParametricPlot::period`のInfoを返す。例えば`{cos[t]+cos[2t]/2,sin[t]+sin[4t]/4}`の`0..4Pi`は共通周期`2Pi`を証明して`0..2Pi`へ短縮する。一方，`0..5Pi`のような非整数周回はpath topologyを変え得るため短縮しない。
+
+### 29.3 option・viewport・clip
+
+現在の初期optionは`PlotRange`，`AspectRatio`，`Ticks`，`PlotPoints`。option名はいずれも予約語・predefined symbolではなく通常のSymbolで，`Rule`の左辺として`Plot`が局所的に解釈する。`PlotRange->{ymin,ymax}`はy方向viewportを有限な昇順区間へ明示固定し，Automaticのpaddingを加えない。`AspectRatio->r`は**height / width**で，正の有限定数を要求する。既定幅150 mmを保つため，`AspectRatio->1`は150×150 mm，`AspectRatio->0.5`は150×75 mmになる。未指定時は従来どおり150×100 mm（height/width = 2/3）。`Ticks`は既定`True`で，`Ticks->False`ではmajor tickとtick labelを両軸とも非表示にするが，x/y軸線自体は残す。`PlotPoints->n`は100〜1024の整数で，100を現行既定のcoarse sampling密度とする相対倍率である。200は初期meshを2倍にする。adaptive chord toleranceや再帰深度は変更せず，exact Line/Bézier/Circle/Ellipse/EllipticArcのgeometryは増密しない。
+
+明示`PlotRange`で範囲外になった曲線geometryは内部plot areaでclipし，tick label用marginへ線が漏れない。`Ticks->False`では不要なmajor tick列挙自体も省略する。`Show`で合成した各`Plot`はそれぞれの`PlotPoints`を保持できるが，明示`Ticks`が相互に矛盾する場合は`Export` / `toNormal`ともDomain errorになる。重複optionと未知optionはerror。
+
+### 29.4 domain解析・sampling・semantic anchor
+
+実定義域・pole・branch境界・可除特異点・step不連続を可能な範囲でexactに解析してからsamplingする。証明できない実軌跡を都合よく部分描画することはせず，不完全になる場合は安全側でExportを拒否する。`sin[1/x]`のような有限解像度で無限振動する函数は，物理canvas上のadaptive sampling/resource limitで有限vertexへ落とす。
+
+0〜3次多項式はgeometryを特殊化する。一次以下は直線，二次はquadratic Bézier，三次`a x^3+b x^2+c x+d`はcubic Bézierとして表現し，曲線交点・軸交点・極値等のsemantic anchorではde Casteljau分割して形状を変えずpath endpointを作る。一般函数はmm単位のscreen-space誤差でadaptive polyline samplingする。
+
+PlotProgramへ現在接続済みの代表的な実函数には，基本初等函数・三角/双曲線函数，`floor` / `ceil` / `trunc` / unary `round` / `frac` / `sign`，`sinc` / `cosc` / `tanc` / `sinhc` / `tanhc` / `expc`，`erf` / `erfc`，Fresnel `fresnelc` / `fresnels`，`Ei` / `Si` / `Ci`等がある。`Ci`の実Plotはprincipal branchに従い正実軸側だけを扱い，`Ei`は0を除く両実側，`Si`は全実軸を扱う。`tanc`等の正規化函数は0近傍で安定化したcertified経路を使い，別のpoleは通常の不連続境界として解析する。
+
+### 29.5 `ListPlot`
+
+`ListPlot[{x1,x2,...}]`は1次元点列を数直線上の`{x,0}`として描画し，`ListPlot[{{x1,y1},{x2,y2},...}]`は2次元点群を描画する。`N×1` Arrayは1次元点列と同じ意味を持つ。既定`Joined->False`では点markerだけを描き，`Joined->True`ではmarkerを残したまま入力順のpolylineを追加する。`AspectRatio`と`Ticks`は`Plot`と共通である。入力点が既に明示されているため`PlotPoints`は受理しない。3列以上，rank 3以上，raggedな`{{1},{2,3}}`等は暗黙投影せずerrorとする。`toNormal[ListPlot[...]]`は1D入力も含め常に`N×2` Arrayへ正規化する。
+
+### 29.6 `Show` / `Export` / Graphics backend
+
+最終描画はbackend非依存の`GraphicsScene`へlowerし，内部寸法はmm・y軸上向きで保持する。既定canvasは150×100 mmで，label marginはcanvas外へ足さず内部plot areaを縮める。現在のvector backendはSVG / EPS / PDF。PDFは初版でPDF 1.4，classic xref，非圧縮object/content/XMPを使う。`Export[obj,file,"PDF"]`のようにformatを明示し，fileの既存拡張子が異なる場合は置換せず`.pdf`を追加する（例: `file.svg.pdf`）。
 
 ---
 
-# 30. 現在のsource-callable函数一覧
+## 30. 主要alias
 
-v1.5.5では **builtin/alias登録名278個 / sourceから呼出可能な名前258個**。内部headはsource-callable数に含めない。
+| alias | canonical |
+| --- | --- |
+| `ave` | `mean` |
+| `csgn` | `sign` |
+| `fact` | `Factorial` |
+| `fract` | `frac` |
+| `imag` | `im` |
+| `ln` | `log` |
+| `mag` | `abs` |
+| `matmul` | `dot` |
+| `mcols` | `cols` |
+| `mdet` | `det` |
+| `mdiag` | `diag` |
+| `mget` | `at` |
+| `minverse` | `inverse` |
+| `mmul` | `dot` |
+| `mrank` | `matrixRank` |
+| `mrows` | `rows` |
+| `mtrace` | `trace` |
+| `mtranspose` | `transpose` |
+| `plot` | `Plot` |
+| `pow` | `Power` |
+| `rank` | `matrixRank` |
+| `real` | `re` |
+| `rect` | `polar` |
+| `singularValueDecomposition` | `svd` |
+| `unit` | `sign` |
+
+aliasは別実装ではなく同一`BuiltinId`へ束ねる。数学metadataやSolver規則を二重管理しない。
+
+mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりalias（`Sin`, `ArcTan`, `Integrate`, `Solve`等）を削除した。数学函数はlowercase canonicalを原則とする。`D`, `N`, `In`, `Out`, `Exit`, `Clear`, `Defs`, `UnDef`, `Export`に加え，描画要求を表す`Plot` / `Show`は記号演算・Kernel/I/O・graphics操作の固有名として例外的に維持する。旧`plot`は互換aliasとして同一`BuiltinId`へ束ねる。互換構文が必要になった場合は，原則としてdefault namespaceへ大文字aliasを増やさず独立したimport/compatibility層として検討する。
+
+---
+
+## 31. 現在のsource-callable函数一覧
+
+現在のtreeでは **builtin/alias登録名284個 / sourceから呼出可能な名前264個**。内部headはsource-callable数に含めない。この一覧はregistryとの一致を回帰テストで検証し，ASCII辞書順で固定する。
 
 ```text
-Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,
-In, N, Out, RtoD, RtoG, Si, UnDef, abs, accuracy, acos,
-acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2, atanh,
-ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor,
-bitshiftl, bitshiftr, bitxor, cases, cbrt, ceil, choice, cis, clamp, collect,
-cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman, cos, cosc,
-cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
-det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
-eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp,
-expand, expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib,
-floor, fma, frac, fract, fresnelc, fresnels, fullSimplify, gamma, gcd, geomean,
-grad, gramSchmidt, groebnerBasis, harmmean, hessian, hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity,
-if, ifft, im, imag, inner, integrate, inverse, iqr, isprime, jacobian,
-kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
-linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd,
-mag, manhattanDistance, map, matmul, matrixRank, max, mcols, mdet, mdiag, mean,
-median, mget, min, minverse, mmul, mod, mode, mrank, mrows, mtrace,
-mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ, orthonormalQ,
-outer, percentile, percentrank, perm, polar, polylog, polynomialReduce, pow, precision, prevprime,
-prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed, randint,
-randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection,
-rem, reshape, risingfact, rms, root, round, rows, rref, sec, sech,
-series, sign, simplify, sin, sinc, singularValueDecomposition, sinh, sinhc, skew, solve,
-solveLinear, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc,
-tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit,
-var, vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
+Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, Export, GtoD, GtoR, In, ListPlot, N, Out, ParametricPlot, Plot, RtoD, RtoG,
+Rule, Show, Si, UnDef, abs, accuracy, acos, acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2,
+atanh, ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor, bitshiftl, bitshiftr,
+bitxor, cases, cbrt, ceil, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
+conjugateTranspose, convolve, corr, corrspearman, cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn,
+curl, cv, det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
+eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp, expand,
+expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib, floor, fma, frac, fract, fresnelc,
+fresnels, fullSimplify, gamma, gcd, geomean, grad, gramSchmidt, groebnerBasis, harmmean, hessian,
+hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity, if, ifft, im, imag, inner, integrate, inverse,
+iqr, isprime, jacobian, kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
+linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd, mag, manhattanDistance,
+map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode, mrank,
+mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ,
+orthonormalQ, outer, percentile, percentrank, perm, plot, polar, polylog, polynomialReduce, pow, precision,
+prevprime, prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed,
+randint, randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection, rem,
+reshape, risingfact, rms, root, round, rows, rref, sec, sech, series, sign, simplify, sin, sinc,
+singularValueDecomposition, sinh, sinhc, skew, solve, solveLinear, sqrt, stddev, stddevs, stderr, sum, svd,
+table, tan, tanc, tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit, var,
+vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
 ```
 
 ---
 
-# 31. エラー / Warning方針
+## 32. エラー / Warning方針
 
 主なCalcError種別:
 
@@ -3336,7 +3519,7 @@ var, vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
 
 評価自体は成功したがalgorithmic builtinが処理を完了できない場合は，結果Exprと別にWarningを返す。`D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, `eigenvalues`, `eigenvectors`, `eigensystem`（互換alias `rank`を含む）, `integrate`に加え，`precision/accuracy/rationalize`が対象外入力を未評価保持する場合もWarningになる。
 
-正常な状態変更の補足にはInfo diagnosticを使う。現在は変数・函数の再定義通知が対象。
+正常な状態変更や，意味を変えない証明済み最適化の補足にはInfo diagnosticを使う。現在は変数・函数の再定義通知に加え，`ParametricPlot`が証明済み周期によって重複周回を短縮した場合の`ParametricPlot::period`が対象である。
 
 ```text
 D[abs[x],x]
@@ -3371,7 +3554,7 @@ Parser/Evaluatorはsource spanとdocumentを保持し，函数定義経由のErr
 
 ---
 
-# 32. 性能方針
+## 33. 性能方針
 
 exact/certifiedはCPUのnative doubleより大幅に重い。
 過去のmicrobenchmarkでは，対象によりdouble比で約100倍〜10万倍超の差がある。
@@ -3390,11 +3573,11 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 - certified Log 値域 reduction / log(2) enclosure共有
 - FFT radix-2
 
-将来`for/Plot`のように数千〜数百万回の評価を行う処理では，Exact/Certifiedとは別に明示的Machine evaluatorを追加する予定。
+`Plot`は現在BigFloat専用PlotProgram evaluatorを使う。将来`for`やPlotのmachine backendが必要になった場合も，Exact/Certifiedとは分離した明示的Machine evaluatorとして追加する。
 
 ---
 
-# 33. 現在未実装・保留の主な項目
+## 34. 現在未実装・保留の主な項目
 
 代表:
 
@@ -3402,16 +3585,16 @@ exact/certifiedはCPUのnative doubleより大幅に重い。
 - `hilbert`（旧仕様の名称再確認）
 - 工学函数，財務函数，単位変換
 - 旧colon command `:defs`, `:unset`, `:undef` 等（函数版`Defs[]/UnDef[]`は実装済み）。`:angle`は`angleMode[]`へ置換し，frontend commandとして`:help` / `:fix` / `:layout` / `:status`を実装済み
-- `for`, `plot`
+- `for`
 - general Machine/double evaluation mode
 
 今後追加検討:
 
-今後は任意次数の完全Q因子分解・異なるprimitive generator間の一般number-field merge / 正準化・未証明表現まで含む完全なcross-context algebraic comparison・`rootApproximant`，より一般のパラメータ付き solution family，Machine evaluator / `for` / `plot`等を候補とする。
+今後は任意次数の完全Q因子分解・異なるprimitive generator間の一般number-field merge / 正準化・未証明表現まで含む完全なcross-context algebraic comparison・`rootApproximant`，より一般のパラメータ付き solution family，Machine evaluator / `for`等を候補とする。
 
 ---
 
-# 34. 現在のCLI
+## 35. 現在のCLI
 
 CLIはKernelの数学状態とfrontendの表示状態を分離する。起動時には次のオプションを指定できる。
 
@@ -3451,7 +3634,7 @@ Out[1]> 1/3
 - `Defs[]`, `UnDef[...]`: user definitionsの確認・削除
 - 計算履歴 `@`, `%`, `%%`, ... および正負添字を持つ再評価型`In [n]`, snapshot型`Out[n]`
 
-## 34.1 `:help`
+### 35.1 `:help`
 
 ```text
 :help
@@ -3467,7 +3650,7 @@ Out[1]> 1/3
 
 `:help`は式をparse/evaluateせず，成功・定数・未知名のいずれでも`In[n]`を進めず履歴へ入らない。未知名には函数・定数indexへの案内も返す。
 
-## 34.2 `:fix` — presentation-only小数表示
+### 35.2 `:fix` — presentation-only小数表示
 
 ```text
 :fix 16
@@ -3487,7 +3670,7 @@ Out[2]> 1/3
 
 数値としてcertifyできる式全体は表示時だけ近似する。自由変数を含むsymbolic expressionはexact表記を維持する。
 
-## 34.3 `:layout` — 対話REPLの組版
+### 35.3 `:layout` — 対話REPLの組版
 
 ```text
 :layout
@@ -3519,7 +3702,7 @@ Out[2]> cases[
 
 `:layout`だけなら現在modeを表示する。
 
-## 34.4 `:status`
+### 35.4 `:status`
 
 ```text
 :status
@@ -3533,7 +3716,7 @@ History: 0
 
 `:status`も履歴へ入らないCLI commandである。数学状態の変更は`angleMode[...]`等のKernel函数，frontendの照会・presentation状態変更は`:help` / `:fix` / `:layout`等のCLI command，という境界を維持する。
 
-## 34.5 `:quit` / `:exit`
+### 35.5 `:quit` / `:exit`
 
 ```text
 :quit
@@ -3542,7 +3725,7 @@ History: 0
 
 どちらも現在のCLI sessionを正常終了する互換commandであり，式としての`Exit[]`と同じ目的を持つ。parse/evaluateや履歴追加は行わない。裸の`quit` / `exit`は通常の入力として扱い，特別な終了commandにはしない。`--batch`でも認識し，その行で正常終了する。
 
-## 34.6 console title
+### 35.6 console title
 
 タイトルは補助情報として，例えば次の形式に更新する。
 
@@ -3557,7 +3740,7 @@ mmCal <version> - Deg - Fixed(16) - Layout(Multi)
 
 タイトル変更失敗は計算Errorにしない。状態確認の正本は`:status`であり，terminalがtitleを上書きしても意味論には影響しない。
 
-## 34.7 canonical formatter
+### 35.7 canonical formatter
 
 通常`Out[n]`はAST dumpではなく，再parse可能なcompact数学表記とする。
 
@@ -3580,7 +3763,7 @@ canonical formatterは1行serialization契約の正本として維持する。�
 
 ---
 
-# 35. 実装上の主要層
+## 36. 実装上の主要層
 
 ```text
 Lexer / Parser
@@ -3616,7 +3799,7 @@ CertifiedEvaluator -> interval -> DecimalApproximation
 
 この分離を維持し，函数追加ごとにSolver・Simplifier・数値計算基盤へ同じ知識を重複記述しないことを基本方針とする。
 
-## CertifiedEvaluator の安全限界
+### 36.1 CertifiedEvaluator の安全限界
 
 CertifiedEvaluatorは式を再帰的に区間評価するため，病的に深いASTについてはOSのstack overflowへ到達する前に評価対象外として扱う。現在の深さ上限は96段。通常のn-ary `Add` / `Multiply` の項数ではなく，ASTの入れ子深さに対する安全弁である。
 

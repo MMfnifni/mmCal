@@ -58,8 +58,14 @@
     <Filter Include="src\random">
       <UniqueIdentifier>{86F86618-9541-47CA-879F-1125CB840F58}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\plot">
+      <UniqueIdentifier>{6C395657-5627-463D-826B-0BA252F71C05}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\cli">
       <UniqueIdentifier>{72825FC0-F4B6-492E-9242-2D5A8A569F24}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\graphics">
+      <UniqueIdentifier>{A9F8A4A3-7D31-4B60-A881-31D6C1F65A71}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -357,6 +363,24 @@
     <ClInclude Include="..\..\src\symbolic\polynomial.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\differential_tower.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\risch_core.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\risch_differential_equation.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\risch_differential_reduction.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\risch_expression.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\risch_tower_recognizer.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\symbolic\groebner.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
@@ -378,6 +402,75 @@
     <ClInclude Include="..\..\src\solver\real_function_analysis.hpp">
       <Filter>src\solver</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_request.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_analysis.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_program.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_sampling.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_sample_analysis.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_range_estimator.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_view_transform.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_adaptive_sampling.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_intersections.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_anchors.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_scene.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_axis_layout.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_graphics_lowering.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_pipeline.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_periodicity.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_exact_geometry.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\plot\plot_exact_range.hpp">
+      <Filter>src\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\graphics_scene.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\graphics_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\eps_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\pdf_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\text_metrics.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\svg_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\solver\solve_constraints.hpp">
       <Filter>src\solver</Filter>
     </ClInclude>
@@ -397,6 +490,9 @@
       <Filter>src\symbolic</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\symbolic\series.hpp">
+      <Filter>src\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\symbolic\finite_sum_product.hpp">
       <Filter>src\symbolic</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\symbolic\integration.hpp">
@@ -472,6 +568,7 @@
   <ClInclude Include="..\..\src\linear_algebra\exact_matrix.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\modular_linear_algebra.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\decomposition.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
+  <ClInclude Include="..\..\src\linear_algebra\exact_lll.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\complex_point.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\eigen.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
   <ClInclude Include="..\..\src\linear_algebra\svd.hpp"><Filter>src\linear_algebra</Filter></ClInclude>
@@ -717,6 +814,27 @@
     <ClCompile Include="..\..\src\symbolic\polynomial.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\differential_tower.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_core.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_differential_equation.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_differential_reduction.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_expression.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_primitive_rational.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\risch_tower_recognizer.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\symbolic\groebner.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
@@ -737,6 +855,66 @@
     </ClCompile>
     <ClCompile Include="..\..\src\solver\real_function_analysis.cpp">
       <Filter>src\solver</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_analysis.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_program.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_sampling.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_sample_analysis.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_range_estimator.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_view_transform.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_adaptive_sampling.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_intersections.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_anchors.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_scene.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_axis_layout.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_graphics_lowering.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_pipeline.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_periodicity.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_exact_geometry.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plot\plot_exact_range.cpp">
+      <Filter>src\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\graphics_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\eps_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\pdf_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\svg_backend.cpp">
+      <Filter>src\graphics</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\solver\transcendental_solver.cpp">
       <Filter>src\solver</Filter>
@@ -760,6 +938,9 @@
       <Filter>src\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\symbolic\series.cpp">
+      <Filter>src\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\symbolic\finite_sum_product.cpp">
       <Filter>src\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\symbolic\integration.cpp">
@@ -826,6 +1007,7 @@
   <ClCompile Include="..\..\src\linear_algebra\exact_matrix.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\modular_linear_algebra.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\decomposition.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
+  <ClCompile Include="..\..\src\linear_algebra\exact_lll.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\complex_point.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\eigen.cpp"><Filter>src\linear_algebra</Filter></ClCompile>
   <ClCompile Include="..\..\src\linear_algebra\svd.cpp"><Filter>src\linear_algebra</Filter></ClCompile>

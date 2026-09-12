@@ -122,9 +122,11 @@ void runHistoryDiagnosticTests(TestRunner& tests) {
     tests.expect(!hasWarning(warnings, "D::unevaluated"),
         "completed D does not emit an unevaluated warning");
 
-    static_cast<void>(warnings.evaluate("solve[sin[x]==0,x]"));
-    tests.expect(hasWarning(warnings, "solve::unresolved"),
-        "unresolved solve emits a warning");
+    tests.expectEqual(eval(warnings, "solve[sin[x]==0,x]"),
+        std::string{"{x == Pi k where k in Integer}"},
+        "symbolic periodic solve returns its exact integer family");
+    tests.expect(!hasWarning(warnings, "solve::unresolved"),
+        "completed symbolic periodic solve does not retain an unresolved warning");
 
     const std::size_t genericWarningsBefore = warningCount(warnings, "N::unevaluated");
     static_cast<void>(warnings.evaluate("N[x,20]"));

@@ -18,6 +18,16 @@ namespace {
     return formatting::formatExpr(session.evaluate(source));
 }
 
+[[nodiscard]] std::size_t countOccurrences(
+    std::string_view text, std::string_view needle) {
+    std::size_t count = 0;
+    for (std::size_t position = 0;
+         (position = text.find(needle, position)) != std::string_view::npos;
+         position += needle.size())
+        ++count;
+    return count;
+}
+
 
 [[nodiscard]] std::string intervalText(const solver::RealDomainInterval& interval) {
     std::string result = interval.lowerInclusive ? "[" : "(";
@@ -252,6 +262,85 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         "inverse-trigonometric infinity limit respects Radian semantics");
     tests.expectEqual(eval(session, "limit[exp[-x],x,Infinity]"), std::string{"0"},
         "affine exponential asymptotics are known");
+    tests.expectEqual(eval(session, "limit[(1+x)^(1/x),x,0]"), std::string{"E"},
+        "finite-point base-one powers use a branch-safe logarithmic normalization");
+    tests.expectEqual(eval(session, "limit[(1+2x)^(3/x),x,0]"), std::string{"exp[6]"},
+        "finite-point base-one powers preserve exact affine scale factors");
+    tests.expectEqual(eval(session, "limit[cos[x]^(1/x^2),x,0]"), std::string{"exp[-1/2]"},
+        "finite-point base-one powers close after a second-order logarithmic limit");
+    tests.expectEqual(eval(session, "limit[x*(sqrt[x^2+1]-x),x,Infinity]"),
+        std::string{"1/2"},
+        "nested quadratic-radical cancellation is rationalized before multiplication");
+    tests.expectEqual(eval(session, "limit[sqrt[x^2]-x,x,Infinity]"),
+        std::string{"0"},
+        "an exact-square principal radical uses its eventual positive-infinity sign");
+    tests.expectEqual(eval(session, "limit[(sqrt[x^2+x]-x)/(1/x),x,Infinity]"),
+        std::string{"Infinity"},
+        "a vanishing radical difference divided by a vanishing reciprocal keeps its growth rate");
+    tests.expectEqual(eval(session, "limit[sqrt[x^2+1],x,-Infinity]"),
+        std::string{"Infinity"},
+        "principal quadratic radicals remain positive at negative infinity");
+    tests.expectEqual(eval(session, "limit[x/sqrt[x^2+1],x,-Infinity]"),
+        std::string{"-1"},
+        "quadratic-radical ratios retain the sign of the approach direction");
+    tests.expectEqual(eval(session, "limit[exp[x]/x^10,x,Infinity]"),
+        std::string{"Infinity"},
+        "l'Hopital proves that exponential growth dominates a polynomial");
+    tests.expectEqual(eval(session, "limit[x^10/exp[x],x,Infinity]"),
+        std::string{"0"},
+        "l'Hopital proves that a polynomial divided by an exponential vanishes");
+    tests.expectEqual(eval(session, "limit[x^10*exp[-x],x,Infinity]"),
+        std::string{"0"},
+        "exponential decay dominates polynomial growth in product form");
+    tests.expectEqual(eval(session, "limit[x^9*exp[x],x,-Infinity]"),
+        std::string{"0"},
+        "product-form exponential decay is classified at negative infinity");
+    tests.expectEqual(eval(session, "limit[x^3*exp[x]*exp[-x],x,Infinity]"),
+        std::string{"Infinity"},
+        "opposite polynomial exponential factors cancel before infinity classification");
+    tests.expectEqual(eval(session, "limit[x/log[x],x,Infinity]"),
+        std::string{"Infinity"},
+        "l'Hopital classifies an infinity-over-infinity logarithmic ratio");
+    tests.expectEqual(eval(session, "limit[exp[-x^2],x,-Infinity]"),
+        std::string{"0"},
+        "polynomial exponent signs are classified exactly at negative infinity");
+    tests.expectEqual(eval(session, "limit[(2x+sin[x])/(3x+cos[x]),x,Infinity]"),
+        std::string{"2/3"},
+        "bounded trigonometric terms do not obscure an affine leading ratio");
+    tests.expectEqual(eval(session, "limit[(x+sin[x])/(x+cos[x]),x,Infinity]"),
+        std::string{"1"},
+        "matching affine growth dominates independent bounded oscillations");
+    tests.expectEqual(eval(session, "limit[1/(1+exp[-x]),x,-Infinity]"),
+        std::string{"0"},
+        "logistic decay at negative infinity is classified without speculative point evaluation");
+    tests.expectEqual(eval(session, "limit[x*log[sin[x]],x,0,1]"),
+        std::string{"0"},
+        "a vanishing positive factor dominates a local logarithmic singularity");
+    tests.expectEqual(eval(session, "limit[-sin[x],x,Infinity]"),
+        std::string{"Indeterminate"},
+        "negation preserves a proved non-existent oscillatory limit sentinel");
+    tests.expectEqual(eval(session, "limit[(1+1/x)^x,x,Infinity]"), std::string{"E"},
+        "branch-safe one-to-infinity power limit closes through logarithmic normalization");
+    tests.expectEqual(eval(session, "limit[(1+2/x)^x,x,Infinity]"), std::string{"exp[2]"},
+        "one-to-infinity power limit preserves the exact exponential constant");
+    tests.expectEqual(eval(session, "limit[(1+1/x)^(3x+2),x,Infinity]"), std::string{"exp[3]"},
+        "affine exponent one-to-infinity limit uses the logarithmic exponent limit");
+    tests.expectEqual(eval(session, "limit[(1+1/x)^(x^2),x,Infinity]"), std::string{"Infinity"},
+        "divergent logarithmic exponent of a one-to-infinity form yields positive infinity");
+    tests.expectEqual(eval(session, "limit[(1-1/x)^(x^2),x,Infinity]"), std::string{"0"},
+        "negative divergent logarithmic exponent of a one-to-infinity form yields zero");
+    tests.expectEqual(eval(session, "limit[sqrt[x^2+x]-x,x,Infinity]"), std::string{"1/2"},
+        "quadratic radical cancellation is rationalized at positive infinity");
+    tests.expectEqual(eval(session, "limit[x-sqrt[x^2-x],x,Infinity]"), std::string{"1/2"},
+        "reversed quadratic radical cancellation is rationalized at positive infinity");
+    tests.expectEqual(eval(session, "limit[sqrt[x^2+3x+2]-x,x,Infinity]"), std::string{"3/2"},
+        "quadratic radical rationalization retains the linear correction coefficient");
+    tests.expectEqual(eval(session, "limit[(sqrt[x^2+x]-x)*x,x,Infinity]"), std::string{"Infinity"},
+        "finite positive radical-cancellation limit times positive infinity keeps its exact sign");
+    tests.expectEqual(eval(session, "limit[-(sqrt[x^2+x]-x)*x,x,Infinity]"), std::string{"-Infinity"},
+        "finite negative factor times positive infinity keeps its exact sign");
+    tests.expectEqual(eval(session, "limit[sqrt[x^2-3x+2]+x,x,-Infinity]"), std::string{"3/2"},
+        "negative-infinity radical cancellation reflects to the positive-infinity kernel");
     tests.expectEqual(eval(session, "limit[sin[1/x],x,0]"), std::string{"Indeterminate"},
         "two-sided essential oscillation is reported as a proved non-existent limit");
     tests.expectEqual(eval(session, "limit[sin[1/x],x,0,1]"), std::string{"Indeterminate"},
@@ -858,6 +947,17 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "D[exp[x]*cos[x],{x,12}]"),
         std::string{"-64cos[x]exp[x]"},
         "repeated derivatives flatten exact linear combinations instead of accumulating nested product-rule terms");
+    tests.expectEqual(eval(session, "D[exp[x]*sin[x^2],{x,4}]"),
+        std::string{"((16x^4-24x^2-48x-11)sin[x^2]+(-32x^3-48x^2+8x+12)cos[x^2])exp[x]"},
+        "repeated exponential-trigonometric derivatives use the polynomial coefficient recurrence");
+    tests.expectEqual(eval(session, "D[3*exp[2x-x^2]*cos[x^2+x],{x,3}]"),
+        std::string{"((48x^3+72x^2-126x-48)cos[x^2+x]+(-48x^3+144x^2+90x-51)sin[x^2+x])exp[2x-x^2]"},
+        "the exponential-trigonometric recurrence preserves exact scalar factors and quadratic phases");
+    const std::string highOrderExpTrig = eval(session, "D[exp[x]*sin[x^2],{x,40}]");
+    tests.expect(highOrderExpTrig.find("D[") == std::string::npos
+            && countOccurrences(highOrderExpTrig, "exp[x]") == 1
+            && highOrderExpTrig.size() < 4096,
+        "high-order exponential-trigonometric derivatives stay collected instead of re-entering the product-rule performance cliff");
 
     tests.expectEqual(eval(session, "solve[ellipticF[x,0]==2,x]"), std::string{"{x == 2}"},
         "Solve consumes exact ellipticF degeneration before polynomial solving");
@@ -944,16 +1044,36 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
         std::string{"{x == root[{-3, 0, 1}, 1], x == root[{-2, 0, 1}, 1], x == root[{-2, 0, 1}, 2], x == root[{-3, 0, 1}, 2]}"},
         "Real Solve canonicalizes reducible polynomial roots to their minimal factors");
     tests.expectEqual(eval(session, "solve[x^5-x+1==0,x]"),
-        std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1, Complex], x == root[{1, -1, 0, 0, 0, 1}, 2, Complex], x == root[{1, -1, 0, 0, 0, 1}, 3, Complex], x == root[{1, -1, 0, 0, 0, 1}, 4, Complex], x == root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
-        "Complex Solve falls back to certified complex Root isolation for unresolved rational polynomials");
+        std::string{"{x == root[{1, -1, 0, 0, 0, 1}, 1, Complex], x == root[{1, -1, 0, 0, 0, 1}, 1], x == root[{1, -1, 0, 0, 0, 1}, 3, Complex], x == root[{1, -1, 0, 0, 0, 1}, 4, Complex], x == root[{1, -1, 0, 0, 0, 1}, 5, Complex]}"},
+        "Solve exposes a proven real algebraic root without losing the remaining complex roots");
     tests.expectEqual(eval(session,
         "solve[x^6-3x^5-x^4+2x^3+2x^2-2x-1==0,x]"),
-        std::string{"{x == root[{-1, -2, 2, 2, -1, -3, 1}, 1, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 2, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 3, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 4, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 5, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 6, Complex]}"},
-        "Complex Solve proves irreducibility from intersected modular factor-degree constraints");
+        std::string{"{x == root[{-1, -2, 2, 2, -1, -3, 1}, 1, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 2, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 1], x == root[{-1, -2, 2, 2, -1, -3, 1}, 4, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 5, Complex], x == root[{-1, -2, 2, 2, -1, -3, 1}, 2]}"},
+        "Solve preserves real-root identity while using modular irreducibility for the defining polynomial");
     tests.expectEqual(eval(session,
         "solve[(x^3-x-1)*(x^3+x+1)==0,x]"),
-        std::string{"{x == root[{1, 1, 0, 1}, 1, Complex], x == root[{-1, -1, 0, 1}, 1, Complex], x == root[{1, 1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 3, Complex], x == root[{1, 1, 0, 1}, 3, Complex]}"},
-        "Complex Solve batch-canonicalizes reducible all-root isolation to minimal factors");
+        std::string{"{x == root[{1, 1, 0, 1}, 1, Complex], x == root[{-1, -1, 0, 1}, 1, Complex], x == root[{1, 1, 0, 1}, 1], x == root[{-1, -1, 0, 1}, 2, Complex], x == root[{-1, -1, 0, 1}, 1], x == root[{1, 1, 0, 1}, 3, Complex]}"},
+        "Solve batch-canonicalizes reducible roots and exposes each proven real root in its minimal real domain");
+
+    kernel::KernelSession sharedIsolationSession;
+    const std::string degree64Complex = eval(
+        sharedIsolationSession, "solve[x^64-4x-1==x^2,x]");
+    const evaluation::EvaluationUsage degree64ComplexUsage =
+        sharedIsolationSession.lastEvaluationUsage();
+    tests.expect(countOccurrences(degree64Complex, "root[") == 64
+            && countOccurrences(degree64Complex, ", Complex]") == 62,
+        "high-degree Solve exposes exactly the two certified real roots without discarding complex roots");
+
+    const std::string degree64Real = eval(
+        sharedIsolationSession, "solve[x^64-4x-1==x^2,x,Real]");
+    const evaluation::EvaluationUsage degree64RealUsage =
+        sharedIsolationSession.lastEvaluationUsage();
+    tests.expect(countOccurrences(degree64Real, "root[") == 2
+            && degree64Real.find(", Complex]") == std::string::npos,
+        "high-degree Real Solve filters the shared isolated root set to its two real roots");
+    tests.expectEqual(
+        degree64RealUsage.algebraicRefinements, degree64ComplexUsage.algebraicRefinements,
+        "high-degree Real Solve does not repeat algebraic root isolation after the Complex path");
     tests.expectEqual(eval(session, "N[root[{1,0,1},2,Complex],30]"),
         std::string{"1.0I"},
         "complex Root refinement certifies an exact imaginary algebraic root");
@@ -1068,6 +1188,12 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[sin[2x+1]==0,x,Real]"),
         std::string{"{x == -(1-Pi k)/2 where k in Integer}"},
         "Solve propagates periodic targets through an exact affine argument");
+    tests.expectEqual(eval(session, "solve[sin[a*x+b]==c,x,Real]"),
+        std::string{"cases[{x == (2Pi k+asin[c]-b)/a where k in Integer if c in Real && c >= -1 && c <= 1 && a in Real && b in Real, x == (Pi+2Pi k-asin[c]-b)/a where k in Integer if c in Real && c >= -1 && c <= 1 && a in Real && b in Real} if a != 0; All if a == 0 && sin[b] == c; {} if a == 0 && sin[b] != c]"},
+        "Solve separates a symbolic affine periodic slope from its constant degeneracies");
+    tests.expectEqual(eval(session, "solve[exp[a*x+b]==c,x,Complex]"),
+        std::string{"cases[{x == (2I Pi k+log[c]-b)/a where k in Integer if c in Complex && c != 0} if a != 0; All if a == 0 && exp[b] == c; {} if a == 0 && exp[b] != c]"},
+        "Complex Solve retains symbolic affine exponential periodicity and zero-slope cases");
     tests.expectEqual(eval(session, "solve[sin[x]==1,x,Real]"),
         std::string{"{x == Pi/2+2Pi k where k in Integer}"},
         "Sine endpoint targets avoid duplicate periodic branches");

@@ -100,6 +100,19 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "integrate[1/(x^4-1),x]"),
         std::string{"-atan[x]/2+log[x-1]/4-log[x+1]/4"},
         "rational integration factors quartic denominators into exact linear/quadratic components");
+    const std::string positiveQuartic = eval(session, "integrate[1/(x^4+1),x]");
+    tests.expectEqual(positiveQuartic,
+        std::string{"(2atan[1+x sqrt[2]]-2atan[1-x sqrt[2]]+log[1+x sqrt[2]+x^2]-log[1-x sqrt[2]+x^2])/(4sqrt[2])"},
+        "positive quartic reciprocals prefer an elementary atan/log primitive over 2F1");
+    tests.expectEqual(eval(session,
+        "limit[D[(" + positiveQuartic + "),x]-1/(x^4+1),x,0]"),
+        std::string{"0"},
+        "the elementary positive-quartic primitive differentiates back exactly at a regular point");
+    const std::string scaledPositiveQuartic = eval(session, "integrate[3/(16x^4+1),x]");
+    tests.expect(scaledPositiveQuartic.find("atan[") != std::string::npos
+            && scaledPositiveQuartic.find("log[") != std::string::npos
+            && scaledPositiveQuartic.find("hypergeometric2F1[") == std::string::npos,
+        "positive quartic normalization handles exact coefficient scaling as one family");
     tests.expectEqual(eval(session, "integrate[1/(x^2+1)^2,x]"),
         std::string{"x/(2(x^2+1))+atan[x]/2"},
         "partial fractions integrate repeated irreducible quadratic factors by exact recurrence");
@@ -253,12 +266,83 @@ void runAdvancedIntegrationTests(TestRunner& tests) {
         "cosine-over-argument kernels close through Ci");
     tests.expectEqual(eval(session, "integrate[1/log[x],x]"), std::string{"li[x]"},
         "reciprocal-log kernels close through li");
+    tests.expectEqual(eval(session, "integrate[1/log[x]^2,x]"),
+        std::string{"-x/log[x]+li[x]"},
+        "Risch primitive reduction lowers a repeated Log denominator");
+    tests.expectEqual(eval(session, "D[integrate[3/log[x]^4,x],x]"),
+        std::string{"3/log[x]^4"},
+        "Risch primitive reduction verifies repeated normal-factor lowering end to end");
+    tests.expectEqual(eval(session, "D[integrate[1/log[2x+3]^3,x],x]"),
+        std::string{"1/log[2x+3]^3"},
+        "Risch primitive reduction retains an affine logarithmic differential");
+    tests.expectEqual(eval(session, "integrate[log[x]/(log[x]+1)^2,x]"),
+        std::string{"x/(1+log[x])"},
+        "Risch primitive rational reduction handles a generator in a repeated denominator");
+    tests.expectEqual(eval(session,
+        "integrate[(4+3log[x])/(x*(2+3log[x]+log[x]^2)),x]"),
+        std::string{"log[1+log[x]]+2log[2+log[x]]"},
+        "Risch primitive rational reduction splits exact constant-coefficient factors");
+    tests.expectEqual(eval(session,
+        "D[integrate[(4+3log[x])/(x*(2+3log[x]+log[x]^2)),x],x]"),
+        std::string{"(4+3log[x])/(x*(2+log[x]^2+3log[x]))"},
+        "Risch primitive rational factor splitting differentiates back exactly");
+    tests.expectEqual(eval(session, "integrate[1/(log[x]^2+1),x]"),
+        std::string{"integrate[1/(1+log[x]^2), x]"},
+        "Risch primitive rational reduction preserves an unproved special residue");
+    tests.expectEqual(eval(session,
+        "integrate[((x-1)^2*exp[x])/(x^2+1)^2,x]"),
+        std::string{"exp[x]/(x^2+1)"},
+        "Risch exponential RDE solves a rational coefficient beyond integration-by-parts heuristics");
+    tests.expectEqual(eval(session,
+        "integrate[((x^3-x+2)*exp[x])/(x^2+1)^2,x]"),
+        std::string{"(x+1)exp[x]/(x^2+1)"},
+        "Risch exponential RDE handles a nontrivial rational numerator and repeated denominator");
+    tests.expectEqual(eval(session,
+        "integrate[-(x+1)^2/(exp[x]*(x^2+1)^2),x]"),
+        std::string{"exp[x]^(-1)/(x^2+1)"},
+        "Risch exponential RDE supports negative Laurent powers exactly");
+    tests.expectEqual(eval(session,
+        "D[integrate[((x^3-x+2)*exp[x])/(x^2+1)^2,x],x]"),
+        std::string{"(x^3-x+2)exp[x]/(x^2+1)^2"},
+        "Risch exponential RDE materialization differentiates back exactly");
+    tests.expectEqual(eval(session,
+        "integrate[log[x]*(-2*x*log[x]/(x^2+1)^2+2/(x*(x^2+1))),x]"),
+        std::string{"log[x]^2/(x^2+1)"},
+        "Risch primitive polynomial reduction closes rational coefficients coupled across Log degrees");
+    tests.expectEqual(eval(session,
+        "integrate[2*log[x]/(x*(x^2+1))-2*x*log[x]^2/(x^2+1)^2,x]"),
+        std::string{"log[x]^2/(x^2+1)"},
+        "Risch primitive reduction retries an exact whole sum after termwise integration is partial");
+    tests.expectEqual(eval(session,
+        "D[integrate[2*log[x]/(x*(x^2+1))-2*x*log[x]^2/(x^2+1)^2,x],x]"),
+        std::string{"2log[x]/(x*(x^2+1))-2x log[x]^2/(x^2+1)^2"},
+        "Risch primitive polynomial materialization differentiates back exactly");
     tests.expectEqual(eval(session, "integrate[li[x],x]"),
         std::string{"x li[x]-Ei[2log[x]]"},
         "li has a branch-safe principal antiderivative through Ei[2 Log[x]]");
     tests.expectEqual(eval(session, "integrate[x^n,x]"),
         std::string{"x^(n+1)/(n+1)"},
         "generic symbolic powers use the exact parameterized power rule");
+    tests.expectEqual(eval(session, "integrate[sin[x]^(9/5),x]"),
+        std::string{"-cos[x]hypergeometric2F1[1/2, -2/5, 3/2, cos[x]^2]"},
+        "noninteger rational sine powers use a local principal-branch 2F1 primitive");
+    tests.expectEqual(eval(session,
+        "fullSimplify[D[integrate[sin[x]^(9/5),x],x]-sin[x]^(9/5)]"),
+        std::string{"0"},
+        "the rational sine-power 2F1 primitive differentiates back exactly");
+    tests.expectEqual(eval(session, "integrate[cos[2*x+3]^(9/5),x]"),
+        std::string{"hypergeometric2F1[1/2, -2/5, 3/2, sin[2x+3]^2]sin[2x+3]/2"},
+        "rational cosine powers retain an affine argument scale");
+    tests.expectEqual(eval(session, "integrate[sin[a*x+b]^(9/5),x]"),
+        std::string{"-cos[b+a x]hypergeometric2F1[1/2, -2/5, 3/2, cos[b+a x]^2]/a"},
+        "rational sine powers accept generic nonzero symbolic affine rates");
+    tests.expectEqual(eval(session, "D[integrate[sqrt[sin[2*x+3]],x],x]"),
+        std::string{"sqrt[sin[2x+3]]"},
+        "square-root sine is covered by the same local rational-power rule");
+    tests.expectEqual(eval(session,
+        "D[integrate[sin[(2*x+3) Deg]^(1/2),x],x]"),
+        std::string{"sqrt[sin[(2x+3) Deg]]"},
+        "rational trigonometric powers preserve explicit angle-unit scaling");
     tests.expectEqual(eval(session, "integrate[x^-1,x]"), std::string{"log[x]"},
         "the explicit exponent -1 remains on the logarithmic branch");
     tests.expectEqual(eval(session, "integrate[log[log[x]],x]"),

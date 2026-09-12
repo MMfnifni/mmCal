@@ -17,6 +17,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
         return "+";
     case TokenKind::Minus:
         return "-";
+    case TokenKind::RuleArrow:
+        return "->";
     case TokenKind::Star:
         return "*";
     case TokenKind::Slash:

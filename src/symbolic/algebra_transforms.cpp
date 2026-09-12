@@ -6,11 +6,13 @@
 #include "numeric/number.hpp"
 #include "simplification/simplification_context.hpp"
 #include "simplification/simplifier.hpp"
+#include "symbolic/cyclotomic_field.hpp"
 #include "symbolic/polynomial.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -51,6 +53,26 @@ using numeric::Rational;
         || result > maximum)
         return std::nullopt;
     return result;
+}
+
+[[nodiscard]] bool containsUnevaluatedZeroPower(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!expression.isCall())
+        return false;
+
+    const auto& arguments = expression.asCall().arguments;
+    if (isHead(expression, builtins, BuiltinId::Power)
+        && arguments.size() == 2) {
+        const auto exponent = smallNonNegativeInteger(arguments[1], 0);
+        if (exponent && *exponent == 0)
+            return true;
+    }
+    for (const Expr& argument : arguments) {
+        if (containsUnevaluatedZeroPower(argument, builtins))
+            return true;
+    }
+    return false;
 }
 
 [[nodiscard]] Expr simplify(
@@ -513,7 +535,10 @@ void trimModularPolynomial(std::vector<std::uint32_t>& polynomial) {
         if (factor.exponent / degree != 0)
             factors.push_back(MonomialFactor{factor.variable, factor.exponent / degree});
     }
-    Expr atom = monomialExpr(Monomial{std::move(factors)}, builtins);
+    const Monomial rootMonomial{std::move(factors)};
+    if (rootMonomial.isOne())
+        return Expr{Number{*coefficientRoot}};
+    Expr atom = monomialExpr(rootMonomial, builtins);
     return mathematics::scaleExactExpression(*coefficientRoot, atom, builtins);
 }
 
@@ -936,6 +961,49 @@ struct ProductParts final {
     return multiplyExpr({std::move(plus), std::move(minus)}, builtins);
 }
 
+[[nodiscard]] std::optional<Expr> factorCyclotomicBinomial(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    const std::size_t degree = polynomial.degree();
+    if (degree < 2 || polynomial.coefficient(degree) != rational(1))
+        return std::nullopt;
+
+    const Rational constant = polynomial.coefficient(0);
+    if (constant != rational(-1) && constant != rational(1))
+        return std::nullopt;
+    for (std::size_t exponent = 1; exponent < degree; ++exponent)
+        if (!polynomial.coefficient(exponent).isZero())
+            return std::nullopt;
+
+    // x^n-1 = product_(d|n) Phi_d(x)
+    // x^n+1 = product_(d|2n, dがnを割らない) Phi_d(x)
+    // をそのまま使う。係数生成はexact FFTと共有し，近似rootには降ろさない。
+    if (constant == rational(1)
+        && degree > std::numeric_limits<std::size_t>::max() / 2)
+        return std::nullopt;
+    const std::size_t maximumConductor = constant == rational(-1) ? degree : 2 * degree;
+
+    std::vector<Expr> factors;
+    for (std::size_t conductor = 1; conductor <= maximumConductor; ++conductor) {
+        if (maximumConductor % conductor != 0)
+            continue;
+        if (constant == rational(1) && degree % conductor == 0)
+            continue;
+        const auto coefficients = cyclotomicPolynomialCoefficients(conductor);
+        if (!coefficients)
+            return std::nullopt;
+        factors.push_back(polynomialToExpandedExpr(
+            RationalPolynomial{*coefficients}, variable, builtins));
+    }
+
+    // Phi_4=x^2+1 や Phi_16=x^8+1 のように元から既約なら形を変えず，
+    // factorExpressionの再帰を必ず真に次数が下がる場合だけ開始する。
+    if (factors.size() < 2)
+        return std::nullopt;
+    return multiplyExpr(std::move(factors), builtins);
+}
+
 [[nodiscard]] std::optional<Expr> factorUnivariate(
     RationalPolynomial polynomial,
     const expression::Symbol& variable,
@@ -995,6 +1063,68 @@ struct ProductParts final {
     return multiplyExpr(std::move(factors), builtins);
 }
 
+[[nodiscard]] std::optional<Expr> factorGeneralRationalUnivariate(
+    const RationalPolynomial& polynomial,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    const RationalPolynomialFactorization decomposition =
+        factorRationalPolynomialOverQ(polynomial);
+    if (decomposition.factors.size() <= 1)
+        return std::nullopt;
+
+    std::vector<Expr> factors;
+    Rational scalar = decomposition.scalar;
+    for (std::size_t i = 0; i < decomposition.factors.size();) {
+        std::size_t end = i + 1;
+        while (end < decomposition.factors.size()
+            && decomposition.factors[end].coefficients()
+                == decomposition.factors[i].coefficients())
+            ++end;
+
+        const std::size_t multiplicity = end - i;
+        BigInt commonDenominator{1};
+        for (const Rational& coefficient : decomposition.factors[i].coefficients())
+            commonDenominator = numeric::lcm(
+                commonDenominator, coefficient.denominator());
+        std::vector<Rational> primitiveCoefficients;
+        primitiveCoefficients.reserve(decomposition.factors[i].coefficients().size());
+        BigInt content{0};
+        std::vector<BigInt> integerCoefficients;
+        for (const Rational& coefficient : decomposition.factors[i].coefficients()) {
+            BigInt integerCoefficient = coefficient.numerator()
+                * (commonDenominator / coefficient.denominator());
+            content = content.isZero()
+                ? integerCoefficient.abs()
+                : numeric::gcd(content, integerCoefficient.abs());
+            integerCoefficients.push_back(std::move(integerCoefficient));
+        }
+        if (content.isZero())
+            content = BigInt{1};
+        for (BigInt& coefficient : integerCoefficients) {
+            coefficient /= content;
+            primitiveCoefficients.emplace_back(coefficient);
+        }
+        const BigInt primitiveLeading = integerCoefficients.back();
+        const Rational factorScale{primitiveLeading};
+        for (std::size_t copy = 0; copy < multiplicity; ++copy)
+            scalar /= factorScale;
+
+        Expr factor = polynomialToExpandedExpr(
+            RationalPolynomial{std::move(primitiveCoefficients)}, variable, builtins);
+        if (multiplicity > 1) {
+            factor = Expr::call(
+                builtins.symbol(BuiltinId::Power),
+                {std::move(factor),
+                    Expr{Number{BigInt::fromUnsigned(multiplicity)}}});
+        }
+        factors.push_back(std::move(factor));
+        i = end;
+    }
+    if (!(scalar == rational(1)))
+        factors.insert(factors.begin(), Expr{Number{scalar}});
+    return multiplyExpr(std::move(factors), builtins);
+}
+
 [[nodiscard]] Expr collectExpressionRecursive(
     const Expr& expression,
     std::span<const expression::Symbol> variables,
@@ -1031,6 +1161,10 @@ Expr expandExpression(
     const mathematics::AngleSemantics& angles,
     AlgebraTransformOptions options) {
     const Expr expanded = expandRecursive(expression, builtins, mathematics, angles, options);
+    // 未評価のbase^0はbase=0で未定義であり，多項式の定数1へ落とすと
+    // definednessを失う。数値的に非零と確定したbase^0はsimplifierが先に1へ畳む。
+    if (containsUnevaluatedZeroPower(expanded, builtins))
+        return expanded;
     // 純粋な有理係数多項式なら多変数Polynomialを一度通して項を標準順へ揃える。
     if (const auto polynomial = toMultivariateRationalPolynomial(expanded, builtins))
         return polynomialToExpandedExpr(*polynomial, builtins);
@@ -1045,6 +1179,10 @@ Expr collectExpression(
     const mathematics::AngleSemantics& angles) {
     const Expr expanded = expandExpression(expression, builtins, mathematics, angles);
     if (variables.empty())
+        return expanded;
+    // ExpressionPolynomialも0乗を定数項として表すため，未評価のbase^0を
+    // round-tripさせず，その穴を保った式を返す。
+    if (containsUnevaluatedZeroPower(expanded, builtins))
         return expanded;
 
     // 指定順に一変数ExpressionPolynomialを再帰的に作る。各段の係数は
@@ -1071,6 +1209,10 @@ Expr factorExpression(
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
     Expr simplified = simplify(expression, builtins, mathematics, angles);
+    // factorの多項式round-tripでも未評価のbase^0を定数1へ落としてはならない。
+    // 因数分解の見栄えより，base=0に残る定義域の穴を優先して保持する。
+    if (containsUnevaluatedZeroPower(simplified, builtins))
+        return simplified;
 
     // Rational polynomialへ落ちない函数係数でも、各項に同じexact部分式が
     // 構造的に掛かっているなら安全に括り出せる。
@@ -1096,22 +1238,37 @@ Expr factorExpression(
 
     Expr core = polynomialToExpandedExpr(primitive, builtins);
     bool factoredCore = false;
+    bool recursivelyFactorCore = true;
 
-    if (const auto square = factorPerfectSquareTrinomial(primitive, builtins)) {
-        core = *square;
-        factoredCore = true;
+    const auto variables = primitive.variables();
+    if (variables.size() == 1) {
+        if (const auto univariate = toRationalPolynomial(core, variables.front(), builtins);
+            univariate && univariate->degree() > 1) {
+            // x^n+/-1は差の平方・和差の立方より先に一括分解する。先に
+            // (x^m-1)(x^(2m)+x^m+1)等へ落とすと，後者がbinomialでなくなり
+            // Phi_dの一部を取りこぼすためである。
+            if (const auto cyclotomic = factorCyclotomicBinomial(
+                *univariate, variables.front(), builtins)) {
+                core = *cyclotomic;
+                factoredCore = true;
+            }
+        }
     }
-    else if (const auto difference = factorDifferenceOfSquares(primitive, builtins)) {
-        core = *difference;
-        factoredCore = true;
-    }
-    else if (const auto cubes = factorSumOfCubes(primitive, builtins)) {
-        core = *cubes;
-        factoredCore = true;
-    }
-    else {
-        const auto variables = primitive.variables();
-        if (variables.size() == 1) {
+
+    if (!factoredCore) {
+        if (const auto square = factorPerfectSquareTrinomial(primitive, builtins)) {
+            core = *square;
+            factoredCore = true;
+        }
+        else if (const auto difference = factorDifferenceOfSquares(primitive, builtins)) {
+            core = *difference;
+            factoredCore = true;
+        }
+        else if (const auto cubes = factorSumOfCubes(primitive, builtins)) {
+            core = *cubes;
+            factoredCore = true;
+        }
+        else if (variables.size() == 1) {
             if (const auto univariate = toRationalPolynomial(core, variables.front(), builtins);
                 univariate && univariate->degree() > 1) {
                 if (const auto quadraticPower = factorQuadraticInPower(
@@ -1124,14 +1281,25 @@ Expr factorExpression(
                     core = *sparse;
                     factoredCore = true;
                 }
-                else if (const auto perfectPower = factorPerfectUnivariatePower(
-                    *univariate, variables.front(), builtins)) {
-                    core = *perfectPower;
-                    factoredCore = true;
-                }
                 else if (const auto result = factorUnivariate(
                     *univariate, variables.front(), builtins, mathematics, angles)) {
                     core = *result;
+                    factoredCore = true;
+                }
+                else if (const auto general = factorGeneralRationalUnivariate(
+                    *univariate, variables.front(), builtins)) {
+                    core = *general;
+                    factoredCore = true;
+                    // backendはbudget停止時にも証明済みpartial factorを返す。
+                    // 未解決leafを同じ既定budgetで即座に再試行しても進展せず，
+                    // 再帰cycleになるため，この呼出しで得たexact積をそのまま採用する。
+                    recursivelyFactorCore = false;
+                }
+                else if (const auto perfectPower = factorPerfectUnivariatePower(
+                    *univariate, variables.front(), builtins)) {
+                    // 一般Q[x] backendがbudget外または単一leafだった場合の
+                    // structure-specific fallbackとしてcompactな冪形を試す。
+                    core = *perfectPower;
                     factoredCore = true;
                 }
             }
@@ -1141,7 +1309,8 @@ Expr factorExpression(
     // difference of squares/cubes等で積へ分かれた後は、各因子も同じfactor engineへ
     // 再帰的に渡す。次数が下がる因子だけを辿るため、x^6-1 のような式を
     // (x-1)(x+1)(x^2+x+1)(x^2-x+1) まで段階的に分解できる。
-    if (factoredCore && isHead(core, builtins, BuiltinId::Multiply)) {
+    if (factoredCore && recursivelyFactorCore
+        && isHead(core, builtins, BuiltinId::Multiply)) {
         std::vector<Expr> recursiveFactors;
         recursiveFactors.reserve(core.asCall().arguments.size());
         for (const Expr& factor : core.asCall().arguments) {

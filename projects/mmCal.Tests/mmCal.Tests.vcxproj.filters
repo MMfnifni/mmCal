@@ -40,6 +40,9 @@
     <Filter Include="tests\symbolic">
       <UniqueIdentifier>{E13ADCC9-AEF8-4C85-A3F4-D4489F55F1F4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="tests\plot">
+      <UniqueIdentifier>{530BC3DC-9009-4D85-974C-ECFF01ABC1D0}</UniqueIdentifier>
+    </Filter>
     <Filter Include="tests\builtins">
       <UniqueIdentifier>{33BB186A-C5EC-4261-A557-F035D00DF936}</UniqueIdentifier>
     </Filter>
@@ -141,6 +144,15 @@
     <ClInclude Include="..\..\tests\solver\solution_set_tests.hpp">
       <Filter>tests\solver</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\tests\plot\plot_analysis_tests.hpp">
+      <Filter>tests\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\plot\plot_program_tests.hpp">
+      <Filter>tests\plot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\plot\plot_sampling_tests.hpp">
+      <Filter>tests\plot</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\tests\mathematics\exact_transcendental_tests.hpp">
       <Filter>tests\mathematics</Filter>
     </ClInclude>
@@ -154,6 +166,9 @@
       <Filter>tests\simplification</Filter>
     </ClInclude>
     <ClInclude Include="..\..\tests\symbolic\differentiation_tests.hpp">
+      <Filter>tests\symbolic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\tests\symbolic\risch_core_tests.hpp">
       <Filter>tests\symbolic</Filter>
     </ClInclude>
     <ClInclude Include="..\..\tests\symbolic\series_tests.hpp">
@@ -293,6 +308,15 @@
     <ClCompile Include="..\..\tests\solver\solution_set_tests.cpp">
       <Filter>tests\solver</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\tests\plot\plot_analysis_tests.cpp">
+      <Filter>tests\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\plot\plot_program_tests.cpp">
+      <Filter>tests\plot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\plot\plot_sampling_tests.cpp">
+      <Filter>tests\plot</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\tests\mathematics\exact_transcendental_tests.cpp">
       <Filter>tests\mathematics</Filter>
     </ClCompile>
@@ -306,6 +330,9 @@
       <Filter>tests\simplification</Filter>
     </ClCompile>
     <ClCompile Include="..\..\tests\symbolic\differentiation_tests.cpp">
+      <Filter>tests\symbolic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\tests\symbolic\risch_core_tests.cpp">
       <Filter>tests\symbolic</Filter>
     </ClCompile>
     <ClCompile Include="..\..\tests\symbolic\series_tests.cpp">

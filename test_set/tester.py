@@ -1,4 +1,4 @@
-# mmCal V1.5 black-box test runner.
+# mmCal black-box test runner.
 # Python 3.7+ / Windows and POSIX compatible.
 
 from __future__ import print_function
@@ -30,7 +30,7 @@ PUBLIC_ERROR_TYPES = tuple(name for name in ERROR_TYPES if name != "InternalErro
 class RunnerProtocolError(RuntimeError):
     pass
 
-# V1.5 final is ``In[n]>`` / ``Out[n]>``.  Older black-box targets used
+# Current protocol is ``In[n]>`` / ``Out[n]>``.  Older black-box targets used
 # ``In [n]>`` in some builds, so accept optional whitespace around the index.
 # This keeps the runner useful across the historical test targets as requested.
 PROMPT_RE = re.compile(r"(?:^|\n)In\s*\[\s*\d+\s*\]>[ \t]*")
@@ -429,10 +429,10 @@ def collect_test_files(arguments):
     return sorted(script_dir().glob("test*.txt"))
 
 
-RUNNER_VERSION = "V1.5 exact black-box r4"
+RUNNER_VERSION = "V1.6 exact black-box r5"
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="mmCal V1.5 black-box tests")
+    parser = argparse.ArgumentParser(description="mmCal V1.6 black-box tests")
     parser.add_argument("tests", nargs="*", help="test files or glob patterns")
     parser.add_argument("--exe", help="path to mmCal executable")
     parser.add_argument("--timeout", type=float, default=120.0, help="timeout per test file")

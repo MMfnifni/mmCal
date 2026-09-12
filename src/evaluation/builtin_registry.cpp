@@ -331,6 +331,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     // 言語・比較用head。
     fixed(builtins::names::set, BuiltinId::Set, 2, ArgumentEvaluation::HoldFirst),
     fixed(builtins::names::setDelayed, BuiltinId::SetDelayed, 2, ArgumentEvaluation::HoldAll),
+    fixed(builtins::names::rule, BuiltinId::Rule, 2, ArgumentEvaluation::HoldFirst, true),
     fixed(builtins::names::less, BuiltinId::Less, 2),
     fixed(builtins::names::lessEqual, BuiltinId::LessEqual, 2),
     fixed(builtins::names::greater, BuiltinId::Greater, 2),
@@ -348,10 +349,16 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::definitions, BuiltinId::Definitions, 0, ArgumentEvaluation::HoldAll, true),
     variadic(builtins::names::undefine, BuiltinId::Undefine, 1, ArgumentEvaluation::HoldAll, true),
     range(builtins::names::angleMode, BuiltinId::AngleMode, 0, 1, ArgumentEvaluation::All, true),
+    variadic(builtins::names::plot, BuiltinId::Plot, 2, ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
+    variadic(builtins::names::parametricPlot, BuiltinId::ParametricPlot, 2, ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
+    variadic(builtins::names::listPlot, BuiltinId::ListPlot, 1, ArgumentEvaluation::All, true),
+    variadic(builtins::names::show, BuiltinId::Show, 1, ArgumentEvaluation::HoldAll, true),
+    range(builtins::names::exportFile, BuiltinId::Export, 2, 3, ArgumentEvaluation::HoldAll, true),
     fixed(builtins::names::unitApplied, BuiltinId::UnitApplied, 2)
 };
 
 constexpr BuiltinAliasSpec defaultAliases[] = {
+    {"plot", BuiltinId::Plot},
     {"pow", BuiltinId::Power},
     {"fact", BuiltinId::Factorial},
     {"fract", BuiltinId::Frac},

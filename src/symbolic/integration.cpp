@@ -22,13 +22,20 @@
 #include "symbolic/limit.hpp"
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/risch_core.hpp"
+#include "symbolic/risch_differential_equation.hpp"
+#include "symbolic/risch_differential_reduction.hpp"
+#include "symbolic/risch_expression.hpp"
+#include "symbolic/risch_tower_recognizer.hpp"
 #include "symbolic/substitution.hpp"
 #include "symbolic/series.hpp"
+#include "symbols/symbol_table.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1169,6 +1176,84 @@ struct FactorSplit final {
         std::move(halfLinear));
 }
 
+[[nodiscard]] std::optional<Expr> tryPositiveQuarticBinomialReciprocal(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    Expr numerator = integer(1);
+    const Expr* denominator = nullptr;
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2
+        && !containsVariable(expression.asCall().arguments[0], variable)) {
+        numerator = expression.asCall().arguments[0];
+        denominator = &expression.asCall().arguments[1];
+    }
+    else if (isHead(expression, builtins, BuiltinId::Power)
+        && expression.asCall().arguments.size() == 2
+        && expression::exact::realRational(expression.asCall().arguments[1])
+            == Rational{BigInt{-1}}) {
+        denominator = &expression.asCall().arguments[0];
+    }
+    else {
+        return std::nullopt;
+    }
+
+    const auto polynomial = toRationalPolynomial(
+        *denominator, variable, builtins, PolynomialConversionOptions{4, 16});
+    if (!polynomial || polynomial->degree() != 4
+        || !polynomial->coefficient(1).isZero()
+        || !polynomial->coefficient(2).isZero()
+        || !polynomial->coefficient(3).isZero())
+        return std::nullopt;
+
+    const Rational constant = polynomial->coefficient(0);
+    const Rational leading = polynomial->coefficient(4);
+    if (!(constant > Rational{BigInt{0}})
+        || !(leading > Rational{BigInt{0}}))
+        return std::nullopt;
+
+    // a+b*x^4 = a(1+u^4), u=(b/a)^(1/4)x と正の実scaleで標準化する。
+    // 1/(1+u^4) はQ(sqrt(2))上の共役二次因子へ分け，2F1より平坦な
+    // atan/log原始函数を構成する。これは正規化可能なfamily全体へのexact ruleである。
+    Expr scale = call(builtins, BuiltinId::Sqrt, {
+        call(builtins, BuiltinId::Sqrt, {rational(leading / constant)})});
+    Expr u = multiply(builtins, mathematics, angles, {scale, Expr{variable}});
+    Expr rootTwo = call(builtins, BuiltinId::Sqrt, {integer(2)});
+    Expr rootTwoU = multiply(builtins, mathematics, angles, {rootTwo, u});
+    Expr oneMinus = subtract(
+        builtins, mathematics, angles, integer(1), rootTwoU);
+    Expr onePlus = add(
+        builtins, mathematics, angles, {integer(1), rootTwoU});
+    Expr uSquared = power(builtins, mathematics, angles, u, integer(2));
+    Expr quadraticMinus = add(builtins, mathematics, angles, {
+        uSquared,
+        negate(builtins, mathematics, angles, rootTwoU),
+        integer(1)});
+    Expr quadraticPlus = add(builtins, mathematics, angles, {
+        uSquared, rootTwoU, integer(1)});
+
+    const Expr radianScale = radiansPerInverseAngleUnit(
+        builtins, mathematics, angles);
+    Expr bracket = add(builtins, mathematics, angles, {
+        multiply(builtins, mathematics, angles, {
+            integer(-2), radianScale,
+            call(builtins, BuiltinId::Atan, {std::move(oneMinus)})}),
+        multiply(builtins, mathematics, angles, {
+            integer(2), radianScale,
+            call(builtins, BuiltinId::Atan, {std::move(onePlus)})}),
+        negate(builtins, mathematics, angles,
+            call(builtins, BuiltinId::Log, {std::move(quadraticMinus)})),
+        call(builtins, BuiltinId::Log, {std::move(quadraticPlus)})});
+    Expr normalization = multiply(builtins, mathematics, angles, {
+        integer(4), rootTwo, rational(constant), scale});
+    return divide(builtins, mathematics, angles,
+        multiply(builtins, mathematics, angles, {
+            std::move(numerator), std::move(bracket)}),
+        std::move(normalization));
+}
+
 struct PolynomialDivision final {
     RationalPolynomial quotient;
     RationalPolynomial remainder;
@@ -1697,58 +1782,6 @@ struct PartialFractionBasis final {
     return add(builtins, mathematics, angles, std::move(terms));
 }
 
-struct HermitePowerReduction final {
-    std::vector<std::pair<RationalPolynomial, std::size_t>> rationalTerms;
-    RationalPolynomial squareFreeNumerator;
-};
-
-[[nodiscard]] std::optional<HermitePowerReduction> hermiteReduceSquareFreePower(
-    RationalPolynomial numerator,
-    const RationalPolynomial& squareFreeFactor,
-    std::size_t denominatorPower,
-    const RationalPolynomial& inverseDerivativeModuloFactor) {
-    if (denominatorPower == 0)
-        return std::nullopt;
-
-    HermitePowerReduction result;
-    const RationalPolynomial derivative = differentiatePolynomial(squareFreeFactor);
-    while (denominatorPower > 1 && !numerator.isZero()) {
-        // 旧degree境界の代わりに，各Hermite stepの多項式作業量を要求budgetへ課す。
-        const std::size_t width = squareFreeFactor.degree() + 1;
-        evaluation::consumeEvaluationBudget(
-            evaluation::EvaluationResource::IntegrationCandidate, width * width);
-
-        PolynomialDivision inverseProduct = dividePolynomials(
-            multiplyPolynomials(numerator, inverseDerivativeModuloFactor),
-            squareFreeFactor);
-        const Rational scale = -Rational{BigInt{1}}
-            / Rational{BigInt::fromUnsigned(denominatorPower - 1)};
-        RationalPolynomial correction = scalePolynomial(inverseProduct.remainder, scale);
-
-        // d(B/f^(k-1)) = (B' f - (k-1) B f') / f^k.
-        // B = -A (f')^-1/(k-1) mod f と取ると残差はexactにfで割れ，
-        // 分母冪を1段下げられる。数値rootや因数分解は使わないHermite stepである。
-        RationalPolynomial residual = addPolynomials(numerator,
-            addPolynomials(
-                negatePolynomial(multiplyPolynomials(
-                    differentiatePolynomial(correction), squareFreeFactor)),
-                scalePolynomial(
-                    multiplyPolynomials(correction, derivative),
-                    Rational{BigInt::fromUnsigned(denominatorPower - 1)})));
-        PolynomialDivision lowered = dividePolynomials(residual, squareFreeFactor);
-        if (!lowered.remainder.isZero())
-            return std::nullopt;
-
-        if (!correction.isZero())
-            result.rationalTerms.emplace_back(
-                std::move(correction), denominatorPower - 1);
-        numerator = std::move(lowered.quotient);
-        --denominatorPower;
-    }
-    result.squareFreeNumerator = std::move(numerator);
-    return result;
-}
-
 [[nodiscard]] std::optional<Expr> integrateSquareFreeAlgebraicLog(
     const RationalPolynomial& numerator,
     const RationalPolynomial& denominator,
@@ -1772,17 +1805,32 @@ struct HermitePowerReduction final {
     if (polynomialGcdMonic(denominator, derivative).degree() != 0)
         return std::nullopt;
 
-    auto roots = ComplexAlgebraicNumber::isolateAll(denominator.coefficients());
-    if (!roots || roots->size() != denominator.degree())
-        return std::nullopt;
-    if (auto canonical = ComplexAlgebraicNumber::canonicalizeAll(*roots))
-        roots = std::move(canonical);
-
     // reducedなsquare-free有理函数では numerator と denominator は互いに素であり，
     // denominatorの各rootで留数分子が0になることはない。各rootごとに
     // AlgebraicNumberを四則演算のたび再canonicalizeせず，同じRoot上のexact式を保持する。
     if (polynomialGcdMonic(numerator, denominator).degree() != 0)
         return std::nullopt;
+
+    // LRTは等しい留数をresidue polynomialごとにまとめる。公開Exprへexactに
+    // materializeできたときだけ採用し，budget超過・非対応時は従来のpole別Rootへ戻す。
+    risch::RischOptions lrtOptions;
+    lrtOptions.maximumLrtDegree = 8;
+    lrtOptions.maximumResidueDegree = 16;
+    const auto lrt = risch::lazardRiobooTrager(
+        risch::RationalFunction{numerator, denominator}, lrtOptions);
+    if (lrt) {
+        const auto materialized = risch::materializeLrtLogarithms(
+            risch::RationalFunction{numerator, denominator},
+            *lrt.value, variable, builtins, mathematics, angles, lrtOptions);
+        if (materialized)
+            return *materialized.value;
+    }
+
+    auto roots = ComplexAlgebraicNumber::isolateAll(denominator.coefficients());
+    if (!roots || roots->size() != denominator.degree())
+        return std::nullopt;
+    if (auto canonical = ComplexAlgebraicNumber::canonicalizeAll(*roots))
+        roots = std::move(canonical);
 
     const auto polynomialAtRootExpr = [&](const RationalPolynomial& polynomial,
                                            const Expr& rootExpr) {
@@ -1938,20 +1986,25 @@ struct HermitePowerReduction final {
     if (!inverseDerivative)
         return false;
 
-    const auto reduced = hermiteReduceSquareFreePower(
+    const std::size_t hermiteWidth = factor.degree() + 1;
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate,
+        (multiplicity - 1) * hermiteWidth * hermiteWidth);
+    const auto reduced = risch::hermiteReduceSquareFreePower(
         std::move(numerator), factor, multiplicity, *inverseDerivative);
     if (!reduced)
         return false;
     std::vector<RationalPolynomial> rationalNumerators(
         multiplicity, RationalPolynomial{});
-    for (const auto& [rationalNumerator, denominatorPower] : reduced->rationalTerms) {
+    for (const auto& [rationalNumerator, denominatorPower]
+         : reduced.value->rationalTerms) {
         if (denominatorPower == 0 || denominatorPower >= rationalNumerators.size())
             return false;
         rationalNumerators[denominatorPower] = addPolynomials(
             rationalNumerators[denominatorPower], rationalNumerator);
     }
     return appendHermitePrimitiveTerms(
-        primitiveTerms, rationalNumerators, reduced->squareFreeNumerator,
+        primitiveTerms, rationalNumerators, reduced.value->squareFreeNumerator,
         factor, variable, builtins, mathematics, angles);
 }
 
@@ -2176,13 +2229,18 @@ struct HermitePowerReduction final {
                 continue;
             }
 
-            const auto reduced = hermiteReduceSquareFreePower(
+            const std::size_t hermiteWidth = factor.polynomial.degree() + 1;
+            evaluation::consumeEvaluationBudget(
+                evaluation::EvaluationResource::IntegrationCandidate,
+                (k - 1) * hermiteWidth * hermiteWidth);
+            const auto reduced = risch::hermiteReduceSquareFreePower(
                 partialNumerator, factor.polynomial, k, *inverseDerivative);
             if (!reduced)
                 return std::nullopt;
             squareFreeNumerator = addPolynomials(
-                squareFreeNumerator, reduced->squareFreeNumerator);
-            for (const auto& [rationalNumerator, denominatorPower] : reduced->rationalTerms) {
+                squareFreeNumerator, reduced.value->squareFreeNumerator);
+            for (const auto& [rationalNumerator, denominatorPower]
+                 : reduced.value->rationalTerms) {
                 if (denominatorPower == 0 || denominatorPower >= rationalNumerators.size())
                     return std::nullopt;
                 rationalNumerators[denominatorPower] = addPolynomials(
@@ -3123,6 +3181,73 @@ struct EllipticTrigKernel final {
 
     return multiply(builtins, mathematics, angles, {
         std::move(inverseScale), *primitives[static_cast<std::size_t>(*order)]});
+}
+
+
+[[nodiscard]] std::optional<Expr> integrateAffineTrigRationalPower2F1(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const Expr* base = nullptr;
+    std::optional<Rational> exponent;
+    if (isHead(expression, builtins, BuiltinId::Sqrt)
+        && expression.asCall().arguments.size() == 1) {
+        base = &expression.asCall().arguments[0];
+        exponent = Rational{BigInt{1}, BigInt{2}};
+    }
+    else if (isHead(expression, builtins, BuiltinId::Power)
+        && expression.asCall().arguments.size() == 2) {
+        const auto& arguments = expression.asCall().arguments;
+        base = &arguments[0];
+        exponent = expression::exact::realRational(arguments[1]);
+    }
+    if (!base || !exponent || exponent->isInteger()
+        || !base->isCall() || base->asCall().arguments.size() != 1)
+        return std::nullopt;
+
+    const auto* definition = builtins.find(base->asCall().head);
+    if (!definition
+        || (definition->id != BuiltinId::Sin && definition->id != BuiltinId::Cos))
+        return std::nullopt;
+
+    const Expr& sourceArgument = base->asCall().arguments[0];
+    TrigArgument info = trigArgument(sourceArgument, builtins, mathematics, angles);
+    Expr du = simplify(
+        differentiateExpression(info.argument, variable, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+    // 記号aを含むa*x+bも一般位置a!=0として扱う。a=0という退化値ではなく，
+    // xへの依存が残る非affine argumentとexact zeroだけを拒否する。
+    if (containsVariable(du, variable) || isZero(du))
+        return std::nullopt;
+
+    const std::size_t exponentBits = exponent->numerator().bitLength()
+        + exponent->denominator().bitLength();
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate, exponentBits + 1);
+
+    const Rational parameter =
+        (Rational{BigInt{1}} - *exponent) / Rational{BigInt{2}};
+    const BuiltinId companionId = definition->id == BuiltinId::Sin
+        ? BuiltinId::Cos : BuiltinId::Sin;
+    Expr companion = call(builtins, companionId, {sourceArgument});
+    Expr hypergeometric = call(builtins, BuiltinId::Hypergeometric2F1, {
+        rational(Rational{BigInt{1}, BigInt{2}}),
+        rational(parameter),
+        rational(Rational{BigInt{3}, BigInt{2}}),
+        power(builtins, mathematics, angles, companion, integer(2))});
+    Expr primitive = multiply(
+        builtins, mathematics, angles, {std::move(companion), std::move(hypergeometric)});
+    if (definition->id == BuiltinId::Sin)
+        primitive = negate(builtins, mathematics, angles, std::move(primitive));
+
+    // この2F1表示はsin(theta)またはcos(theta)の符号が一定である連結領域上の
+    // principal-branch primitiveである。sqrt[sin(theta)]も同じ局所枝規則に含める。
+    Expr inverseRate = divide(
+        builtins, mathematics, angles, std::move(info.inverseScale), std::move(du));
+    return multiply(builtins, mathematics, angles, {
+        std::move(inverseRate), std::move(primitive)});
 }
 
 
@@ -4646,6 +4771,773 @@ struct RationalFunctionForm final {
     return std::nullopt;
 }
 
+struct InverseLogPowerKernel final {
+    Rational coefficient;
+    Expr argument;
+    std::size_t power = 0;
+};
+
+[[nodiscard]] std::optional<std::size_t> positiveBoundedInteger(
+    const Expr& expression,
+    std::size_t maximum) {
+    const auto rationalValue = expression::exact::realRational(expression);
+    if (!rationalValue || !rationalValue->isInteger()
+        || rationalValue->numerator().isNegative())
+        return std::nullopt;
+    const auto value = numeric::tryToUint64(rationalValue->numerator());
+    if (!value || *value == 0 || *value > maximum)
+        return std::nullopt;
+    return static_cast<std::size_t>(*value);
+}
+
+[[nodiscard]] std::optional<InverseLogPowerKernel> inverseLogPowerKernel(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    constexpr std::size_t maximumPower = 32;
+    if (isHead(expression, builtins, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2) {
+        const auto coefficient = expression::exact::realRational(
+            expression.asCall().arguments[0]);
+        const Expr& denominator = expression.asCall().arguments[1];
+        if (!coefficient || !isHead(denominator, builtins, BuiltinId::Power)
+            || denominator.asCall().arguments.size() != 2)
+            return std::nullopt;
+        const Expr& logarithm = denominator.asCall().arguments[0];
+        const auto power = positiveBoundedInteger(
+            denominator.asCall().arguments[1], maximumPower);
+        if (!power || *power < 2
+            || !isHead(logarithm, builtins, BuiltinId::Log)
+            || logarithm.asCall().arguments.size() != 1)
+            return std::nullopt;
+        return InverseLogPowerKernel{
+            *coefficient, logarithm.asCall().arguments[0], *power};
+    }
+    if (!isHead(expression, builtins, BuiltinId::Power)
+        || expression.asCall().arguments.size() != 2)
+        return std::nullopt;
+    const Expr& logarithm = expression.asCall().arguments[0];
+    const auto exponent = expression::exact::realRational(
+        expression.asCall().arguments[1]);
+    if (!exponent || !exponent->isInteger()
+        || !exponent->numerator().isNegative()
+        || !isHead(logarithm, builtins, BuiltinId::Log)
+        || logarithm.asCall().arguments.size() != 1)
+        return std::nullopt;
+    const auto magnitude = numeric::tryToUint64(-exponent->numerator());
+    if (!magnitude || *magnitude < 2 || *magnitude > maximumPower)
+        return std::nullopt;
+    return InverseLogPowerKernel{
+        Rational{BigInt{1}}, logarithm.asCall().arguments[0],
+        static_cast<std::size_t>(*magnitude)};
+}
+
+[[nodiscard]] Expr rischRationalFunctionToExpr(
+    const risch::RationalFunction& value,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (value.numerator.isZero())
+        return integer(0);
+    Expr numerator = polynomialToExpandedExpr(value.numerator, variable, builtins);
+    if (value.denominator.degree() == 0
+        && value.denominator.coefficient(0) == Rational{BigInt{1}})
+        return numerator;
+    return divide(
+        builtins, mathematics, angles, std::move(numerator),
+        polynomialToExpandedExpr(value.denominator, variable, builtins));
+}
+
+[[nodiscard]] Expr differentialPolynomialToExpr(
+    const risch::DifferentialPolynomial& polynomial,
+    const Expr& generator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    Expr value = rischRationalFunctionToExpr(
+        polynomial.coefficient(polynomial.degree()), variable,
+        builtins, mathematics, angles);
+    for (std::size_t exponent = polynomial.degree(); exponent != 0; --exponent)
+        value = add(builtins, mathematics, angles, {
+            multiply(builtins, mathematics, angles, {value, generator}),
+            rischRationalFunctionToExpr(
+                polynomial.coefficient(exponent - 1), variable,
+                builtins, mathematics, angles)});
+    return value;
+}
+
+using RischLaurentMap = std::map<std::int64_t, risch::RationalFunction>;
+
+constexpr std::int64_t maximumRischLaurentExponent = 64;
+constexpr std::size_t maximumRischLaurentTerms = 128;
+
+[[nodiscard]] risch::RationalFunction rischConstantFunction(
+    const Rational& value) {
+    return risch::RationalFunction{
+        RationalPolynomial{{value}},
+        RationalPolynomial{{Rational{BigInt{1}}}}};
+}
+
+[[nodiscard]] bool rischFunctionBudgetOkay(
+    const risch::RationalFunction& value) {
+    return !value.denominator.isZero()
+        && value.numerator.degree() <= 64
+        && value.denominator.degree() <= 64
+        && value.numerator.coefficients().size() <= 128
+        && value.denominator.coefficients().size() <= 128;
+}
+
+[[nodiscard]] std::optional<risch::RationalFunction>
+toRischRationalFunction(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    const auto form = toRationalFunctionForm(expression, variable, builtins);
+    if (!form || form->denominator.isZero())
+        return std::nullopt;
+    risch::RationalFunction result = risch::canonicalizeRationalFunction(
+        risch::RationalFunction{form->numerator, form->denominator});
+    if (!rischFunctionBudgetOkay(result))
+        return std::nullopt;
+    return result;
+}
+
+void normalizeRischLaurent(RischLaurentMap& value) {
+    for (auto iterator = value.begin(); iterator != value.end();) {
+        iterator->second = risch::canonicalizeRationalFunction(
+            std::move(iterator->second));
+        if (iterator->second.numerator.isZero())
+            iterator = value.erase(iterator);
+        else
+            ++iterator;
+    }
+}
+
+[[nodiscard]] bool rischLaurentBudgetOkay(const RischLaurentMap& value) {
+    if (value.size() > maximumRischLaurentTerms)
+        return false;
+    for (const auto& [exponent, coefficient] : value)
+        if (exponent < -maximumRischLaurentExponent
+            || exponent > maximumRischLaurentExponent
+            || !rischFunctionBudgetOkay(coefficient))
+            return false;
+    return true;
+}
+
+[[nodiscard]] std::optional<RischLaurentMap> addRischLaurent(
+    RischLaurentMap lhs,
+    const RischLaurentMap& rhs,
+    bool subtractRight = false) {
+    for (const auto& [exponent, coefficient] : rhs) {
+        const risch::RationalFunction signedCoefficient = subtractRight
+            ? risch::subtractRationalFunctionsExact(
+                rischConstantFunction(Rational{BigInt{0}}), coefficient)
+            : coefficient;
+        auto [iterator, inserted] = lhs.try_emplace(
+            exponent, signedCoefficient);
+        if (!inserted)
+            iterator->second = risch::addRationalFunctionsExact(
+                iterator->second, signedCoefficient);
+    }
+    normalizeRischLaurent(lhs);
+    if (!rischLaurentBudgetOkay(lhs))
+        return std::nullopt;
+    return lhs;
+}
+
+[[nodiscard]] std::optional<RischLaurentMap> multiplyRischLaurent(
+    const RischLaurentMap& lhs,
+    const RischLaurentMap& rhs) {
+    if (lhs.empty() || rhs.empty())
+        return RischLaurentMap{};
+    if (lhs.size() > maximumRischLaurentTerms / rhs.size())
+        return std::nullopt;
+    RischLaurentMap result;
+    for (const auto& [leftExponent, leftCoefficient] : lhs) {
+        for (const auto& [rightExponent, rightCoefficient] : rhs) {
+            const std::int64_t exponent = leftExponent + rightExponent;
+            if (exponent < -maximumRischLaurentExponent
+                || exponent > maximumRischLaurentExponent)
+                return std::nullopt;
+            const risch::RationalFunction product =
+                risch::multiplyRationalFunctionsExact(
+                    leftCoefficient, rightCoefficient);
+            auto [iterator, inserted] = result.try_emplace(exponent, product);
+            if (!inserted)
+                iterator->second = risch::addRationalFunctionsExact(
+                    iterator->second, product);
+        }
+    }
+    normalizeRischLaurent(result);
+    if (!rischLaurentBudgetOkay(result))
+        return std::nullopt;
+    return result;
+}
+
+[[nodiscard]] std::optional<RischLaurentMap> powerRischLaurent(
+    RischLaurentMap base,
+    const BigInt& exponent) {
+    const BigInt magnitudeInteger = exponent.isNegative() ? -exponent : exponent;
+    const auto magnitude = numeric::tryToUint64(magnitudeInteger);
+    if (!magnitude || *magnitude > 32)
+        return std::nullopt;
+    RischLaurentMap result{{
+        0, rischConstantFunction(Rational{BigInt{1}})}};
+    std::uint64_t remaining = *magnitude;
+    while (remaining != 0) {
+        if ((remaining & 1U) != 0) {
+            auto product = multiplyRischLaurent(result, base);
+            if (!product)
+                return std::nullopt;
+            result = std::move(*product);
+        }
+        remaining >>= 1U;
+        if (remaining != 0) {
+            auto square = multiplyRischLaurent(base, base);
+            if (!square)
+                return std::nullopt;
+            base = std::move(*square);
+        }
+    }
+    if (!exponent.isNegative())
+        return result;
+    if (result.size() != 1 || result.begin()->second.numerator.isZero())
+        return std::nullopt;
+    const auto inverse = risch::divideRationalFunctionsExact(
+        rischConstantFunction(Rational{BigInt{1}}), result.begin()->second);
+    if (!inverse)
+        return std::nullopt;
+    const std::int64_t inverseExponent = -result.begin()->first;
+    if (inverseExponent < -maximumRischLaurentExponent
+        || inverseExponent > maximumRischLaurentExponent)
+        return std::nullopt;
+    return RischLaurentMap{{inverseExponent, *inverse}};
+}
+
+[[nodiscard]] std::optional<RischLaurentMap> parseRischLaurent(
+    const Expr& expression,
+    const expression::Symbol& generator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    std::size_t depth = 0) {
+    if (depth > 128)
+        return std::nullopt;
+    if (!containsSymbol(expression, generator)) {
+        const auto coefficient = toRischRationalFunction(
+            expression, variable, builtins);
+        if (!coefficient)
+            return std::nullopt;
+        if (coefficient->numerator.isZero())
+            return RischLaurentMap{};
+        return RischLaurentMap{{0, *coefficient}};
+    }
+    if (expression.isSymbol()
+        && expression.asSymbol().sameIdentity(generator))
+        return RischLaurentMap{{
+            1, rischConstantFunction(Rational{BigInt{1}})}};
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    if (definition->id == BuiltinId::Negate && arguments.size() == 1) {
+        auto inner = parseRischLaurent(
+            arguments[0], generator, variable, builtins, depth + 1);
+        if (!inner)
+            return std::nullopt;
+        return addRischLaurent({}, *inner, true);
+    }
+    if (definition->id == BuiltinId::Add
+        || definition->id == BuiltinId::Multiply) {
+        RischLaurentMap accumulated;
+        if (definition->id == BuiltinId::Multiply)
+            accumulated.emplace(
+                0, rischConstantFunction(Rational{BigInt{1}}));
+        for (const Expr& argument : arguments) {
+            auto part = parseRischLaurent(
+                argument, generator, variable, builtins, depth + 1);
+            if (!part)
+                return std::nullopt;
+            auto next = definition->id == BuiltinId::Add
+                ? addRischLaurent(std::move(accumulated), *part)
+                : multiplyRischLaurent(accumulated, *part);
+            if (!next)
+                return std::nullopt;
+            accumulated = std::move(*next);
+        }
+        return accumulated;
+    }
+    if ((definition->id == BuiltinId::Subtract
+            || definition->id == BuiltinId::Divide)
+        && arguments.size() == 2) {
+        auto lhs = parseRischLaurent(
+            arguments[0], generator, variable, builtins, depth + 1);
+        auto rhs = parseRischLaurent(
+            arguments[1], generator, variable, builtins, depth + 1);
+        if (!lhs || !rhs)
+            return std::nullopt;
+        if (definition->id == BuiltinId::Subtract)
+            return addRischLaurent(std::move(*lhs), *rhs, true);
+        if (rhs->size() != 1 || rhs->begin()->second.numerator.isZero())
+            return std::nullopt;
+        const auto inverseCoefficient = risch::divideRationalFunctionsExact(
+            rischConstantFunction(Rational{BigInt{1}}),
+            rhs->begin()->second);
+        if (!inverseCoefficient)
+            return std::nullopt;
+        const std::int64_t inverseExponent = -rhs->begin()->first;
+        if (inverseExponent < -maximumRischLaurentExponent
+            || inverseExponent > maximumRischLaurentExponent)
+            return std::nullopt;
+        return multiplyRischLaurent(
+            *lhs, RischLaurentMap{{inverseExponent, *inverseCoefficient}});
+    }
+    if (definition->id == BuiltinId::Power && arguments.size() == 2) {
+        auto base = parseRischLaurent(
+            arguments[0], generator, variable, builtins, depth + 1);
+        const auto exponent = expression::exact::realRational(arguments[1]);
+        if (!base || !exponent || !exponent->isInteger())
+            return std::nullopt;
+        return powerRischLaurent(std::move(*base), exponent->numerator());
+    }
+    return std::nullopt;
+}
+
+struct RischPrimitiveFraction final {
+    RischLaurentMap numerator;
+    RischLaurentMap denominator{{
+        0, rischConstantFunction(Rational{BigInt{1}})}};
+};
+
+[[nodiscard]] bool rischPolynomialMapOkay(const RischLaurentMap& value) {
+    return std::ranges::all_of(value, [](const auto& term) {
+        return term.first >= 0;
+    }) && rischLaurentBudgetOkay(value);
+}
+
+[[nodiscard]] std::optional<RischLaurentMap> powerRischPolynomial(
+    RischLaurentMap base,
+    std::uint64_t exponent) {
+    RischLaurentMap result{{
+        0, rischConstantFunction(Rational{BigInt{1}})}};
+    while (exponent != 0) {
+        if ((exponent & 1U) != 0) {
+            auto product = multiplyRischLaurent(result, base);
+            if (!product || !rischPolynomialMapOkay(*product))
+                return std::nullopt;
+            result = std::move(*product);
+        }
+        exponent >>= 1U;
+        if (exponent != 0) {
+            auto square = multiplyRischLaurent(base, base);
+            if (!square || !rischPolynomialMapOkay(*square))
+                return std::nullopt;
+            base = std::move(*square);
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<RischPrimitiveFraction> addRischPrimitiveFractions(
+    const RischPrimitiveFraction& lhs,
+    const RischPrimitiveFraction& rhs,
+    bool subtractRight = false) {
+    auto leftNumerator = multiplyRischLaurent(
+        lhs.numerator, rhs.denominator);
+    auto rightNumerator = multiplyRischLaurent(
+        rhs.numerator, lhs.denominator);
+    auto denominator = multiplyRischLaurent(
+        lhs.denominator, rhs.denominator);
+    if (!leftNumerator || !rightNumerator || !denominator)
+        return std::nullopt;
+    auto numerator = addRischLaurent(
+        std::move(*leftNumerator), *rightNumerator, subtractRight);
+    if (!numerator || !rischPolynomialMapOkay(*numerator)
+        || !rischPolynomialMapOkay(*denominator)
+        || denominator->empty())
+        return std::nullopt;
+    return RischPrimitiveFraction{
+        std::move(*numerator), std::move(*denominator)};
+}
+
+[[nodiscard]] std::optional<RischPrimitiveFraction>
+multiplyRischPrimitiveFractions(
+    const RischPrimitiveFraction& lhs,
+    const RischPrimitiveFraction& rhs) {
+    auto numerator = multiplyRischLaurent(lhs.numerator, rhs.numerator);
+    auto denominator = multiplyRischLaurent(
+        lhs.denominator, rhs.denominator);
+    if (!numerator || !denominator
+        || !rischPolynomialMapOkay(*numerator)
+        || !rischPolynomialMapOkay(*denominator)
+        || denominator->empty())
+        return std::nullopt;
+    return RischPrimitiveFraction{
+        std::move(*numerator), std::move(*denominator)};
+}
+
+[[nodiscard]] std::optional<RischPrimitiveFraction> powerRischPrimitiveFraction(
+    const RischPrimitiveFraction& value,
+    const BigInt& exponent) {
+    const BigInt magnitudeInteger = exponent.isNegative() ? -exponent : exponent;
+    const auto magnitude = numeric::tryToUint64(magnitudeInteger);
+    if (!magnitude || *magnitude > 32)
+        return std::nullopt;
+    auto numerator = powerRischPolynomial(value.numerator, *magnitude);
+    auto denominator = powerRischPolynomial(value.denominator, *magnitude);
+    if (!numerator || !denominator)
+        return std::nullopt;
+    if (exponent.isNegative())
+        std::swap(numerator, denominator);
+    if (denominator->empty())
+        return std::nullopt;
+    return RischPrimitiveFraction{
+        std::move(*numerator), std::move(*denominator)};
+}
+
+[[nodiscard]] std::optional<RischPrimitiveFraction> parseRischPrimitiveFraction(
+    const Expr& expression,
+    const expression::Symbol& generator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    std::size_t depth = 0) {
+    if (depth > 128)
+        return std::nullopt;
+    if (!containsSymbol(expression, generator)) {
+        const auto coefficient = toRischRationalFunction(
+            expression, variable, builtins);
+        if (!coefficient)
+            return std::nullopt;
+        RischPrimitiveFraction result;
+        if (!coefficient->numerator.isZero())
+            result.numerator.emplace(0, *coefficient);
+        return result;
+    }
+    if (expression.isSymbol()
+        && expression.asSymbol().sameIdentity(generator))
+        return RischPrimitiveFraction{
+            RischLaurentMap{{
+                1, rischConstantFunction(Rational{BigInt{1}})}},
+            RischLaurentMap{{
+                0, rischConstantFunction(Rational{BigInt{1}})}}};
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    if (definition->id == BuiltinId::Negate && arguments.size() == 1) {
+        auto inner = parseRischPrimitiveFraction(
+            arguments[0], generator, variable, builtins, depth + 1);
+        if (!inner)
+            return std::nullopt;
+        auto numerator = addRischLaurent({}, inner->numerator, true);
+        if (!numerator)
+            return std::nullopt;
+        inner->numerator = std::move(*numerator);
+        return inner;
+    }
+    if (definition->id == BuiltinId::Add
+        || definition->id == BuiltinId::Multiply) {
+        RischPrimitiveFraction accumulated;
+        if (definition->id == BuiltinId::Multiply)
+            accumulated.numerator.emplace(
+                0, rischConstantFunction(Rational{BigInt{1}}));
+        for (const Expr& argument : arguments) {
+            auto part = parseRischPrimitiveFraction(
+                argument, generator, variable, builtins, depth + 1);
+            if (!part)
+                return std::nullopt;
+            auto next = definition->id == BuiltinId::Add
+                ? addRischPrimitiveFractions(accumulated, *part)
+                : multiplyRischPrimitiveFractions(accumulated, *part);
+            if (!next)
+                return std::nullopt;
+            accumulated = std::move(*next);
+        }
+        return accumulated;
+    }
+    if ((definition->id == BuiltinId::Subtract
+            || definition->id == BuiltinId::Divide)
+        && arguments.size() == 2) {
+        auto lhs = parseRischPrimitiveFraction(
+            arguments[0], generator, variable, builtins, depth + 1);
+        auto rhs = parseRischPrimitiveFraction(
+            arguments[1], generator, variable, builtins, depth + 1);
+        if (!lhs || !rhs)
+            return std::nullopt;
+        if (definition->id == BuiltinId::Subtract)
+            return addRischPrimitiveFractions(*lhs, *rhs, true);
+        if (rhs->numerator.empty())
+            return std::nullopt;
+        return multiplyRischPrimitiveFractions(
+            *lhs, RischPrimitiveFraction{
+                rhs->denominator, rhs->numerator});
+    }
+    if (definition->id == BuiltinId::Power && arguments.size() == 2) {
+        auto base = parseRischPrimitiveFraction(
+            arguments[0], generator, variable, builtins, depth + 1);
+        const auto exponent = expression::exact::realRational(arguments[1]);
+        if (!base || !exponent || !exponent->isInteger())
+            return std::nullopt;
+        return powerRischPrimitiveFraction(*base, exponent->numerator());
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] risch::DifferentialPolynomial rischMapToDifferentialPolynomial(
+    const RischLaurentMap& value) {
+    if (value.empty())
+        return {};
+    const std::size_t degree = static_cast<std::size_t>(value.rbegin()->first);
+    std::vector<risch::RationalFunction> coefficients(degree + 1);
+    for (const auto& [exponent, coefficient] : value)
+        coefficients[static_cast<std::size_t>(exponent)] = coefficient;
+    return risch::DifferentialPolynomial{std::move(coefficients)};
+}
+
+[[nodiscard]] Expr differentialRationalFunctionToExpr(
+    const risch::DifferentialRationalFunction& value,
+    const Expr& generator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    Expr numerator = differentialPolynomialToExpr(
+        value.numerator, generator, variable,
+        builtins, mathematics, angles);
+    const Expr denominator = differentialPolynomialToExpr(
+        value.denominator, generator, variable,
+        builtins, mathematics, angles);
+    if (isOne(denominator))
+        return numerator;
+    return divide(
+        builtins, mathematics, angles,
+        std::move(numerator), denominator);
+}
+
+[[nodiscard]] Expr rischLaurentToExpr(
+    const std::vector<risch::ExponentialLaurentTerm>& terms,
+    const Expr& generator,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    std::vector<Expr> expressions;
+    expressions.reserve(terms.size());
+    for (const risch::ExponentialLaurentTerm& term : terms) {
+        Expr generatorPower = term.exponent == 1
+            ? generator
+            : power(
+                builtins, mathematics, angles,
+                generator, integer(term.exponent));
+        expressions.push_back(multiply(
+            builtins, mathematics, angles, {
+                rischRationalFunctionToExpr(
+                    term.coefficient, variable,
+                    builtins, mathematics, angles),
+                std::move(generatorPower)}));
+    }
+    if (expressions.empty())
+        return integer(0);
+    return add(builtins, mathematics, angles, std::move(expressions));
+}
+
+[[nodiscard]] std::optional<Expr> integrateSingleExtensionRisch(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t depth) {
+    if (!containsHead(expression, builtins, BuiltinId::Log)
+        && !containsHead(expression, builtins, BuiltinId::Exp))
+        return std::nullopt;
+    symbols::SymbolTable temporarySymbols;
+    const auto recognized = risch::recognizeDifferentialTower(
+        expression, variable, temporarySymbols,
+        builtins, mathematics, angles);
+    if (!recognized.complete() || recognized.tower.depth() != 1)
+        return std::nullopt;
+    const risch::DifferentialExtension& extension =
+        recognized.tower.extensions().front();
+    const auto differentialCoefficient = toRischRationalFunction(
+        extension.differentialCoefficient(), variable, builtins);
+    if (!differentialCoefficient)
+        return std::nullopt;
+    risch::RischOptions options;
+    options.maximumHermiteDegree = 64;
+    options.maximumRdeDegree = 64;
+    options.maximumRdeMatrixEntries = 16384;
+    options.maximumRdeSteps = 16384;
+
+    Expr extensionPart = integer(0);
+    risch::RationalFunction lowerFieldRemainder;
+    if (extension.kind() == risch::DifferentialExtensionKind::Primitive) {
+        auto parsed = parseRischPrimitiveFraction(
+            recognized.rewrittenExpression, extension.generator(),
+            variable, builtins);
+        if (!parsed)
+            return std::nullopt;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::IntegrationCandidate,
+            std::max<std::size_t>(
+                1, parsed->numerator.size() + parsed->denominator.size()));
+        const risch::DifferentialRationalFunction input{
+            rischMapToDifferentialPolynomial(parsed->numerator),
+            rischMapToDifferentialPolynomial(parsed->denominator)};
+        const auto reduction = risch::reducePrimitiveRationalFunction(
+            input,
+            *differentialCoefficient, options);
+        if (!reduction || !reduction.value->exactVerified
+            || !reduction.value->residualPart.empty())
+            return std::nullopt;
+        std::vector<Expr> terms;
+        if (!reduction.value->polynomialPart.isZero())
+            terms.push_back(differentialPolynomialToExpr(
+                reduction.value->polynomialPart, extension.source(), variable,
+                builtins, mathematics, angles));
+        for (const risch::DifferentialRationalFunction& term
+             : reduction.value->rationalPart)
+            terms.push_back(differentialRationalFunctionToExpr(
+                term, extension.source(), variable,
+                builtins, mathematics, angles));
+        for (const risch::PrimitiveLogarithmicTerm& term
+             : reduction.value->logarithmicPart)
+            terms.push_back(multiply(
+                builtins, mathematics, angles, {
+                    rational(term.coefficient),
+                    call(builtins, BuiltinId::Log, {
+                        differentialPolynomialToExpr(
+                            term.argument, extension.source(), variable,
+                            builtins, mathematics, angles)})}));
+        extensionPart = terms.empty()
+            ? integer(0)
+            : add(builtins, mathematics, angles, std::move(terms));
+        lowerFieldRemainder = reduction.value->lowerFieldRemainder;
+    }
+    else {
+        auto parsed = parseRischLaurent(
+            recognized.rewrittenExpression, extension.generator(),
+            variable, builtins);
+        if (!parsed)
+            return std::nullopt;
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::IntegrationCandidate,
+            std::max<std::size_t>(1, parsed->size()));
+        std::vector<risch::ExponentialLaurentTerm> terms;
+        terms.reserve(parsed->size());
+        for (const auto& [exponent, coefficient] : *parsed)
+            terms.push_back({exponent, coefficient});
+        const auto reduction = risch::reduceExponentialLaurentPolynomial(
+            terms, *differentialCoefficient, options);
+        if (!reduction || !reduction.value->exactVerified)
+            return std::nullopt;
+        extensionPart = rischLaurentToExpr(
+            reduction.value->laurentPart, extension.source(), variable,
+            builtins, mathematics, angles);
+        lowerFieldRemainder = reduction.value->lowerFieldRemainder;
+    }
+
+    if (lowerFieldRemainder.numerator.isZero())
+        return simplify(
+            std::move(extensionPart), builtins, mathematics, angles);
+    Expr lowerIntegrand = rischRationalFunctionToExpr(
+        lowerFieldRemainder, variable, builtins, mathematics, angles);
+    Expr lowerPrimitive = integrateCore(
+        lowerIntegrand, variable, builtins, mathematics, angles, depth + 1);
+    if (containsHead(lowerPrimitive, builtins, BuiltinId::SymbolicIntegral))
+        return std::nullopt;
+    return simplify(
+        add(builtins, mathematics, angles, {
+            std::move(extensionPart), std::move(lowerPrimitive)}),
+        builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> integrateInverseLogPowerRisch(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto kernel = inverseLogPowerKernel(expression, builtins);
+    if (!kernel)
+        return std::nullopt;
+    if (kernel->coefficient.isZero())
+        return std::nullopt;
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::IntegrationCandidate, kernel->power);
+    const auto argument = toRationalPolynomial(
+        kernel->argument, variable, builtins,
+        PolynomialConversionOptions{2, 4});
+    if (!argument || argument->degree() != 1
+        || argument->coefficient(1).isZero())
+        return std::nullopt;
+
+    const RationalPolynomial onePolynomial{{Rational{BigInt{1}}}};
+    const auto coefficientFunction = [&](const Rational& coefficient) {
+        return risch::RationalFunction{
+            RationalPolynomial{{coefficient}}, onePolynomial};
+    };
+    const risch::DifferentialPolynomial numerator{{
+        coefficientFunction(kernel->coefficient)}};
+    const risch::DifferentialPolynomial generatorFactor{{
+        coefficientFunction(Rational{BigInt{0}}),
+        coefficientFunction(Rational{BigInt{1}})}};
+    const risch::DifferentialDerivation derivation{
+        risch::DifferentialExtensionKind::Primitive,
+        risch::RationalFunction{
+            RationalPolynomial{{argument->coefficient(1)}}, *argument}};
+    risch::RischOptions options;
+    options.maximumHermiteDegree = 8;
+    options.maximumDifferentialOperations = 8192;
+    const auto reduction = risch::hermiteReduceNormalDifferentialPower(
+        numerator, generatorFactor, kernel->power, derivation, options);
+    if (!reduction || !reduction.value->exactVerified)
+        return std::nullopt;
+
+    const Expr logarithm = call(builtins, BuiltinId::Log, {kernel->argument});
+    std::vector<Expr> terms;
+    terms.reserve(reduction.value->rationalTerms.size() + 1);
+    for (const auto& [termNumerator, denominatorPower]
+         : reduction.value->rationalTerms) {
+        Expr denominator = denominatorPower == 1
+            ? logarithm
+            : power(
+                builtins, mathematics, angles, logarithm,
+                integer(static_cast<std::int64_t>(denominatorPower)));
+        terms.push_back(divide(
+            builtins, mathematics, angles,
+            differentialPolynomialToExpr(
+                termNumerator, logarithm, variable,
+                builtins, mathematics, angles),
+            std::move(denominator)));
+    }
+
+    const risch::DifferentialPolynomial& remainder =
+        reduction.value->squareFreeNumerator;
+    if (remainder.degree() != 0)
+        return std::nullopt;
+    const risch::RationalFunction& remainderCoefficient = remainder.coefficient(0);
+    if (remainderCoefficient.numerator.degree() != 0
+        || remainderCoefficient.denominator.degree() != 0)
+        return std::nullopt;
+    const Rational liScale = remainderCoefficient.numerator.coefficient(0)
+        / remainderCoefficient.denominator.coefficient(0)
+        / argument->coefficient(1);
+    if (!liScale.isZero())
+        terms.push_back(multiply(builtins, mathematics, angles, {
+            rational(liScale),
+            call(builtins, BuiltinId::LogarithmicIntegralLi, {kernel->argument})}));
+    if (terms.empty())
+        return integer(0);
+    return add(builtins, mathematics, angles, std::move(terms));
+}
+
 [[nodiscard]] Expr integrateCore(
     const Expr& original,
     const expression::Symbol& variable,
@@ -4666,6 +5558,10 @@ struct RationalFunctionForm final {
         return divide(builtins, mathematics, angles,
             power(builtins, mathematics, angles, Expr{variable}, integer(2)), integer(2));
 
+    if (auto primitiveRisch = integrateInverseLogPowerRisch(
+            expression, variable, builtins, mathematics, angles))
+        return *primitiveRisch;
+
     // principal li(x) = Ei(Log(x)) の標準原始函数。
     // d/dx Ei(2 Log(x)) = Exp(2 Log(x))/(x Log(x)) = x/Log(x)
     // はprincipal Logの定義域で成立するため、
@@ -4685,6 +5581,10 @@ struct RationalFunctionForm final {
             multiply(builtins, mathematics, angles, {x, expression}),
             call(builtins, BuiltinId::ExponentialIntegralEi, {std::move(doubledLog)}));
     }
+
+    if (auto result = integrateAffineTrigRationalPower2F1(
+            expression, variable, builtins, mathematics, angles))
+        return *result;
 
     if (isHead(expression, builtins, BuiltinId::Power)) {
         if (auto result = integrateReciprocalTrigPower(
@@ -4740,6 +5640,9 @@ struct RationalFunctionForm final {
         if (auto rationalFactored = tryRationalFactored(
                 *normalizedRational, variable, builtins, mathematics, angles))
             return *rationalFactored;
+        if (auto quartic = tryPositiveQuarticBinomialReciprocal(
+                *normalizedRational, variable, builtins, mathematics, angles))
+            return *quartic;
     }
 
     if (auto rationalQuadratic = tryRationalLowDegree(
@@ -4748,6 +5651,9 @@ struct RationalFunctionForm final {
     if (auto rationalFactored = tryRationalFactored(
             expression, variable, builtins, mathematics, angles))
         return *rationalFactored;
+    if (auto quartic = tryPositiveQuarticBinomialReciprocal(
+            expression, variable, builtins, mathematics, angles))
+        return *quartic;
     if (auto quadratic = tryQuadraticReciprocal(
             expression, variable, builtins, mathematics, angles))
         return *quadratic;
@@ -4809,15 +5715,34 @@ struct RationalFunctionForm final {
                 // integrate[unknown,x] をその項だけに保持して部分結果を返す。
                 std::vector<Expr> terms;
                 terms.reserve(a.size());
-                for (const Expr& term : a)
-                    terms.push_back(integrateCore(
-                        term, variable, builtins, mathematics, angles, depth + 1));
+                bool containsUnresolvedTerm = false;
+                for (const Expr& term : a) {
+                    Expr primitive = integrateCore(
+                        term, variable, builtins, mathematics, angles, depth + 1);
+                    containsUnresolvedTerm = containsUnresolvedTerm
+                        || containsHead(
+                            primitive, builtins, BuiltinId::SymbolicIntegral);
+                    terms.push_back(std::move(primitive));
+                }
+                // primitive polynomialでは別次数の項がD[t]を介して結合する。
+                // 各項への線形分配が部分結果になる場合だけ，全体のtowerを解く。
+                if (containsUnresolvedTerm)
+                    if (auto towerRisch = integrateSingleExtensionRisch(
+                            expression, variable, builtins,
+                            mathematics, angles, depth))
+                        return *towerRisch;
                 return add(builtins, mathematics, angles, std::move(terms));
             }
             case BuiltinId::Subtract:
                 if (a.size() == 2) {
                     Expr lhs = integrateCore(a[0], variable, builtins, mathematics, angles, depth + 1);
                     Expr rhs = integrateCore(a[1], variable, builtins, mathematics, angles, depth + 1);
+                    if ((containsHead(lhs, builtins, BuiltinId::SymbolicIntegral)
+                            || containsHead(rhs, builtins, BuiltinId::SymbolicIntegral)))
+                        if (auto towerRisch = integrateSingleExtensionRisch(
+                                expression, variable, builtins,
+                                mathematics, angles, depth))
+                            return *towerRisch;
                     return subtract(builtins, mathematics, angles, std::move(lhs), std::move(rhs));
                 }
                 break;
@@ -5066,6 +5991,13 @@ struct RationalFunctionForm final {
     if (auto rationalAlgebraic = tryRationalFactored(
             expression, variable, builtins, mathematics, angles, true))
         return *rationalAlgebraic;
+
+    // 小さな標準形・部分積分・特殊函数を優先した後，単一primitive／exponential
+    // extensionのexact RDEをfallbackとして使う。既存のcanonical outputを変えず，
+    // heuristic候補が閉じない有理係数towerだけを補完する。
+    if (auto towerRisch = integrateSingleExtensionRisch(
+            expression, variable, builtins, mathematics, angles, depth))
+        return *towerRisch;
 
     return unresolved(original, variable, builtins);
 }

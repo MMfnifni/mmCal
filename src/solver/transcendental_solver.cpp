@@ -970,6 +970,227 @@ struct BaseLogSide final {
         std::move(branches)).withAdditionalConditions(result.conditions());
 }
 
+[[nodiscard]] std::optional<SolutionSet> solveAffinePeriodicTargets(
+    const Expr& argument,
+    std::vector<Expr> targets,
+    const Expr& constantFunctionValue,
+    const Expr& rhs,
+    const expression::Symbol& variable,
+    const expression::Symbol& parameter,
+    const mathematics::AssumptionSet& targetConditions,
+    mathematics::NumericDomain domain,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    const auto affine = symbolic::toExpressionPolynomial(
+        argument, variable, builtins, mathematics, angles);
+    if (!affine || affine->degree() != 1)
+        return std::nullopt;
+    const Expr& slope = affine->coefficient(1);
+    const Expr& intercept = affine->coefficient(0);
+
+    // 既存の数値係数経路はPolynomial solverを通し、従来のcanonical表示を保つ。
+    if (slope.isNumber() && !slope.asNumber().isZero()) {
+        std::vector<SolutionBranch> branches;
+        mathematics::AssumptionSet globalConditions;
+        for (const Expr& target : targets) {
+            auto family = solvePeriodicTarget(
+                argument, target, variable, parameter, targetConditions,
+                builtins, mathematics, angles);
+            if (!family)
+                return std::nullopt;
+            branches.insert(
+                branches.end(), family->branches().begin(), family->branches().end());
+            for (const auto& predicate : family->conditions().predicates())
+                globalConditions.add(predicate);
+        }
+        return SolutionSet::finite(
+            {SolverVariable{variable, domain}}, std::move(branches))
+            .withAdditionalConditions(globalConditions);
+    }
+
+    // a*x+bのaが記号なら、a!=0の周期族とa==0のconstant degenerationを
+    // 集合レベルのcaseへ分離する。aで割った式だけを無条件に返さない。
+    mathematics::AssumptionSet branchConditions = targetConditions;
+    if (domain == mathematics::NumericDomain::Real) {
+        const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+        for (const Expr* coefficient : std::array<const Expr*, 2>{&slope, &intercept}) {
+            const auto predicate = mathematics::elementOf(
+                *coefficient, mathematics::NumericDomain::Real);
+            if (knowledge.prove(predicate) == TruthValue::Unknown)
+                branchConditions.add(predicate);
+        }
+    }
+
+    std::vector<SolutionBranch> branches;
+    branches.reserve(targets.size());
+    for (Expr& target : targets) {
+        Expr numerator = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                std::move(target), intercept}),
+            builtins, mathematics, angles, assumptions);
+        Expr value = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Divide), {
+                std::move(numerator), slope}),
+            builtins, mathematics, angles, assumptions);
+        SolutionBranch branch;
+        branch.bindings.push_back(SolutionBinding{variable, std::move(value)});
+        branch.conditions = branchConditions;
+        branch.freeVariables.push_back(
+            SolverVariable{parameter, mathematics::NumericDomain::Integer});
+        branch.bindingsCertifiedDomain = domain;
+        branches.push_back(std::move(branch));
+    }
+
+    mathematics::AssumptionSet nonzeroSlope;
+    nonzeroSlope.add(mathematics::relation(
+        RelationKind::NotEqual, slope, integerExpr(0)));
+    mathematics::AssumptionSet constantEqual;
+    constantEqual.add(mathematics::relation(
+        RelationKind::Equal, slope, integerExpr(0)));
+    constantEqual.add(mathematics::relation(
+        RelationKind::Equal, constantFunctionValue, rhs));
+    mathematics::AssumptionSet constantUnequal;
+    constantUnequal.add(mathematics::relation(
+        RelationKind::Equal, slope, integerExpr(0)));
+    constantUnequal.add(mathematics::relation(
+        RelationKind::NotEqual, constantFunctionValue, rhs));
+
+    std::vector<SolutionCase> cases;
+    cases.push_back(SolutionCase{
+        std::move(nonzeroSlope), SolutionSetKind::Finite, std::move(branches)});
+    cases.push_back(SolutionCase{
+        std::move(constantEqual), SolutionSetKind::Universal, {}});
+    cases.push_back(SolutionCase{
+        std::move(constantUnequal), SolutionSetKind::Empty, {}});
+    return SolutionSet::conditional(
+        {SolverVariable{variable, domain}}, std::move(cases));
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveTargetWithConditions(
+    const Expr& argument,
+    const Expr& target,
+    const expression::Symbol& variable,
+    const mathematics::AssumptionSet& remainingConditions,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    Expr relation = Expr::call(
+        builtins.symbol(BuiltinId::Equal), {argument, target});
+    SolutionSet result = solveUnivariatePolynomialRelation(
+        relation, variable, builtins, mathematics, angles);
+    if (result.kind() != SolutionSetKind::Finite)
+        return std::nullopt;
+
+    std::vector<SolutionBranch> branches(result.branches().begin(), result.branches().end());
+    for (SolutionBranch& branch : branches)
+        for (const auto& predicate : remainingConditions.predicates())
+            branch.conditions.add(predicate);
+    return SolutionSet::finite(
+        std::vector<SolverVariable>{result.variables().begin(), result.variables().end()},
+        std::move(branches)).withAdditionalConditions(result.conditions());
+}
+
+struct ExactCartesianParts final {
+    Expr real;
+    Expr imaginary;
+};
+
+[[nodiscard]] std::optional<ExactCartesianParts> exactCartesianParts(
+    const Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions,
+    std::size_t depth = 0) {
+    if (depth > 64)
+        return std::nullopt;
+    if (expression.isNumber()) {
+        return ExactCartesianParts{
+            Expr{Number{expression.asNumber().realPart()}},
+            Expr{Number{expression.asNumber().imaginaryPart()}}};
+    }
+
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+    if (knowledge.prove(mathematics::elementOf(
+            expression, mathematics::NumericDomain::Real)) == TruthValue::True)
+        return ExactCartesianParts{expression, integerExpr(0)};
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+    const auto simplify = [&](Expr value) {
+        return simplifyForSolve(
+            std::move(value), builtins, mathematics, angles, assumptions);
+    };
+    const auto addParts = [&](ExactCartesianParts lhs, ExactCartesianParts rhs) {
+        return ExactCartesianParts{
+            simplify(Expr::call(builtins.symbol(BuiltinId::Add), {
+                std::move(lhs.real), std::move(rhs.real)})),
+            simplify(Expr::call(builtins.symbol(BuiltinId::Add), {
+                std::move(lhs.imaginary), std::move(rhs.imaginary)}))};
+    };
+
+    if (isHead(expression, builtins, BuiltinId::Negate) && arguments.size() == 1) {
+        auto value = exactCartesianParts(
+            arguments[0], builtins, mathematics, angles, assumptions, depth + 1);
+        if (!value)
+            return std::nullopt;
+        return ExactCartesianParts{
+            simplify(Expr::call(
+                builtins.symbol(BuiltinId::Negate), {std::move(value->real)})),
+            simplify(Expr::call(
+                builtins.symbol(BuiltinId::Negate), {std::move(value->imaginary)}))};
+    }
+    if (isHead(expression, builtins, BuiltinId::Add)) {
+        ExactCartesianParts result{integerExpr(0), integerExpr(0)};
+        for (const Expr& argument : arguments) {
+            auto value = exactCartesianParts(
+                argument, builtins, mathematics, angles, assumptions, depth + 1);
+            if (!value)
+                return std::nullopt;
+            result = addParts(std::move(result), std::move(*value));
+        }
+        return result;
+    }
+    if (isHead(expression, builtins, BuiltinId::Subtract) && arguments.size() == 2) {
+        auto lhs = exactCartesianParts(
+            arguments[0], builtins, mathematics, angles, assumptions, depth + 1);
+        auto rhs = exactCartesianParts(
+            arguments[1], builtins, mathematics, angles, assumptions, depth + 1);
+        if (!lhs || !rhs)
+            return std::nullopt;
+        rhs->real = simplify(Expr::call(
+            builtins.symbol(BuiltinId::Negate), {std::move(rhs->real)}));
+        rhs->imaginary = simplify(Expr::call(
+            builtins.symbol(BuiltinId::Negate), {std::move(rhs->imaginary)}));
+        return addParts(std::move(*lhs), std::move(*rhs));
+    }
+    if (isHead(expression, builtins, BuiltinId::Multiply)) {
+        ExactCartesianParts result{integerExpr(1), integerExpr(0)};
+        for (const Expr& argument : arguments) {
+            auto rhs = exactCartesianParts(
+                argument, builtins, mathematics, angles, assumptions, depth + 1);
+            if (!rhs)
+                return std::nullopt;
+            Expr ac = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
+                result.real, rhs->real}));
+            Expr bd = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
+                result.imaginary, rhs->imaginary}));
+            Expr ad = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
+                result.real, rhs->imaginary}));
+            Expr bc = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
+                result.imaginary, rhs->real}));
+            result.real = simplify(Expr::call(
+                builtins.symbol(BuiltinId::Subtract), {std::move(ac), std::move(bd)}));
+            result.imaginary = simplify(Expr::call(
+                builtins.symbol(BuiltinId::Add), {std::move(ad), std::move(bc)}));
+        }
+        return result;
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] mathematics::Predicate simplifyPredicate(
     const mathematics::Predicate& predicate,
     const evaluation::BuiltinRegistry& builtins,
@@ -1354,15 +1575,11 @@ std::optional<SolutionSet> solveRealPeriodicFunctionRelation(
     if (!matched)
         return std::nullopt;
 
-    // 初版はargumentが変数についてaffineで、一次係数がexact非零の場合に限定する。
-    // symbolic coefficientや非線形argumentのparameter条件を不完全に返さない。
+    // argumentは変数についてaffineに限定する。記号一次係数は下で
+    // nonzero/constant degenerationのconditional solutionへ分ける。
     const auto polynomial = symbolic::toExpressionPolynomial(
         matched->argument, variable, builtins, mathematics, angles);
     if (!polynomial || polynomial->degree() != 1)
-        return std::nullopt;
-    const Expr& linearCoefficient = polynomial->coefficient(1);
-    if (!linearCoefficient.isNumber() || !linearCoefficient.asNumber().isReal()
-        || linearCoefficient.asNumber().isZero())
         return std::nullopt;
 
     matched->rhs = simplifyForSolve(
@@ -1429,29 +1646,251 @@ std::optional<SolutionSet> solveRealPeriodicFunctionRelation(
         return std::nullopt;
     }
 
-    std::vector<SolutionBranch> combined;
-    std::vector<SolverVariable> resultVariables;
-    mathematics::AssumptionSet globalConditions;
+    std::vector<Expr> targets;
+    targets.reserve(bases.size());
     for (Expr& base : bases) {
-        const Expr target = periodicTarget(
+        targets.push_back(periodicTarget(
             std::move(base), period, parameter,
+            builtins, mathematics, angles, assumptions));
+    }
+    Expr constantFunctionValue = Expr::call(
+        matched->definition->symbol, {polynomial->coefficient(0)});
+    return solveAffinePeriodicTargets(
+        matched->argument, std::move(targets), constantFunctionValue, matched->rhs,
+        variable, parameter, *remainingConditions,
+        mathematics::NumericDomain::Real,
+        builtins, mathematics, angles, assumptions);
+}
+
+std::optional<SolutionSet> solveComplexExponentialLogRelation(
+    const Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    if (!isEqualRelation(relation, builtins))
+        return std::nullopt;
+
+    const auto& sides = relation.asCall().arguments;
+    const auto matchBothSides = [&](mathematics::FunctionId function)
+        -> std::optional<FunctionSide> {
+        auto matched = matchNamedFunctionSide(
+            sides[0], sides[1], variable, mathematics, function);
+        if (!matched)
+            matched = matchNamedFunctionSide(
+                sides[1], sides[0], variable, mathematics, function);
+        return matched;
+    };
+
+    const auto* pi = mathematics.findConstant(mathematics::ConstantId::Pi);
+    if (!pi)
+        error::throwCalcError(error::CalcErrorType::Internal, "Pi is not registered");
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+    const std::vector<SolverVariable> variables{
+        SolverVariable{variable, mathematics::NumericDomain::Complex}};
+
+    if (auto exponential = matchBothSides(mathematics::FunctionId::Exp)) {
+        exponential->rhs = simplifyForSolve(
+            exponential->rhs, builtins, mathematics, angles, assumptions);
+        mathematics::AssumptionSet remaining;
+        const auto complexPredicate = mathematics::elementOf(
+            exponential->rhs, mathematics::NumericDomain::Complex);
+        const TruthValue complexTruth = knowledge.prove(complexPredicate);
+        if (complexTruth == TruthValue::False)
+            return SolutionSet::empty(variables);
+        if (complexTruth == TruthValue::Unknown)
+            remaining.add(complexPredicate);
+
+        const auto nonzeroPredicate = mathematics::relation(
+            RelationKind::NotEqual, exponential->rhs, integerExpr(0));
+        const TruthValue nonzeroTruth = knowledge.prove(nonzeroPredicate);
+        if (nonzeroTruth == TruthValue::False)
+            return SolutionSet::empty(variables);
+        if (nonzeroTruth == TruthValue::Unknown)
+            remaining.add(nonzeroPredicate);
+
+        const expression::Symbol parameter = freshIntegerParameter(relation, variable);
+        Expr imaginaryUnit{Number::complex(
+            numeric::RealNumber{BigInt{0}}, numeric::RealNumber{BigInt{1}})};
+        Expr period = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Multiply), {
+                integerExpr(2), std::move(imaginaryUnit), Expr{pi->symbol}}),
             builtins, mathematics, angles, assumptions);
-        auto family = solvePeriodicTarget(
-            matched->argument, target, variable, parameter, *remainingConditions,
-            builtins, mathematics, angles);
-        if (!family)
+        Expr principal = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Log), {exponential->rhs}),
+            builtins, mathematics, angles, assumptions);
+        Expr target = periodicTarget(
+            std::move(principal), period, parameter,
+            builtins, mathematics, angles, assumptions);
+        const auto affine = symbolic::toExpressionPolynomial(
+            exponential->argument, variable, builtins, mathematics, angles);
+        if (!affine || affine->degree() != 1)
             return std::nullopt;
-        if (resultVariables.empty())
-            resultVariables.assign(family->variables().begin(), family->variables().end());
-        for (const auto& predicate : family->conditions().predicates())
-            globalConditions.add(predicate);
-        combined.insert(combined.end(), family->branches().begin(), family->branches().end());
+        Expr constantFunctionValue = Expr::call(
+            exponential->definition->symbol, {affine->coefficient(0)});
+        return solveAffinePeriodicTargets(
+            exponential->argument, {std::move(target)}, constantFunctionValue,
+            exponential->rhs, variable, parameter, remaining,
+            mathematics::NumericDomain::Complex,
+            builtins, mathematics, angles, assumptions);
     }
 
-    if (combined.empty())
-        return SolutionSet::empty({SolverVariable{variable, mathematics::NumericDomain::Real}});
-    return SolutionSet::finite(std::move(resultVariables), std::move(combined))
-        .withAdditionalConditions(globalConditions);
+    std::optional<FunctionSide> periodic = matchPeriodicFunctionSide(
+        sides[0], sides[1], variable, mathematics);
+    if (!periodic)
+        periodic = matchPeriodicFunctionSide(
+            sides[1], sides[0], variable, mathematics);
+    if (periodic) {
+        periodic->rhs = simplifyForSolve(
+            periodic->rhs, builtins, mathematics, angles, assumptions);
+        mathematics::AssumptionSet remaining;
+        const auto complexPredicate = mathematics::elementOf(
+            periodic->rhs, mathematics::NumericDomain::Complex);
+        const TruthValue complexTruth = knowledge.prove(complexPredicate);
+        if (complexTruth == TruthValue::False)
+            return SolutionSet::empty(variables);
+        if (complexTruth == TruthValue::Unknown)
+            remaining.add(complexPredicate);
+
+        if (periodic->definition->id == mathematics::FunctionId::Tan) {
+            Expr imaginaryUnit{Number::complex(
+                numeric::RealNumber{BigInt{0}}, numeric::RealNumber{BigInt{1}})};
+            Expr negativeImaginary = simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Negate), {imaginaryUnit}),
+                builtins, mathematics, angles, assumptions);
+            for (const Expr* omitted : std::array<const Expr*, 2>{
+                    &imaginaryUnit, &negativeImaginary}) {
+                const auto predicate = mathematics::relation(
+                    RelationKind::NotEqual, periodic->rhs, *omitted);
+                const TruthValue truth = knowledge.prove(predicate);
+                if (truth == TruthValue::False)
+                    return SolutionSet::empty(variables);
+                if (truth == TruthValue::Unknown)
+                    remaining.add(predicate);
+            }
+        }
+
+        const auto* inverse = mathematics.findFunction(
+            *periodic->definition->inverseFunction);
+        if (!inverse)
+            return std::nullopt;
+        const expression::Symbol parameter = freshIntegerParameter(relation, variable);
+        Expr period = simplifyForSolve(
+            angleValueFromTurns(
+                *periodic->definition->periodTurns, builtins, mathematics, angles),
+            builtins, mathematics, angles, assumptions);
+        const Expr inverseValue = simplifyForSolve(
+            Expr::call(inverse->symbol, {periodic->rhs}),
+            builtins, mathematics, angles, assumptions);
+        std::vector<Expr> bases;
+        switch (periodic->definition->id) {
+        case mathematics::FunctionId::Tan:
+            bases.push_back(inverseValue);
+            break;
+        case mathematics::FunctionId::Cos:
+            if (exactZero(periodic->rhs)) {
+                bases.push_back(angleValueFromTurns(
+                    numeric::Rational{BigInt{1}, BigInt{4}},
+                    builtins, mathematics, angles));
+                period = angleValueFromTurns(
+                    numeric::Rational{BigInt{1}, BigInt{2}},
+                    builtins, mathematics, angles);
+            }
+            else {
+                bases.push_back(inverseValue);
+                if (!exactEndpointOne(periodic->rhs))
+                    bases.push_back(simplifyForSolve(
+                        Expr::call(builtins.symbol(BuiltinId::Negate), {inverseValue}),
+                        builtins, mathematics, angles, assumptions));
+            }
+            break;
+        case mathematics::FunctionId::Sin:
+            if (exactZero(periodic->rhs)) {
+                bases.push_back(integerExpr(0));
+                period = angleValueFromTurns(
+                    numeric::Rational{BigInt{1}, BigInt{2}},
+                    builtins, mathematics, angles);
+            }
+            else {
+                bases.push_back(inverseValue);
+                if (!exactEndpointOne(periodic->rhs)) {
+                    Expr halfTurn = angleValueFromTurns(
+                        numeric::Rational{BigInt{1}, BigInt{2}},
+                        builtins, mathematics, angles);
+                    bases.push_back(simplifyForSolve(
+                        Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                            std::move(halfTurn), inverseValue}),
+                        builtins, mathematics, angles, assumptions));
+                }
+            }
+            break;
+        default:
+            return std::nullopt;
+        }
+
+        std::vector<Expr> targets;
+        targets.reserve(bases.size());
+        for (Expr& base : bases)
+            targets.push_back(periodicTarget(
+                std::move(base), period, parameter,
+                builtins, mathematics, angles, assumptions));
+        const auto affine = symbolic::toExpressionPolynomial(
+            periodic->argument, variable, builtins, mathematics, angles);
+        if (!affine || affine->degree() != 1)
+            return std::nullopt;
+        Expr constantFunctionValue = Expr::call(
+            periodic->definition->symbol, {affine->coefficient(0)});
+        return solveAffinePeriodicTargets(
+            periodic->argument, std::move(targets), constantFunctionValue,
+            periodic->rhs, variable, parameter, remaining,
+            mathematics::NumericDomain::Complex,
+            builtins, mathematics, angles, assumptions);
+    }
+
+    if (auto logarithm = matchBothSides(mathematics::FunctionId::Log)) {
+        logarithm->rhs = simplifyForSolve(
+            logarithm->rhs, builtins, mathematics, angles, assumptions);
+        mathematics::AssumptionSet remaining;
+        const auto complexPredicate = mathematics::elementOf(
+            logarithm->rhs, mathematics::NumericDomain::Complex);
+        const TruthValue complexTruth = knowledge.prove(complexPredicate);
+        if (complexTruth == TruthValue::False)
+            return SolutionSet::empty(variables);
+        if (complexTruth == TruthValue::Unknown)
+            remaining.add(complexPredicate);
+
+        const auto cartesian = exactCartesianParts(
+            logarithm->rhs, builtins, mathematics, angles, assumptions);
+        const Expr imaginaryPart = cartesian
+            ? cartesian->imaginary
+            : simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Im), {logarithm->rhs}),
+                builtins, mathematics, angles, assumptions);
+        const Expr negativePi = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Negate), {Expr{pi->symbol}}),
+            builtins, mathematics, angles, assumptions);
+        const std::array<mathematics::Predicate, 2> imagePredicates{
+            mathematics::relation(
+                RelationKind::Greater, imaginaryPart, negativePi),
+            mathematics::relation(
+                RelationKind::LessEqual, imaginaryPart, Expr{pi->symbol})};
+        for (const auto& predicate : imagePredicates) {
+            const TruthValue truth = knowledge.prove(predicate);
+            if (truth == TruthValue::False)
+                return SolutionSet::empty(variables);
+            if (truth == TruthValue::Unknown)
+                remaining.add(predicate);
+        }
+
+        Expr target = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Exp), {logarithm->rhs}),
+            builtins, mathematics, angles, assumptions);
+        return solveTargetWithConditions(
+            logarithm->argument, target, variable, remaining,
+            builtins, mathematics, angles);
+    }
+    return std::nullopt;
 }
 
 std::optional<SolutionSet> solveRealInjectiveFunctionRelation(

@@ -896,7 +896,8 @@ struct RationalBound final {
             case RealSign::Unknown:
                 break;
             }
-            return ValueFacts{NumericDomain::Real, sign, argument(0).exact, false};
+            // 実数入力のsignは常に{-1,0,1}のexact integerである。
+            return ValueFacts{NumericDomain::Integer, sign, argument(0).exact, false};
         }
         return ValueFacts{NumericDomain::Complex, RealSign::Unknown, argument(0).exact, false};
 
@@ -1260,13 +1261,18 @@ struct RationalBound final {
             return {};
         return argument(0);
 
-    case BuiltinId::Derivative:
-    case BuiltinId::SymbolicIntegral:
-    case BuiltinId::Limit:
     case BuiltinId::Floor:
     case BuiltinId::Ceil:
     case BuiltinId::Trunc:
     case BuiltinId::Round:
+        if (call.arguments.size() != 1 || !argument(0).isProvablyReal())
+            return {};
+        // 実数入力に対する丸め函数は整数値函数。Powerの指数domain判定でも利用する。
+        return ValueFacts{NumericDomain::Integer, RealSign::Unknown, argument(0).exact, false};
+
+    case BuiltinId::Derivative:
+    case BuiltinId::SymbolicIntegral:
+    case BuiltinId::Limit:
     case BuiltinId::Frac:
     case BuiltinId::Gcd:
     case BuiltinId::Lcm:
@@ -1398,6 +1404,7 @@ struct RationalBound final {
     case BuiltinId::CaseBranch:
     case BuiltinId::Set:
     case BuiltinId::SetDelayed:
+    case BuiltinId::Rule:
     case BuiltinId::Less:
     case BuiltinId::LessEqual:
     case BuiltinId::Greater:
@@ -1419,6 +1426,11 @@ struct RationalBound final {
     case BuiltinId::Normal:
     case BuiltinId::ToNormal:
     case BuiltinId::AngleMode:
+    case BuiltinId::Plot:
+    case BuiltinId::ParametricPlot:
+    case BuiltinId::ListPlot:
+    case BuiltinId::Show:
+    case BuiltinId::Export:
         return {};
     }
 

@@ -109,13 +109,13 @@ std::string_view Parser::tokenText(const Token& token) const noexcept {
 SyntaxNodePtr Parser::parseAssignment() {
     const auto depthGuard = budget_->enter(current().span);
     std::vector<SyntaxNodePtr> targets;
-    SyntaxNodePtr value = parseComparison();
+    SyntaxNodePtr value = parseRule();
     std::size_t operationCount = 0;
 
     while (match(TokenKind::Assign)) {
         budget_->checkOperatorChain(++operationCount, previous().span);
         targets.push_back(makeAssignmentTarget(value));
-        value = parseComparison();
+        value = parseRule();
     }
 
     // v1.5.3では右辺をparseAssignment()で再帰していた。ここでは同じ右結合を
@@ -128,6 +128,30 @@ SyntaxNodePtr Parser::parseAssignment() {
             AssignmentSyntax{std::move(target), std::move(value)});
     }
 
+    return value;
+}
+
+SyntaxNodePtr Parser::parseRule() {
+    const auto depthGuard = budget_->enter(current().span);
+    std::vector<SyntaxNodePtr> operands;
+    std::size_t operationCount = 0;
+    operands.push_back(parseComparison());
+
+    while (match(TokenKind::RuleArrow)) {
+        budget_->checkOperatorChain(++operationCount, previous().span);
+        operands.push_back(parseComparison());
+    }
+
+    // Ruleは右結合。再帰せず末尾から組み立て，長いa->b->...でも
+    // C++スタックを消費しない。
+    SyntaxNodePtr value = operands.back();
+    for (std::size_t index = operands.size() - 1; index != 0; --index) {
+        SyntaxNodePtr left = operands[index - 1];
+        const source::SourceSpan span = combinedSpan(left, value);
+        value = makeNode(
+            span,
+            BinarySyntax{BinaryOperator::Rule, std::move(left), std::move(value)});
+    }
     return value;
 }
 

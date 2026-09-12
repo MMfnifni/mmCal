@@ -91,6 +91,12 @@ void runSpecialFunctionExtensionTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[fresnels[1],20]"),
         std::string{"0.43825914739035476608"},
         "Fresnel S has a certified real numerical backend");
+    tests.expectEqual(eval(session, "N[fresnelc[6],20]"),
+        std::string{"0.49953146785550112019"},
+        "Fresnel C medium-range real series keeps its certified digits after cancellation optimization");
+    tests.expectEqual(eval(session, "N[fresnels[6],20]"),
+        std::string{"0.44696076123693027762"},
+        "Fresnel S medium-range real series keeps its certified digits after cancellation optimization");
     tests.expectEqual(eval(session, "N[fresnelc[1+I],30]"),
         std::string{"2.55579377810243902463452238835+2.55579377810243902463452238835I"},
         "Fresnel C has a certified entire complex series backend");

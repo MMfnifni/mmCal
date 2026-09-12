@@ -24,6 +24,7 @@ enum class BinaryOperator {
     Multiply,
     Divide,
     Power,
+    Rule,
     ImplicitMultiply
 };
 

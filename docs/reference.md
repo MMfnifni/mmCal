@@ -3,7 +3,7 @@
 This document is the detailed specification of **mmCal as implemented**.
 For a user-oriented introduction, see the root-level `README.md`.
 
-> Target: **v1.5.5**
+> Target: **v1.6.0**
 
 This document changes with each version; retrieve older versions from the Git history when needed.
 
@@ -56,9 +56,9 @@ N[Pi,30]
 
 ---
 
-# 2. Internal model for numbers and expressions
+## 2. Internal model for numbers and expressions
 
-## 2.1 Integer
+### 2.1 Integer
 
 Arbitrary-length integer `BigInt`.
 
@@ -72,7 +72,7 @@ Arbitrary-length integer `BigInt`.
 
 Values are not rounded to fixed-width 64-bit integers.
 
-## 2.2 Rational
+### 2.2 Rational
 
 Finite decimal literals are parsed directly as exact Rational values.
 
@@ -89,7 +89,7 @@ Finite decimal literals are parsed directly as exact Rational values.
 
 Therefore the usual IEEE 754 `0.30000000000000004` issue does not occur in ordinary exact evaluation.
 
-## 2.3 Exact complex
+### 2.3 Exact complex
 
 Both the real and imaginary parts are stored as exact `Number` values.
 
@@ -101,7 +101,7 @@ I^2
 -> 3/5 + 4/5I
 ```
 
-## 2.4 Symbolic expressions
+### 2.4 Symbolic expressions
 
 Expressions that do not close to exact numeric values remain as AST expressions.
 
@@ -118,7 +118,7 @@ gamma[1/3]
 
 Here, the `1` in `sin[1]` means **1 radian**. The default angle unit is radians.
 
-## 2.5 Certified approximation
+### 2.5 Certified approximation
 
 `BigFloat` is used for arbitrary-precision working values, while `RealInterval` / `ComplexInterval` provide certified enclosures.
 
@@ -135,7 +135,7 @@ The evaluator does not rely solely on heuristic stopping conditions such as "the
 
 ---
 
-# 3. Predefined symbols
+## 3. Predefined symbols
 
 Current protected predefined symbols:
 
@@ -158,9 +158,9 @@ The legacy constants `Tau`, `NA`, and `ESP` are no longer predefined.
 
 ---
 
-# 4. Input syntax
+## 4. Input syntax
 
-## 4.1 Function calls
+### 4.1 Function calls
 
 Function calls use **square brackets `[]` only**. Parentheses `()` are reserved for grouping and are not function-call delimiters.
 
@@ -172,7 +172,7 @@ f[x]
 
 Using the legacy parenthesized form such as `sin(x)` on a known function name is a SyntaxError. For an ordinary identifier, `x(x+1)` is accepted as implicit multiplication, but the Formatter emits the explicit canonical form `x*(x+1)`. Parentheses are used for grouping, a standalone `[x+1]` is not a grouping expression, and user-defined function signatures use `f[x] := ...`.
 
-## 4.2 Arrays
+### 4.2 Arrays
 
 ```text
 {1,2,3}
@@ -181,7 +181,7 @@ Using the legacy parenthesized form such as `sin(x)` on a known function name is
 
 Internally, dense values use `ArrayExpr`. Numeric values may live in immutable packed pages while shape/offset/strides form a separate layout, allowing transpose and some reshape/slice operations to share the backing storage. This is an implementation detail and does not create new user-visible Array types.
 
-## 4.3 Variables and user-defined functions
+### 4.3 Variables and user-defined functions
 
 ```text
 x := 3
@@ -220,7 +220,31 @@ UnDef[x,y,f]
 
 `Defs[]` returns current global user variables and user-function definitions as an array of expressions. `UnDef[...]` removes both variable and function definitions for the specified names and returns the number of names actually changed.
 
-## 4.4 History
+### 4.4 Rule and `->`
+
+`->` is not Plot-specific option syntax. It is infix syntax for the first-class expression `Rule[lhs,rhs]`.
+
+```text
+x -> 1+2
+-> x -> 3
+
+Rule[x,sin[Pi/2]]
+-> x -> 1
+```
+
+`Rule` holds only its left-hand side; the right-hand side evaluates normally. An existing definition therefore does not replace the rule key.
+
+```text
+PlotRange := 7
+PlotRange -> PlotRange+1
+-> PlotRange -> 8
+```
+
+`->` is right-associative, weaker than comparisons, and stronger than `:=`. Thus `a<b->c` means `Rule[a<b,c]`, `a:=b->c` means `a:=Rule[b,c]`, and `a->b->c` means `Rule[a,Rule[b,c]]`. Direct `Rule[a,b]` input formats canonically as `a -> b`.
+
+Future option names such as `PlotRange` do **not** become lexer keywords or predefined symbols. They remain ordinary identifiers/Symbols; the function consuming options validates the Symbol on the left side of a Rule. The reserved-name set therefore does not grow with every option. `Rule` itself is a protected builtin head.
+
+### 4.5 History
 
 The shorthand forms are:
 
@@ -273,7 +297,7 @@ Thus, `In [n]` means "paste the previous input back into the current environment
 
 If evaluation fails but parsing/lowering succeeded, the absolute input slot remains, but no corresponding positive `Out[n]` snapshot exists.
 
-## 4.5 Comparisons
+### 4.6 Comparisons
 
 ```text
 <  <=  >  >=  ==  !=
@@ -281,7 +305,7 @@ If evaluation fails but parsing/lowering succeeded, the absolute input slot rema
 
 When the result can be proven, evaluation returns `True` or `False`. If the result is symbolically undecidable, the Predicate expression is retained.
 
-## 4.6 Operator precedence
+### 4.7 Operator precedence
 
 Important implementation-level precedence rules:
 
@@ -291,7 +315,8 @@ Important implementation-level precedence rules:
 4. `* /` and implicit multiplication — processed left-to-right at the same term level
 5. `+ -`
 6. comparison
-7. assignment `:=`
+7. rule `->` — right-associative
+8. assignment `:=`
 
 ```text
 2^3^2
@@ -301,7 +326,7 @@ Important implementation-level precedence rules:
 -> -4
 ```
 
-## 4.7 Implicit multiplication
+### 4.8 Implicit multiplication
 
 ```text
 2Pi
@@ -314,7 +339,7 @@ Important implementation-level precedence rules:
 
 A function name directly following a number is not parsed as part of a function-call token; it is interpreted as implicit multiplication. An `e/E` immediately following a number is consumed as scientific notation only when actual exponent digits follow.
 
-## 4.8 Radix-prefixed numeric literals
+### 4.9 Radix-prefixed numeric literals
 
 The current Lowerer supports:
 
@@ -331,7 +356,7 @@ Lexer-level infix bitwise operators such as `&`, `|`, `<<`, and `>>` are not imp
 
 ---
 
-# 5. Conditional evaluation and mathematical cases
+## 5. Conditional evaluation and mathematical cases
 
 ```text
 if[condition,trueExpr,falseExpr]
@@ -344,7 +369,7 @@ cases[value1 if condition1; value2 if condition2; ...]
 
 ---
 
-# 6. Angle semantics
+## 6. Angle semantics
 
 **The default is radians.**
 
@@ -405,7 +430,7 @@ GtoR[200] -> Pi
 
 ---
 
-# 7. `N` — numerical approximation
+## 7. `N` — numerical approximation
 
 ```text
 N[expr]
@@ -452,7 +477,7 @@ accuracy[N[Pi/10^20,20]]
 
 When an exact Rational has a terminating decimal representation, unnecessary trailing zeros are not displayed; for example `N[1/2,10] -> 0.5`. If an ExactValue approximation is rigorously the same exact integer as its displayed value, top-level value formatting omits the decimal point entirely (`N[2,20] -> 2`). This does not convert the internal approximation back into an exact `Number`; embedded expression syntax retains the finite-precision marker. For a noninteger certified-interval result produced at a requested significant precision, only a run of redundant trailing zeros is compacted, with one trailing zero retained: a certified `1.000000000000` that is not eligible for exact-source integer presentation is displayed as `1.0`, while `1.500000000000` is displayed as `1.50`. Requested digits and information metadata remain intact, so visible zeros are not themselves a precision guarantee.
 
-## 7.1 CertifiedEnclosure / InformationEnclosure
+### 7.1 CertifiedEnclosure / InformationEnclosure
 
 `DecimalApproximation` and `ComplexDecimalApproximation` distinguish rigorous enclosure metadata from residual-verified numerical candidates.
 
@@ -537,9 +562,9 @@ retains the original 20-digit guarantee. Asking for fewer digits is allowed to d
 
 ---
 
-# 8. precision / accuracy / rationalize
+## 8. precision / accuracy / rationalize
 
-## 8.1 `accuracy[x]`
+### 8.1 `accuracy[x]`
 
 For a `DecimalApproximation`, returns an **integer lower bound on the guaranteed number of absolute decimal digits** relative to the true value.
 
@@ -563,7 +588,7 @@ accuracy[1/3] -> Infinity
 accuracy[Pi]  -> Infinity
 ```
 
-## 8.2 `precision[x]`
+### 8.2 `precision[x]`
 
 Uses the same absolute error bound divided by a positive lower bound on the value magnitude derived from the InformationEnclosure, returning an **integer lower bound on the guaranteed number of relative decimal digits**.
 
@@ -574,7 +599,7 @@ precision[N[1/3,20]]
 
 This function does not mechanically return the requested 20 significant digits. Around `1/3`, 20-significant-digit rounding has quantum `10^-20`; the resulting relative uncertainty permits an integer lower bound of 19 guaranteed relative decimal digits. If the InformationEnclosure contains zero, no positive lower bound on the value magnitude is available, so the result is 0. Exact expressions return `Infinity`. Near-cancellation can therefore preserve substantial absolute Accuracy while losing many relative Precision digits.
 
-## 8.3 `rationalize[x]`
+### 8.3 `rationalize[x]`
 
 Finds the **exact Rational with the smallest denominator** contained in the InformationEnclosure of an approximate value. The search uses continued-fraction-style interval recursion over exact Rational values and never converts the interval to `double`. Using the InformationEnclosure prevents `rationalize` from recovering hidden guard digits or a hidden exact point that was not declared by the approximation.
 
@@ -601,7 +626,7 @@ rationalize[N[1/3,20],0]
 
 Because the source literal `0.1` is already parsed as exact `1/10` in mmCal, `rationalize[0.1]` simply remains `1/10`. `DecimalApproximation` values nested inside Arrays or expressions are also rationalized recursively.
 
-## 8.4 `explain[value]`
+### 8.4 `explain[value]`
 
 A lightweight introspection function that returns only information **already carried by the evaluated value**. It does not run `det`, mathematical `matrixRank`, LU, Eigen, or other derived computations, and it does not scan a Generic Array merely to infer additional properties.
 
@@ -684,7 +709,7 @@ adds development/performance diagnostics such as `Representation`, Array `Storag
 
 ---
 
-# 9. Basic arithmetic and algebra
+## 9. Basic arithmetic and algebra
 
 Standard operators:
 
@@ -725,7 +750,7 @@ simplify[sqrt[x^2], x >= 0]
 
 ---
 
-# 10. Basic mathematical and complex functions
+## 10. Basic mathematical and complex functions
 
 | Function      | Description                        | Example                          |
 | ------------- | ---------------------------------- | -------------------------------- |
@@ -754,7 +779,7 @@ rect -> polar
 
 ---
 
-# 11. Exponential and logarithmic functions
+## 11. Exponential and logarithmic functions
 
 | Function   | Semantics                                 |
 | ---------- | ----------------------------------------- |
@@ -791,7 +816,7 @@ log[1,10]
 
 ---
 
-# 12. Trigonometric functions
+## 12. Trigonometric functions
 
 Implemented:
 
@@ -814,7 +839,7 @@ Poles of `tan`, `sec`, `cot`, and `csc` are treated as definedness conditions. F
 
 ---
 
-# 13. Hyperbolic functions
+## 13. Hyperbolic functions
 
 Implemented:
 
@@ -828,7 +853,7 @@ Inverse hyperbolic functions with principal complex branches carry branch metada
 
 ---
 
-# 14. Cardinal / stable elementary functions
+## 14. Cardinal / stable elementary functions
 
 ```text
 sinc[x]
@@ -862,17 +887,18 @@ sinc[90 Deg]
 
 ---
 
-# 15. Rounding and integer utilities
+## 15. Rounding, integer, and scalar utilities
+
+### 15.1 Rounding
 
 ```text
-floor ceil trunc round frac
-gcd lcm mod rem quotient
-bitand bitor bitxor bitnot
-bitshiftl bitshiftr bitlength bitcount bitget
-fma clamp proj
+floor[x]
+ceil[x]
+trunc[x]
+round[x]
+round[x,digits]
+frac[x]
 ```
-
-Examples:
 
 ```text
 floor[-3/2] -> -2
@@ -882,14 +908,45 @@ round[5/2]  -> 2       // nearest-even
 round[125,-1] -> 120
 round[135,-1] -> 140
 frac[-3/2]  -> 1/2
+```
 
+`round[x,digits]` rounds to a quantum of `10^-digits` using nearest-even; negative digit counts are allowed. For approximate input, a result is committed only when the full InformationEnclosure rounds to the same value.
+
+### 15.2 Integer quotient, remainder, and GCD/LCM
+
+```text
+gcd[a,b,...]
+lcm[a,b,...]
+quotient[a,b]
+rem[a,b]
+mod[a,m]
+```
+
+```text
 gcd[84,126,210] -> 42
 lcm[6,8,9] -> 72
-
 quotient[-5,3] -> -1
 rem[-5,3]      -> -2
 mod[-5,3]      -> 1
+```
 
+`mod` uses a floor quotient, while `rem` uses a truncate-toward-zero quotient.
+
+### 15.3 Bit operations
+
+```text
+bitand[a,b,...]
+bitor[a,b,...]
+bitxor[a,b,...]
+bitnot[n]
+bitshiftl[n,count]
+bitshiftr[n,count]
+bitlength[n]
+bitcount[n]
+bitget[n,index]
+```
+
+```text
 bitand[-1,5] -> 5
 bitor[-8,3]  -> -5
 bitxor[-1,5] -> -6
@@ -898,17 +955,21 @@ bitshiftr[-3,1] -> -2
 bitget[-2,100]  -> 1
 ```
 
-`round[x,n]` performs nearest-even rounding to a quantum of `10^-n`; negative `n` is allowed. Approximate inputs resolve only when the whole InformationEnclosure rounds to the same value.
+Bitwise functions use **infinite two's-complement semantics** for arbitrary-size BigInt values, so negative integers are sign-extended with one bits. `bitshiftr` is an arithmetic right shift. `bitcount` is restricted to non-negative integers because negative infinite two's-complement values contain infinitely many one bits. Infix forms such as `& | << >>` are intentionally not added; the function API owns the semantics.
 
-The bitwise functions use **infinite two's-complement semantics** over arbitrary BigInt values. Negative operands therefore sign-extend with ones. `bitshiftr` is the user-facing arithmetic right shift, while `bitcount` accepts only nonnegative integers because negative infinite two's-complement values have infinitely many one bits. This version deliberately keeps the semantics in function form rather than adding lexer-level `& | << >>` syntax.
+### 15.4 Scalar utilities
 
-`fma[a,b,c]` remains exact for exact operands and, for certified approximations, evaluates `a*b+c` without an intermediate DecimalApproximation rounding. `clamp[x,lo,hi]` is real-valued and uses InformationEnclosure to prove approximate ordering. `proj[z]` is currently the identity on finite exact/certified complex values; full complex-infinity/Riemann-sphere semantics remain tied to the deferred extended-real model.
+```text
+fma[a,b,c]
+clamp[x,lo,hi]
+proj[z]
+```
 
-`mod` corresponds to a floor quotient, while `rem` corresponds to a truncate-toward-zero quotient.
+For exact input, `fma[a,b,c]` is exactly `a*b+c`; with certified approximations it performs one Certified/Information evaluation without first rounding an intermediate DecimalApproximation. `clamp[x,lo,hi]` is real-valued and commits an approximate result only when the InformationEnclosure proves the relevant ordering. `proj[z]` is currently the identity on finite exact/certified complex values; full complex-infinity/Riemann-sphere semantics are deferred to the extended-real system.
 
 ---
 
-# 16. Combinatorics and lightweight number theory
+## 16. Combinatorics and lightweight number theory
 
 ```text
 perm[n,r]
@@ -949,9 +1010,9 @@ totient[9]     -> 6
 
 ---
 
-# 17. Special functions
+## 17. Special functions
 
-## 17.1 Gamma / LogGamma
+### 17.1 Gamma / LogGamma
 
 ```text
 gamma[5]
@@ -977,7 +1038,7 @@ N[gamma[1+I],20]
 
 `lgamma[x]` currently means **`log[abs[gamma[x]]]` on the real axis**. It is kept separate from complex `LogGamma`.
 
-## 17.2 Erf
+### 17.2 Erf
 
 ```text
 erf[x]
@@ -994,7 +1055,7 @@ N[erf[1+I],20]
 
 Complex input is evaluated by the entire power series on `ComplexInterval` with an explicit tail bound.
 
-## 17.3 Beta
+### 17.3 Beta
 
 Currently restricted to positive real arguments.
 
@@ -1006,7 +1067,7 @@ betaln[1/2,1/2] -> log[Pi]
 
 The implementation does not unconditionally expand to a general Gamma ratio when doing so could break pole cancellation.
 
-## 17.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
+### 17.4 Zeta / Digamma / Trigamma / regularized incomplete Beta
 
 ```text
 zeta[s]
@@ -1053,7 +1114,7 @@ N[ibeta[N[1/3,8],N[2/3,8],1/4],8] -> 0.53302858
 
 Higher polygamma and complex-parameter `ibeta` remain intentionally deferred.
 
-## 17.5 Generalized factorial family
+### 17.5 Generalized factorial family
 
 ```text
 binom[x,n]
@@ -1069,7 +1130,7 @@ fallingfact[5,3] -> 60
 risingfact[5,3] -> 210
 ```
 
-## 17.6 Fresnel C / S
+### 17.6 Fresnel C / S
 
 mmCal uses the standard Fresnel integrals corresponding to
 
@@ -1079,6 +1140,8 @@ fresnels[x] = integral_0^x sin[Pi t^2/2] dt
 ```
 
 as entire odd functions. Arguments that do not close exactly remain symbolic, while `N` certifies both real and complex inputs on `ComplexInterval`. The complex path has no fixed `|z|` boundary: moderate and diagonal-sector arguments use the entire Maclaurin series, while large near-axis arguments use the DLMF 7.12 `f/g` asymptotic expansions with first-neglected-term remainder bounds. Quarter-turn identities `C[i z]=i C[z]` and `S[i z]=-i S[z]` map all coordinate-axis neighborhoods into the same certified wedge; if the asymptotic proof cannot close, evaluation falls back to the Maclaurin path. Work is bounded by term caps and the shared `EvaluationBudget`. The real path likewise has a certified large-argument asymptotic backend.
+
+For real point evaluation, the medium-range Maclaurin remainder is certified directly with directed-rounded BigFloat bounds, avoiding repeated conversion of growing terms to huge exact Rationals. Within one `Plot` executor, odd symmetry also lets equal `|x|` values share a certified `fresnelc` / `fresnels` evaluation, reducing duplicated work on symmetric wide ranges.
 
 ```text
 fresnelc[0] -> 0
@@ -1094,7 +1157,7 @@ D[fresnels[x],x] -> sin[Pi x^2/2 Rad]
 
 `Rad` is explicit in the derivatives because the Fresnel definitions themselves must not depend on the session's default angle unit.
 
-## 17.7 Confluent hypergeometric 1F1
+### 17.7 Confluent hypergeometric 1F1
 
 Kummer's confluent hypergeometric function is written as
 
@@ -1139,7 +1202,7 @@ integrate[exp[x^6],x]
 
 The same family handles `exp[c x^n]` for positive integer `n`.
 
-## 17.8 Gauss hypergeometric 2F1
+### 17.8 Gauss hypergeometric 2F1
 
 The Gauss hypergeometric function is written as
 
@@ -1179,7 +1242,7 @@ integrate[1/(1+x^5),x]
 
 There is intentionally no general `Solve` inversion rule for 2F1 because global injectivity is not available in general. Only exact degenerations that reduce to existing algebraic expressions are passed on to the ordinary solver.
 
-## 17.9 Incomplete elliptic integrals F / E / Pi
+### 17.9 Incomplete elliptic integrals F / E / Pi
 
 mmCal writes the Legendre incomplete elliptic integrals as
 
@@ -1241,7 +1304,7 @@ integrate[1/sqrt[1-x^4],x]
 
 The final quartic reduction is a correct local primitive. `sin[asin[x]]` itself now reduces in the safe principal-inverse direction, but derivative-back identities that also contain principal square roots can still require local branch conditions. Cases that cannot be proved are therefore monitored in ResolutionOnly mode rather than reducing integration capability. General elliptic equations remain unresolved by `Solve` until a principled inverse-elliptic function family exists; exact degenerations such as `m=0` are solved by the existing solver.
 
-## 17.10 Ei / Si / Ci / li / Polylogarithm
+### 17.10 Ei / Si / Ci / li / Polylogarithm
 
 The principal special functions commonly required by symbolic integration are exposed as
 
@@ -1317,7 +1380,7 @@ integrate[log[1-x]/x,x] -> -polylog[2, x]
 
 No general `Solve` rule invents a single principal inverse for `Ei/Si/Ci/li/polylog`: global injectivity and branch structure are not generally available. Only exact degenerations such as `polylog[0,z]` and `polylog[1,z]` are passed to the existing algebraic/logarithmic Solver.
 
-## 17.11 Lambert W
+### 17.11 Lambert W
 
 ```text
 lambertw[z]
@@ -1350,9 +1413,9 @@ Near `-1/E`, complex evaluation switches to a square-root local coordinate using
 
 ---
 
-# 18. Arrays
+## 18. Arrays
 
-## 18.1 Array foundation
+### 18.1 Array foundation
 
 At the language level, `{...}` is a general finite brace container rather than a matrix-only literal. When every child has the same shape, the value is automatically promoted to a dense `ArrayExpr`; heterogeneous-shape values such as `{Q,R}` and ragged braces remain general brace values. Numeric dense Arrays may internally use shared packed Integer / Rational / Number pages and strided views, but those storage choices are not user-visible types. Matrix operations still accept only dense rectangular Arrays and audit this at their boundary.
 
@@ -1367,7 +1430,6 @@ zeros[rows,cols]
 rows[A]
 cols[A]
 diag[A]
-trace[A]
 ```
 
 Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar. Finite `SolutionSet` values use the same zero-based convention. `at[solutions,i]` returns a one-branch `SolutionSet`, preserving branch conditions, free variables, multiplicity, and solver-variable domains. `at[solutions,i,x]` returns only the right-hand side bound to `x` in that branch. Because that three-argument form does not carry condition metadata, use the two-argument branch form when conditional information must be preserved. `Conditional`, `Universal`, and `Unresolved` sets are not indexable because they do not define one unambiguous explicit branch sequence.
@@ -1407,7 +1469,9 @@ dimensions[zeros[0,3]]
 
 If evaluation turns Array elements into Arrays, equal child shapes are flattened into the common representation. Mixed scalar/Array leaves or inconsistent child shapes are TypeErrors.
 
-# 19. Aggregate functions
+## 19. Aggregates and finite-sequence operations
+
+### 19.1 Aggregate functions
 
 ```text
 sum
@@ -1434,9 +1498,41 @@ min[x,3]
 -> min[x, 3]
 ```
 
-Symbolic finite sums of the form `sum[f,{k,a,b}]` are not yet implemented. Explicit finite sequences can be generated with `table` and then aggregated with `sum`.
+In addition to variadic aggregation, `sum` / `prod` accept held finite symbolic iterators.
 
-## 19.1 `range` / `table` / `map`
+```text
+sum[expr,{i,n}]
+sum[expr,{i,a,b}]
+sum[expr,{i,a,b,step}]
+prod[expr,{i,n}]
+prod[expr,{i,a,b}]
+prod[expr,{i,a,b,step}]
+```
+
+For symbolic unit-step bounds, finite polynomial sums use a general exact antidifference kernel; geometric sums, telescoping forms, basic binomial families, and affine-factor products are recognized exactly. Rational functions `P(i)/Q(i)` also pass through a bounded Abramov-style preprocessor that derives a universal denominator from shift dispersion and solves an exact linear system. Every resulting antidifference is certified by exact cross multiplication; cases beyond dispersion 32, denominator degree 96, or 256 equations remain unevaluated. Empty ranges use the identities `sum -> 0` and `prod -> 1`. When non-emptiness of symbolic bounds is not provable, the condition is preserved in `cases[...]`. Non-unit exact finite steps can fall back to the existing finite-sequence kernel.
+
+```text
+sum[i^2,{i,1,5}] -> 55
+sum[1/i-1/(i+1),{i,1,n}] -> cases[1-1/(n+1) if 1 <= n; 0]
+sum[(2i+1)/(i^2(i+1)^2),{i,1,n}] -> cases[1-1/(n+1)^2 if 1 <= n; 0]
+sum[comb[n,i] z^i,{i,0,n}] -> cases[(z+1)^n if 0 <= n; 0]
+prod[i,{i,1,n}] -> cases[n! if 1 <= n; 1]
+prod[2i+3,{i,1,n}] -> cases[2^n risingfact[5/2, n] if 1 <= n; 1]
+```
+
+Multiple iterators follow `table`: the left iterator is outer and the right iterator is inner.
+
+```text
+sum[f,{{i,a,b},{j,c,d}}]
+== sum[sum[f,{j,c,d}],{i,a,b}]
+
+sum[i+j,{{i,1,3},{j,1,2}}] -> 21
+prod[i+j,{{i,1,2},{j,1,2}}] -> 72
+```
+
+The iterator symbol is a local binder for the body and temporarily shadows a session definition of the same name. A symbolic family that cannot be closed and cannot be safely reduced to a finite explicit sequence remains unevaluated.
+
+### 19.2 `range` / `table` / `map`
 
 Use the following functions for exact finite sequence generation and explicit element-wise application.
 
@@ -1475,12 +1571,12 @@ map[sin,{0,Pi/2,Pi}] -> {0, 1, 0}
 
 ---
 
-# 20. Descriptive statistics
+## 20. Descriptive statistics
 
 Statistical functions generally accept **exact real data** and preserve Rational results when the quantity closes rationally.
 Many functions accept either a single rank-1 Array or a scalar argument list.
 
-## 20.1 Order statistics
+### 20.1 Order statistics
 
 ```text
 median
@@ -1501,7 +1597,7 @@ iqr[1,2,3,4] -> 3/2
 
 If `mode` has multiple modes, it returns an Array. If every value occurs exactly once, it returns an empty Array.
 
-## 20.2 Variance and standard deviation
+### 20.2 Variance and standard deviation
 
 ```text
 var      // population variance
@@ -1517,7 +1613,7 @@ stddev[1,2,3] -> sqrt[6]/3
 stddevs[1,2,3] -> 1
 ```
 
-## 20.3 Other statistics
+### 20.3 Other statistics
 
 ```text
 geomean harmmean rms
@@ -1539,7 +1635,7 @@ For compatibility, an even number of scalar arguments may also be split into fir
 
 ---
 
-# 21. Assumptions and domains
+## 21. Assumptions and domains
 
 ```text
 element[x,Real]
@@ -1571,7 +1667,9 @@ Failure to prove membership is never converted into `False`.
 
 ---
 
-# 22. Expression transformation
+## 22. Expression transformation
+
+### 22.1 `simplify` / `fullSimplify` / `expand` / `factor` / `collect`
 
 ```text
 simplify[expr]
@@ -1597,11 +1695,23 @@ expand[(x+1)^3]
 
 factor[x^2-1]
 -> (x-1)(x+1)
+
+factor[(x^12+x+1)(x^12-x+1)]
+-> (x^12-x+1)(x^12+x+1)
+
+factor[(x^68-5x^2-x)(8x^33-2x^8)]
+-> 2x^9(4x^25-1)(x^67-5x-1)
 ```
+
+General univariate factorization over `Q[x]` combines square-free decomposition, Berlekamp or Cantor-Zassenhaus factorization over multiple good primes, product-tree quadratic Hensel lifting, CLD-LLL or bounded Zassenhaus recombination, and a final exact product certificate against the input. A small-prime certificate skips coefficient-growing `Q[x]` GCD work when square-freeness is already proved. Possible true-factor degrees are intersected across the local factorizations and reused for both irreducibility proofs and recombination pruning. Sparse inputs first try exact binomial divisors, Capelli's binomial criterion, and deflation.
+
+The CLD path is activated only when the local-factor count predicts excessive subset enumeration. It embeds coefficients of `f_i' (f/f_i) mod M` for every Hensel factor into a lattice and searches for short relations using the budgeted exact row-LLL kernel. A relation found through a selected coefficient window is rechecked against all CLD coefficients, and its local-factor block is accepted only after exact division in the source integer polynomial. Rank, columns, intermediate height, swaps, size reductions, CLD windows, and candidate checks have independent budgets. Exhaustion means unresolved work; it never proves irreducibility or admits an unverified factor.
+
+Resource guards are phase-specific rather than one global degree cutoff. Current defaults allow finite-field degree 512, a 4096-entry Berlekamp matrix, up to eight good primes, 4096-bit lifting with an 8192-bit working guard, 200000 recombination subsets, and degree 64 for the Kronecker fallback. A budget stop preserves already discovered factors plus an unresolved residual satisfying `input = scalar * product(factors)`. Nonmonic input is reconstructed as primitive integer factors plus an overall scalar.
 
 Perfect-power reconstruction for univariate Rational polynomials has no fixed exponent-64 cutoff. A good-prime `gcd(p,p')` supplies a safe upper bound that cannot exclude the true exponent, and only those candidates are verified exactly. High-degree square-free polynomials skip perfect-power reconstruction through the same modular test.
 
-`fullSimplify` performs bounded candidate search. A shorter expression is not preferred if obtaining it changes the domain.
+`fullSimplify` performs bounded candidate search with structural-hash memoization that still checks structural equality on collisions. Before constructing expansion-based candidates it computes a saturating term-count forecast and skips candidates above `min(4096,max(64,16*nodeCount))`. A shorter expression is not preferred if obtaining it changes the domain.
 
 ```text
 fullSimplify[(x^2-1)/(x-1)]
@@ -1637,7 +1747,7 @@ simplify[hypergeometric2F1[0,2,3,1/x], x != 0]
 
 `Power` definedness distinguishes exact Rational exponents: a positive non-integer Rational exponent permits a zero base where the evaluator defines it, while a negative Rational exponent retains a nonzero-base requirement. `zeta[s]` is not treated as globally unknown for definedness; its sole pole is represented by the finite condition `s != 1`.
 
-## 22.1 `series` / `normal` / `toNormal` (v1.5.5)
+### 22.2 `series` / `normal` / `toNormal`
 
 ```text
 series[expr,{x,a,n}]
@@ -1646,9 +1756,21 @@ normal[seriesExpr]
 toNormal[expr]
 ```
 
-`series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists, arrays, and calls, and now also recurses into binding right-hand sides of finite and conditional `SolutionSet` objects while preserving set structure, branch conditions, free variables, multiplicity, and domain metadata. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`. The TPSA kernel composes exact constants, the expansion variable, sums, differences, products, division, integer powers, `exp` / `log` / `sin` / `cos` / `sinh` / `cosh`, `tan/cot/sec/csc`, `tanh/coth/sech/csch`, `expm1/log1p`, `sinc/cosc/tanc`, `sinhc/tanhc/expc`, `log2/log10`, and principal `sqrt` / exact rational powers, supporting Taylor series, Laurent series with a finite principal part, and Puiseux series on an exact rational exponent grid. `log2/log10` lower through the general `log[base,x] = log[x]/log[base]` form for both finite logarithmic Series and the `+Infinity` logarithmic layers. Different Puiseux denominators are re-embedded into an exact LCM grid. Analytic functions compose through coefficient recurrences rather than repeated higher differentiation. A symbolic leading coefficient is inverted only when nonzero status is proved, while principal `log` is expanded only at a proved positive-real or nonreal regular center. Direct trigonometric series honor the current angle mode and explicit `Rad` / `Deg` / `Grad`. At a branch point, non-integer rational powers are restricted to a positive leading coefficient with a simple zero/pole, or to an already branched Puiseux expression. Higher-multiplicity cases such as `sqrt[x^2]` and uncertified negative leading directions remain unevaluated rather than selecting a branch by guesswork.
+```text
+dimensions[toNormal[Plot[x^2,{x,-2,2}]]]
+-> {n, 2}
+
+length[toNormal[Plot[1/x,{x,-4,4}]]]
+-> 2
+```
+
+`series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists, arrays, and calls, and now also recurses into binding right-hand sides of finite and conditional `SolutionSet` objects while preserving set structure, branch conditions, free variables, multiplicity, and domain metadata. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`.
+
+For a top-level `Plot` or `ParametricPlot`, `toNormal` materializes the drawing request as sampled mathematical coordinates. One continuous curve becomes an `N x 2` Array; one discontinuous curve becomes a list of segment Arrays; multiple curves become a list that preserves curve identity. Returned points are data-space `{x,y}` coordinates, never layout-mm or SVG/PDF backend coordinates. Line / Bezier / Circle / Ellipse / EllipticArc geometry that remains exact during normal rendering is converted to a polyline only for explicit `toNormal` materialization. `PlotPoints` therefore controls this sampled representation without changing exact vector export. `toNormal[ListPlot[...]]` performs no resampling; it normalizes accepted 1D, N x 1, or N x 2 point data to an explicit N x 2 Array. The TPSA kernel composes exact constants, the expansion variable, sums, differences, products, division, integer powers, `exp` / `log` / `sin` / `cos` / `sinh` / `cosh`, `tan/cot/sec/csc`, `tanh/coth/sech/csch`, `expm1/log1p`, `sinc/cosc/tanc`, `sinhc/tanhc/expc`, `log2/log10`, and principal `sqrt` / exact rational powers, supporting Taylor series, Laurent series with a finite principal part, and Puiseux series on an exact rational exponent grid. `log2/log10` lower through the general `log[base,x] = log[x]/log[base]` form for both finite logarithmic Series and the `+Infinity` logarithmic layers. Different Puiseux denominators are re-embedded into an exact LCM grid. Analytic functions compose through coefficient recurrences rather than repeated higher differentiation. A symbolic leading coefficient is inverted only when nonzero status is proved, while principal `log` is expanded only at a proved positive-real or nonreal regular center. Direct trigonometric series honor the current angle mode and explicit `Rad` / `Deg` / `Grad`. At a branch point, non-integer rational powers are restricted to a positive leading coefficient with a simple zero/pole, or to an already branched Puiseux expression. Higher-multiplicity cases such as `sqrt[x^2]` and uncertified negative leading directions remain unevaluated rather than selecting a branch by guesswork.
 
 For analytic bases with valuation zero, integer powers use exponentiation by squaring directly on the truncated `SeriesData`, so there is no fixed exponent-4096 cutoff. Requests such as `series[(1+x)^-1000000,{x,0,2}]` therefore require only logarithmically many power steps when the requested order is small. Laurent/Puiseux powers with nonzero valuation retain a separate internal exponent-grid safety boundary.
+
+When the exponent depends on the expansion variable, mmCal preserves the principal definition by rewriting `Power[B(x),E(x)] = Exp[E(x) Log[B(x)]]` only when the base value at the center is proved to avoid the principal `Log` cut. The existing TPSA/Puiseux machinery can then handle requests such as `series[(1+x)^x,{x,0,5}]` and `series[(1+x)^(1/x),{x,0,5}]`. Branch-ambiguous forms such as `x^x`, or centers on the negative real cut, remain unevaluated. An exponent independent of the expansion variable uses a generalized-binomial recurrence, retaining exact symbolic coefficients for requests such as `series[(1+x)^a,{x,0,5}]`.
 
 `Infinity` is also accepted as an expansion center. Here `Infinity` means real `+Infinity`, not a general point on the Riemann sphere; internally the expansion is mapped to `t->0+` with `t=1/x`. Therefore exponent `r` in `seriesData[x,Infinity,...]` denotes `(1/x)^r`, and logarithmic layers denote `log[1/x]^k`. For example, `series[1/(x+1),{x,Infinity,4}]` represents `x^-1-x^-2+x^-3-x^-4+O[x^-5]`. `normal` / `toNormal` emit ordinary powers of `x` rather than leaving intermediate forms such as `(1/x)^(-m)`. `D` incorporates `dt/dx=-t^2`, while `integrate` uses `dx=-t^-2 dt`; integrating an explicit `1/x` term therefore closes into the logarithmic layer as `-log[1/x]`. If the truncation remainder is exactly `O(1/x)`, integration is left unevaluated because the unknown remainder can generate a logarithm that the current `O(t^r)` metadata cannot describe. The initial scope includes rational functions, polynomial growth, `exp[1/x]`, Puiseux powers, and `log[1/x]`. Oscillatory `sin[x]`, essential growth `exp[x]`, and direct `log[x]` require dedicated asymptotic providers and remain unevaluated.
 
@@ -1860,9 +1982,9 @@ Integrating an `x^(-1)` term moves it into a logarithmic layer; for example, `in
 
 ---
 
-# 23. Symbolic and numerical differentiation
+## 23. Symbolic and numerical differentiation
 
-## 23.1 `D`
+### 23.1 `D`
 
 ```text
 D[expr,x]
@@ -1934,7 +2056,7 @@ D[integrate[t^2,{t,0,x}],x]
 
 For general forms with variable endpoints or where the differentiation variable occurs inside the integral, the Leibniz rule is constructed formally. A quotient whose denominator is independent of the differentiation variable uses `f'/c` directly rather than expanding into the general quotient rule.
 
-## 23.2 `diff`
+### 23.2 `diff`
 
 ```text
 diff[expr,x,at]
@@ -1951,9 +2073,9 @@ diff[x^2,x,3]
 
 ---
 
-# 24. Symbolic integration and certified numerical integration
+## 24. Symbolic integration and certified numerical integration
 
-## 24.1 `integrate` — exact / symbolic integration
+### 24.1 `integrate` — exact / symbolic integration
 
 ```text
 integrate[expr,x]
@@ -1981,15 +2103,16 @@ Major exact rules currently implemented:
 
 - Constants, `x`, and arbitrary finite polynomials
 - Rational powers of affine bases; exponent `-1` is mapped to Log
-- Rational functions with Rational coefficients. Linear/quadratic factors use exact partial fractions, including repeated irreducible quadratics `(a x^2+b x+c)^k` through an exact completing-the-square recurrence. Denominators containing factors of degree three or higher use a Q[x] square-free decomposition plus Hermite reduction; the remaining square-free part is represented as a finite algebraic-log sum over certified complex `root[...,k,Complex]` values with exact residues `P(r)/Q'(r)`. Elementary reverse-chain rules run first so compact `atan/asin` forms are preferred when available. For rational denominators above degree 12, mmCal no longer builds the dense partial-fraction linear system. Yun square-free decomposition produces pairwise-coprime `f_i^k` components, which are separated exactly by polynomial CRT. Linear/quadratic components use the existing recurrences, repeated higher-degree components use Hermite reduction through the modular inverse of `f_i'`, and the remaining square-free terms go directly to the residue formula. The former degree-12 value is therefore an algorithm-selection threshold for preserving the established compact partial-fraction output at lower degrees, not a user-visible solvability boundary. The higher-degree path is controlled by the existing polynomial-conversion, algebraic-degree, and shared integration budgets. Forms such as `x^m/(1+x^n)` may still fall through to a `hypergeometric2F1` primitive when appropriate
+- Rational functions with Rational coefficients. Linear/quadratic factors use exact partial fractions, including repeated irreducible quadratics `(a x^2+b x+c)^k` through an exact completing-the-square recurrence. Denominators containing factors of degree three or higher use a Q[x] square-free decomposition plus Hermite reduction. Low-to-medium-degree square-free remainders use Lazard-Rioboo-Trager to group algebraic residues as `Q(z),S(z,x)`; after revalidating the source identity they materialize as `sum_a a log[S(a,x)]`. If LRT stops, the exact fallback is a pole-by-pole algebraic-log sum over certified complex `root[...,k,Complex]` values with residues `P(r)/Q'(r)`. Elementary reverse-chain rules run first so compact `atan/asin` forms are preferred when available. Above degree 12 mmCal avoids the dense partial-fraction linear system and separates the pairwise-coprime `f_i^k` blocks from Yun decomposition by exact polynomial CRT. The former degree-12 value is an algorithm-selection threshold for compact partial-fraction output, not a user-visible solvability boundary. Polynomial-conversion, algebraic-degree, and shared integration budgets control the higher-degree path. Forms such as `x^m/(1+x^n)` may still use a `hypergeometric2F1` primitive when appropriate
 - Quadratic inverse-square-root forms with provably positive Rational scale, plus `sqrt[q(x)]` primitives for exact Rational quadratics `q(x)`
 - Finite Fourier reduction for `sin^m/cos^n`; mixed products and low-order pure powers may be expanded explicitly through positive integer total degree 256. Pure `sin[x]^n` / `cos[x]^n` above 256 switch to the standard reduction recurrence under the shared integration budget rather than a fixed degree cap
 - Negative integer powers of `sin[u]` / `cos[u]` through the standard `csc/sec` reduction recurrences, with no fixed 256-order cap; iteration work is controlled by the shared integration budget
 - Positive integer powers of `tan/cot/sec/csc` through the standard reduction formulas, with no fixed 256-order cap; iteration work is controlled by the shared integration budget
+- Exact noninteger Rational powers of `sin[theta]` and `cos[theta]` for affine `theta=a x+b`, reduced to local principal-branch `hypergeometric2F1` forms. This includes `sqrt[sin[theta]]` and `sqrt[cos[theta]]`. The result is an antiderivative on a connected region where the sign of the trigonometric base is fixed; mmCal does not synthesize a global Piecewise phase correction across sign changes. A symbolic `a` is treated at its generic nonzero value
 - Linearity over sums, differences, negation, and factors independent of the integration variable
 - Safe standard primitives for `exp/sin/cos/tan/cot/sec/csc`
 - Safe standard primitives for `sinh/cosh/tanh/coth/sech/csch`
-- `log/log1p/expm1/sqrt/cbrt`; logarithmic-derivative knowledge recognizes forms such as `log[x]/x` and `1/(x log[x])`
+- `log/log1p/expm1/sqrt/cbrt`; logarithmic-derivative knowledge recognizes forms such as `log[x]/x` and `1/(x log[x])`. For affine `u=a x+b`, `1/log[u]^n` with exact integer `2<=n<=32` is reduced exactly to rational terms plus `li[u]` by normal Hermite reduction in a primitive differential extension. More generally, a rational function in one logarithmic generator `K(t)=Q(x)(Log[u])` is split by denominator square-free decomposition and CRT separation of multiplicity blocks, then processed by normal-factor Hermite reduction, limited integration of the `K[t]` polynomial part, and exact `c Df/f` recognition. Constant-coefficient denominators are refined by bounded `Q[t]` factorization. Unproved residues remain held, and every completed result is cross-multiplied against the source. Finite Laurent expressions in one `Exp[u]` generator solve one exact `Q(x)` RDE per exponent. Compact existing rules run first, and the Risch path is an exact fallback for rational-coefficient towers they cannot close
 - `asin/acos/atan/asinh/acosh/atanh`
 - `erf/erfc`
 - `fresnelc/fresnels`; exact Rational-coefficient `sin/cos[a x^2+b x+c]` phases are completed to a square and reduced to standard Fresnel integrals; the defining `Pi*x^2/2` kernels are recognized directly
@@ -2138,7 +2261,7 @@ WARN: integrate partially evaluated the expression; remaining subintegral(s) are
 
 Only the unresolved part is retained; successfully integrated terms are not rolled back.
 
-### Unevaluated-integration diagnostics
+#### Unevaluated-integration diagnostics
 
 Unevaluated results are no longer collapsed into one warning. The current diagnostic codes are:
 
@@ -2149,7 +2272,7 @@ Unevaluated results are no longer collapsed into one warning. The current diagno
 
 The last category is deliberately narrower than a claim of absolute mathematical impossibility. A series, a newly introduced special function, or a broader function class may still represent the antiderivative.
 
-### Nested square-root substitution
+#### Nested square-root substitution
 
 The following class is currently supported:
 
@@ -2162,7 +2285,7 @@ integrate[sqrt[x + sqrt[x]],x]
 
 This is not a one-off formula. It handles the class that becomes `2 t sqrt[q(t)]` under `t=sqrt[x]`, where `q` is an exact Rational-coefficient quadratic with a positive leading coefficient. It is a local substitution rule on the principal branch, not a general radical-substitution search.
 
-### Exact / symbolic definite integrals
+#### Exact / symbolic definite integrals
 
 When a safe antiderivative is available, exact substitution is performed at the endpoints and the difference is taken. For functions with domain constraints, the CertifiedEvaluator is used where possible to preflight the **entire interval**, so intermediate poles or branch violations are not missed.
 
@@ -2192,7 +2315,7 @@ integrate[tan[x],{x,0,2}]
 
 Cauchy principal value is not assumed automatically.
 
-### Assumptions and improper integrals
+#### Assumptions and improper integrals
 
 An assumption may be supplied as the third argument. It is integrated into the existing `KnowledgeContext` and can be used for branch-sensitive simplification such as `abs` and `sqrt[x^2]`.
 
@@ -2258,7 +2381,7 @@ integrate[1/(x-2),{x,1,Infinity}]
 -> WARN + unevaluated integrate[...]
 ```
 
-## 24.2 `limit` — exact / symbolic limits
+### 24.2 `limit` — exact / symbolic limits
 
 ```text
 limit[expr,x,a]
@@ -2363,7 +2486,7 @@ limit[1/x,x,0]
 -> WARN + limit[1 / x, x, 0]
 ```
 
-## 24.3 `nintegrate` — certified numerical integration
+### 24.3 `nintegrate` — certified numerical integration
 
 ```text
 nintegrate[expr,{x,a,b}]
@@ -2384,7 +2507,9 @@ Before constructing higher derivatives, the original integrand is preflighted ov
 
 ---
 
-# 25. Solver
+## 25. Solver
+
+### 25.1 `solve` — basic contract
 
 ```text
 solve[equation,x]
@@ -2423,7 +2548,7 @@ When a principal `sqrt` is inverted, mmCal retains not only the squared candidat
 `SolutionSet` distinguishes Empty / Finite / Universal / Conditional / Unresolved.
 Unsupported expressions are not misreported as having no solutions.
 
-### Multivariate polynomials and Gröbner bases
+### 25.2 Multivariate polynomials and Gröbner bases
 
 Exact rational multivariate polynomials use a dedicated `Q[x1,...,xn]` ring representation.
 
@@ -2463,7 +2588,7 @@ Power conversion for rational-function sign charts has no fixed `±64` exponent 
 
 When current Predicate representation cannot completely express a condition, such as the pole set of Gamma, the solver leaves the result unresolved rather than fabricating an incomplete condition.
 
-### Global inverse solving on the real axis
+### 25.3 Global inverse solving on the real axis
 
 `MathRegistry` stores not only principal inverses but also metadata about global injectivity, monotonicity, and real-valued ranges. On **Real or a real subdomain**, `solve` safely applies inverses only to functions that can be proven globally one-to-one.
 
@@ -2511,7 +2636,7 @@ solve[acosh[x]==y,x,Real]
 
 When principal `asin` / `acos` / `atan` / `acosh` is inverted from the right-hand side, its principal real output range is retained as a solution-branch condition. The trigonometric endpoints follow the active `angleMode[]`; `atan` uses open endpoints. Constant endpoint comparisons use certified enclosures, so out-of-range constants are rejected instead of surviving as false conditional branches.
 
-### Real-domain nonexistence / uniqueness proof
+### 25.4 Real-domain nonexistence / uniqueness proof
 
 Real equalities pass through an exact proof layer after the more specific inverse-function solvers. This layer never treats failure to find a numerical root as evidence of nonexistence. It currently attempts, in increasing cost order:
 
@@ -2557,7 +2682,7 @@ The principal equation `x^x==r` is more delicate on the negative real axis becau
 
 These proofs are not reused in the Complex domain. For example, a Real nonexistence proof alone does not turn `solve[exp[x]-x+5==0,x,Complex]` into `{}`.
 
-### Absolute-value equations and inequalities
+### 25.5 Absolute-value equations and inequalities
 
 For Real relations, `abs[u]` is handled with its exact range `[0,Infinity)` intact. Ordered inequalities use Real semantics and, once the sign of the right-hand side is proved, may reduce safely to the corresponding polynomial inequality in `u^2`. An equality `abs[u]==a` is split into `u==a` or `u==-a` only under an **explicit Real domain**. In the default Complex domain, `abs[z]==a` generally describes a locus such as a circle, so mmCal keeps it unresolved rather than collapsing it to two points.
 
@@ -2584,7 +2709,7 @@ solve[abs[x]==2,x]
 -> UnresolvedSolutionSet[x]
 ```
 
-### Real exponentials and Lambert W
+### 25.6 Real exponentials and Lambert W
 
 When the Real-domain solver can prove `a>0` and the exponent real, the principal power `a^u = exp[u log[a]]` is strictly positive. Zero equations therefore close to the empty set without numerical search.
 
@@ -2625,7 +2750,7 @@ N[solve[1.1^x == x^2,x,Real],20]
 
 General `a^(b x+c)==P(x)`, complete Complex branch families, and inequalities involving Lambert W remain deferred. If branch conditions cannot be proved, the solver keeps conditional branches or an `UnresolvedSolutionSet` rather than guessing.
 
-### Principal radical equation solve
+### 25.7 Principal radical equation solve
 
 Equations involving `sqrt` / `cbrt` are not solved by merely raising both sides to a power. Candidate generation from the transformed polynomial is separated from an exact range check for the original radical.
 
@@ -2657,7 +2782,7 @@ solve[cbrt[x]==a,x]         -> {x == a^3 if a in Real}
 
 The Simplifier also applies `cbrt[z]^3 -> z` only when `z` is proved real, preserving the real-domain requirement of `cbrt`.
 
-### Parameterized real solution families for periodic functions
+### 25.8 Parameterized real solution families for periodic functions
 
 `sin/cos/tan` are not globally injective, so mmCal does not collapse them to one principal inverse. On the real axis it can instead preserve periodicity with an integer formal parameter. The parameter is locally bound by `where k in Integer`; if `k` already occurs in the relation, a fresh name such as `k1` is selected.
 
@@ -2672,7 +2797,12 @@ solve[tan[x]==1,x,Real]
 -> {x==Pi/4+Pi k where k in Integer}
 ```
 
-The first implementation is deliberately limited to one-argument `sin/cos/tan` equations whose argument is affine in the solve variable with an **exact nonzero linear coefficient**. Existing Knowledge checks the real target range, so equations such as `sin[x]==2` reduce to the empty set. Nonlinear arguments and complete Complex-domain periodic families remain unresolved rather than being guessed.
+For a one-argument `sin/cos/tan` equation whose argument is affine, `a x+b`, symbolic `a` is handled conditionally: `a!=0` yields the integer-parameter families, `a==0 && f(b)==c` yields `All`, and `a==0 && f(b)!=c` yields the empty set. In the Real domain, existing Knowledge retains coefficient/target reality and range conditions, so equations such as `sin[x]==2` reduce to the empty set. The Complex domain supplies complete affine periodic families for `sin/cos/tan/exp`; `exp` retains a nonzero-target condition and `tan` excludes its omitted values `+I/-I`. Nonlinear arguments remain unresolved rather than being guessed from a principal inverse.
+
+```text
+solve[exp[a*x+b]==c,x,Complex]
+-> cases[{x == (2I Pi k+log[c]-b)/a where k in Integer if c in Complex && c != 0} if a != 0; All if a == 0 && exp[b] == c; {} if a == 0 && exp[b] != c]
+```
 
 The period follows the current session angle mode. The first periodic Solver does not yet normalize an explicit `Rad` / `Deg` / `Grad` suffix around the entire argument into the affine polynomial matcher, so that form remains unresolved for now.
 
@@ -2682,9 +2812,7 @@ solve[sin[x]==0,x,Real]
 -> {x==180k where k in Integer}
 ```
 
-The Complex domain likewise does not fabricate complete solution sets from principal inverses alone.
-
-### Exact algebraic roots: `root` / `AlgebraicNumber`
+### 25.9 Exact algebraic roots: `root` / `AlgebraicNumber`
 
 `root` represents exact real and complex algebraic roots without forcing radical expansions.
 
@@ -2827,15 +2955,16 @@ To bound resultant and primitive-element growth, the current **algebraic-field c
 
 ---
 
-# 26. Linear algebra
+## 26. Linear algebra
 
-## 26.1 Exact-first linear algebra
+### 26.1 Matrices and exact-first linear algebra
 
 Canonical API:
 
 ```text
 transpose[A]
 conjugateTranspose[A]
+madd[A,B,...]
 dot[A,B]
 det[A]
 inverse[A]
@@ -2852,14 +2981,13 @@ leastSquares[A,b]
 eigenvalues[A]
 eigenvectors[A]
 eigensystem[A]
-norm[v]
-normalize[v]
 trace[A]
 ```
 
-`dot` supports rank-1 and rank-2 Arrays.
+`madd` explicitly adds two or more same-shape rank-2 matrices element by element. Its mathematical effect matches same-shape Array `+`, but the function form requires matrix inputs. `dot` performs rank-1/rank-2 contraction rather than element-wise addition.
 
 ```text
+madd[{{1,2},{3,4}},{{5,6},{7,8}}] -> {{6,8},{10,12}}
 dot[{1,2,3},{4,5,6}] -> 32
 dot[{{1,2},{3,4}},{5,6}] -> {17, 39}
 dot[{5,6},{{1,2},{3,4}}] -> {23, 34}
@@ -2934,7 +3062,7 @@ norm[{3+4I}] -> 5
 normalize[{3,4}] -> {3/5, 4/5}
 ```
 
-### Precision-aware `N`
+#### Precision-aware `N`
 
 Matrix backends share the same `ApproximationContext` and certified Expr/interval conversion layer as FFT. Therefore calls such as
 
@@ -2957,7 +3085,7 @@ N[norm[v],100]
 
 can pass the requested precision directly to the BigFloat/interval backend instead of first constructing a potentially huge exact intermediate expression. When an exact matrix is sent into an outer `N`, its input enclosure can be recomputed at the requested working precision. When matrix elements already contain `DecimalApproximation` / `ComplexDecimalApproximation` leaves, value computation uses the CertifiedEnclosure while zero/nonzero, pivot, and rank decisions use the InformationEnclosure, so undeclared guard information cannot reappear. `solveLinear`, `inverse`, `rref`, `matrixRank`, and `nullSpace` return results only when InformationEnclosures certify the required pivot structure; uncertain cases are not completed with epsilon thresholds or hidden point values. Continuous quantities such as `det`, `dot`, and `norm` propagate Certified/Information enclosures in parallel so cancellation naturally reduces output Precision. The current `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, and `eigen*` perturbation certificates are not yet defined for matrices that already contain finite-precision leaves, so those inputs remain conservatively unevaluated. Exact matrices evaluated through `N[...,p]` continue to use the certified numerical backends.
 
-## 26.2 Vectors, inner products, and orthogonalization
+### 26.2 Vectors, inner products, and orthogonalization
 
 A rank-1 Array is a vector. Vectors carry no row/column orientation; `dot` performs rank-dependent contraction explicitly. The primary vector API is:
 
@@ -3027,6 +3155,8 @@ gramSchmidt[{{1,1},{1,-1}}]
 
 The old convenience functions `vadd` / `vsub` / `vscalar` / `vsum` are no longer registered; use Array `+` / `-` / scalar multiplication and `sum` directly. The old public names `vcross` / `vmanhattan` / `veuclidean` / `vproject` / `vangle` / `vreflect` / `vreflect_axis` are also removed. Their primary names are `cross` / `manhattanDistance` / `distance` / `projection` / `vectorAngle` / `reflectNormal` / `reflectAxis`. Vector operations do not keep compatibility aliases with separate public spellings.
 
+### 26.3 Vector calculus
+
 Vector-calculus operators use explicit Cartesian coordinates.
 
 ```text
@@ -3055,7 +3185,7 @@ The coordinate specification must be a nonempty rank-1 Array of distinct symbols
 
 ---
 
-# 27. Signal processing
+## 27. Signal processing
 
 ```text
 dft[v]
@@ -3085,12 +3215,12 @@ The approximate path uses radix-2 for power-of-two sizes and Bluestein convoluti
 
 ---
 
-# 28. Random numbers
+## 28. Random numbers
 
 Random-number functions are stateful built-ins.
 The RNG state is independent for each `KernelSession`.
 
-## 28.1 Seed
+### 28.1 `randSeed` — seed
 
 ```text
 randSeed[42]
@@ -3109,7 +3239,7 @@ rand[] == a
 
 `randSeed[]` reseeds from entropy and returns the integer seed that can be used to reproduce the sequence.
 
-## 28.2 Uniform real
+### 28.2 `rand` — uniform real
 
 ```text
 rand[]
@@ -3134,7 +3264,7 @@ rand[hi]     : [0,hi), hi >= 0
 rand[lo,hi]  : [lo,hi), lo <= hi
 ```
 
-## 28.3 Integer
+### 28.3 `randint` — integer
 
 ```text
 randint[]
@@ -3151,7 +3281,7 @@ randint[1,6] : [1,6] inclusive
 
 Arbitrary `BigInt` ranges are supported. Rejection sampling is used to avoid modulo bias.
 
-## 28.4 Choice
+### 28.4 `choice`
 
 ```text
 choice[2,3,5,7]
@@ -3160,7 +3290,7 @@ choice[{2,3,5,7}]
 
 Selects one element from either a rank-1 Array or a variadic list.
 
-## 28.5 Normal
+### 28.5 `randn` — normal distribution
 
 ```text
 randn[]
@@ -3184,74 +3314,129 @@ N[randn[],8]
 
 ---
 
-# 29. Major aliases
+## 29. Graphics, plotting, and export
 
-| Alias                    | Canonical    |
-| ------------------------ | ------------ |
-| `pow`                    | `Power`      |
-| `fact`                   | `Factorial`  |
-| `fract`                  | `frac`       |
-| `ln`                     | `log`        |
-| `real`                   | `re`         |
-| `imag`                   | `im`         |
-| `mag`                    | `abs`        |
-| `unit`, `csgn`           | `sign`       |
-| `rect`                   | `polar`      |
-| `ave`                    | `mean`       |
-| `matmul`, `mmul`         | `dot`        |
-| `mtranspose`             | `transpose`  |
-| `mget`                   | `at`         |
-| `singularValueDecomposition` | `svd` |
-| `mdet`                   | `det`        |
-| `minverse`               | `inverse`    |
-| `rank`, `mrank`          | `matrixRank` |
-| `mtrace`                 | `trace`      |
-| `mrows`                  | `rows`       |
-| `mcols`                  | `cols`       |
-| `mdiag`                  | `diag`       |
+### 29.1 Public syntax and held requests
 
-Aliases are not separate implementations; they resolve to the same `BuiltinId`. Mathematical metadata and Solver rules are therefore not duplicated.
+```text
+Plot[expression,{x,a,b}]
+Plot[expression,{x,a,b},PlotRange->{ymin,ymax}]
+Plot[expression,{x,a,b},AspectRatio->r]
+Plot[expression,{x,a,b},Ticks->True|False]
+Plot[expression,{x,a,b},PlotPoints->n]
+Plot[{expression1,expression2,...},{x,a,b}]
+ParametricPlot[{xExpression,yExpression},{t,a,b}]
+ParametricPlot[{{x1,y1},{x2,y2},...},{t,a,b}]
+ParametricPlot[{xExpression,yExpression},{t,a,b},AspectRatio->r,Ticks->True|False,PlotPoints->n]
+ListPlot[{x1,x2,...}]
+ListPlot[{{x1,y1},{x2,y2},...},Joined->True|False]
+Show[Plot[...],Plot[...],...]
+Export[Plot[...],"file.svg"]
+Export[Plot[...],"file.eps"]
+Export[Plot[...],"file.pdf"]
+```
 
-In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`Sin`, `ArcTan`, `Integrate`, `Solve`, etc.) were removed. Lowercase canonical names are the default for mathematical functions. `D`, `N`, `In`, `Out`, `Exit`, `Clear`, `Defs`, and `UnDef` remain as intentional proper names for symbolic and Kernel operations. If compatibility syntax becomes necessary, it should be implemented as a separate import/compatibility layer rather than by adding aliases to the default namespace.
+`Plot` is the canonical held request for a two-dimensional function plot over a finite real interval; the old `plot` spelling is a compatibility alias. The bound variable is protected from session definitions, while parameters, user functions, and interval endpoints are materialized from the session environment when the request is formed. Complex-valued loci are intentionally not mixed into `Plot`; a future `ComplexPlot`-style facility is kept separate.
+
+`ParametricPlot` holds `{x(t),y(t)}` as a two-dimensional curve over a finite real parameter interval. The x and y coordinates are analyzed independently for real domains, and only their common real domain is drawn. `AspectRatio` and `Ticks` have the same meaning as in `Plot`. The one-dimensional `PlotRange->{min,max}` form is intentionally rejected for `ParametricPlot` until an unambiguous two-dimensional range syntax is defined.
+
+### 29.2 Exact geometry and periodicity analysis
+
+Coordinate expressions that are polynomials of degree at most three in the parameter bypass sampling and retain exact geometry: affine coordinates become lines, quadratics become quadratic Béziers, and cubics become cubic Béziers. A two-coordinate curve of the form `C + A cos(q t+b) + B sin(q t+b)` with a shared affine phase is retained as exact Circle/Ellipse geometry for a complete traversal and as an EllipticArc for a partial traversal; individual backends lower these primitives to SVG ellipse/arc commands, PostScript arcs under affine transforms, or PDF vector paths. General curves use adaptive two-dimensional millimeter-space sampling.
+
+`ParametricPlot` also analyzes provable common parameter periods. If the requested span is an exact integer multiple of the proven period and contains at least two complete traversals, sampling is reduced to one period while preserving the original starting point, and an informational `ParametricPlot::period` diagnostic is emitted. For example, `{cos[t]+cos[2t]/2,sin[t]+sin[4t]/4}` over `0..4Pi` has provable common period `2Pi` and is sampled over `0..2Pi`. A non-integral traversal such as `0..5Pi` is not reduced because doing so could alter path topology.
+
+### 29.3 Options, viewport, and clipping
+
+The initial options are `PlotRange`, `AspectRatio`, `Ticks`, and `PlotPoints`. Option names are ordinary symbols rather than reserved words or predefined symbols; `Plot` interprets them locally when they occur on the left side of a `Rule`. `PlotRange->{ymin,ymax}` fixes the y viewport to a finite increasing interval with no Automatic padding. `AspectRatio->r` means **height / width** and requires a positive finite constant. The default width remains 150 mm, so `AspectRatio->1` produces 150x150 mm and `AspectRatio->0.5` produces 150x75 mm. With no explicit ratio the established 150x100 mm canvas remains unchanged (height/width = 2/3). `Ticks` defaults to `True`; `Ticks->False` suppresses major ticks and tick labels on both axes while leaving the axis lines visible. `PlotPoints->n` accepts an integer from 100 through 1024 and scales coarse sampling relative to the current default, where 100 is unchanged, 200 doubles the initial mesh, and 1024 is the maximum. It does not tighten adaptive chord tolerance or recursion depth, and exact Line/Bézier/Circle/Ellipse/EllipticArc geometry is not densified.
+
+Curve geometry outside an explicit `PlotRange` is clipped to the inner plot area so it cannot spill into tick-label margins. Each `Plot` inside `Show` may retain its own `PlotPoints` value, but mutually conflicting explicit `Ticks` settings produce a Domain error from both `Export` and `toNormal`. Duplicate and unknown options are errors.
+
+### 29.4 Domain analysis, sampling, and semantic anchors
+
+The pipeline analyzes real-domain components, poles, branch boundaries, removable singularities, and step discontinuities exactly when possible before sampling. It does not silently draw only a convenient subset of a real locus when completeness cannot be established. Functions with infinite visual complexity such as `sin[1/x]` are reduced to finite geometry by physical-canvas adaptive sampling and resource limits.
+
+Polynomial geometry of degree 0 through 3 is specialized. Affine functions become straight lines, quadratics become quadratic Béziers, and cubics `a x^3+b x^2+c x+d` become cubic Béziers. Semantic anchors such as curve intersections, axis intersections, and extrema split those Béziers with de Casteljau subdivision without changing the represented curve. General functions use adaptive polyline sampling with millimeter screen-space error control.
+
+Representative real functions currently connected to PlotProgram include elementary, trigonometric, and hyperbolic functions; `floor` / `ceil` / `trunc` / unary `round` / `frac` / `sign`; `sinc` / `cosc` / `tanc` / `sinhc` / `tanhc` / `expc`; `erf` / `erfc`; Fresnel `fresnelc` / `fresnels`; and `Ei` / `Si` / `Ci`. Real `Ci` follows its principal branch and is plotted only on the positive real side; `Ei` supports both real sides excluding zero; `Si` supports the full real axis. Normalized functions such as `tanc` use stable certified paths around their removable value at zero while their distinct poles remain ordinary discontinuity boundaries.
+
+### 29.5 `ListPlot`
+
+`ListPlot[{x1,x2,...}]` treats one-dimensional data as points `{x,0}` on the number line, while `ListPlot[{{x1,y1},{x2,y2},...}]` plots explicit two-dimensional points. An `N x 1` Array is equivalent to one-dimensional data. `Joined -> False` is the default and draws markers only; `Joined -> True` preserves the markers and adds a polyline in input order. `AspectRatio` and `Ticks` share Plot semantics. `PlotPoints` is rejected because the input samples are already explicit. Three or more columns, rank-three data, and ragged inputs such as `{{1},{2,3}}` are rejected rather than implicitly projected. `toNormal[ListPlot[...]]` always normalizes accepted data to an `N x 2` Array.
+
+### 29.6 `Show` / `Export` / graphics backends
+
+Final geometry lowers to the backend-independent `GraphicsScene`, using millimeters and a y-up coordinate system internally. The default canvas is 150x100 mm; label margins shrink the internal plot area rather than expanding the canvas. Current vector backends are SVG, EPS, and PDF. Native PDF output initially targets PDF 1.4 with classic xref and readable uncompressed objects/content/XMP. With an explicit format such as `Export[obj,file,"PDF"]`, an incompatible existing suffix is preserved and `.pdf` is appended (for example `file.svg.pdf`).
 
 ---
 
-# 30. Current source-callable function list
+## 30. Major aliases
 
-v1.5.5 contains **278 registered builtin/alias names / 258 source-callable names**. Internal heads are not included in the source-callable count.
+| Alias | Canonical |
+| --- | --- |
+| `ave` | `mean` |
+| `csgn` | `sign` |
+| `fact` | `Factorial` |
+| `fract` | `frac` |
+| `imag` | `im` |
+| `ln` | `log` |
+| `mag` | `abs` |
+| `matmul` | `dot` |
+| `mcols` | `cols` |
+| `mdet` | `det` |
+| `mdiag` | `diag` |
+| `mget` | `at` |
+| `minverse` | `inverse` |
+| `mmul` | `dot` |
+| `mrank` | `matrixRank` |
+| `mrows` | `rows` |
+| `mtrace` | `trace` |
+| `mtranspose` | `transpose` |
+| `plot` | `Plot` |
+| `pow` | `Power` |
+| `rank` | `matrixRank` |
+| `real` | `re` |
+| `rect` | `polar` |
+| `singularValueDecomposition` | `svd` |
+| `unit` | `sign` |
+
+Aliases are not separate implementations; they resolve to the same `BuiltinId`. Mathematical metadata and Solver rules are therefore not duplicated.
+
+In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`Sin`, `ArcTan`, `Integrate`, `Solve`, etc.) were removed. Lowercase canonical names are the default for mathematical functions. `D`, `N`, `In`, `Out`, `Exit`, `Clear`, `Defs`, `UnDef`, and `Export`, together with the graphics-request heads `Plot` / `Show`, remain as intentional proper names for symbolic, Kernel, I/O, and graphics operations. The old lowercase `plot` spelling remains a compatibility alias to the same `BuiltinId`. Further compatibility syntax should generally live in a separate import/compatibility layer rather than adding uppercase aliases to the default namespace.
+
+---
+
+## 31. Current source-callable function list
+
+The current tree contains **284 registered builtin/alias names / 264 source-callable names**. Internal heads are excluded from the source-callable count. This list is regression-checked against the registry and kept in ASCII lexical order.
 
 ```text
-Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, GtoD, GtoR,
-In, N, Out, RtoD, RtoG, Si, UnDef, abs, accuracy, acos,
-acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2, atanh,
-ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor,
-bitshiftl, bitshiftr, bitxor, cases, cbrt, ceil, choice, cis, clamp, collect,
-cols, comb, conditionNumber, conj, conjugateTranspose, convolve, corr, corrspearman, cos, cosc,
-cosh, cot, coth, cov, cross, csc, csch, csgn, curl, cv,
-det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
-eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp,
-expand, expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib,
-floor, fma, frac, fract, fresnelc, fresnels, fullSimplify, gamma, gcd, geomean,
-grad, gramSchmidt, groebnerBasis, harmmean, hessian, hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity,
-if, ifft, im, imag, inner, integrate, inverse, iqr, isprime, jacobian,
-kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
-linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd,
-mag, manhattanDistance, map, matmul, matrixRank, max, mcols, mdet, mdiag, mean,
-median, mget, min, minverse, mmul, mod, mode, mrank, mrows, mtrace,
-mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ, orthonormalQ,
-outer, percentile, percentrank, perm, polar, polylog, polynomialReduce, pow, precision, prevprime,
-prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed, randint,
-randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection,
-rem, reshape, risingfact, rms, root, round, rows, rref, sec, sech,
-series, sign, simplify, sin, sinc, singularValueDecomposition, sinh, sinhc, skew, solve,
-solveLinear, sqrt, stddev, stddevs, stderr, sum, svd, table, tan, tanc,
-tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit,
-var, vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
+Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, Export, GtoD, GtoR, In, ListPlot, N, Out, ParametricPlot, Plot, RtoD, RtoG,
+Rule, Show, Si, UnDef, abs, accuracy, acos, acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2,
+atanh, ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor, bitshiftl, bitshiftr,
+bitxor, cases, cbrt, ceil, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
+conjugateTranspose, convolve, corr, corrspearman, cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn,
+curl, cv, det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
+eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp, expand,
+expc, explain, expm1, fact, factor, factorint, fallingfact, fft, fib, floor, fma, frac, fract, fresnelc,
+fresnels, fullSimplify, gamma, gcd, geomean, grad, gramSchmidt, groebnerBasis, harmmean, hessian,
+hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity, if, ifft, im, imag, inner, integrate, inverse,
+iqr, isprime, jacobian, kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
+linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd, mag, manhattanDistance,
+map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode, mrank,
+mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ,
+orthonormalQ, outer, percentile, percentrank, perm, plot, polar, polylog, polynomialReduce, pow, precision,
+prevprime, prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed,
+randint, randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection, rem,
+reshape, risingfact, rms, root, round, rows, rref, sec, sech, series, sign, simplify, sin, sinc,
+singularValueDecomposition, sinh, sinhc, skew, solve, solveLinear, sqrt, stddev, stddevs, stderr, sum, svd,
+table, tan, tanc, tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit, var,
+vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
 ```
 
 ---
 
-# 31. Error / Warning policy
+## 32. Error / Warning policy
 
 Main `CalcError` categories:
 
@@ -3266,7 +3451,7 @@ Main `CalcError` categories:
 
 When evaluation itself succeeds but an algorithmic built-in cannot complete its work, a Warning is returned separately from the result Expr. This applies to `D`, `solve`, `solveLinear`, `N`, `rref`, `matrixRank`, `nullSpace`, `luDecomposition`, `qrDecomposition`, `svd`, `conditionNumber`, `pseudoInverse`, `leastSquares`, `eigenvalues`, `eigenvectors`, `eigensystem` (including the compatibility alias `rank`), and `integrate`, as well as cases where `precision/accuracy/rationalize` retain unsupported input unevaluated.
 
-Info diagnostics are used for normal state-change notifications. Currently this includes variable and function redefinition notices.
+Info diagnostics are used for normal state changes and proven optimizations that preserve meaning. They currently cover variable/function redefinition notices and `ParametricPlot::period` when redundant complete traversals are removed using a proven period.
 
 ```text
 D[abs[x],x]
@@ -3301,7 +3486,7 @@ The Parser/Evaluator retains source spans and documents, allowing Errors that pr
 
 ---
 
-# 32. Performance policy
+## 33. Performance policy
 
 Exact and certified computation is substantially more expensive than native `double`.
 Historical microbenchmarks have shown costs ranging from roughly 100× to more than 100,000× that of `double`, depending on the operation.
@@ -3320,11 +3505,11 @@ Implemented optimizations include:
 - Certified Log range reduction / shared log(2) enclosure
 - Radix-2 FFT
 
-Future features such as `for/Plot`, which may evaluate expressions thousands or millions of times, are expected to use an explicit Machine evaluator separate from Exact/Certified semantics.
+`Plot` currently uses its dedicated BigFloat PlotProgram evaluator. If a machine backend is later needed for `for` or Plot, it will remain an explicit Machine evaluator separate from Exact/Certified semantics.
 
 ---
 
-# 33. Major currently unimplemented / deferred features
+## 34. Major currently unimplemented / deferred features
 
 Representative items:
 
@@ -3332,16 +3517,16 @@ Representative items:
 - `hilbert` (legacy naming/specification still to be confirmed)
 - Engineering functions, financial functions, and unit conversion
 - Legacy colon commands such as `:defs`, `:unset`, and `:undef` (`Defs[]/UnDef[]` function forms are implemented). `:angle` has been replaced by `angleMode[]`; `:help` / `:fix` / `:layout` / `:status` are frontend commands
-- `for`, `plot`
+- `for`
 - General Machine/double evaluation mode
 
 Further candidates:
 
-complete arbitrary-degree Q-factorization, general number-field merging/canonicalization across different primitive generators, complete cross-context comparison for unproven representations, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for` / `plot`.
+complete arbitrary-degree Q-factorization, general number-field merging/canonicalization across different primitive generators, complete cross-context comparison for unproven representations, `rootApproximant`, more general parameterized solution families, and a Machine evaluator / `for`.
 
 ---
 
-# 34. Current CLI
+## 35. Current CLI
 
 The CLI separates mathematical Kernel state from frontend presentation state. The following startup options are available:
 
@@ -3381,7 +3566,7 @@ Out[1]> 1/3
 - `Defs[]`, `UnDef[...]`: Inspect and remove user definitions
 - History references `@`, `%`, `%%`, ... together with signed-index reevaluating `In [n]` and snapshot `Out[n]`
 
-## 34.1 `:help`
+### 35.1 `:help`
 
 ```text
 :help
@@ -3397,7 +3582,7 @@ With no argument, `:help` prints a concise REPL-command summary. `:help function
 
 Help lookup is handled before parsing or evaluation. Successful, constant, and unknown lookups therefore neither advance `In[n]` nor enter history; an unknown name also points to the function and constant indexes.
 
-## 34.2 `:fix` — presentation-only decimal display
+### 35.2 `:fix` — presentation-only decimal display
 
 ```text
 :fix 16
@@ -3417,7 +3602,7 @@ Out[2]> 1/3
 
 An entire expression that can be certified numerically is approximated only for display. Symbolic expressions containing free variables retain exact notation.
 
-## 34.3 `:layout` — interactive REPL composition
+### 35.3 `:layout` — interactive REPL composition
 
 ```text
 :layout
@@ -3449,7 +3634,7 @@ Out[2]> cases[
 
 With no argument, `:layout` reports the current mode.
 
-## 34.4 `:status`
+### 35.4 `:status`
 
 ```text
 :status
@@ -3463,7 +3648,7 @@ History: 0
 
 `:status` is also a CLI command and is not stored in history. The design boundary is maintained: mathematical state changes use Kernel functions such as `angleMode[...]`, while frontend queries and presentation changes use CLI commands such as `:help`, `:fix`, and `:layout`.
 
-## 34.5 `:quit` / `:exit`
+### 35.5 `:quit` / `:exit`
 
 ```text
 :quit
@@ -3472,7 +3657,7 @@ History: 0
 
 Both commands terminate the current CLI session successfully. They are compatibility commands with the same purpose as the expression-level `Exit[]`; they do not parse/evaluate an expression or consume history. Bare `quit` / `exit` are not special. `--batch` also recognizes these commands and stops successfully at that line.
 
-## 34.6 Console title
+### 35.6 Console title
 
 As auxiliary information, the title is updated to forms such as:
 
@@ -3487,7 +3672,7 @@ mmCal <version> - Deg - Fixed(16) - Layout(Multi)
 
 Failure to change the title is never treated as a calculation Error. `:status` is authoritative for state inspection; terminal software overriding the title has no effect on semantics.
 
-## 34.7 Canonical formatter
+### 35.7 Canonical formatter
 
 Ordinary `Out[n]` uses compact, reparsable mathematical notation rather than an AST dump.
 
@@ -3510,7 +3695,7 @@ The canonical formatter remains the one-line serialization contract. Interactive
 
 ---
 
-# 35. Major implementation layers
+## 36. Major implementation layers
 
 ```text
 Lexer / Parser
@@ -3546,7 +3731,7 @@ Major responsibilities:
 
 This separation is maintained so that adding a function does not require duplicating the same mathematical knowledge independently across the Solver, Simplifier, and numerical backend.
 
-## CertifiedEvaluator safety limit
+### 36.1 CertifiedEvaluator safety limit
 
 Because CertifiedEvaluator recursively evaluates expressions as intervals, pathologically deep ASTs are treated as unsupported before reaching an OS stack overflow. The current depth limit is 96 levels. This is a safety guard on AST nesting depth, not on the number of terms in ordinary n-ary `Add` / `Multiply` expressions.
 

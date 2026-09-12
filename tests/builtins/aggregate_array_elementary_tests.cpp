@@ -50,6 +50,51 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "min[x,3]"), std::string{"min[x, 3]"},
         "min stays symbolic when ordering cannot be proved");
 
+    // Finite symbolic sums/products share table's held local iterator semantics.
+    tests.expectEqual(eval(session, "sum[i^2,{i,1,5}]"), std::string{"55"},
+        "finite polynomial sum closes exactly");
+    tests.expectEqual(eval(session, "sum[1/i-1/(i+1),{i,1,n}]"),
+        std::string{"cases[1-1/(n+1) if 1 <= n; 0]"},
+        "finite telescoping sum preserves symbolic empty-range semantics");
+    tests.expectEqual(eval(session, "sum[1/(i(i+1)(i+2)),{i,1,n}]"),
+        std::string{"cases[1/4-1/(2(1+n+(n+1)^2)) if 1 <= n; 0]"},
+        "Abramov rational summation closes a three-factor telescoping denominator");
+    tests.expectEqual(eval(session, "sum[(2i+1)/(i^2(i+1)^2),{i,1,n}]"),
+        std::string{"cases[1-1/(n+1)^2 if 1 <= n; 0]"},
+        "Abramov rational summation solves a repeated shifted denominator exactly");
+    tests.expectEqual(eval(session,
+        "sum[(-4i-4)/((i^2+1)*((i+2)^2+1)),{i,1,n}]"),
+        std::string{"cases[(3+2(n+1)+2(n+1)^2)/(2+2(n+1)+3(n+1)^2+2(n+1)^3+(n+1)^4)-7/10 if 1 <= n; 0]"},
+        "Abramov rational summation uses polynomial shift dispersion beyond affine factors");
+    tests.expectEqual(eval(session, "sum[comb[n,i]*z^i,{i,0,n}]"),
+        std::string{"cases[(z+1)^n if 0 <= n; 0]"},
+        "finite binomial-power sum uses the exact binomial theorem");
+    tests.expectEqual(eval(session, "sum[i+j,{{i,1,3},{j,1,2}}]"), std::string{"21"},
+        "multiple sum iterators are nested with the left iterator outermost");
+    tests.expectEqual(eval(session, "prod[i,{i,1,5}]"), std::string{"120"},
+        "finite integer product closes exactly");
+    tests.expectEqual(eval(session, "prod[2i+3,{i,1,n}]"),
+        std::string{"cases[2^n risingfact[5/2, n] if 1 <= n; 1]"},
+        "finite affine product reduces to a rising factorial");
+    tests.expectEqual(eval(session, "prod[(i+1)/i,{i,1,n}]"),
+        std::string{"cases[n+1 if 1 <= n; 1]"},
+        "finite telescoping product closes exactly");
+    tests.expectEqual(eval(session, "prod[i+j,{{i,1,2},{j,1,2}}]"), std::string{"72"},
+        "multiple product iterators follow table's nesting order");
+    tests.expectEqual(eval(session, "sum[i,{i,1,5,2}]"), std::string{"9"},
+        "finite sum supports an exact non-unit step through explicit finite fallback");
+    tests.expectEqual(eval(session, "prod[i,{i,1,5,2}]"), std::string{"15"},
+        "finite product supports an exact non-unit step through explicit finite fallback");
+    tests.expectEqual(eval(session, "sum[1,{i,5,3}]"), std::string{"0"},
+        "empty finite sum returns the additive identity");
+    tests.expectEqual(eval(session, "prod[7,{i,5,3}]"), std::string{"1"},
+        "empty finite product returns the multiplicative identity");
+    static_cast<void>(eval(session, "aggregateIteratorShadow:=99"));
+    tests.expectEqual(eval(session, "sum[aggregateIteratorShadow,{aggregateIteratorShadow,1,4}]"),
+        std::string{"10"}, "sum iterator locally shadows a session definition");
+    tests.expectEqual(eval(session, "aggregateIteratorShadow"), std::string{"99"},
+        "sum restores the shadowed session definition");
+
     // Exact sequence generation and explicit element-wise iteration.
     tests.expectEqual(eval(session, "range[5]"), std::string{"{1, 2, 3, 4, 5}"},
         "range[n] constructs an exact inclusive integer sequence");

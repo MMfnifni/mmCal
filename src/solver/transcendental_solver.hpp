@@ -32,6 +32,16 @@ namespace mmcal::solver {
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions = {});
 
+// Complex上のExp[u]==cを Log[c]+2 Pi I k（k in Integer）へ，
+// principal Log[u]==cをprincipal-log像の範囲条件付きでExp[c]へ反転する。
+[[nodiscard]] std::optional<SolutionSet> solveComplexExponentialLogRelation(
+    const expression::Expr& relation,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions = {});
+
 // 実指数方程式を分類する。正の定数baseの対数反転，
 // affine exponential == affine，boundedなx^x constant target，a^x==x^2をLambert Wへ落とす。
 [[nodiscard]] std::optional<SolutionSet> solveRealExponentialRelation(

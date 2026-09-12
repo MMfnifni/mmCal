@@ -176,6 +176,15 @@ void runLowererTests(TestRunner& tests) {
         "square bracket syntax lowers to a function call");
     tests.expectEqual(lowerAndFormat("f[x]:=x+1"), std::string{"f[x]:=x+1"},
         "function definition syntax is preserved for later evaluation");
+    tests.expectEqual(lowerAndFormat("a->b->c"), std::string{"a -> b -> c"},
+        "rule syntax lowers to the canonical Rule head and formats right-associatively");
+    tests.expectEqual(lowerAndFormat("(a->b)->c"), std::string{"(a -> b) -> c"},
+        "formatter preserves a left-nested Rule with parentheses");
+    tests.expectEqual(lowerAndFormat("Rule[a,b]"), std::string{"a -> b"},
+        "explicit Rule call and arrow syntax share one canonical representation");
+    tests.expectEqual(evaluateAndFormat("1+1->2+3"), std::string{"1+1 -> 5"},
+        "Rule holds its left side while evaluating its right side");
+
     tests.expectEqual(lowerAndFormat("1 < x <= 3"), std::string{"And[1 < x, x <= 3]"},
         "comparison chain lowers without losing operands");
     tests.expectEqual(lowerAndFormat("%%"), std::string{"%%"},

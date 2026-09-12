@@ -1,8 +1,8 @@
-# mmCal V1.5 ブラックボックステスト
+# mmCal ブラックボックステスト
 
 このディレクトリは，mmCal の public CLI を介して exact arithmetic，symbolic evaluation，certified numerical evaluation，calculus，special functions，matrix/statistics，definedness/error semantics を横断確認するブラックボックステスト集合である。
 
-テストファイルは10本へ整理しており，現在は合計2465ケースである。certified numerical audit，performance/capability監査，微積分・仮定推論，exact FFT等で見つかった回帰を継続して追加する。
+テストファイルは10本へ整理しており，v1.6.0時点では合計2512ケースである。certified numerical audit，performance/capability監査，微積分・仮定推論，exact FFT等で見つかった回帰を継続して追加する。
 
 ## 実行方法
 
@@ -30,14 +30,14 @@ py cli_automation_tests.py --exe "..\..\build\x64\Release\mmCal.exe"
 | `test01_legacy_numeric.txt` | statistics，matrix/linear algebra | 353 |
 | `test02_legacy_errors.txt` | 旧error/exception回帰 | 165 |
 | `test03_language_runtime.txt` | core syntax，angle mode，numeric lexer，history，iteration，variables | 161 |
-| `test04_exact_arithmetic_algebra.txt` | BigInt/Rational，exact complex/algebraic，number theory，number fields，cyclotomic FFT | 227 |
+| `test04_exact_arithmetic_algebra.txt` | BigInt/Rational，exact complex/algebraic，number theory，number fields，cyclotomic FFT | 241 |
 | `test05_approximation_certification.txt` | `N`，Precision/Accuracy，explain，InformationEnclosure，branch/backend audit | 170 |
-| `test06_calculus_solver.txt` | symbolic/numerical calculus，Solve，Lambert W，Series / toNormal | 427 |
+| `test06_calculus_solver.txt` | symbolic/numerical calculus，Solve，Lambert W，Series / toNormal，Plot/Rule/記号和積 | 460 |
 | `test07_special_functions.txt` | gamma系，hypergeometric，elliptic，polylog等 | 142 |
 | `test08_boundary_errors.txt` | 詳細なdomain/boundary/error message contract | 86 |
 | `test09_semantics_audit.txt` | semantic coherence，definedness-preserving simplification，横断audit | 309 |
 
-合計は2465ケースである。
+合計は2512ケースである。 v1.6.0正式化時のLinux Release（LTO off）検証では2512 / 2512 PASSを確認した。
 
 ## `# @session` と隔離性
 
