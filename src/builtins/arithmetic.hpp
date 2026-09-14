@@ -28,7 +28,8 @@ namespace mmcal::builtins {
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry);
 [[nodiscard]] expression::Expr evaluateFactorial(
-    std::span<const expression::Expr> arguments);
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry);
 [[nodiscard]] expression::Expr evaluateSqrt(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,

@@ -122,6 +122,31 @@ void runSeriesTests(TestRunner& tests) {
         "Series: sin and cos use a coupled TPSA recurrence");
 
     tests.expectEqual(
+        eval(session, "seriesCoefficient[sin[x],{x,0,5}]"),
+        std::string{"1/120"},
+        "SeriesCoefficient: public frontend extracts an exact Taylor coefficient");
+    tests.expectEqual(
+        eval(session, "seriesCoefficient[1/x,{x,0,-1}]"),
+        std::string{"1"},
+        "SeriesCoefficient: negative integer powers address Laurent coefficients");
+    tests.expectEqual(
+        eval(session, "residue[1/(x^2+1),{x,I}]"),
+        std::string{"-I/2"},
+        "Residue: public frontend extracts the certified Laurent coefficient at a simple pole");
+    tests.expectEqual(
+        eval(session, "residue[1/x^2,{x,0}]"),
+        std::string{"0"},
+        "Residue: a meromorphic pole without a minus-one coefficient returns zero");
+    tests.expectEqual(
+        eval(session, "residue[sqrt[x],{x,0}]"),
+        std::string{"residue[sqrt[x], {x, 0}]"},
+        "Residue: a Puiseux branch point remains unevaluated rather than receiving a formal residue");
+    tests.expectEqual(
+        eval(session, "residue[log[x],{x,0}]"),
+        std::string{"residue[log[x], {x, 0}]"},
+        "Residue: a logarithmic branch point remains unevaluated");
+
+    tests.expectEqual(
         eval(session, "series[cos[x],{x,Pi/2,4}]"),
         std::string{"seriesData[x, Pi/2, {-1, 0, 1/6, 0}, 1, 5, 1]"},
         "Series: trigonometric recurrence supports exact nonzero centers");

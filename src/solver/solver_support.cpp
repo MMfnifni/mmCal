@@ -2,6 +2,9 @@
 #include "solver_support.hpp"
 
 #include "evaluation/builtin_registry.hpp"
+#include "approximation/certification_error.hpp"
+#include "approximation/certified_evaluator.hpp"
+#include "mathematics/knowledge_context.hpp"
 #include "mathematics/numeric_domain.hpp"
 #include "mathematics/definedness.hpp"
 #include "mathematics/relation_builtin.hpp"
@@ -19,6 +22,52 @@ using expression::Expr;
 using mathematics::RelationKind;
 using numeric::BigInt;
 using numeric::Number;
+
+
+CertifiedOrder certifiedConstantOrder(
+    const Expr& lhs,
+    const Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (lhs == rhs)
+        return CertifiedOrder::Equal;
+
+    const mathematics::AssumptionSet noAssumptions;
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, noAssumptions};
+    if (knowledge.prove(mathematics::relation(RelationKind::Less, lhs, rhs))
+        == mathematics::TruthValue::True)
+        return CertifiedOrder::Less;
+    if (knowledge.prove(mathematics::relation(RelationKind::Greater, lhs, rhs))
+        == mathematics::TruthValue::True)
+        return CertifiedOrder::Greater;
+    if (knowledge.prove(mathematics::relation(RelationKind::Equal, lhs, rhs))
+        == mathematics::TruthValue::True)
+        return CertifiedOrder::Equal;
+
+    // 閉じた定数式の大小は近似値をguessせず，certified enclosureが分離した場合だけ採用する。
+    const approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
+    for (const std::size_t bits : {96U, 192U, 384U}) {
+        try {
+            const auto left = certified.enclose(lhs, bits);
+            const auto right = certified.enclose(rhs, bits);
+            if (!left || !right || !left->isReal() || !right->isReal())
+                return CertifiedOrder::Unknown;
+            const auto& l = left->asReal();
+            const auto& r = right->asReal();
+            if (l.upper() < r.lower())
+                return CertifiedOrder::Less;
+            if (l.lower() > r.upper())
+                return CertifiedOrder::Greater;
+            if (l.isPoint() && r.isPoint() && l.lower() == r.lower())
+                return CertifiedOrder::Equal;
+        }
+        catch (const approximation::CertifiedBackendUnsupported&) {
+            return CertifiedOrder::Unknown;
+        }
+    }
+    return CertifiedOrder::Unknown;
+}
 
 Expr integerExpr(std::int64_t value) {
     return Expr{Number{BigInt{value}}};

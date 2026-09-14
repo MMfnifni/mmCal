@@ -347,14 +347,23 @@ enum class IntegralRoundingOperation {
 }
 
 
-[[nodiscard]] Expr factorList(std::vector<std::uint64_t> factors, bool negative) {
-    std::sort(factors.begin(), factors.end());
+[[nodiscard]] Expr factorMultiplicityList(
+    const std::vector<numeric::PrimePowerFactor>& factors,
+    bool negative) {
     std::vector<Expr> elements;
     elements.reserve(factors.size() + (negative ? 1U : 0U));
-    if (negative)
-        elements.emplace_back(Number{BigInt{-1}});
-    for (const std::uint64_t factor : factors)
-        elements.emplace_back(Number{BigInt::fromUnsigned(factor)});
+    if (negative) {
+        elements.push_back(Expr::list({
+            Expr{Number{BigInt{-1}}},
+            Expr{Number{BigInt{1}}}
+        }));
+    }
+    for (const auto& factor : factors) {
+        elements.push_back(Expr::list({
+            Expr{Number{factor.prime}},
+            Expr{Number{BigInt::fromUnsigned(factor.exponent)}}
+        }));
+    }
     return Expr::list(std::move(elements));
 }
 
@@ -655,16 +664,10 @@ Expr evaluateFactorInteger(
 
     const bool negative = integerValue->isNegative();
     const BigInt magnitude = integerValue->abs();
-    const auto value = numeric::tryToUint64(magnitude);
-    if (!value)
+    std::vector<numeric::PrimePowerFactor> factors;
+    if (!numeric::factorBigInt(magnitude, factors))
         return holdUnary(arguments, registry, evaluation::BuiltinId::FactorInteger, names::factorInteger);
-    if (*value == 1)
-        return Expr::list({Expr{Number{negative ? BigInt{-1} : BigInt{1}}}});
-
-    std::vector<std::uint64_t> factors;
-    if (!numeric::factorUint64(*value, factors))
-        return holdUnary(arguments, registry, evaluation::BuiltinId::FactorInteger, names::factorInteger);
-    return factorList(std::move(factors), negative);
+    return factorMultiplicityList(factors, negative);
 }
 
 Expr evaluateTotient(
@@ -676,25 +679,16 @@ Expr evaluateTotient(
         error::throwCalcError(error::CalcErrorType::Type, "totient requires an integer argument");
     if (!integerValue->isPositive())
         error::throwCalcError(error::CalcErrorType::Domain, "totient requires a positive integer");
-    const auto value = numeric::tryToUint64(*integerValue);
-    if (!value)
-        return holdUnary(arguments, registry, evaluation::BuiltinId::Totient, names::totient);
-    if (*value == 1)
+    if (*integerValue == BigInt{1})
         return integerResult(BigInt{1});
 
-    std::vector<std::uint64_t> factors;
-    if (!numeric::factorUint64(*value, factors))
+    std::vector<numeric::PrimePowerFactor> factors;
+    if (!numeric::factorBigInt(*integerValue, factors))
         return holdUnary(arguments, registry, evaluation::BuiltinId::Totient, names::totient);
-    std::sort(factors.begin(), factors.end());
-    std::uint64_t result = *value;
-    std::uint64_t previous = 0;
-    for (const std::uint64_t prime : factors) {
-        if (prime == previous)
-            continue;
-        result = (result / prime) * (prime - 1);
-        previous = prime;
-    }
-    return integerResult(BigInt::fromUnsigned(result));
+    BigInt result = *integerValue;
+    for (const auto& factor : factors)
+        result = (result / factor.prime) * (factor.prime - BigInt{1});
+    return integerResult(std::move(result));
 }
 
 Expr evaluateRem(

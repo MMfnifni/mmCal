@@ -99,6 +99,23 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "The TPSA backend covers Taylor/Laurent/Puiseux/logarithmic Series, selected special functions, low-cost trigonometric/hyperbolic/stable-elementary rewrites, and real +Infinity through the reciprocal local variable. A symbolic exponent independent of the expansion variable uses the generalized-binomial recurrence at a proven analytic principal-branch center. Unsupported branches or transseries remain unevaluated rather than being guessed.",
         "series[(1+x)^a, {x, 0, 5}]\n"
         "normal[series[(1+x)^3, {x, 0, 5}]]  ->  x^3+3x^2+3x+1"),
+    HELP_NOTE(SeriesCoefficient,
+        "Returns an exact coefficient from a supported local Taylor, Laurent, or Puiseux expansion.",
+        "seriesCoefficient[expression, {variable, center, exponent}]",
+        "expression: Held while the expansion variable is locally bound.\n"
+        "variable: The expansion symbol.\n"
+        "center: The exact expansion point.\n"
+        "exponent: An exact integer on the local power grid.",
+        "Logarithmic local layers are not silently projected onto an ordinary power coefficient; unsupported cases remain unevaluated.",
+        "seriesCoefficient[sin[x], {x, 0, 5}]  ->  1/120"),
+    HELP_NOTE(Residue,
+        "Returns the coefficient of (x-a)^-1 at a proven isolated meromorphic singularity.",
+        "residue[expression, {variable, point}]",
+        "expression: Held while the expansion variable is locally bound.\n"
+        "variable: The local expansion symbol.\n"
+        "point: The exact finite expansion point.",
+        "Puiseux branch points and logarithmic local layers are rejected rather than assigned a residue by analogy.",
+        "residue[1/(x^2+1), {x, I}]  ->  -I/2"),
     HELP_NOTE(Normal,
         "Removes the order term from a structured series and returns its truncated expression.",
         "normal[expression]",
@@ -243,12 +260,12 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "n: An integer greater than 2.",
         "prevprime[14]  ->  13"),
     HELP_NOTE(FactorInteger,
-        "Factors an integer into a flat list of exact prime factors.",
+        "Factors an integer into exact {prime, exponent} pairs.",
         "factorint[n]",
-        "n: A nonzero integer whose magnitude is within the supported unsigned 64-bit factorization range.",
-        "A negative input prefixes -1; zero is a DomainError.",
-        "factorint[360]  ->  {2, 2, 2, 3, 3, 5}\n"
-        "factorint[-12]  ->  {-1, 2, 2, 3}"),
+        "n: A nonzero exact integer. BigInt factorization is bounded and may remain unevaluated when an exact prime certificate cannot be obtained.",
+        "Negative inputs include {-1,1}; factorint[1] is {}; zero is a DomainError.",
+        "factorint[360]  ->  {{2, 3}, {3, 2}, {5, 1}}\n"
+        "factorint[-12]  ->  {{-1, 1}, {2, 2}, {3, 1}}"),
     HELP(Totient,
         "Computes Euler's totient: the count of residues coprime to n.",
         "totient[n]",
@@ -422,6 +439,13 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "leastSquares[{{1, 0}, {0, 1}, {1, 1}}, {1, 2, 4}]  ->  {4/3, 7/3}\n"
         "leastSquares[{{1, 2}, {2, 4}}, {1, 2}]  ->  {1/5, 2/5}\n"
         "N[leastSquares[{{1, 0}, {0, 1}, {1, 1}}, {1, 2, 4}], 12]"),
+    HELP_NOTE(CharacteristicPolynomial,
+        "Returns the exact characteristic polynomial det(x I-A) of a square matrix.",
+        "characteristicPolynomial[matrix, variable]",
+        "matrix: A square matrix with exact real or complex Rational entries.\n"
+        "variable: An unprotected user symbol used as the polynomial indeterminate.",
+        "The polynomial is constructed by a division-free Berkowitz recurrence, so singular matrices require no pivot division. The result is exact; unsupported matrix entries remain unevaluated.",
+        "characteristicPolynomial[{{1, 2}, {3, 4}}, x]  ->  x^2-5x-2"),
     HELP_NOTE(Eigenvalues,
         "Computes the eigenvalues of a square matrix.",
         "eigenvalues[matrix]\n"
@@ -1588,6 +1612,13 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "root[{-2, 0, 1}, 2]  ->  root[{-2, 0, 1}, 2]\n"
         "N[root[{-2, 0, 1}, 2], 30]  ->  1.41421356237309504880168872421\n"
         "N[root[{1, 0, 1}, 2, Complex], 30]  ->  I"),
+    HELP_NOTE(MinimalPolynomial,
+        "Returns the exact minimal polynomial over Q of a proven algebraic value.",
+        "minimalPolynomial[value, variable]",
+        "value: An exact algebraic expression supported by the AlgebraicNumber backend.\n"
+        "variable: An unprotected user symbol used as the polynomial indeterminate.",
+        "The function does not guess algebraicity from numerical approximations; unsupported inputs remain unevaluated.",
+        "minimalPolynomial[sqrt[2]+sqrt[3], x]  ->  x^4-10x^2+1"),
     HELP_NOTE(Simplify,
         "Applies conservative exact simplification, optionally under assumptions.",
         "simplify[expression]\n"
@@ -1652,7 +1683,7 @@ constexpr FunctionHelpEntry functionHelpEntries[] = {
         "equation: An equality, ordered inequality, or brace of equations.\n"
         "variable: A user symbol, or a brace of symbols for a system.\n"
         "domain: Integer, Rational, Real, or Complex; default equation domain is Complex. A constraint may be used instead.",
-        "The domain-only shorthand infers a variable only when exactly one unknown user symbol exists. Affine Exp/Sin/Cos/Tan equations in the default Complex domain return integer-parameter periodic families; principal Log and tangent omitted values retain their exact image restrictions. Unsupported families remain unresolved rather than being reported as empty.",
+        "The domain-only shorthand infers a variable only when exactly one unknown user symbol exists. Affine Exp/Sin/Cos/Tan equations in the default Complex domain return integer-parameter periodic families. Principal sqrt/log/log1p and inverse trig/hyperbolic inversion retains exact half-open principal-image restrictions; symbolic targets keep those restrictions as branch conditions. Unsupported families remain unresolved rather than being reported as empty.",
         "solve[x^2==1, x]  ->  {x==1, x==-1}\n"
         "solve[x^2+1==0, x, Real]  ->  {}\n"
         "solve[{2x+3y==5, x-2y==9}, {x, y}]  ->  {{x==37/7, y==-13/7}}\n"

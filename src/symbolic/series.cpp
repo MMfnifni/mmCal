@@ -10,6 +10,7 @@
 #include "numeric/integer_algorithms.hpp"
 #include "simplification/simplifier.hpp"
 #include "solver/solution_set.hpp"
+#include "symbolic/cases.hpp"
 #include "symbolic/polynomial.hpp"
 #include "symbolic/substitution.hpp"
 
@@ -5113,6 +5114,28 @@ Expr toNormalExpression(
             normalSeriesExpression(*series, builtins, mathematics, angles),
             builtins, mathematics, angles);
 
+    if (builtins.isCallTo(expression, BuiltinId::Cases)) {
+        const auto& source = expression.asCall();
+        std::vector<Expr> branches;
+        branches.reserve(source.arguments.size());
+        bool changed = false;
+        for (const Expr& branchExpression : source.arguments) {
+            const auto branch = detail::caseBranchView(branchExpression, builtins);
+            if (!branch) return expression;
+            Expr value = toNormalExpression(
+                *branch->value, builtins, mathematics, angles);
+            changed |= !(value == *branch->value);
+            branches.push_back(detail::makeCaseBranch(
+                builtins,
+                std::move(value),
+                branch->hasCondition()
+                    ? std::optional<Expr>{*branch->condition}
+                    : std::nullopt));
+        }
+        if (!changed) return expression;
+        return detail::makeCases(builtins, std::move(branches));
+    }
+
     if (expression.isCall()) {
         const auto& source = expression.asCall();
         std::vector<Expr> arguments;
@@ -5183,7 +5206,10 @@ Expr toNormalExpression(
             for (const solver::SolutionBranch& branch : solutions.branches())
                 branches.push_back(convertBranch(branch));
             if (!changed) return expression;
-            return Expr::solutionSet(solver::SolutionSet::finite(variables(), std::move(branches)));
+            solver::SolutionSet converted = solver::SolutionSet::finite(
+                variables(), std::move(branches));
+            converted = converted.withAdditionalConditions(solutions.conditions());
+            return Expr::solutionSet(std::move(converted));
         }
         case solver::SolutionSetKind::Conditional: {
             std::vector<solver::SolutionCase> cases(
@@ -5193,7 +5219,10 @@ Expr toNormalExpression(
                     for (solver::SolutionBranch& branch : solutionCase.branches)
                         branch = convertBranch(branch);
             if (!changed) return expression;
-            return Expr::solutionSet(solver::SolutionSet::conditional(variables(), std::move(cases)));
+            solver::SolutionSet converted = solver::SolutionSet::conditional(
+                variables(), std::move(cases));
+            converted = converted.withAdditionalConditions(solutions.conditions());
+            return Expr::solutionSet(std::move(converted));
         }
         case solver::SolutionSetKind::Empty:
         case solver::SolutionSetKind::Universal:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "expression/symbol.hpp"
 #include "symbolic/algebraic_number.hpp"
 
 #include <cstddef>
@@ -44,6 +45,14 @@ namespace mmcal::symbolic {
 // 数値近似から代数性を推測せず，証明できない式はnulloptを返す。
 [[nodiscard]] std::optional<AlgebraicNumber> exactAlgebraicValue(
     const expression::Expr& expression,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics);
+
+// exact algebraic expressionについて，Q上で証明済みのminimal polynomialを
+// 指定変数の通常式として返す。証明できない場合はnullopt。
+[[nodiscard]] std::optional<expression::Expr> minimalPolynomialExpression(
+    const expression::Expr& expression,
+    const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics);
 

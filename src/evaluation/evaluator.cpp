@@ -853,6 +853,7 @@ expression::Expr Evaluator::evaluateMachine(
                                     const bool held = definition->argumentEvaluation == ArgumentEvaluation::HoldAll
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirst && index == 0)
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstTwo && index < 2)
+                                        || (definition->argumentEvaluation == ArgumentEvaluation::HoldSecond && index == 1)
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndIteratorSpec && index == 0)
                                         || (definition->argumentEvaluation == ArgumentEvaluation::HoldFirstAndTableIteratorSpec && index == 0);
                                     if (held)

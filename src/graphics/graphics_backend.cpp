@@ -2,7 +2,9 @@
 
 #include "eps_backend.hpp"
 #include "pdf_backend.hpp"
+#include "png_backend.hpp"
 #include "svg_backend.hpp"
+#include "webp_backend.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -30,6 +32,10 @@ std::optional<GraphicsFormat> parseGraphicsFormat(std::string_view format) {
         return GraphicsFormat::Eps;
     if (value == "pdf")
         return GraphicsFormat::Pdf;
+    if (value == "png")
+        return GraphicsFormat::Png;
+    if (value == "webp")
+        return GraphicsFormat::Webp;
     return std::nullopt;
 }
 
@@ -45,6 +51,8 @@ const char* graphicsFormatName(GraphicsFormat format) noexcept {
     case GraphicsFormat::Svg: return "SVG";
     case GraphicsFormat::Eps: return "EPS";
     case GraphicsFormat::Pdf: return "PDF";
+    case GraphicsFormat::Png: return "PNG";
+    case GraphicsFormat::Webp: return "WEBP";
     }
     return "Unknown";
 }
@@ -54,11 +62,16 @@ const char* graphicsFormatExtension(GraphicsFormat format) noexcept {
     case GraphicsFormat::Svg: return ".svg";
     case GraphicsFormat::Eps: return ".eps";
     case GraphicsFormat::Pdf: return ".pdf";
+    case GraphicsFormat::Png: return ".png";
+    case GraphicsFormat::Webp: return ".webp";
     }
     return "";
 }
 
-GraphicsRenderResult renderGraphics(const GraphicsScene& scene, GraphicsFormat format) {
+GraphicsRenderResult renderGraphics(
+    const GraphicsScene& scene,
+    GraphicsFormat format,
+    const GraphicsRenderOptions& options) {
     switch (format) {
     case GraphicsFormat::Svg: {
         auto rendered = renderSvg(scene);
@@ -89,6 +102,30 @@ GraphicsRenderResult renderGraphics(const GraphicsScene& scene, GraphicsFormat f
             return GraphicsRenderResult{GraphicsRenderStatus::InvalidScene, std::nullopt};
         if (rendered.status == PdfRenderStatus::UnsupportedTransparency
             || rendered.status == PdfRenderStatus::UnsupportedText)
+            return GraphicsRenderResult{GraphicsRenderStatus::UnsupportedFeature, std::nullopt};
+        return GraphicsRenderResult{GraphicsRenderStatus::RenderFailed, std::nullopt};
+    }
+    case GraphicsFormat::Png: {
+        auto rendered = renderPng(scene, options.raster);
+        if (rendered)
+            return GraphicsRenderResult{GraphicsRenderStatus::Success, std::move(rendered.png)};
+        if (rendered.status == PngRenderStatus::InvalidScene)
+            return GraphicsRenderResult{GraphicsRenderStatus::InvalidScene, std::nullopt};
+        if (rendered.status == PngRenderStatus::InvalidOptions)
+            return GraphicsRenderResult{GraphicsRenderStatus::InvalidOptions, std::nullopt};
+        if (rendered.status == PngRenderStatus::UnsupportedText)
+            return GraphicsRenderResult{GraphicsRenderStatus::UnsupportedFeature, std::nullopt};
+        return GraphicsRenderResult{GraphicsRenderStatus::RenderFailed, std::nullopt};
+    }
+    case GraphicsFormat::Webp: {
+        auto rendered = renderWebp(scene, options.raster);
+        if (rendered)
+            return GraphicsRenderResult{GraphicsRenderStatus::Success, std::move(rendered.webp)};
+        if (rendered.status == WebpRenderStatus::InvalidScene)
+            return GraphicsRenderResult{GraphicsRenderStatus::InvalidScene, std::nullopt};
+        if (rendered.status == WebpRenderStatus::InvalidOptions)
+            return GraphicsRenderResult{GraphicsRenderStatus::InvalidOptions, std::nullopt};
+        if (rendered.status == WebpRenderStatus::UnsupportedText)
             return GraphicsRenderResult{GraphicsRenderStatus::UnsupportedFeature, std::nullopt};
         return GraphicsRenderResult{GraphicsRenderStatus::RenderFailed, std::nullopt};
     }

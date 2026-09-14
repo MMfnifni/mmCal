@@ -142,6 +142,11 @@ namespace mmcal::builtins {
     const evaluation::BuiltinRegistry& registry,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
+[[nodiscard]] expression::Expr evaluateCharacteristicPolynomial(
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
 [[nodiscard]] expression::Expr evaluateEigenvalues(
     std::span<const expression::Expr> arguments,
     const evaluation::BuiltinRegistry& registry,

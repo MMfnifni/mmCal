@@ -1,6 +1,7 @@
 #pragma once
 
 #include "graphics_scene.hpp"
+#include "raster_backend.hpp"
 
 #include <optional>
 #include <string>
@@ -11,14 +12,21 @@ namespace mmcal::graphics {
 enum class GraphicsFormat {
     Svg,
     Eps,
-    Pdf
+    Pdf,
+    Png,
+    Webp
 };
 
 enum class GraphicsRenderStatus {
     Success,
     InvalidScene,
+    InvalidOptions,
     UnsupportedFeature,
     RenderFailed
+};
+
+struct GraphicsRenderOptions final {
+    RasterRenderOptions raster;
 };
 
 struct GraphicsRenderResult final {
@@ -38,6 +46,7 @@ struct GraphicsRenderResult final {
 // GraphicsSceneをbackendへ送る共通入口。Plot側は出力形式を意識しない。
 [[nodiscard]] GraphicsRenderResult renderGraphics(
     const GraphicsScene& scene,
-    GraphicsFormat format);
+    GraphicsFormat format,
+    const GraphicsRenderOptions& options = {});
 
 } // namespace mmcal::graphics

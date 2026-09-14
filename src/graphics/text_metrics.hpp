@@ -29,7 +29,9 @@ struct GraphicsTextMetrics final {
             em += 0.56;
         else if (ch == '.' || ch == ',')
             em += 0.28;
-        else if (ch == '-' || ch == '+')
+        else if (ch == '-')
+            em += 0.52;
+        else if (ch == '+')
             em += 0.36;
         else if (ch == 'e' || ch == 'E')
             em += 0.52;

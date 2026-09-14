@@ -36,6 +36,7 @@ struct StartupOptions final {
     InputMode inputMode = InputMode::Interactive;
     std::optional<std::string> expression;
     bool showHelp = false;
+    bool showVersion = false;
 };
 
 [[nodiscard]] inline std::size_t parseFixedDigitsOption(std::string_view text) {
@@ -70,6 +71,11 @@ struct StartupOptions final {
         const std::string_view argument = arguments[index];
         if (argument == "--help" || argument == "-h") {
             options.showHelp = true;
+            continue;
+        }
+
+        if (argument == "--version" || argument == "-v") {
+            options.showVersion = true;
             continue;
         }
 
@@ -132,6 +138,7 @@ inline void printUsage(std::ostream& output) {
         << "Usage: mmCal [--fix <0..1000>] [--angle <deg|rad|grad>] [--layout <auto|single|multi>]\n"
         << "       mmCal [options] --eval <expression>\n"
         << "       mmCal [options] --batch\n"
+        << "       mmCal -v | --version\n"
         << "Interactive help: :help [function]\n";
 }
 

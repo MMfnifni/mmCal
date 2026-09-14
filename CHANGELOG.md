@@ -1,8 +1,13 @@
 # Changelog
 
 ## Unreleased
-
-not yet.
+- Added `minimalPolynomial`, `seriesCoefficient`, `residue`, and `characteristicPolynomial`. The CLI also supports `-v` / `--version`.
+- Extended `eigenvalues`, `eigenvectors`, and `eigensystem` for general exact Rational matrices, including exact algebraic eigenvalues and diagonalizable repeated roots. Defective matrices remain unevaluated.
+- Connected `cases` / `SolutionSet` with `at` / `toNormal`, preserving conditions across branch selection, normalization, and reuse in later symbolic operations.
+- Extended finite symbolic `sum` / `prod` with Gosper summation for supported hypergeometric terms, symbolic factorial handling, and product distribution over factors and bounded integer powers.
+- Extended `factorint` to BigInt inputs and changed its result to `{{prime, exponent}, ...}`. Evaluated large integers such as `factorint[50!]` now use the normal factorization path.
+- Improved principal-inverse handling in `solve`, preserving valid complex principal values even when solving for a Real variable. Inverse-trigonometric boundaries now follow the active angle mode.
+- Added PNG and lossless WebP export. Raster export supports `DPI`, `ImageSize`, `Antialiasing`, and `Background`.
 
 ## v1.6.0 — 2026-09-12
 

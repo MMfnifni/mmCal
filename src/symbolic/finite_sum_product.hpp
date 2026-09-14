@@ -27,8 +27,8 @@ namespace mmcal::symbolic {
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles);
 
-// Gosper等を後段に接続するためのhypergeometric term基礎認識。
-// f(k+1)/f(k) が現在のexact simplifierでkの有理函数へ落ちる場合だけratioを返す。
+// hypergeometric termの基礎認識。Factorial / Combination / rising/falling factorial
+// 等のshift quotientを構造的に正規化し，f(k+1)/f(k)がkの有理函数ならratioを返す。
 struct HypergeometricTermRecognition final {
     expression::Expr ratio;
 };

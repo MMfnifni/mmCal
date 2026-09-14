@@ -1173,6 +1173,7 @@ using numeric::Rational;
     case BuiltinId::ConditionNumber:
     case BuiltinId::LeastSquares:
     case BuiltinId::PseudoInverse:
+    case BuiltinId::CharacteristicPolynomial:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -1305,6 +1306,9 @@ using numeric::Rational;
     case BuiltinId::Undefine:
     case BuiltinId::AngleMode:
     case BuiltinId::Series:
+    case BuiltinId::SeriesCoefficient:
+    case BuiltinId::Residue:
+    case BuiltinId::MinimalPolynomial:
         break;
     case BuiltinId::SeriesData:
         if (const auto series = parseSeriesData(expression, builtins))

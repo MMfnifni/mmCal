@@ -586,6 +586,25 @@ void runLinearAlgebraTests(TestRunner& tests) {
         "N[leastSquares[{{1,0},{0,1},{1,1}},{1,2,4}],8]"),
         std::string{"{1.3333333, 2.3333333}"},
         "Linear algebra: N leastSquares propagates certified SVD precision");
+    tests.expectEqual(eval(session, "characteristicPolynomial[{{1,2},{3,4}},x]"),
+        std::string{"x^2-5x-2"},
+        "Linear algebra: characteristicPolynomial uses exact division-free coefficients");
+    tests.expectEqual(eval(session,
+        "characteristicPolynomial[{{1,2,3},{0,4,5},{1,0,6}},x]"),
+        std::string{"x^3-11x^2+31x-22"},
+        "Linear algebra: Berkowitz characteristic polynomial handles general exact 3x3 matrices");
+    tests.expectEqual(eval(session,
+        "characteristicPolynomial[{{1+I,1,0},{0,2-I,1},{1,0,3}},x]"),
+        std::string{"x^3-6x^2+(12+I)x+(-10-3I)"},
+        "Linear algebra: characteristicPolynomial preserves exact complex coefficients");
+    tests.expectEqual(eval(session,
+        "eigenvalues[{{1,2,3},{0,4,5},{1,0,6}}]"),
+        std::string{"{root[{-22, 31, -11, 1}, 1], root[{-22, 31, -11, 1}, 2], root[{-22, 31, -11, 1}, 3]}"},
+        "Linear algebra: general exact rational 3x3 eigenvalues reuse the polynomial Root solver");
+    tests.expectEqual(eval(session,
+        "eigenvalues[{{1,1,0},{0,1,0},{1,0,1}}]"),
+        std::string{"{1, 1, 1}"},
+        "Linear algebra: general exact eigenvalues preserve algebraic multiplicity");
     tests.expectEqual(eval(session, "eigenvalues[{{1,2},{3,4}}]"),
         std::string{"{(5+sqrt[33])/2, (5-sqrt[33])/2}"},
         "Linear algebra: exact 2x2 eigenvalues preserve radicals");
@@ -601,6 +620,30 @@ void runLinearAlgebraTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "eigenvectors[{{1,2},{3,4}}]"),
         std::string{"{{2, 2}, {(5+sqrt[33])/2-1, (5-sqrt[33])/2-1}}"},
         "Linear algebra: distinct exact 2x2 eigenvectors stay symbolic and column-oriented");
+    tests.expectEqual(eval(session,
+        "eigenvectors[{{0,1,0},{2,0,0},{0,0,3}}]"),
+        std::string{"{{0, sqrt[2]/2, -sqrt[2]/2}, {0, 1, 1}, {1, 0, 0}}"},
+        "Linear algebra: algebraic-field null space produces exact eigenvectors for irrational eigenvalues");
+    tests.expectEqual(eval(session,
+        "eigensystem[{{0,1,0},{2,0,0},{0,0,3}}]"),
+        std::string{"{{3, sqrt[2], -sqrt[2]}, {{0, sqrt[2]/2, -sqrt[2]/2}, {0, 1, 1}, {1, 0, 0}}}"},
+        "Linear algebra: general exact eigensystem keeps eigenvalue/vector columns aligned");
+    tests.expectEqual(eval(session,
+        "eigenvectors[{{0,-1,0},{1,0,0},{0,0,2}}]"),
+        std::string{"{{0, I, -I}, {0, 1, 1}, {1, 0, 0}}"},
+        "Linear algebra: algebraic-field null space handles exact complex eigenvalues of real rational matrices");
+    tests.expectEqual(eval(session,
+        "eigenvectors[{{1,0,1},{0,1,0},{0,0,2}}]"),
+        std::string{"{{1, 0, 1}, {0, 1, 0}, {0, 0, 1}}"},
+        "Linear algebra: repeated diagonalizable eigenvalues receive an independent eigenspace basis");
+    tests.expectEqual(eval(session,
+        "eigenvectors[{{0,0,1},{1,0,1},{0,1,0}}]"),
+        std::string{"{{-1+root[{-1, -1, 0, 1}, 1, Complex]^2, -1+root[{-1, -1, 0, 1}, 2, Complex]^2, -1+root[{-1, -1, 0, 1}, 1]^2}, {root[{-1, -1, 0, 1}, 1, Complex], root[{-1, -1, 0, 1}, 2, Complex], root[{-1, -1, 0, 1}, 1]}, {1, 1, 1}}"},
+        "Linear algebra: cubic algebraic eigenvectors stay in the same exact number field as each eigenvalue");
+    tests.expectEqual(eval(session,
+        "eigenvectors[{{1,1,0},{0,1,0},{0,0,2}}]"),
+        std::string{"eigenvectors[{{1, 1, 0}, {0, 1, 0}, {0, 0, 2}}]"},
+        "Linear algebra: defective general exact matrices remain unevaluated instead of duplicating eigenvectors");
     tests.expectEqual(eval(session, "eigenvectors[{{1,1},{0,1}}]"),
         std::string{"eigenvectors[{{1, 1}, {0, 1}}]"},
         "Linear algebra: defective exact 2x2 matrices do not receive duplicate eigenvectors");

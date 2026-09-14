@@ -70,13 +70,37 @@ void runCombinatoricsSignalTests(TestRunner& tests) {
         "prevprime returns the previous exact prime");
     tests.expect(evalError(session, "prevprime[2]").type() == error::CalcErrorType::Domain,
         "prevprime rejects values without a positive predecessor prime");
-    tests.expectEqual(eval(session, "factorint[360]"), std::string{"{2, 2, 2, 3, 3, 5}"},
-        "factorint returns flattened sorted prime factors");
-    tests.expectEqual(eval(session, "factorint[-84]"), std::string{"{-1, 2, 2, 3, 7}"},
-        "factorint preserves the sign as a leading minus-one factor");
+    tests.expectEqual(eval(session, "factorint[360]"),
+        std::string{"{{2, 3}, {3, 2}, {5, 1}}"},
+        "factorint returns sorted prime-exponent pairs");
+    tests.expectEqual(eval(session, "factorint[-84]"),
+        std::string{"{{-1, 1}, {2, 2}, {3, 1}, {7, 1}}"},
+        "factorint preserves the sign as the {-1,1} factor");
+    tests.expectEqual(eval(session, "factorint[1]"), std::string{"{}"},
+        "factorint one has the empty prime factorization");
     tests.expectEqual(eval(session, "factorint[1000036000099]"),
-        std::string{"{1000003, 1000033}"},
+        std::string{"{{1000003, 1}, {1000033, 1}}"},
         "factorint splits a nontrivial uint64 semiprime");
+    tests.expectEqual(eval(session,
+        "factorint[815915283247897734345611269596115894272000000000]"),
+        std::string{"{{2, 38}, {3, 18}, {5, 9}, {7, 5}, {11, 3}, {13, 3}, {17, 2}, {19, 2}, {23, 1}, {29, 1}, {31, 1}, {37, 1}}"},
+        "factorint handles smooth BigInt values beyond uint64");
+    tests.expectEqual(eval(session, "factorint[50!]"),
+        std::string{"{{2, 47}, {3, 22}, {5, 12}, {7, 8}, {11, 4}, {13, 3}, {17, 2}, {19, 2}, {23, 2}, {29, 1}, {31, 1}, {37, 1}, {41, 1}, {43, 1}, {47, 1}}"},
+        "factorint evaluates a factorial argument normally before BigInt factorization");
+    tests.expectEqual(eval(session,
+        "factorint[30414093201713378043612608166064768844377641568960512000000000000]"),
+        std::string{"{{2, 47}, {3, 22}, {5, 12}, {7, 8}, {11, 4}, {13, 3}, {17, 2}, {19, 2}, {23, 2}, {29, 1}, {31, 1}, {37, 1}, {41, 1}, {43, 1}, {47, 1}}"},
+        "factorint returns the same factorization after the factorial has already materialized as a BigInt");
+    tests.expectEqual(eval(session, "factorint[100000010600000019779]"),
+        std::string{"{{10000000019, 1}, {10000001041, 1}}"},
+        "factorint uses BigInt Pollard-Rho beyond uint64");
+    tests.expectEqual(eval(session, "factorint[18446744073709552253]"),
+        std::string{"{{18446744073709552253, 1}}"},
+        "factorint certifies a prime just beyond uint64 with Pocklington");
+    tests.expectEqual(eval(session, "factorint[18446799413941773381656759]"),
+        std::string{"{{1000003, 1}, {18446744073709552253, 1}}"},
+        "factorint combines BigInt Pollard-Rho with a certified factor above uint64");
     tests.expectEqual(eval(session, "totient[1]"), std::string{"1"},
         "totient one is exact");
     tests.expectEqual(eval(session, "totient[9]"), std::string{"6"},

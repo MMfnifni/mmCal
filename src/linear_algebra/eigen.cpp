@@ -9,6 +9,7 @@
 #include "approximation/precision.hpp"
 #include "builtins/exact_operations.hpp"
 #include "linear_algebra/exact_matrix_detail.hpp"
+#include "linear_algebra/algebraic_field_linear.hpp"
 #include "expression/array_utils.hpp"
 #include "evaluation/evaluation_budget.hpp"
 #include "linear_algebra/complex_point.hpp"
@@ -20,6 +21,12 @@
 #include "numeric/number.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/rational.hpp"
+#include "solver/polynomial_solver.hpp"
+#include "symbolic/algebraic_expression.hpp"
+#include "symbolic/number_field.hpp"
+#include "symbolic/polynomial.hpp"
+#include "symbolic/risch_core.hpp"
+#include "symbolic/substitution.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -59,6 +66,300 @@ using detail::subtract;
 using detail::two;
 using detail::zero;
 
+[[nodiscard]] bool exactNumberMatrix(const MatrixView& matrix) noexcept {
+    return matrix.array().hasExactNumberStorage();
+}
+
+// Berkowitz recurrence. coeffsは det(x I - A) の降冪係数
+// {1,c1,...,cn} を返す。pivot divisionを行わないので，特異行列や
+// 零pivotでも同一経路でexactに処理できる。
+[[nodiscard]] std::optional<std::vector<Number>> berkowitzCoefficients(
+    const MatrixView& matrix) {
+    if (matrix.rows() != matrix.columns() || !exactNumberMatrix(matrix))
+        return std::nullopt;
+
+    const std::size_t size = matrix.rows();
+    evaluation::consumeEvaluationBudget(
+        evaluation::EvaluationResource::TemporaryMatrixElement,
+        size == 0 ? 1 : size * size);
+
+    std::vector<Number> coefficients{Number{BigInt{1}}};
+    for (std::size_t order = 1; order <= size; ++order) {
+        std::vector<Number> toeplitz(order + 1, Number{BigInt{0}});
+        toeplitz[0] = Number{BigInt{1}};
+        toeplitz[1] = -matrix(order - 1, order - 1).asNumber();
+
+        if (order >= 2) {
+            const std::size_t preceding = order - 1;
+            std::vector<Number> powerColumn(preceding, Number{BigInt{0}});
+            for (std::size_t row = 0; row < preceding; ++row)
+                powerColumn[row] = matrix(row, order - 1).asNumber();
+
+            for (std::size_t offset = 2; offset <= order; ++offset) {
+                Number scalar{BigInt{0}};
+                for (std::size_t column = 0; column < preceding; ++column)
+                    scalar += matrix(order - 1, column).asNumber() * powerColumn[column];
+                toeplitz[offset] = -scalar;
+
+                if (offset == order)
+                    break;
+                std::vector<Number> next(preceding, Number{BigInt{0}});
+                for (std::size_t row = 0; row < preceding; ++row)
+                    for (std::size_t column = 0; column < preceding; ++column)
+                        next[row] += matrix(row, column).asNumber() * powerColumn[column];
+                powerColumn = std::move(next);
+            }
+        }
+
+        std::vector<Number> next(order + 1, Number{BigInt{0}});
+        for (std::size_t row = 0; row <= order; ++row)
+            for (std::size_t column = 0;
+                 column < coefficients.size() && column <= row; ++column)
+                next[row] += toeplitz[row - column] * coefficients[column];
+        coefficients = std::move(next);
+    }
+    return coefficients;
+}
+
+[[nodiscard]] std::optional<symbolic::RationalPolynomial>
+rationalCharacteristicPolynomial(const MatrixView& matrix) {
+    if (!matrix.array().hasExactRealStorage())
+        return std::nullopt;
+    const auto descending = berkowitzCoefficients(matrix);
+    if (!descending)
+        return std::nullopt;
+    std::vector<Rational> ascending;
+    ascending.reserve(descending->size());
+    for (auto iterator = descending->rbegin(); iterator != descending->rend(); ++iterator) {
+        if (!iterator->isReal())
+            return std::nullopt;
+        ascending.push_back(iterator->asReal().toRational());
+    }
+    return symbolic::RationalPolynomial{std::move(ascending)};
+}
+
+[[nodiscard]] bool polynomialIsOne(const symbolic::RationalPolynomial& value) {
+    return value.degree() == 0 && value.coefficient(0) == Rational{BigInt{1}};
+}
+
+// char 0 の標準square-free decomposition。固有値配列では代数的重複度を
+// 失えないため，Root isolationへ渡す前に multiplicity を明示的に分離する。
+[[nodiscard]] std::optional<std::vector<std::pair<symbolic::RationalPolynomial, std::size_t>>>
+squareFreeComponents(const symbolic::RationalPolynomial& input) {
+    using symbolic::risch::differentiateRationalPolynomialExact;
+    using symbolic::risch::divideRationalPolynomialsExactly;
+    using symbolic::risch::gcdRationalPolynomialsMonic;
+    using symbolic::risch::monicRationalPolynomialExact;
+
+    if (input.isZero() || input.degree() == 0)
+        return std::vector<std::pair<symbolic::RationalPolynomial, std::size_t>>{};
+    const symbolic::RationalPolynomial polynomial = monicRationalPolynomialExact(input);
+    symbolic::RationalPolynomial repeated = gcdRationalPolynomialsMonic(
+        polynomial, differentiateRationalPolynomialExact(polynomial));
+    auto squareFree = divideRationalPolynomialsExactly(polynomial, repeated);
+    if (!squareFree)
+        return std::nullopt;
+
+    std::vector<std::pair<symbolic::RationalPolynomial, std::size_t>> result;
+    symbolic::RationalPolynomial current = std::move(*squareFree);
+    std::size_t multiplicity = 1;
+    while (!polynomialIsOne(current)) {
+        const symbolic::RationalPolynomial shared = gcdRationalPolynomialsMonic(current, repeated);
+        auto factor = divideRationalPolynomialsExactly(current, shared);
+        if (!factor)
+            return std::nullopt;
+        if (!polynomialIsOne(*factor))
+            result.emplace_back(monicRationalPolynomialExact(*factor), multiplicity);
+
+        auto nextRepeated = divideRationalPolynomialsExactly(repeated, shared);
+        if (!nextRepeated)
+            return std::nullopt;
+        current = shared;
+        repeated = std::move(*nextRepeated);
+        ++multiplicity;
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<Expr> rationalMatrixEigenvalues(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    const auto polynomial = rationalCharacteristicPolynomial(matrix);
+    if (!polynomial || polynomial->degree() == 0)
+        return polynomial ? std::optional<Expr>{Expr::array({0}, {})} : std::nullopt;
+    const auto components = squareFreeComponents(*polynomial);
+    if (!components)
+        return std::nullopt;
+
+    // user-visible変数ではなくsolver bridge専用のsymbol。出力へは残らない。
+    const expression::Symbol lambda{"$eigenvalue"};
+    std::vector<Expr> values;
+    values.reserve(matrix.rows());
+    for (const auto& [factor, multiplicity] : *components) {
+        const Expr factorExpr = symbolic::polynomialToExpandedExpr(
+            factor, lambda, context.builtins);
+        const Expr equation = Expr::call(
+            context.builtins.symbol(evaluation::BuiltinId::Equal),
+            {factorExpr, Expr{Number{BigInt{0}}}});
+        const solver::SolutionSet solutions = solver::solvePolynomialEquation(
+            equation, lambda, context.builtins, context.mathematics, context.angles);
+        if (solutions.kind() != solver::SolutionSetKind::Finite)
+            return std::nullopt;
+        for (const solver::SolutionBranch& branch : solutions.branches()) {
+            if (!branch.unconditional() || !branch.freeVariables.empty())
+                return std::nullopt;
+            const auto binding = std::find_if(
+                branch.bindings.begin(), branch.bindings.end(),
+                [&](const solver::SolutionBinding& candidate) {
+                    return candidate.variable == lambda;
+                });
+            if (binding == branch.bindings.end())
+                return std::nullopt;
+            for (std::size_t count = 0; count < multiplicity; ++count)
+                values.push_back(binding->value);
+        }
+    }
+    if (values.size() != matrix.rows())
+        return std::nullopt;
+    const std::size_t valueCount = values.size();
+    return Expr::array({valueCount}, std::move(values));
+}
+
+
+struct ExactRationalEigensystem final {
+    Expr values;
+    Expr vectors;
+};
+
+[[nodiscard]] std::optional<symbolic::AlgebraicElement> fieldConstant(
+    const std::shared_ptr<const symbolic::NumberFieldContext>& field,
+    const Rational& value) {
+    if (!field || field->degree() == 0)
+        return std::nullopt;
+    std::vector<Rational> coefficients(field->degree());
+    coefficients[0] = value;
+    return symbolic::AlgebraicElement::create(field, std::move(coefficients));
+}
+
+[[nodiscard]] Expr algebraicElementExpression(
+    const symbolic::AlgebraicElement& value,
+    const Expr& generator,
+    const ExactMatrixContext& context) {
+    std::vector<Rational> coefficients(
+        value.coefficients().begin(), value.coefficients().end());
+    const expression::Symbol fieldVariable{"$eigenfield"};
+    const Expr polynomial = symbolic::polynomialToExpandedExpr(
+        symbolic::RationalPolynomial{std::move(coefficients)},
+        fieldVariable, context.builtins);
+    return symbolic::substituteSymbol(polynomial, fieldVariable, generator);
+}
+
+struct EigenvalueGroup final {
+    Expr value;
+    std::vector<std::size_t> columns;
+    std::vector<std::vector<Expr>> vectors;
+};
+
+[[nodiscard]] std::optional<ExactRationalEigensystem> rationalMatrixEigensystem(
+    const MatrixView& matrix,
+    const ExactMatrixContext& context) {
+    if (!matrix.array().hasExactRealStorage() || matrix.rows() == 0)
+        return std::nullopt;
+
+    const auto valueExpression = eigenvalues(matrix, context);
+    if (!valueExpression || !valueExpression->isArray())
+        return std::nullopt;
+    const auto& values = valueExpression->asArray();
+    if (values.rank() != 1 || values.size() != matrix.rows())
+        return std::nullopt;
+
+    std::vector<EigenvalueGroup> groups;
+    groups.reserve(values.size());
+    for (std::size_t column = 0; column < values.size(); ++column) {
+        const Expr value = values.element(column);
+        auto group = std::find_if(groups.begin(), groups.end(), [&](const EigenvalueGroup& candidate) {
+            return candidate.value == value;
+        });
+        if (group == groups.end()) {
+            groups.push_back(EigenvalueGroup{value, {column}, {}});
+        }
+        else {
+            group->columns.push_back(column);
+        }
+    }
+
+    for (EigenvalueGroup& group : groups) {
+        auto algebraic = symbolic::exactAlgebraicValue(
+            group.value, context.builtins, context.mathematics);
+        if (!algebraic)
+            return std::nullopt;
+        *algebraic = algebraic->withGeneratorField();
+        const symbolic::AlgebraicElement* generatorElement = algebraic->arithmeticElement();
+        if (!generatorElement)
+            return std::nullopt;
+        const auto field = generatorElement->field();
+        if (!field || field->degree() == 0)
+            return std::nullopt;
+
+        evaluation::consumeEvaluationBudget(
+            evaluation::EvaluationResource::TemporaryMatrixElement,
+            matrix.rows() * matrix.columns());
+        std::vector<symbolic::AlgebraicElement> shifted;
+        shifted.reserve(matrix.rows() * matrix.columns());
+        for (std::size_t row = 0; row < matrix.rows(); ++row) {
+            for (std::size_t column = 0; column < matrix.columns(); ++column) {
+                const Expr entry = matrix(row, column);
+                if (!entry.isNumber() || !entry.asNumber().isReal())
+                    return std::nullopt;
+                auto value = fieldConstant(field, entry.asNumber().asReal().toRational());
+                if (!value)
+                    return std::nullopt;
+                if (row == column) {
+                    auto difference = value->subtract(*generatorElement);
+                    if (!difference)
+                        return std::nullopt;
+                    value = std::move(difference);
+                }
+                shifted.push_back(std::move(*value));
+            }
+        }
+
+        const auto basis = algebraicFieldNullSpace(
+            matrix.rows(), matrix.columns(), shifted);
+        // eigenvectors[...] はn本の独立固有vectorを列に並べる契約なので，
+        // 幾何学的重複度が代数的重複度より小さいdefective matrixは未評価に戻す。
+        if (!basis || basis->size() != group.columns.size())
+            return std::nullopt;
+
+        group.vectors.reserve(basis->size());
+        for (const auto& vector : *basis) {
+            std::vector<Expr> materialized;
+            materialized.reserve(vector.size());
+            for (const symbolic::AlgebraicElement& component : vector)
+                materialized.push_back(algebraicElementExpression(
+                    component, group.value, context));
+            group.vectors.push_back(std::move(materialized));
+        }
+    }
+
+    std::vector<Expr> output(matrix.rows() * matrix.columns(), integer(0));
+    for (const EigenvalueGroup& group : groups) {
+        if (group.columns.size() != group.vectors.size())
+            return std::nullopt;
+        for (std::size_t index = 0; index < group.columns.size(); ++index) {
+            const std::size_t column = group.columns[index];
+            const auto& vector = group.vectors[index];
+            if (vector.size() != matrix.rows())
+                return std::nullopt;
+            for (std::size_t row = 0; row < matrix.rows(); ++row)
+                output[row * matrix.columns() + column] = vector[row];
+        }
+    }
+
+    return ExactRationalEigensystem{
+        *valueExpression,
+        Expr::array({matrix.rows(), matrix.columns()}, std::move(output))};
+}
 
 [[nodiscard]] Expr square(Expr value, const ExactMatrixContext& context) {
     return multiply(value, value, context);
@@ -795,6 +1096,25 @@ enum class ApproximateEigenOutput {
 
 } // namespace
 
+std::optional<Expr> characteristicPolynomial(
+    const MatrixView& matrix,
+    const expression::Symbol& variable,
+    const ExactMatrixContext& context) {
+    if (matrix.rows() != matrix.columns())
+        return std::nullopt;
+    const auto descending = berkowitzCoefficients(matrix);
+    if (!descending)
+        return std::nullopt;
+
+    std::vector<Expr> ascending;
+    ascending.reserve(descending->size());
+    for (auto iterator = descending->rbegin(); iterator != descending->rend(); ++iterator)
+        ascending.emplace_back(*iterator);
+    return symbolic::expressionPolynomialToCollectedExpr(
+        symbolic::ExpressionPolynomial{std::move(ascending)},
+        variable, context.builtins, context.mathematics, context.angles);
+}
+
 std::optional<Expr> eigenvalues(
     const MatrixView& matrix,
     const ExactMatrixContext& context) {
@@ -804,6 +1124,8 @@ std::optional<Expr> eigenvalues(
         return diagonalValues(matrix);
     if (matrix.rows() == 2)
         return exactTwoByTwoEigenvalues(matrix, context);
+    if (matrix.array().hasExactRealStorage())
+        return rationalMatrixEigenvalues(matrix, context);
     return std::nullopt;
 }
 
@@ -814,8 +1136,15 @@ std::optional<Expr> eigenvectors(
         return std::nullopt;
     if (isDiagonal(matrix))
         return identityExpr(matrix.rows());
-    if (matrix.rows() == 2)
-        return exactTwoByTwoEigenvectors(matrix, context);
+    if (matrix.rows() == 2) {
+        if (const auto vectors = exactTwoByTwoEigenvectors(matrix, context))
+            return vectors;
+    }
+    if (matrix.array().hasExactRealStorage()) {
+        const auto system = rationalMatrixEigensystem(matrix, context);
+        if (system)
+            return system->vectors;
+    }
     return std::nullopt;
 }
 
@@ -831,9 +1160,13 @@ std::optional<Expr> eigensystem(
     }
     if (matrix.rows() == 2) {
         const auto vectors = exactTwoByTwoEigenvectors(matrix, context);
-        if (!vectors)
-            return std::nullopt;
-        return expression::braceValue({exactTwoByTwoEigenvalues(matrix, context), *vectors});
+        if (vectors)
+            return expression::braceValue({exactTwoByTwoEigenvalues(matrix, context), *vectors});
+    }
+    if (matrix.array().hasExactRealStorage()) {
+        const auto system = rationalMatrixEigensystem(matrix, context);
+        if (system)
+            return expression::braceValue({system->values, system->vectors});
     }
     return std::nullopt;
 }

@@ -12,10 +12,10 @@
 
 namespace mmcal::solver {
 
-// 主値Lambert Wの値が実主値域[-1,inf)にあると証明できる場合だけ，
-// W_0(x)==r をdomain非依存に x==r Exp[r] へ反転する。
-// 複素r一般のprincipal-range判定はここでは推測しない。
-[[nodiscard]] std::optional<SolutionSet> solvePrincipalLambertRelation(
+// Lambert Wの明示branchについて，実値像をexactに証明できる範囲だけ
+// W_k(x)==r を x==r Exp[r] へ反転する。W_0は[-1,inf)，W_-1は(-inf,-1]。
+// 一般の複素targetに対するbranch imageは推測せず未解決を保つ。
+[[nodiscard]] std::optional<SolutionSet> solveLambertBranchRelation(
     const expression::Expr& relation,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
@@ -32,9 +32,10 @@ namespace mmcal::solver {
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions = {});
 
-// Complex上のExp[u]==cを Log[c]+2 Pi I k（k in Integer）へ，
-// principal Log[u]==cをprincipal-log像の範囲条件付きでExp[c]へ反転する。
-[[nodiscard]] std::optional<SolutionSet> solveComplexExponentialLogRelation(
+// Complex上のbranch-aware transcendental inversion。Exp / Sin / Cos / Tanに加え，
+// Sinh / Cosh / Tanhの虚周期解族，u Exp[u]==aのLambert W全整数branchを扱う。
+// principal Log[u]==cはprincipal-log像(-Pi,Pi]をexact/certifiedに検査して反転する。
+[[nodiscard]] std::optional<SolutionSet> solveComplexTranscendentalRelation(
     const expression::Expr& relation,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,

@@ -47,6 +47,7 @@
 #include "symbolic/differentiation.hpp"
 #include "symbolic/integration.hpp"
 #include "symbolic/limit.hpp"
+#include "symbolic/polynomial.hpp"
 #include "symbolic/series.hpp"
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/real_number.hpp"
@@ -56,6 +57,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -1256,6 +1258,116 @@ struct ExportGraphicsTarget final {
     graphics::GraphicsFormat format = graphics::GraphicsFormat::Svg;
 };
 
+struct ExportGraphicsOptions final {
+    graphics::GraphicsRenderOptions render;
+    bool dpiSpecified = false;
+    bool imageSizeSpecified = false;
+    bool antialiasingSpecified = false;
+    bool backgroundSpecified = false;
+};
+
+[[nodiscard]] std::optional<double> exportPositiveNumber(
+    const expression::Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal())
+        return std::nullopt;
+    const auto rational = expression.asNumber().asReal().toRational();
+    try {
+        const long double numerator = std::stold(rational.numerator().toString());
+        const long double denominator = std::stold(rational.denominator().toString());
+        const double value = static_cast<double>(numerator / denominator);
+        if (!(value > 0.0) || !std::isfinite(value))
+            return std::nullopt;
+        return value;
+    }
+    catch (...) {
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<std::uint32_t> exportPositiveUint32(
+    const expression::Expr& expression) {
+    if (!expression.isNumber() || !expression.asNumber().isReal()
+        || !expression.asNumber().asReal().isInteger())
+        return std::nullopt;
+    const auto value = numeric::tryToUint64(expression.asNumber().asReal().asInteger());
+    if (!value || *value == 0 || *value > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
+    return static_cast<std::uint32_t>(*value);
+}
+
+[[nodiscard]] ExportGraphicsOptions parseExportGraphicsOptions(
+    std::span<const expression::Expr> options,
+    const BuiltinRegistry& builtins) {
+    ExportGraphicsOptions parsed;
+    for (const auto& option : options) {
+        if (!builtins.isCallTo(option, BuiltinId::Rule)
+            || option.asCall().arguments.size() != 2
+            || !option.asCall().arguments[0].isSymbol())
+            error::throwCalcError(
+                error::CalcErrorType::Type,
+                "Export options must be rules such as DPI -> 254");
+
+        const auto& rule = option.asCall().arguments;
+        const expression::Expr& value = rule[1];
+        const std::string_view name = rule[0].asSymbol().view();
+        if (name == "DPI") {
+            if (parsed.dpiSpecified)
+                error::throwCalcError(error::CalcErrorType::Domain, "Duplicate option 'DPI' for Export");
+            const auto dpi = exportPositiveNumber(value);
+            if (!dpi)
+                error::throwCalcError(error::CalcErrorType::Domain, "DPI expects a positive finite number");
+            parsed.render.raster.dpi = *dpi;
+            parsed.dpiSpecified = true;
+        }
+        else if (name == "ImageSize") {
+            if (parsed.imageSizeSpecified)
+                error::throwCalcError(error::CalcErrorType::Domain, "Duplicate option 'ImageSize' for Export");
+            const auto pair = plotRangePair(value);
+            if (!pair)
+                error::throwCalcError(error::CalcErrorType::Type, "ImageSize expects {width,height}");
+            const auto width = exportPositiveUint32(pair->first);
+            const auto height = exportPositiveUint32(pair->second);
+            if (!width || !height)
+                error::throwCalcError(error::CalcErrorType::Domain, "ImageSize expects positive integer pixel dimensions");
+            parsed.render.raster.widthPx = *width;
+            parsed.render.raster.heightPx = *height;
+            parsed.imageSizeSpecified = true;
+        }
+        else if (name == "Antialiasing") {
+            if (parsed.antialiasingSpecified)
+                error::throwCalcError(error::CalcErrorType::Domain, "Duplicate option 'Antialiasing' for Export");
+            const auto factor = exportPositiveUint32(value);
+            if (!factor || (*factor != 1 && *factor != 2 && *factor != 4))
+                error::throwCalcError(error::CalcErrorType::Domain, "Antialiasing expects 1, 2, or 4");
+            parsed.render.raster.antialiasing = *factor;
+            parsed.antialiasingSpecified = true;
+        }
+        else if (name == "Background") {
+            if (parsed.backgroundSpecified)
+                error::throwCalcError(error::CalcErrorType::Domain, "Duplicate option 'Background' for Export");
+            if (!value.isSymbol())
+                error::throwCalcError(error::CalcErrorType::Domain, "Background expects White or None");
+            const std::string_view background = value.asSymbol().view();
+            if (background == "White")
+                parsed.render.raster.background = graphics::RasterBackground::White;
+            else if (background == "None")
+                parsed.render.raster.background = graphics::RasterBackground::None;
+            else
+                error::throwCalcError(error::CalcErrorType::Domain, "Background expects White or None");
+            parsed.backgroundSpecified = true;
+        }
+        else
+            error::throwCalcError(
+                error::CalcErrorType::Domain,
+                "Unknown option '" + std::string{name} + "' for Export");
+    }
+    if (parsed.dpiSpecified && parsed.imageSizeSpecified)
+        error::throwCalcError(
+            error::CalcErrorType::Domain,
+            "Export option conflict: DPI and ImageSize cannot be specified together");
+    return parsed;
+}
+
 [[nodiscard]] std::optional<ExportGraphicsTarget> exportGraphicsTarget(
     const std::filesystem::path& path,
     const std::optional<std::string>& explicitFormat) {
@@ -1553,7 +1665,7 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Negate:
         return builtins::evaluateNegate(arguments, registry_);
     case BuiltinId::Factorial:
-        return builtins::evaluateFactorial(arguments);
+        return builtins::evaluateFactorial(arguments, registry_);
     case BuiltinId::Derivative: {
         if (arguments.size() < 2)
             error::throwCalcError(error::CalcErrorType::Type,
@@ -1837,6 +1949,101 @@ expression::Expr Evaluator::dispatchBuiltin(
         emitWarning("series::unsupported",
             "series could not construct a supported local expansion; the request remains unevaluated");
         return expression::Expr::call(registry_.symbol(BuiltinId::Series),
+            std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+    }
+    case BuiltinId::SeriesCoefficient: {
+        if (arguments.size() != 2 || !arguments[1].isArray())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "seriesCoefficient expects seriesCoefficient[expression, {variable, center, integer exponent}]");
+        const auto& spec = arguments[1].asArray();
+        if (spec.rank() != 1 || spec.size() != 3 || !spec.element(0).isSymbol())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "seriesCoefficient specification must be {variable, center, integer exponent}");
+        if (!spec.element(2).isNumber() || !spec.element(2).asNumber().isReal()
+            || !spec.element(2).asNumber().asReal().isInteger())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "seriesCoefficient exponent must be an exact integer");
+
+        const std::string exponentText = spec.element(2).asNumber().asReal().asInteger().toString();
+        std::int64_t exponent = 0;
+        const auto parsed = std::from_chars(
+            exponentText.data(), exponentText.data() + exponentText.size(), exponent);
+        if (parsed.ec != std::errc{} || parsed.ptr != exponentText.data() + exponentText.size())
+            error::throwCalcError(error::CalcErrorType::ResourceLimit,
+                "seriesCoefficient exponent exceeds the current signed 64-bit series grid");
+
+        const std::array<expression::Symbol, 1> variables{spec.element(0).asSymbol()};
+        expression::Expr held = materializeSafeHeldFrontends(
+            resolveHeldHistoryReferences(arguments[0]), variables);
+        const std::size_t order = exponent > 0
+            ? static_cast<std::size_t>(exponent)
+            : std::size_t{0};
+        if (order > 1024)
+            error::throwCalcError(error::CalcErrorType::ResourceLimit,
+                "seriesCoefficient exponent exceeds the current series order limit of 1024");
+
+        if (const auto expanded = symbolic::seriesExpression(
+                held, spec.element(0).asSymbol(), spec.element(1), order,
+                registry_, mathematics_, angleSemantics_)) {
+            if (const auto data = symbolic::parseSeriesData(*expanded, registry_)) {
+                // log layerを含む局所展開では通常の冪係数を暗黙に選ばない。
+                if (data->logarithmicCoefficients.empty()) {
+                    const auto denominator = static_cast<std::int64_t>(data->exponentDenominator);
+                    if ((exponent > 0 && exponent > std::numeric_limits<std::int64_t>::max() / denominator)
+                        || (exponent < 0 && exponent < std::numeric_limits<std::int64_t>::min() / denominator))
+                        error::throwCalcError(error::CalcErrorType::ResourceLimit,
+                            "seriesCoefficient exponent overflows the internal Puiseux grid");
+                    const std::int64_t target = exponent * denominator;
+                    if (target < data->minimumExponent)
+                        return expression::Expr{numeric::Number{numeric::BigInt{0}}};
+                    if (target < data->orderNumerator) {
+                        const auto index = static_cast<std::size_t>(target - data->minimumExponent);
+                        if (index < data->coefficients.size())
+                            return data->coefficients[index];
+                    }
+                }
+            }
+        }
+
+        emitWarning("seriesCoefficient::unsupported",
+            "seriesCoefficient could not prove an ordinary exact coefficient; the request remains unevaluated");
+        return expression::Expr::call(registry_.symbol(BuiltinId::SeriesCoefficient),
+            std::vector<expression::Expr>{arguments.begin(), arguments.end()});
+    }
+    case BuiltinId::Residue: {
+        if (arguments.size() != 2 || !arguments[1].isArray())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "residue expects residue[expression, {variable, point}]");
+        const auto& spec = arguments[1].asArray();
+        if (spec.rank() != 1 || spec.size() != 2 || !spec.element(0).isSymbol())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "residue specification must be {variable, point}");
+
+        const std::array<expression::Symbol, 1> variables{spec.element(0).asSymbol()};
+        expression::Expr held = materializeSafeHeldFrontends(
+            resolveHeldHistoryReferences(arguments[0]), variables);
+        if (const auto expanded = symbolic::seriesExpression(
+                held, spec.element(0).asSymbol(), spec.element(1), 0,
+                registry_, mathematics_, angleSemantics_)) {
+            if (const auto data = symbolic::parseSeriesData(*expanded, registry_)) {
+                // classical residueは孤立meromorphic特異点にだけ定義する。
+                if (data->exponentDenominator == 1
+                    && data->logarithmicCoefficients.empty()) {
+                    constexpr std::int64_t target = -1;
+                    if (target < data->minimumExponent)
+                        return expression::Expr{numeric::Number{numeric::BigInt{0}}};
+                    if (target < data->orderNumerator) {
+                        const auto index = static_cast<std::size_t>(target - data->minimumExponent);
+                        if (index < data->coefficients.size())
+                            return data->coefficients[index];
+                    }
+                }
+            }
+        }
+
+        emitWarning("residue::unsupported",
+            "residue requires a proven isolated meromorphic singularity; the request remains unevaluated");
+        return expression::Expr::call(registry_.symbol(BuiltinId::Residue),
             std::vector<expression::Expr>{arguments.begin(), arguments.end()});
     }
     case BuiltinId::SeriesData: {
@@ -2145,6 +2352,9 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "leastSquares could not determine a safe exact or numerical rank; the expression remains unevaluated");
         return result;
     }
+    case BuiltinId::CharacteristicPolynomial:
+        return builtins::evaluateCharacteristicPolynomial(
+            arguments, registry_, mathematics_, angleSemantics_);
     case BuiltinId::Eigenvalues: {
         if (const auto* approximation = currentApproximationContext())
             if (const auto result = builtins::evaluateApproximateEigenvalues(
@@ -2266,7 +2476,7 @@ expression::Expr Evaluator::dispatchBuiltin(
     case BuiltinId::Length:
         return builtins::evaluateLength(arguments);
     case BuiltinId::ArrayGet:
-        return builtins::evaluateArrayGet(arguments);
+        return builtins::evaluateArrayGet(arguments, registry_);
     case BuiltinId::Reshape:
         return builtins::evaluateReshape(arguments);
     case BuiltinId::Identity:
@@ -2547,6 +2757,28 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "root index is invalid or the polynomial exceeds the current algebraic degree limit");
         return symbolic::makeCanonicalRootExpression(*algebraic, registry_);
     }
+    case BuiltinId::MinimalPolynomial: {
+        if (arguments.size() != 2 || !arguments[1].isSymbol())
+            error::throwCalcError(error::CalcErrorType::Type,
+                "minimalPolynomial expects minimalPolynomial[algebraicValue, variable]");
+        if (registry_.contains(arguments[1].asSymbol()))
+            error::throwCalcError(error::CalcErrorType::Type,
+                "minimalPolynomial variable must be an unprotected user symbol");
+
+        if (const auto algebraic = symbolic::exactAlgebraicValue(
+                arguments[0], registry_, mathematics_)) {
+            symbolic::RationalPolynomial polynomial{
+                std::vector<numeric::Rational>{
+                    algebraic->polynomial().begin(), algebraic->polynomial().end()}};
+            return symbolic::polynomialToExpandedExpr(
+                polynomial, arguments[1].asSymbol(), registry_);
+        }
+
+        emitWarning("minimalPolynomial::unsupported",
+            "minimalPolynomial could not prove the input algebraic; the request remains unevaluated");
+        return expression::Expr::call(registry_.symbol(BuiltinId::MinimalPolynomial),
+            {arguments[0], arguments[1]});
+    }
     case BuiltinId::Simplify:
     case BuiltinId::FullSimplify: {
         if (arguments.empty() || arguments.size() > 2)
@@ -2680,15 +2912,15 @@ expression::Expr Evaluator::dispatchBuiltin(
                     relation, variables.front(), registry_, mathematics_,
                     angleSemantics_, constraints.assumptions))
                 return *radical;
-            if (auto principalLambert = solver::solvePrincipalLambertRelation(
+            if (auto lambertBranch = solver::solveLambertBranchRelation(
                     relation, variables.front(), registry_, mathematics_,
                     angleSemantics_, constraints.assumptions))
-                return *principalLambert;
+                return *lambertBranch;
             if (!realSolveDomain) {
-                if (auto complexPeriodic = solver::solveComplexExponentialLogRelation(
+                if (auto complexTranscendental = solver::solveComplexTranscendentalRelation(
                         relation, variables.front(), registry_, mathematics_,
                         angleSemantics_, constraints.assumptions))
-                    return *complexPeriodic;
+                    return *complexTranscendental;
             }
             if (realSolveDomain) {
                 consumeEvaluationBudget(EvaluationResource::SolverBranch, 3);
@@ -3042,10 +3274,10 @@ expression::Expr Evaluator::dispatchBuiltin(
     }
     case BuiltinId::Export: {
         const EvaluationContext* exportEvaluationContext = context_;
-        if (arguments.size() < 2 || arguments.size() > 3)
+        if (arguments.size() < 2)
             error::throwCalcError(
                 error::CalcErrorType::Type,
-                "Export expects Export[object,file] or Export[object,file,format]");
+                "Export expects Export[object,file] with an optional format and export options");
 
         // HoldAllの引数を一つずつnested evaluateすると現在のEvaluationContextが
         // 一時的に置き換わる。%/Out参照はcontextが生きているうちに全て解決する。
@@ -3076,22 +3308,50 @@ expression::Expr Evaluator::dispatchBuiltin(
                 "Export file name must evaluate to a string");
 
         std::optional<std::string> format;
-        if (resolvedArguments.size() == 3) {
-            expression::Expr evaluatedFormat = evaluate(resolvedArguments[2]);
+        std::size_t optionBegin = 2;
+        if (optionBegin < resolvedArguments.size()
+            && !registry_.isCallTo(resolvedArguments[optionBegin], BuiltinId::Rule)) {
+            expression::Expr evaluatedFormat = evaluate(resolvedArguments[optionBegin]);
             context_ = exportEvaluationContext;
             if (!evaluatedFormat.isString())
                 error::throwCalcError(
                     error::CalcErrorType::Type,
-                    "Export format must evaluate to a string");
+                    "Export format must evaluate to a string or be omitted before export options");
             format = evaluatedFormat.asString();
+            ++optionBegin;
         }
+
+        std::vector<expression::Expr> evaluatedOptions;
+        evaluatedOptions.reserve(resolvedArguments.size() - optionBegin);
+        for (std::size_t i = optionBegin; i < resolvedArguments.size(); ++i) {
+            const auto& option = resolvedArguments[i];
+            if (!registry_.isCallTo(option, BuiltinId::Rule)
+                || option.asCall().arguments.size() != 2
+                || !option.asCall().arguments[0].isSymbol())
+                error::throwCalcError(
+                    error::CalcErrorType::Type,
+                    "Export options must be rules such as DPI -> 254");
+            const auto& rule = option.asCall().arguments;
+            expression::Expr value = evaluate(rule[1]);
+            context_ = exportEvaluationContext;
+            evaluatedOptions.push_back(expression::Expr::call(
+                registry_.symbol(BuiltinId::Rule), {rule[0], std::move(value)}));
+        }
+        const ExportGraphicsOptions exportOptions = parseExportGraphicsOptions(
+            evaluatedOptions, registry_);
 
         const std::filesystem::path requestedPath{destination.asString()};
         const auto target = exportGraphicsTarget(requestedPath, format);
         if (!target)
             error::throwCalcError(
                 error::CalcErrorType::Domain,
-                "Export currently supports SVG, EPS, and PDF plot output");
+                "Export currently supports SVG, EPS, PDF, PNG, and WEBP plot output");
+        if (target->format != graphics::GraphicsFormat::Png
+            && target->format != graphics::GraphicsFormat::Webp
+            && !evaluatedOptions.empty())
+            error::throwCalcError(
+                error::CalcErrorType::Domain,
+                "DPI, ImageSize, Antialiasing, and Background are currently raster-only Export options");
 
         const auto* infinity = symbolRegistry_.find("Infinity");
         if (!infinity)
@@ -3148,13 +3408,18 @@ expression::Expr Evaluator::dispatchBuiltin(
                 buildStatus, "Export could not build the plot graphics scene");
 
         const auto rendered = graphics::renderGraphics(
-            *graphicsScene, target->format);
-        if (!rendered || !rendered.data)
+            *graphicsScene, target->format, exportOptions.render);
+        if (!rendered || !rendered.data) {
+            if (rendered.status == graphics::GraphicsRenderStatus::InvalidOptions)
+                error::throwCalcError(
+                    error::CalcErrorType::Domain,
+                    "Export raster options are incompatible with the requested canvas");
             error::throwCalcError(
                 error::CalcErrorType::Evaluation,
                 rendered.status == graphics::GraphicsRenderStatus::UnsupportedFeature
                     ? "Export format does not support a graphics feature used by this plot"
                     : "Export could not render the plot in the requested format");
+        }
 
         std::ofstream output(target->path, std::ios::binary | std::ios::trunc);
         if (!output)

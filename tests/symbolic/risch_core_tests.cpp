@@ -81,6 +81,20 @@ using symbolic::RationalPolynomial;
     return {polynomial(numerator), polynomial(denominator)};
 }
 
+void runSharedPolynomialKernelTests(TestRunner& tests) {
+    const RationalPolynomial value = polynomial({1, 2, 3});
+    tests.expect(
+        same(
+            symbolic::risch::shiftRationalPolynomialExact(value, 2),
+            polynomial({17, 14, 3})),
+        "shared Q[x] kernel: exact positive polynomial shift");
+    tests.expect(
+        same(
+            symbolic::risch::shiftRationalPolynomialExact(value, -1),
+            polynomial({2, -4, 3})),
+        "shared Q[x] kernel: exact negative polynomial shift");
+}
+
 [[nodiscard]] std::size_t countCalls(
     const expression::Expr& expression,
     const evaluation::BuiltinRegistry& builtins,
@@ -589,6 +603,7 @@ void runRationalDifferentialEquationTests(TestRunner& tests) {
 } // namespace
 
 void runRischCoreTests(TestRunner& tests) {
+    runSharedPolynomialKernelTests(tests);
     runDifferentialTowerTests(tests);
     runHermiteTests(tests);
     runLrtTests(tests);

@@ -18,6 +18,11 @@ struct IntegerCubeRootResult final {
     BigInt remainder;
 };
 
+struct PrimePowerFactor final {
+    BigInt prime;
+    std::uint64_t exponent = 0;
+};
+
 [[nodiscard]] BigInt gcd(BigInt lhs, BigInt rhs);
 [[nodiscard]] BigInt lcm(const BigInt& lhs, const BigInt& rhs);
 [[nodiscard]] BigInt pow(BigInt base, std::uint64_t exponent);
@@ -28,5 +33,7 @@ struct IntegerCubeRootResult final {
 [[nodiscard]] bool isPerfectSquare(const BigInt& value);
 [[nodiscard]] bool isPrimeUint64(std::uint64_t value) noexcept;
 [[nodiscard]] bool factorUint64(std::uint64_t value, std::vector<std::uint64_t>& factors);
+// 任意精度整数をexactに因数分解する。証明できない巨大素因数が残る場合はfalseを返す。
+[[nodiscard]] bool factorBigInt(const BigInt& value, std::vector<PrimePowerFactor>& factors);
 
 } // namespace mmcal::numeric

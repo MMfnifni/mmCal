@@ -20,7 +20,9 @@
 #include "graphics/eps_backend.hpp"
 #include "graphics/graphics_backend.hpp"
 #include "graphics/pdf_backend.hpp"
+#include "graphics/png_backend.hpp"
 #include "graphics/svg_backend.hpp"
+#include "graphics/webp_backend.hpp"
 #include "plot/plot_sample_analysis.hpp"
 #include "plot/plot_request.hpp"
 #include "plot/plot_range_estimator.hpp"
@@ -1356,15 +1358,19 @@ void runPlotSamplingTests(TestRunner& tests) {
             const auto inferredSvg = graphics::graphicsFormatFromExtension(".SVG");
             const auto inferredEps = graphics::graphicsFormatFromExtension("eps");
             const auto inferredPdf = graphics::graphicsFormatFromExtension(".PDF");
+            const auto inferredPng = graphics::graphicsFormatFromExtension(".PNG");
+            const auto inferredWebp = graphics::graphicsFormatFromExtension(".WEBP");
             const auto rendered = inferredEps
                 ? graphics::renderGraphics(scene, *inferredEps)
                 : graphics::GraphicsRenderResult{};
             tests.expect(inferredSvg == graphics::GraphicsFormat::Svg
                     && inferredEps == graphics::GraphicsFormat::Eps
                     && inferredPdf == graphics::GraphicsFormat::Pdf
+                    && inferredPng == graphics::GraphicsFormat::Png
+                    && inferredWebp == graphics::GraphicsFormat::Webp
                     && rendered && rendered.data
                     && rendered.data->find("%!PS-Adobe-3.0 EPSF-3.0") == 0,
-                "GraphicsBackend: case-insensitive format parsing dispatches SVG/EPS/PDF behind one scene renderer");
+                "GraphicsBackend: case-insensitive format parsing dispatches SVG/EPS/PDF/PNG/WEBP behind one scene renderer");
 
             graphics::PdfRenderOptions deterministicPdf;
             deterministicPdf.deterministic = true;
@@ -1387,6 +1393,159 @@ void runPlotSamplingTests(TestRunner& tests) {
                     && pdfA.pdf->find(" re W n\n") != std::string::npos
                     && pdfA.pdf->find(" c\n") != std::string::npos,
                 "PDF: deterministic PDF 1.4 keeps metadata, classic xref, clipping, and uncompressed readable vector content");
+
+            graphics::GraphicsScene rasterScene;
+            rasterScene.extent = {20.0, 10.0};
+            graphics::GraphicsPathNode rasterPath;
+            rasterPath.commands.push_back(graphics::GraphicsMoveTo{{1.0, 1.0}});
+            rasterPath.commands.push_back(graphics::GraphicsCubicTo{
+                {5.0, 9.0}, {15.0, 1.0}, {19.0, 9.0}});
+            rasterPath.stroke = graphics::GraphicsStrokeStyle{};
+            rasterScene.nodes.push_back(rasterPath);
+            graphics::GraphicsTextNode rasterText;
+            rasterText.origin = {10.0, 5.0};
+            rasterText.text = "-0.123456789";
+            rasterText.fontSizeMm = 2.0;
+            rasterText.anchor = graphics::GraphicsTextAnchor::Middle;
+            rasterScene.nodes.push_back(rasterText);
+            graphics::RasterRenderOptions pngOptions;
+            pngOptions.dpi = 254.0;
+            pngOptions.antialiasing = 2;
+            const auto png = graphics::renderPng(rasterScene, pngOptions);
+            const bool pngHeader = png && png.png && png.png->size() > 64
+                && png.png->compare(0, 8, "\x89PNG\r\n\x1a\n", 8) == 0;
+            const auto byte = [&](std::size_t offset) {
+                return static_cast<unsigned char>((*png.png)[offset]);
+            };
+            const std::uint32_t pngWidth = pngHeader
+                ? (static_cast<std::uint32_t>(byte(16)) << 24u)
+                    | (static_cast<std::uint32_t>(byte(17)) << 16u)
+                    | (static_cast<std::uint32_t>(byte(18)) << 8u)
+                    | static_cast<std::uint32_t>(byte(19))
+                : 0u;
+            const std::uint32_t pngHeight = pngHeader
+                ? (static_cast<std::uint32_t>(byte(20)) << 24u)
+                    | (static_cast<std::uint32_t>(byte(21)) << 16u)
+                    | (static_cast<std::uint32_t>(byte(22)) << 8u)
+                    | static_cast<std::uint32_t>(byte(23))
+                : 0u;
+            const std::size_t pngIdat = pngHeader ? png.png->find("IDAT") : std::string::npos;
+            const bool pngDynamicDeflate = pngIdat != std::string::npos
+                && pngIdat + 6u < png.png->size()
+                && ((static_cast<unsigned char>((*png.png)[pngIdat + 6u]) >> 1u) & 0x03u) == 2u;
+            tests.expect(pngHeader && pngWidth == 200 && pngHeight == 100
+                    && png.png->find("pHYs") != std::string::npos
+                    && pngIdat != std::string::npos
+                    && pngDynamicDeflate
+                    && png.png->size() < 20u * 10u * 100u,
+                "PNG: raster backend writes 254-dpi dimensions, pHYs, filtered IDAT, and dynamic-Huffman DEFLATE");
+
+            // 長い258-byte matchが頻発する白canvasで，専用length code 285を使う回帰。
+            // code 284 + extra=31へ落ちると同じ画像でも大幅に肥大化する。
+            graphics::GraphicsScene pngLongRunScene;
+            pngLongRunScene.extent = {40.0, 30.0};
+            graphics::RasterRenderOptions pngLongRunOptions;
+            pngLongRunOptions.dpi = 254.0;
+            pngLongRunOptions.antialiasing = 1;
+            const auto pngLongRun = graphics::renderPng(pngLongRunScene, pngLongRunOptions);
+            tests.expect(pngLongRun && pngLongRun.png && pngLongRun.png->size() < 1600u,
+                "PNG DEFLATE: 258-byte LZ77 matches use the dedicated RFC 1951 length code 285");
+
+            const auto webp = graphics::renderWebp(rasterScene, pngOptions);
+            const bool webpHeader = webp && webp.webp && webp.webp->size() > 25
+                && webp.webp->compare(0, 4, "RIFF", 4) == 0
+                && webp.webp->compare(8, 8, "WEBPVP8L", 8) == 0
+                && static_cast<unsigned char>((*webp.webp)[20]) == 0x2f;
+            // Transform選択はentropy tree最適化で変わり得るため，固定offsetのcache bitには依存しない。
+            // main imageのencoder経路自体は常に16-entry color cacheとadaptive prefix treeを使う。
+            tests.expect(webpHeader && webp.webp->size() < 12000u,
+                "WEBP: lossless backend writes bounded LZ77/color-cache data with adaptive prefix trees");
+
+            graphics::GraphicsScene predictorScene;
+            predictorScene.extent = {25.6, 6.4};
+            for (unsigned shade = 0; shade < 256u; ++shade) {
+                graphics::GraphicsPathNode strip;
+                strip.commands.push_back(graphics::GraphicsMoveTo{{shade * 0.1, 0.0}});
+                strip.commands.push_back(graphics::GraphicsLineTo{{(shade + 1u) * 0.1, 0.0}});
+                strip.commands.push_back(graphics::GraphicsLineTo{{(shade + 1u) * 0.1, 6.4}});
+                strip.commands.push_back(graphics::GraphicsLineTo{{shade * 0.1, 6.4}});
+                strip.commands.push_back(graphics::GraphicsClosePath{});
+                const auto component = static_cast<std::uint8_t>(shade);
+                strip.fill = graphics::GraphicsFillStyle{
+                    graphics::GraphicsColor{component, component, component, 255u}};
+                predictorScene.nodes.push_back(std::move(strip));
+            }
+            graphics::RasterRenderOptions predictorOptions;
+            predictorOptions.widthPx = 256;
+            predictorOptions.heightPx = 64;
+            predictorOptions.antialiasing = 1;
+            const auto predictorWebp = graphics::renderWebp(predictorScene, predictorOptions);
+            const bool predictorHeader = predictorWebp && predictorWebp.webp
+                && predictorWebp.webp->size() > 26u
+                && predictorWebp.webp->compare(0, 4, "RIFF", 4) == 0
+                && predictorWebp.webp->compare(8, 8, "WEBPVP8L", 8) == 0;
+            // VP8L header直後の最初のtransform bit=1，type=00ならPredictor Transform。
+            const bool predictorTransform = predictorHeader
+                && (static_cast<unsigned char>((*predictorWebp.webp)[25]) & 0x07u) == 0x01u;
+            tests.expect(predictorTransform && predictorWebp.webp->size() < 1000u,
+                "WEBP predictor: adaptive VP8L predictor transform is selected for a smooth grayscale ramp");
+
+            // Gを擬似的に並べ替えつつR=G+20, B=G+40とする。
+            // 原画像ではRGB各channelが広いalphabetを持つがSubtract Green後はR/Bが定数となるため，
+            // adaptive prefix tree込みでもSubtract Greenがdeterministicに有利になる。
+            graphics::GraphicsScene subtractGreenScene;
+            subtractGreenScene.extent = {256.0, 1.0};
+            for (unsigned x = 0u; x < 256u; ++x) {
+                const auto green = static_cast<std::uint8_t>((x * 73u) & 0xffu);
+                graphics::GraphicsPathNode pixel;
+                pixel.commands.push_back(graphics::GraphicsMoveTo{{static_cast<double>(x), 0.0}});
+                pixel.commands.push_back(graphics::GraphicsLineTo{{static_cast<double>(x + 1u), 0.0}});
+                pixel.commands.push_back(graphics::GraphicsLineTo{{static_cast<double>(x + 1u), 1.0}});
+                pixel.commands.push_back(graphics::GraphicsLineTo{{static_cast<double>(x), 1.0}});
+                pixel.commands.push_back(graphics::GraphicsClosePath{});
+                pixel.fill = graphics::GraphicsFillStyle{graphics::GraphicsColor{
+                    static_cast<std::uint8_t>(green + 20u),
+                    green,
+                    static_cast<std::uint8_t>(green + 40u),
+                    255u}};
+                subtractGreenScene.nodes.push_back(std::move(pixel));
+            }
+
+            graphics::RasterRenderOptions subtractGreenOptions;
+            subtractGreenOptions.widthPx = 256u;
+            subtractGreenOptions.heightPx = 1u;
+            subtractGreenOptions.antialiasing = 1u;
+            const auto subtractGreenWebp =
+                graphics::renderWebp(subtractGreenScene, subtractGreenOptions);
+            // VP8L header直後: transform-present=1, type=10(Subtract Green)なのでlow 3 bitsは101。
+            const bool subtractGreenTransform = subtractGreenWebp && subtractGreenWebp.webp
+                && subtractGreenWebp.webp->size() > 26u
+                && (static_cast<unsigned char>((*subtractGreenWebp.webp)[25]) & 0x07u) == 0x05u;
+            tests.expect(subtractGreenTransform && subtractGreenWebp.webp->size() < 256u,
+                "WEBP subtract-green: correlated RGB channels select Subtract Green with adaptive prefix trees");
+
+            graphics::GraphicsScene backgroundScene;
+            backgroundScene.extent = {2.0, 1.0};
+            graphics::RasterRenderOptions whiteBackground;
+            whiteBackground.widthPx = 2;
+            whiteBackground.heightPx = 1;
+            whiteBackground.antialiasing = 1;
+            const auto whiteRaster = graphics::renderRaster(backgroundScene, whiteBackground);
+            graphics::RasterRenderOptions transparentBackground = whiteBackground;
+            transparentBackground.background = graphics::RasterBackground::None;
+            const auto transparentRaster = graphics::renderRaster(backgroundScene, transparentBackground);
+            tests.expect(whiteRaster && transparentRaster
+                    && whiteRaster.image->rgba == std::vector<std::uint8_t>{
+                        255, 255, 255, 255, 255, 255, 255, 255}
+                    && transparentRaster.image->rgba == std::vector<std::uint8_t>{
+                        0, 0, 0, 0, 0, 0, 0, 0},
+                "PNG background: White is default and None preserves a fully transparent RGBA canvas");
+
+            graphics::GraphicsScene unsupportedTextScene = rasterScene;
+            std::get<graphics::GraphicsTextNode>(unsupportedTextScene.nodes.back()).text = "1e3";
+            const auto unsupportedText = graphics::renderPng(unsupportedTextScene, pngOptions);
+            tests.expect(unsupportedText.status == graphics::PngRenderStatus::UnsupportedText,
+                "PNG text: built-in stroke font is deliberately limited to digits, minus, and decimal point");
 
             graphics::GraphicsScene transparentScene;
             transparentScene.extent = {10.0, 10.0};

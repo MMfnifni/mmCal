@@ -4,6 +4,8 @@
 
 #include <span>
 
+namespace mmcal::evaluation { class BuiltinRegistry; }
+
 namespace mmcal::builtins {
 
 [[nodiscard]] expression::Expr evaluateDimensions(
@@ -13,7 +15,8 @@ namespace mmcal::builtins {
 [[nodiscard]] expression::Expr evaluateLength(
     std::span<const expression::Expr> arguments);
 [[nodiscard]] expression::Expr evaluateArrayGet(
-    std::span<const expression::Expr> arguments);
+    std::span<const expression::Expr> arguments,
+    const evaluation::BuiltinRegistry& builtins);
 [[nodiscard]] expression::Expr evaluateReshape(
     std::span<const expression::Expr> arguments);
 

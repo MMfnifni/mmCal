@@ -82,7 +82,7 @@ v1.6.0 adds **first-class plotting/export infrastructure and moves the exact sym
 
 Major changes include:
 
-- **Plot and Graphics**: added `Plot`, `ParametricPlot`, `ListPlot`, `Show`, `PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`, and SVG / EPS / PDF export. Parametric polynomials through degree three are recognized as exact Bézier geometry, while same-phase `C+A cos+B sin` forms become exact circles, ellipses, or elliptic arcs before sampling
+- **Plot and Graphics**: added `Plot`, `ParametricPlot`, `ListPlot`, `Show`, `PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`, and SVG / EPS / PDF / PNG / WebP export. Parametric polynomials through degree three are recognized as exact Bézier geometry, while same-phase `C+A cos+B sin` forms become exact circles, ellipses, or elliptic arcs before sampling
 - **Rules and language composition**: added first-class `Rule[lhs,rhs]` and the right-associative `lhs -> rhs` operator, allowing Plot options to remain ordinary Symbols interpreted by their consumer
 - **General factorization**: connected `Q[x]` square-free decomposition, Berlekamp / Cantor–Zassenhaus, multi-good-prime factor-degree filtering, quadratic Hensel lifting, Zassenhaus recombination, and CLD + exact LLL as a bounded pipeline
 - **Symbolic integration**: extended Hermite reduction / compact LRT residues, the Risch differential equation over `Q(x)`, single primitive/exponential differential towers, and primitive rational cases with exact reconstruction certificates
@@ -104,6 +104,7 @@ mmCal --angle grad --fix 8
 mmCal --layout multi
 mmCal --eval "factor[x^2-1]"
 mmCal --batch < expressions.txt
+mmCal --version
 ```
 
 - `--fix 16`: Display results with **up to 16(0..1000) digits after the decimal point**. Unnecessary trailing zeros are omitted
@@ -113,6 +114,7 @@ mmCal --batch < expressions.txt
 - `--layout auto|single|multi`: Interactive REPL layout. The default `auto` structurally expands Arrays/Lists/`cases`/solution sets on a TTY and falls back to one-line output through pipes or redirects
 - `--eval expr`: Evaluate one expression and write only its value to standard output
 - `--batch`: Evaluate standard input one line at a time in one session.
+- `-v`, `--version`: Print `mmCal ` followed by `MMCAL_VERSION_STRING` from `version.h`, then exit successfully
 - `--help`, `-h`: Show concise startup usage. Use commands such as `:help sin` after startup for function details
 
 `--eval` and `--batch` are automation modes: they do not emit the banner, prompts, `Out[...]` labels, or farewell. Values go to standard output; warnings and errors go to standard error. Stable exit codes are `0` for success, `2` for arguments, `3` for syntax/resource limits, `4` for evaluation errors, and `5` for internal errors. Batch mode continues after an error and returns the greatest exit code observed.
@@ -277,7 +279,7 @@ Indices are zero-based.
 
 `conditionNumber`, `leastSquares`, `pseudoInverse`
 
-`eigenvalues`, `eigenvectors`, `eigensystem`
+`characteristicPolynomial`, `eigenvalues`, `eigenvectors`, `eigensystem`
 
 `trace`, `rows`, `cols`, `diag`
 
@@ -325,7 +327,7 @@ ListPlot[{{0,0},{1,1},{2,4}},Joined -> True]
 Export[Plot[sin[x],{x,-Pi,Pi}],"sin.svg"]
 ```
 
-The main options are `PlotRange`, `AspectRatio`, `Ticks`, and `PlotPoints`, passed as `lhs -> rhs` rules. SVG, EPS, and PDF export are supported. See the Reference for exact geometry, sampling, discontinuities, canvas dimensions, `toNormal`, and backend details.
+The main options are `PlotRange`, `AspectRatio`, `Ticks`, and `PlotPoints`, passed as `lhs -> rhs` rules. SVG, EPS, PDF, PNG, and WebP export are supported. PNG / WebP default to 254 dpi with 2x supersampling and a white background; `DPI`, `ImageSize`, `Antialiasing`, and `Background` are raster Export options. `Background->None` produces a transparent canvas. PNG uses adaptive scanline filters, bounded 32 KiB LZ77, bounded 3-byte-hash matching with a conditional 8-byte-hash alternative, two-token local lazy parsing, and dynamic-Huffman DEFLATE. WebP is a correctness-first lossless VP8L encoder using bounded pixel-wise LZ77 backward references, one-pixel lazy matching for short matches, a 16-entry color cache, an adaptive Predictor Transform, and Subtract Green Transform. Its five G/length/cache, R, B, A, and distance prefix trees are canonical Huffman codes derived from actual token frequencies, with repeat-coded code-length streams. Predictor modes are selected per 16x16 block from all 14 VP8L modes, while Subtract Green subtracts G from R and B modulo 256. The encoder actually writes the no-transform, Predictor, Subtract Green, and Subtract Green+Predictor candidates and keeps the smallest payload. See the Reference for exact geometry, sampling, discontinuities, canvas dimensions, `toNormal`, and backend details.
 
 ## 11. About Warnings
 

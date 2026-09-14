@@ -4,6 +4,7 @@
 #include "symbolic/polynomial.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -97,6 +98,9 @@ struct RationalPolynomialDivision final {
     const RationalPolynomial& value);
 [[nodiscard]] RationalPolynomial integrateRationalPolynomialExact(
     const RationalPolynomial& value);
+[[nodiscard]] RationalPolynomial shiftRationalPolynomialExact(
+    const RationalPolynomial& value,
+    std::int64_t shift);
 [[nodiscard]] RationalPolynomial monicRationalPolynomialExact(
     const RationalPolynomial& value);
 [[nodiscard]] RationalPolynomial gcdRationalPolynomialsMonic(

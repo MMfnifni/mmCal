@@ -51,8 +51,21 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
         "min stays symbolic when ordering cannot be proved");
 
     // Finite symbolic sums/products share table's held local iterator semantics.
+    tests.expectEqual(eval(session, "fact[k]"), std::string{"k!"},
+        "factorial holds a symbolic argument for hypergeometric summation");
+    tests.expect(evalError(session, "fact[1/2]").type() == error::CalcErrorType::Type,
+        "factorial still rejects a numeric non-integer argument");
     tests.expectEqual(eval(session, "sum[i^2,{i,1,5}]"), std::string{"55"},
         "finite polynomial sum closes exactly");
+    tests.expectEqual(eval(session, "sum[i*2^i,{i,0,n}]"),
+        std::string{"cases[2+(n-1)2^(n+1) if 0 <= n; 0]"},
+        "Gosper summation closes a polynomial-times-geometric hypergeometric term");
+    tests.expectEqual(eval(session, "sum[i*fact[i],{i,1,n}]"),
+        std::string{"cases[(n+1)!-1 if 1 <= n; 0]"},
+        "Gosper summation uses the held symbolic factorial quotient");
+    tests.expectEqual(eval(session, "sum[(-1)^i*comb[n,i]/(i+1),{i,0,n}]"),
+        std::string{"cases[1/(n+1) if 0 <= n; 0]"},
+        "alternating binomial reciprocal family closes exactly");
     tests.expectEqual(eval(session, "sum[1/i-1/(i+1),{i,1,n}]"),
         std::string{"cases[1-1/(n+1) if 1 <= n; 0]"},
         "finite telescoping sum preserves symbolic empty-range semantics");
@@ -79,6 +92,12 @@ void runAggregateArrayElementaryTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "prod[(i+1)/i,{i,1,n}]"),
         std::string{"cases[n+1 if 1 <= n; 1]"},
         "finite telescoping product closes exactly");
+    tests.expectEqual(eval(session, "prod[i^2,{i,1,n}]"),
+        std::string{"cases[n!^2 if 1 <= n; 1]"},
+        "finite product distributes an exact integer power over the product");
+    tests.expectEqual(eval(session, "prod[(i+1)*(i+2),{i,1,n}]"),
+        std::string{"cases[risingfact[2, n]risingfact[3, n] if 1 <= n; 1]"},
+        "finite product distributes multiplicative factors before affine reduction");
     tests.expectEqual(eval(session, "prod[i+j,{{i,1,2},{j,1,2}}]"), std::string{"72"},
         "multiple product iterators follow table's nesting order");
     tests.expectEqual(eval(session, "sum[i,{i,1,5,2}]"), std::string{"9"},

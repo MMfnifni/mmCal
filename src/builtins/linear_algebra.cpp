@@ -1133,6 +1133,31 @@ Expr evaluateLeastSquares(
     return dotPair(*inverse, arguments[1], registry, mathematics, angles);
 }
 
+Expr evaluateCharacteristicPolynomial(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const ArrayExpr& array = detail::requireMatrix(arguments[0], "characteristicPolynomial");
+    if (array.shape[0] != array.shape[1])
+        error::throwCalcError(error::CalcErrorType::Domain,
+            "characteristicPolynomial requires a square matrix");
+    if (!arguments[1].isSymbol())
+        error::throwCalcError(error::CalcErrorType::Type,
+            "characteristicPolynomial variable must be a symbol");
+    if (registry.contains(arguments[1].asSymbol()))
+        error::throwCalcError(error::CalcErrorType::Type,
+            "characteristicPolynomial variable must be an unprotected user symbol");
+
+    const auto result = linear_algebra::characteristicPolynomial(
+        linear_algebra::MatrixView{array}, arguments[1].asSymbol(),
+        exactContext(registry, mathematics, angles));
+    if (result)
+        return *result;
+    return Expr::call(registry.symbol(BuiltinId::CharacteristicPolynomial),
+        {arguments[0], arguments[1]});
+}
+
 Expr evaluateEigenvalues(
     std::span<const Expr> arguments,
     const evaluation::BuiltinRegistry& registry,

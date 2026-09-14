@@ -1,8 +1,13 @@
 # Changelog
 
 ## Unreleased
-
-ﾏﾀﾞﾅｲﾖ
+- `minimalPolynomial`，`seriesCoefficient`，`residue`，`characteristicPolynomial`を追加した。CLIには`-v` / `--version`も追加した。
+- 一般exact Rational行列の`eigenvalues` / `eigenvectors` / `eigensystem`を拡張し，代数的固有値を含むexact結果を扱えるようにした。対角化可能な重根にも対応し，defective matrixは未評価を保持する。
+- `cases` / `SolutionSet`を`at` / `toNormal`へ接続し，条件を保持したままbranch選択・通常式化・後段の記号計算へ再利用できるようにした。
+- 有限記号`sum` / `prod`を拡張し，対応可能なhypergeometric和のGosper求和，symbolic factorial，積の因子・整数冪への分配に対応した。
+- `factorint`をBigIntへ拡張し，返値を`{{prime, exponent}, ...}`へ変更した。`factorint[50!]`のような評価済み巨大整数も通常の因数分解経路で扱う。
+- `solve`の主値逆函数処理を改善し，Real変数に対しても正当な複素主値を保持するようにした。逆三角函数の境界はangle modeにも追従する。
+- PNGおよびLossless WebPへのExportを追加した。raster Exportでは`DPI`，`ImageSize`，`Antialiasing`，`Background`を指定できる。
 
 ## v1.6.0 — 2026-09-12
 

@@ -72,6 +72,10 @@ constexpr BuiltinSpec defaultBuiltins[] = {
         ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
     range(builtins::names::series, BuiltinId::Series, 2, 3,
         ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
+    fixed(builtins::names::seriesCoefficient, BuiltinId::SeriesCoefficient, 2,
+        ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
+    fixed(builtins::names::residue, BuiltinId::Residue, 2,
+        ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
     range(builtins::names::seriesData, BuiltinId::SeriesData, 6, 7,
         ArgumentEvaluation::All, false),
     fixed(builtins::names::normal, BuiltinId::Normal, 1,
@@ -129,6 +133,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     fixed(builtins::names::conditionNumber, BuiltinId::ConditionNumber, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::leastSquares, BuiltinId::LeastSquares, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::pseudoInverse, BuiltinId::PseudoInverse, 1, ArgumentEvaluation::All, true),
+    fixed(builtins::names::characteristicPolynomial, BuiltinId::CharacteristicPolynomial, 2, ArgumentEvaluation::HoldSecond, true),
     fixed(builtins::names::eigenvalues, BuiltinId::Eigenvalues, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::eigenvectors, BuiltinId::Eigenvectors, 1, ArgumentEvaluation::All, true),
     fixed(builtins::names::eigensystem, BuiltinId::Eigensystem, 1, ArgumentEvaluation::All, true),
@@ -315,6 +320,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     range(builtins::names::explain, BuiltinId::Explain, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::rationalize, BuiltinId::Rationalize, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::root, BuiltinId::Root, 2, 3, ArgumentEvaluation::All, true),
+    fixed(builtins::names::minimalPolynomial, BuiltinId::MinimalPolynomial, 2, ArgumentEvaluation::HoldSecond, true),
     range(builtins::names::simplify, BuiltinId::Simplify, 1, 2, ArgumentEvaluation::All, true),
     range(builtins::names::fullSimplify, BuiltinId::FullSimplify, 1, 2, ArgumentEvaluation::All, true),
     fixed(builtins::names::expand, BuiltinId::Expand, 1, ArgumentEvaluation::All, true),
@@ -353,7 +359,7 @@ constexpr BuiltinSpec defaultBuiltins[] = {
     variadic(builtins::names::parametricPlot, BuiltinId::ParametricPlot, 2, ArgumentEvaluation::HoldFirstAndIteratorSpec, true),
     variadic(builtins::names::listPlot, BuiltinId::ListPlot, 1, ArgumentEvaluation::All, true),
     variadic(builtins::names::show, BuiltinId::Show, 1, ArgumentEvaluation::HoldAll, true),
-    range(builtins::names::exportFile, BuiltinId::Export, 2, 3, ArgumentEvaluation::HoldAll, true),
+    variadic(builtins::names::exportFile, BuiltinId::Export, 2, ArgumentEvaluation::HoldAll, true),
     fixed(builtins::names::unitApplied, BuiltinId::UnitApplied, 2)
 };
 

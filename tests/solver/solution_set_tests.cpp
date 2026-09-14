@@ -43,6 +43,7 @@ void runSolutionSetTests(TestRunner& tests) {
     const auto builtins = evaluation::BuiltinRegistry::defaults(symbols);
     const auto x = symbols.intern("x");
     const auto a = symbols.intern("a");
+    const auto b = symbols.intern("b");
 
     // x^3 == -8 のComplex上の全解を、Power[-8,1/3]という「函数値」とは別に
     // 3本のbranchとして表現できることを確認する。CubeRoot/Solveそのものはまだ
@@ -92,23 +93,25 @@ void runSolutionSetTests(TestRunner& tests) {
         {SolverVariable{k, NumericDomain::Integer}},
         NumericDomain::Real};
     const auto metadataSet = solver::SolutionSet::finite(
-        {SolverVariable{x, NumericDomain::Real}}, {metadataBranch});
+        {SolverVariable{x, NumericDomain::Real}}, {metadataBranch})
+        .withAdditionalConditions(nonZeroA);
     const std::array<Expr, 2> branchSelection{
         Expr::solutionSet(metadataSet), integer(0)};
-    const Expr selectedBranch = builtins::evaluateArrayGet(branchSelection);
+    const Expr selectedBranch = builtins::evaluateArrayGet(branchSelection, builtins);
     tests.expect(
         selectedBranch.isSolutionSet()
             && selectedBranch.asSolutionSet().kind() == solver::SolutionSetKind::Finite
             && selectedBranch.asSolutionSet().variables().size() == 1
             && selectedBranch.asSolutionSet().variables().front().domain == NumericDomain::Real
             && selectedBranch.asSolutionSet().branches().size() == 1
-            && selectedBranch.asSolutionSet().branches().front() == metadataBranch,
-        "at: selecting a SolutionSet branch preserves branch metadata and variable domains");
+            && selectedBranch.asSolutionSet().branches().front() == metadataBranch
+            && selectedBranch.asSolutionSet().conditions() == nonZeroA,
+        "at: selecting a SolutionSet branch preserves branch metadata, variable domains, and set conditions");
 
     const std::array<Expr, 3> bindingSelection{
         Expr::solutionSet(metadataSet), integer(0), Expr{x}};
     tests.expect(
-        builtins::evaluateArrayGet(bindingSelection) == Expr{a},
+        builtins::evaluateArrayGet(bindingSelection, builtins) == Expr{a},
         "at: selecting a SolutionSet binding returns its right-hand-side expression");
 
     const auto allReal = solver::SolutionSet::universal(
@@ -121,6 +124,8 @@ void runSolutionSetTests(TestRunner& tests) {
 
     mathematics::AssumptionSet zeroA;
     zeroA.add(mathematics::relation(RelationKind::Equal, Expr{a}, integer(0)));
+    mathematics::AssumptionSet nonZeroB;
+    nonZeroB.add(mathematics::relation(RelationKind::NotEqual, Expr{b}, integer(0)));
     const auto conditionalSet = solver::SolutionSet::conditional(
         {SolverVariable{x, NumericDomain::Complex}},
         {
@@ -139,6 +144,42 @@ void runSolutionSetTests(TestRunner& tests) {
         std::string{"cases[{x == 1} if a != 0; All if a == 0]"},
         "SolutionSet: conditional cases have a readable exact representation");
 
+    const auto conditionalSetWithOuter = conditionalSet.withAdditionalConditions(nonZeroB);
+    const std::array<Expr, 2> conditionalFiniteSelection{
+        Expr::solutionSet(conditionalSetWithOuter), integer(0)};
+    const Expr selectedConditionalFinite = builtins::evaluateArrayGet(
+        conditionalFiniteSelection, builtins);
+    tests.expect(
+        selectedConditionalFinite.isSolutionSet()
+            && selectedConditionalFinite.asSolutionSet().kind()
+                == solver::SolutionSetKind::Finite
+            && selectedConditionalFinite.asSolutionSet().branches().size() == 1
+            && selectedConditionalFinite.asSolutionSet().conditions().size() == 2
+            && selectedConditionalFinite.asSolutionSet().conditions().contains(
+                nonZeroA.predicates().front())
+            && selectedConditionalFinite.asSolutionSet().conditions().contains(
+                nonZeroB.predicates().front()),
+        "at: selecting a conditional finite outcome preserves case and outer conditions");
+    tests.expectEqual(
+        formatting::formatExpr(selectedConditionalFinite),
+        std::string{"{x == 1} if a != 0 && b != 0"},
+        "at: conditional SolutionSet selection returns a reusable conditioned SolutionSet");
+
+    const std::array<Expr, 2> conditionalUniversalSelection{
+        Expr::solutionSet(conditionalSetWithOuter), integer(1)};
+    const Expr selectedConditionalUniversal = builtins::evaluateArrayGet(
+        conditionalUniversalSelection, builtins);
+    tests.expect(
+        selectedConditionalUniversal.isSolutionSet()
+            && selectedConditionalUniversal.asSolutionSet().kind()
+                == solver::SolutionSetKind::Universal
+            && selectedConditionalUniversal.asSolutionSet().conditions().size() == 2
+            && selectedConditionalUniversal.asSolutionSet().conditions().contains(
+                zeroA.predicates().front())
+            && selectedConditionalUniversal.asSolutionSet().conditions().contains(
+                nonZeroB.predicates().front()),
+        "at: selecting a conditional universal outcome preserves case and outer conditions");
+
     const auto math = mathematics::MathRegistry::defaults(symbols, builtins);
     const auto& angles = mathematics::defaultAngleSemantics();
 
@@ -148,7 +189,8 @@ void runSolutionSetTests(TestRunner& tests) {
         {SolutionBinding{x, symbolic::makeSeriesData(bindingSeries, builtins)}},
         nonZeroA, std::size_t{2}, {SolverVariable{k, NumericDomain::Integer}}, NumericDomain::Real};
     const auto normalizableSet = solver::SolutionSet::finite(
-        {SolverVariable{x, NumericDomain::Real}}, {normalizableBranch});
+        {SolverVariable{x, NumericDomain::Real}}, {normalizableBranch})
+        .withAdditionalConditions(nonZeroB);
     const Expr normalizedSolutions = symbolic::toNormalExpression(
         Expr::solutionSet(normalizableSet), builtins, math, angles);
     tests.expect(
@@ -163,12 +205,36 @@ void runSolutionSetTests(TestRunner& tests) {
             && normalizedSolutions.asSolutionSet().branches().front().freeVariables
                 == std::vector<SolverVariable>{{k, NumericDomain::Integer}}
             && normalizedSolutions.asSolutionSet().branches().front().bindingsCertifiedDomain
-                == std::optional<NumericDomain>{NumericDomain::Real},
-        "toNormal: SolutionSet conversion preserves branch metadata and solver domains");
+                == std::optional<NumericDomain>{NumericDomain::Real}
+            && normalizedSolutions.asSolutionSet().conditions() == nonZeroB,
+        "toNormal: SolutionSet conversion preserves branch metadata, solver domains, and set conditions");
     tests.expectEqual(
         formatting::formatExpr(normalizedSolutions),
-        std::string{"{x == a+1 where k in Integer if a != 0 (multiplicity 2)}"},
-        "toNormal: SolutionSet conversion recursively normalizes binding values");
+        std::string{"{x == a+1 where k in Integer if a != 0 (multiplicity 2)} if b != 0"},
+        "toNormal: SolutionSet conversion recursively normalizes binding values without dropping set conditions");
+
+    const auto normalizableConditionalSet = solver::SolutionSet::conditional(
+        {SolverVariable{x, NumericDomain::Real}},
+        {
+            solver::SolutionCase{
+                nonZeroA,
+                solver::SolutionSetKind::Finite,
+                {normalizableBranch}},
+            solver::SolutionCase{zeroA, solver::SolutionSetKind::Empty, {}}
+        })
+        .withAdditionalConditions(nonZeroB);
+    const Expr normalizedConditionalSolutions = symbolic::toNormalExpression(
+        Expr::solutionSet(normalizableConditionalSet), builtins, math, angles);
+    tests.expect(
+        normalizedConditionalSolutions.isSolutionSet()
+            && normalizedConditionalSolutions.asSolutionSet().kind()
+                == solver::SolutionSetKind::Conditional
+            && normalizedConditionalSolutions.asSolutionSet().conditions() == nonZeroB
+            && normalizedConditionalSolutions.asSolutionSet().cases().front().conditions == nonZeroA
+            && normalizedConditionalSolutions.asSolutionSet().cases().front().branches.front()
+                .bindings.front().value
+                != normalizableBranch.bindings.front().value,
+        "toNormal: conditional SolutionSet conversion preserves outer/case conditions while materializing bindings");
 
     const Expr quadraticEquation = Expr::call(
         builtins.symbol(evaluation::BuiltinId::Equal),

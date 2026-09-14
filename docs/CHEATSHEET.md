@@ -241,7 +241,7 @@ perm[10,3]      -> 720
 comb[10,3]      -> 120
 fib[100]
 isprime[97]     -> True
-factorint[360]
+factorint[360] -> {{2, 3}, {3, 2}, {5, 1}}
 totient[9]      -> 6
 ```
 
@@ -356,13 +356,17 @@ solve[{2x+3y==5,x-2y==9},{x,y}]
 
 For equation systems, the default ambient domain is `Complex`. Ordered inequalities use the `Real` domain family.
 
-Finite-solution branch selection is **0-based**.
+Solution and conditional-branch selection is **0-based**. The two-argument `at` form preserves condition metadata.
 
 ```text
 s:=solve[x^2==1,x]
 at[s,0]     -> {x == 1}
 at[s,1]     -> {x == -1}
 at[s,1,x]   -> -1
+
+at[solve[a*x==1,x],0] -> {x == 1/a} if a != 0
+at[at[solve[a*x==1,x],0],0,x] -> 1/a
+at[cases[x^2 if a>0;0],0] -> cases[x^2 if a > 0]
 ```
 
 Exact roots:
@@ -441,6 +445,7 @@ nullSpace[A]             solveLinear[A,b]
 luDecomposition[A]       qrDecomposition[A]
 svd[A]                   conditionNumber[A]
 pseudoInverse[A]         leastSquares[A,b]
+characteristicPolynomial[A,x]
 eigenvalues[A]           eigenvectors[A]
 eigensystem[A]           trace[A]
 ```

@@ -10,6 +10,7 @@
 #include "symbolic/algebra_transforms.hpp"
 #include "symbolic/cases.hpp"
 #include "symbolic/polynomial.hpp"
+#include "symbolic/risch_core.hpp"
 #include "symbolic/substitution.hpp"
 
 #include <algorithm>
@@ -508,6 +509,101 @@ struct GeometricTerm final {
     return power(std::move(onePlusZ), n, builtins, mathematics, angles);
 }
 
+
+void collectMultiplicativeFactors(
+    const Expr& expression,
+    bool denominator,
+    const evaluation::BuiltinRegistry& builtins,
+    std::vector<Expr>& numeratorFactors,
+    std::vector<Expr>& denominatorFactors) {
+    if (builtins.isCallTo(expression, BuiltinId::Multiply)) {
+        for (const Expr& argument : expression.asCall().arguments)
+            collectMultiplicativeFactors(
+                argument, denominator, builtins,
+                numeratorFactors, denominatorFactors);
+        return;
+    }
+    if (builtins.isCallTo(expression, BuiltinId::Divide)
+        && expression.asCall().arguments.size() == 2) {
+        collectMultiplicativeFactors(
+            expression.asCall().arguments[0], denominator, builtins,
+            numeratorFactors, denominatorFactors);
+        collectMultiplicativeFactors(
+            expression.asCall().arguments[1], !denominator, builtins,
+            numeratorFactors, denominatorFactors);
+        return;
+    }
+    (denominator ? denominatorFactors : numeratorFactors).push_back(expression);
+}
+
+[[nodiscard]] bool isAffineVariablePlusOne(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto polynomial = toExpressionPolynomial(
+        expression, variable, builtins, mathematics, angles,
+        PolynomialConversionOptions{1, 16});
+    if (!polynomial || polynomial->degree() != 1)
+        return false;
+    const auto constant = expression::exact::realRational(polynomial->coefficient(0));
+    const auto slope = expression::exact::realRational(polynomial->coefficient(1));
+    return constant && slope
+        && *constant == Rational{BigInt{1}}
+        && *slope == Rational{BigInt{1}};
+}
+
+[[nodiscard]] std::optional<Expr> alternatingBinomialReciprocalSum(
+    const Expr& body,
+    const expression::Symbol& variable,
+    const Bounds& bounds,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (!isExactIntegerValue(bounds.lower, 0))
+        return std::nullopt;
+
+    std::vector<Expr> numeratorFactors;
+    std::vector<Expr> denominatorFactors;
+    collectMultiplicativeFactors(
+        body, false, builtins, numeratorFactors, denominatorFactors);
+    if (denominatorFactors.size() != 1
+        || !isAffineVariablePlusOne(
+            denominatorFactors.front(), variable,
+            builtins, mathematics, angles))
+        return std::nullopt;
+
+    std::optional<Expr> n;
+    bool alternating = false;
+    for (const Expr& factor : numeratorFactors) {
+        if (!n && builtins.isCallTo(factor, BuiltinId::Combination)
+            && factor.asCall().arguments.size() == 2
+            && factor.asCall().arguments[1].isSymbol()
+            && factor.asCall().arguments[1].asSymbol().sameIdentity(variable)) {
+            n = factor.asCall().arguments[0];
+            continue;
+        }
+        if (!alternating && builtins.isCallTo(factor, BuiltinId::Power)
+            && factor.asCall().arguments.size() == 2
+            && isExactIntegerValue(factor.asCall().arguments[0], -1)
+            && factor.asCall().arguments[1].isSymbol()
+            && factor.asCall().arguments[1].asSymbol().sameIdentity(variable)) {
+            alternating = true;
+            continue;
+        }
+        if (!isExactIntegerValue(factor, 1))
+            return std::nullopt;
+    }
+    if (!n || !alternating || !(bounds.upper == *n))
+        return std::nullopt;
+
+    return builtins::exact::divide(
+        integer(1),
+        builtins::exact::add({*n, integer(1)}, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+}
+
 [[nodiscard]] std::optional<Expr> telescopingProduct(
     const Expr& body,
     const expression::Symbol& variable,
@@ -580,32 +676,91 @@ struct GeometricTerm final {
         std::move(rising)}, builtins, mathematics, angles);
 }
 
+
+[[nodiscard]] std::optional<std::int64_t> boundedIntegerExponent(
+    const Expr& expression,
+    std::int64_t magnitudeLimit);
+
+[[nodiscard]] std::optional<Expr> finiteProductCore(
+    const Expr& body,
+    const expression::Symbol& variable,
+    const Bounds& bounds,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t depth = 0) {
+    if (depth > 32)
+        return std::nullopt;
+    if (!containsSymbol(body, variable))
+        return power(
+            body, countExpression(bounds, builtins, mathematics, angles),
+            builtins, mathematics, angles);
+
+    // compactな専用形を先に試し，分配で式を不要に膨らませない。
+    if (auto result = telescopingProduct(
+            body, variable, bounds, builtins, mathematics, angles))
+        return result;
+    if (auto result = affineProduct(
+            body, variable, bounds, builtins, mathematics, angles))
+        return result;
+
+    if (builtins.isCallTo(body, BuiltinId::Multiply)) {
+        std::vector<Expr> products;
+        products.reserve(body.asCall().arguments.size());
+        for (const Expr& factor : body.asCall().arguments) {
+            auto product = finiteProductCore(
+                factor, variable, bounds, builtins, mathematics, angles, depth + 1);
+            if (!product)
+                return std::nullopt;
+            products.push_back(std::move(*product));
+        }
+        return builtins::exact::multiply(
+            std::move(products), builtins, mathematics, angles);
+    }
+
+    if (builtins.isCallTo(body, BuiltinId::Power)
+        && body.asCall().arguments.size() == 2
+        && !containsSymbol(body.asCall().arguments[1], variable)) {
+        const auto exponent = boundedIntegerExponent(
+            body.asCall().arguments[1], 64);
+        if (exponent) {
+            auto baseProduct = finiteProductCore(
+                body.asCall().arguments[0], variable, bounds,
+                builtins, mathematics, angles, depth + 1);
+            if (baseProduct)
+                return power(
+                    std::move(*baseProduct), body.asCall().arguments[1],
+                    builtins, mathematics, angles);
+        }
+    }
+
+    if (builtins.isCallTo(body, BuiltinId::Divide)
+        && body.asCall().arguments.size() == 2) {
+        auto numerator = finiteProductCore(
+            body.asCall().arguments[0], variable, bounds,
+            builtins, mathematics, angles, depth + 1);
+        auto denominator = finiteProductCore(
+            body.asCall().arguments[1], variable, bounds,
+            builtins, mathematics, angles, depth + 1);
+        if (numerator && denominator)
+            return builtins::exact::divide(
+                std::move(*numerator), std::move(*denominator),
+                builtins, mathematics, angles);
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] RationalPolynomial rpMonic(const RationalPolynomial& polynomial) {
-    if (polynomial.isZero())
-        return polynomial;
-    const Rational leading = polynomial.coefficient(polynomial.degree());
-    std::vector<Rational> coefficients(
-        polynomial.coefficients().begin(), polynomial.coefficients().end());
-    for (Rational& coefficient : coefficients)
-        coefficient /= leading;
-    return RationalPolynomial{std::move(coefficients)};
+    return risch::monicRationalPolynomialExact(polynomial);
 }
 
 [[nodiscard]] RationalPolynomial rpAdd(
     const RationalPolynomial& lhs,
     const RationalPolynomial& rhs,
     bool subtract = false) {
-    std::vector<Rational> coefficients(
-        std::max(lhs.degree(), rhs.degree()) + 1, Rational{BigInt{0}});
-    for (std::size_t i = 0; i <= lhs.degree(); ++i)
-        coefficients[i] += lhs.coefficient(i);
-    for (std::size_t i = 0; i <= rhs.degree(); ++i) {
-        if (subtract)
-            coefficients[i] -= rhs.coefficient(i);
-        else
-            coefficients[i] += rhs.coefficient(i);
-    }
-    return RationalPolynomial{std::move(coefficients)};
+    return subtract
+        ? risch::subtractRationalPolynomialsExact(lhs, rhs)
+        : risch::addRationalPolynomialsExact(lhs, rhs);
 }
 
 [[nodiscard]] std::optional<RationalPolynomial> rpMultiply(
@@ -614,15 +769,10 @@ struct GeometricTerm final {
     std::size_t maximumDegree = 96) {
     if (lhs.isZero() || rhs.isZero())
         return RationalPolynomial{};
-    if (lhs.degree() > maximumDegree - std::min(rhs.degree(), maximumDegree)
-        || lhs.degree() + rhs.degree() > maximumDegree)
+    if (lhs.degree() > maximumDegree || rhs.degree() > maximumDegree
+        || lhs.degree() > maximumDegree - rhs.degree())
         return std::nullopt;
-    std::vector<Rational> coefficients(
-        lhs.degree() + rhs.degree() + 1, Rational{BigInt{0}});
-    for (std::size_t i = 0; i <= lhs.degree(); ++i)
-        for (std::size_t j = 0; j <= rhs.degree(); ++j)
-            coefficients[i + j] += lhs.coefficient(i) * rhs.coefficient(j);
-    return RationalPolynomial{std::move(coefficients)};
+    return risch::multiplyRationalPolynomialsExact(lhs, rhs);
 }
 
 struct RpDivision final {
@@ -635,64 +785,27 @@ struct RpDivision final {
     const RationalPolynomial& divisor) {
     if (divisor.isZero())
         return std::nullopt;
-    if (dividend.degree() < divisor.degree())
-        return RpDivision{RationalPolynomial{}, dividend};
-    std::vector<Rational> remainder(
-        dividend.coefficients().begin(), dividend.coefficients().end());
-    std::vector<Rational> quotient(
-        dividend.degree() - divisor.degree() + 1, Rational{BigInt{0}});
-    const Rational leading = divisor.coefficient(divisor.degree());
-    for (std::size_t degree = dividend.degree() + 1; degree-- > divisor.degree();) {
-        const Rational amount = remainder[degree] / leading;
-        const std::size_t shift = degree - divisor.degree();
-        quotient[shift] += amount;
-        for (std::size_t i = 0; i <= divisor.degree(); ++i)
-            remainder[i + shift] -= amount * divisor.coefficient(i);
-    }
-    remainder.resize(divisor.degree());
+    auto division = risch::divideRationalPolynomials(dividend, divisor);
     return RpDivision{
-        RationalPolynomial{std::move(quotient)},
-        RationalPolynomial{std::move(remainder)}};
+        std::move(division.quotient), std::move(division.remainder)};
 }
 
 [[nodiscard]] std::optional<RationalPolynomial> rpExactQuotient(
     const RationalPolynomial& dividend,
     const RationalPolynomial& divisor) {
-    auto division = rpDivide(dividend, divisor);
-    if (!division || !division->remainder.isZero())
-        return std::nullopt;
-    return std::move(division->quotient);
+    return risch::divideRationalPolynomialsExactly(dividend, divisor);
 }
 
 [[nodiscard]] RationalPolynomial rpGcd(
     RationalPolynomial lhs,
     RationalPolynomial rhs) {
-    while (!rhs.isZero()) {
-        auto division = rpDivide(lhs, rhs);
-        if (!division)
-            return RationalPolynomial{{Rational{BigInt{1}}}};
-        lhs = std::move(rhs);
-        rhs = std::move(division->remainder);
-    }
-    return rpMonic(lhs);
+    return risch::gcdRationalPolynomialsMonic(std::move(lhs), std::move(rhs));
 }
 
 [[nodiscard]] RationalPolynomial rpShift(
     const RationalPolynomial& polynomial,
     std::int64_t shift) {
-    std::vector<Rational> coefficients(
-        polynomial.degree() + 1, Rational{BigInt{0}});
-    const Rational offset{BigInt{shift}};
-    for (std::size_t exponent = 0; exponent <= polynomial.degree(); ++exponent) {
-        Rational offsetPower{BigInt{1}};
-        for (std::size_t reverse = 0; reverse <= exponent; ++reverse) {
-            const std::size_t outputExponent = exponent - reverse;
-            coefficients[outputExponent] += polynomial.coefficient(exponent)
-                * Rational{binomialBig(exponent, outputExponent)} * offsetPower;
-            offsetPower *= offset;
-        }
-    }
-    return RationalPolynomial{std::move(coefficients)};
+    return risch::shiftRationalPolynomialExact(polynomial, shift);
 }
 
 [[nodiscard]] std::optional<RationalPolynomial> rpLcm(
@@ -713,23 +826,15 @@ struct RpDivision final {
     RationalPolynomial base,
     std::uint64_t exponent,
     std::size_t maximumDegree) {
-    RationalPolynomial result{{Rational{BigInt{1}}}};
-    while (exponent != 0) {
-        if ((exponent & 1U) != 0) {
-            auto product = rpMultiply(result, base, maximumDegree);
-            if (!product)
-                return std::nullopt;
-            result = std::move(*product);
-        }
-        exponent >>= 1U;
-        if (exponent != 0) {
-            auto square = rpMultiply(base, base, maximumDegree);
-            if (!square)
-                return std::nullopt;
-            base = std::move(*square);
-        }
-    }
-    return result;
+    if (base.isZero())
+        return exponent == 0
+            ? std::optional<RationalPolynomial>{RationalPolynomial{{Rational{BigInt{1}}}}}
+            : std::optional<RationalPolynomial>{RationalPolynomial{}};
+    if (base.degree() != 0
+        && exponent > maximumDegree / base.degree())
+        return std::nullopt;
+    return risch::powerRationalPolynomialExact(
+        std::move(base), static_cast<std::size_t>(exponent));
 }
 
 struct ExactRationalFunction final {
@@ -904,6 +1009,243 @@ struct ExactRationalFunction final {
     return std::nullopt;
 }
 
+
+[[nodiscard]] std::optional<std::int64_t> affineIntegerStep(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::int64_t magnitudeLimit = 32) {
+    const auto polynomial = toExpressionPolynomial(
+        expression, variable, builtins, mathematics, angles,
+        PolynomialConversionOptions{1, 32});
+    if (!polynomial || polynomial->degree() > 1)
+        return std::nullopt;
+    if (polynomial->degree() == 0)
+        return 0;
+    return boundedIntegerExponent(polynomial->coefficient(1), magnitudeLimit);
+}
+
+[[nodiscard]] Expr finiteShiftFactorProduct(
+    const Expr& center,
+    std::int64_t firstOffset,
+    std::size_t count,
+    std::int64_t offsetStep,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (count == 0)
+        return integer(1);
+    std::vector<Expr> factors;
+    factors.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        const std::int64_t offset = firstOffset
+            + static_cast<std::int64_t>(index) * offsetStep;
+        factors.push_back(offset == 0
+            ? center
+            : builtins::exact::add(
+                {center, integer(offset)}, builtins, mathematics, angles));
+    }
+    return builtins::exact::multiply(
+        std::move(factors), builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> factorialShiftQuotient(
+    const Expr& argument,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    const auto delta = affineIntegerStep(
+        argument, variable, builtins, mathematics, angles);
+    if (!delta)
+        return std::nullopt;
+    if (*delta == 0)
+        return integer(1);
+    const std::size_t count = static_cast<std::size_t>(
+        *delta < 0 ? -*delta : *delta);
+    if (*delta > 0)
+        return finiteShiftFactorProduct(
+            argument, 1, count, 1, builtins, mathematics, angles);
+    Expr denominator = finiteShiftFactorProduct(
+        argument, 0, count, -1, builtins, mathematics, angles);
+    return builtins::exact::divide(
+        integer(1), std::move(denominator), builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> finiteFactorialOrderShiftQuotient(
+    BuiltinId id,
+    const Expr& base,
+    const Expr& order,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (containsSymbol(base, variable))
+        return std::nullopt;
+    const auto delta = affineIntegerStep(
+        order, variable, builtins, mathematics, angles);
+    if (!delta)
+        return std::nullopt;
+    if (*delta == 0)
+        return integer(1);
+    const std::size_t count = static_cast<std::size_t>(
+        *delta < 0 ? -*delta : *delta);
+    Expr center = builtins::exact::add(
+        {base, id == BuiltinId::RisingFactorial
+            ? order
+            : builtins::exact::negate(order, builtins, mathematics, angles)},
+        builtins, mathematics, angles);
+    if (id == BuiltinId::RisingFactorial) {
+        if (*delta > 0)
+            return finiteShiftFactorProduct(
+                center, 0, count, 1, builtins, mathematics, angles);
+        Expr denominator = finiteShiftFactorProduct(
+            center, -1, count, -1, builtins, mathematics, angles);
+        return builtins::exact::divide(
+            integer(1), std::move(denominator), builtins, mathematics, angles);
+    }
+    if (*delta > 0)
+        return finiteShiftFactorProduct(
+            center, 0, count, -1, builtins, mathematics, angles);
+    Expr denominator = finiteShiftFactorProduct(
+        center, 1, count, 1, builtins, mathematics, angles);
+    return builtins::exact::divide(
+        integer(1), std::move(denominator), builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> structuralShiftQuotient(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    std::size_t depth = 0) {
+    if (depth > 64)
+        return std::nullopt;
+    if (!containsSymbol(expression, variable))
+        return integer(1);
+    if (expression.isSymbol() && expression.asSymbol().sameIdentity(variable)) {
+        return builtins::exact::divide(
+            builtins::exact::add(
+                {Expr{variable}, integer(1)}, builtins, mathematics, angles),
+            Expr{variable}, builtins, mathematics, angles);
+    }
+    if (!expression.isCall())
+        return std::nullopt;
+    const auto* definition = builtins.find(expression.asCall().head);
+    if (!definition)
+        return std::nullopt;
+    const auto& arguments = expression.asCall().arguments;
+
+    if (definition->id == BuiltinId::Negate && arguments.size() == 1)
+        return structuralShiftQuotient(
+            arguments[0], variable, builtins, mathematics, angles, depth + 1);
+
+    if (definition->id == BuiltinId::Multiply && !arguments.empty()) {
+        std::vector<Expr> factors;
+        factors.reserve(arguments.size());
+        for (const Expr& argument : arguments) {
+            auto quotient = structuralShiftQuotient(
+                argument, variable, builtins, mathematics, angles, depth + 1);
+            if (!quotient)
+                return std::nullopt;
+            factors.push_back(std::move(*quotient));
+        }
+        return builtins::exact::multiply(
+            std::move(factors), builtins, mathematics, angles);
+    }
+
+    if (definition->id == BuiltinId::Divide && arguments.size() == 2) {
+        auto numerator = structuralShiftQuotient(
+            arguments[0], variable, builtins, mathematics, angles, depth + 1);
+        auto denominator = structuralShiftQuotient(
+            arguments[1], variable, builtins, mathematics, angles, depth + 1);
+        if (!numerator || !denominator)
+            return std::nullopt;
+        return builtins::exact::divide(
+            std::move(*numerator), std::move(*denominator),
+            builtins, mathematics, angles);
+    }
+
+    if (definition->id == BuiltinId::Power && arguments.size() == 2) {
+        const Expr& base = arguments[0];
+        const Expr& exponent = arguments[1];
+        if (!containsSymbol(base, variable)) {
+            const auto exponentPolynomial = toExpressionPolynomial(
+                exponent, variable, builtins, mathematics, angles,
+                PolynomialConversionOptions{1, 32});
+            if (exponentPolynomial && exponentPolynomial->degree() <= 1) {
+                Expr delta = exponentPolynomial->degree() == 0
+                    ? integer(0) : exponentPolynomial->coefficient(1);
+                if (!containsSymbol(delta, variable))
+                    return power(base, std::move(delta), builtins, mathematics, angles);
+            }
+        }
+        if (const auto integerExponent = boundedIntegerExponent(exponent, 16)) {
+            auto baseQuotient = structuralShiftQuotient(
+                base, variable, builtins, mathematics, angles, depth + 1);
+            if (baseQuotient)
+                return power(
+                    std::move(*baseQuotient), exponent,
+                    builtins, mathematics, angles);
+        }
+        return std::nullopt;
+    }
+
+    if (definition->id == BuiltinId::Factorial && arguments.size() == 1)
+        return factorialShiftQuotient(
+            arguments[0], variable, builtins, mathematics, angles);
+
+    if (definition->id == BuiltinId::Combination && arguments.size() == 2) {
+        auto nQuotient = factorialShiftQuotient(
+            arguments[0], variable, builtins, mathematics, angles);
+        auto kQuotient = factorialShiftQuotient(
+            arguments[1], variable, builtins, mathematics, angles);
+        Expr difference = builtins::exact::subtract(
+            arguments[0], arguments[1], builtins, mathematics, angles);
+        auto differenceQuotient = factorialShiftQuotient(
+            difference, variable, builtins, mathematics, angles);
+        if (!nQuotient || !kQuotient || !differenceQuotient)
+            return std::nullopt;
+        Expr denominator = builtins::exact::multiply(
+            {std::move(*kQuotient), std::move(*differenceQuotient)},
+            builtins, mathematics, angles);
+        return builtins::exact::divide(
+            std::move(*nQuotient), std::move(denominator),
+            builtins, mathematics, angles);
+    }
+
+    if ((definition->id == BuiltinId::RisingFactorial
+            || definition->id == BuiltinId::FallingFactorial)
+        && arguments.size() == 2)
+        return finiteFactorialOrderShiftQuotient(
+            definition->id, arguments[0], arguments[1], variable,
+            builtins, mathematics, angles);
+
+    return std::nullopt;
+}
+
+[[nodiscard]] Expr normalizedShiftQuotient(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (auto structural = structuralShiftQuotient(
+            expression, variable, builtins, mathematics, angles))
+        return builtins::exact::simplify(
+            std::move(*structural), builtins, mathematics, angles);
+    Expr variablePlusOne = builtins::exact::add(
+        {Expr{variable}, integer(1)}, builtins, mathematics, angles);
+    Expr shifted = substituteSymbol(expression, variable, variablePlusOne);
+    return builtins::exact::simplify(
+        builtins::exact::divide(
+            std::move(shifted), expression, builtins, mathematics, angles),
+        builtins, mathematics, angles);
+}
+
 [[nodiscard]] std::optional<std::vector<Rational>> solveExactLinearSystem(
     std::vector<std::vector<Rational>> matrix,
     std::size_t unknownCount) {
@@ -947,6 +1289,284 @@ struct ExactRationalFunction final {
     const RationalPolynomial& lhs,
     const RationalPolynomial& rhs) {
     return lhs.coefficients() == rhs.coefficients();
+}
+
+struct GosperNormalForm final {
+    RationalPolynomial a;
+    RationalPolynomial b;
+    RationalPolynomial c{{Rational{BigInt{1}}}};
+};
+
+[[nodiscard]] std::optional<GosperNormalForm> gosperNormalForm(
+    const ExactRationalFunction& ratio) {
+    constexpr std::size_t maximumShift = 32;
+    constexpr std::size_t maximumDegree = 128;
+    if (ratio.numerator.isZero() || ratio.denominator.isZero())
+        return std::nullopt;
+
+    GosperNormalForm form{ratio.numerator, ratio.denominator};
+    for (std::size_t shift = 1; shift <= maximumShift; ++shift) {
+        while (true) {
+            const RationalPolynomial shiftedB = rpShift(
+                form.b, static_cast<std::int64_t>(shift));
+            const RationalPolynomial common = rpGcd(form.a, shiftedB);
+            if (common.degree() == 0)
+                break;
+
+            auto reducedA = rpExactQuotient(form.a, common);
+            auto reducedB = rpExactQuotient(
+                form.b, rpShift(common, -static_cast<std::int64_t>(shift)));
+            if (!reducedA || !reducedB)
+                return std::nullopt;
+
+            RationalPolynomial bridge{{Rational{BigInt{1}}}};
+            for (std::size_t index = 1; index <= shift; ++index) {
+                auto next = rpMultiply(
+                    bridge,
+                    rpShift(common, -static_cast<std::int64_t>(index)),
+                    maximumDegree);
+                if (!next)
+                    return std::nullopt;
+                bridge = std::move(*next);
+            }
+            auto newC = rpMultiply(form.c, bridge, maximumDegree);
+            if (!newC)
+                return std::nullopt;
+            form.a = std::move(*reducedA);
+            form.b = std::move(*reducedB);
+            form.c = std::move(*newC);
+        }
+    }
+
+    // p/q = a/b * c(k+1)/c(k) を元のratioに対してexactに再検証する。
+    auto leftA = rpMultiply(ratio.numerator, form.b, maximumDegree);
+    auto left = leftA ? rpMultiply(*leftA, form.c, maximumDegree) : std::nullopt;
+    auto rightA = rpMultiply(ratio.denominator, form.a, maximumDegree);
+    auto right = rightA
+        ? rpMultiply(*rightA, rpShift(form.c, 1), maximumDegree)
+        : std::nullopt;
+    if (!left || !right || !samePolynomial(*left, *right))
+        return std::nullopt;
+    return form;
+}
+
+[[nodiscard]] std::optional<RationalPolynomial> gosperPolynomialCertificate(
+    const GosperNormalForm& form) {
+    constexpr std::size_t maximumCertificateDegree = 32;
+    constexpr std::size_t maximumEquationCount = 192;
+    const RationalPolynomial bMinusOne = rpShift(form.b, -1);
+
+    for (std::size_t degree = 0; degree <= maximumCertificateDegree; ++degree) {
+        std::vector<RationalPolynomial> columns;
+        columns.reserve(degree + 1);
+        std::size_t equationCount = form.c.degree() + 1;
+        bool overflow = false;
+        for (std::size_t exponent = 0; exponent <= degree; ++exponent) {
+            std::vector<Rational> coefficients(
+                exponent + 1, Rational{BigInt{0}});
+            coefficients.back() = Rational{BigInt{1}};
+            RationalPolynomial monomial{std::move(coefficients)};
+            auto left = rpMultiply(
+                form.a, rpShift(monomial, 1), maximumEquationCount);
+            auto right = rpMultiply(
+                bMinusOne, monomial, maximumEquationCount);
+            if (!left || !right) {
+                overflow = true;
+                break;
+            }
+            columns.push_back(rpAdd(*left, *right, true));
+            equationCount = std::max(
+                equationCount, columns.back().degree() + 1);
+        }
+        if (overflow || equationCount > maximumEquationCount)
+            return std::nullopt;
+
+        const std::size_t unknownCount = degree + 1;
+        std::vector<std::vector<Rational>> matrix(
+            equationCount,
+            std::vector<Rational>(unknownCount + 1, Rational{BigInt{0}}));
+        for (std::size_t row = 0; row < equationCount; ++row) {
+            for (std::size_t column = 0; column < unknownCount; ++column)
+                matrix[row][column] = columns[column].coefficient(row);
+            matrix[row][unknownCount] = form.c.coefficient(row);
+        }
+        auto solution = solveExactLinearSystem(std::move(matrix), unknownCount);
+        if (!solution)
+            continue;
+        RationalPolynomial certificate{std::move(*solution)};
+
+        auto verifiedLeft = rpMultiply(
+            form.a, rpShift(certificate, 1), maximumEquationCount);
+        auto verifiedRight = rpMultiply(
+            bMinusOne, certificate, maximumEquationCount);
+        if (verifiedLeft
+            && verifiedRight
+            && samePolynomial(
+                rpAdd(*verifiedLeft, *verifiedRight, true), form.c))
+            return certificate;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<ExactRationalFunction> gosperRationalCertificate(
+    const ExactRationalFunction& ratio) {
+    constexpr std::size_t maximumDegree = 256;
+    const auto form = gosperNormalForm(ratio);
+    if (!form)
+        return std::nullopt;
+    const auto polynomialCertificate = gosperPolynomialCertificate(*form);
+    if (!polynomialCertificate)
+        return std::nullopt;
+
+    auto numerator = rpMultiply(
+        rpShift(form->b, -1), *polynomialCertificate, maximumDegree);
+    if (!numerator)
+        return std::nullopt;
+    auto rationalCertificate = normalizeRationalFunction(
+        ExactRationalFunction{std::move(*numerator), form->c});
+    if (!rationalCertificate)
+        return std::nullopt;
+
+    // ratio(k) R(k+1) - R(k) = 1 を元ratioへ戻して再検証する。
+    auto shiftedCertificate = normalizeRationalFunction(ExactRationalFunction{
+        rpShift(rationalCertificate->numerator, 1),
+        rpShift(rationalCertificate->denominator, 1)});
+    if (!shiftedCertificate)
+        return std::nullopt;
+    auto first = combineRationalFunctions(
+        ratio, *shiftedCertificate, BuiltinId::Multiply, maximumDegree);
+    auto difference = first
+        ? combineRationalFunctions(
+            *first, *rationalCertificate, BuiltinId::Subtract, maximumDegree)
+        : std::nullopt;
+    if (!difference
+        || !samePolynomial(difference->numerator, difference->denominator))
+        return std::nullopt;
+    return rationalCertificate;
+}
+
+[[nodiscard]] bool isUnitPolynomial(const RationalPolynomial& polynomial) {
+    return polynomial.degree() == 0
+        && polynomial.coefficient(0) == Rational{BigInt{1}};
+}
+
+[[nodiscard]] Expr multiplyHypergeometricCertificate(
+    const Expr& body,
+    const ExactRationalFunction& certificate,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    RationalPolynomial denominator = certificate.denominator;
+    std::vector<Expr> factors;
+    if (builtins.isCallTo(body, BuiltinId::Multiply))
+        factors.assign(body.asCall().arguments.begin(), body.asCall().arguments.end());
+    else
+        factors.push_back(body);
+
+    // R(k)の分母とterm中の多項式因子をQ[k]上で先に約分する。
+    // これはk=0等にあるremovable singularityをG(k)=R(k)f(k)へ持ち込まないためである。
+    for (Expr& factor : factors) {
+        if (isUnitPolynomial(denominator))
+            break;
+        auto polynomial = toRationalPolynomial(
+            factor, variable, builtins,
+            PolynomialConversionOptions{128, 1024});
+        if (!polynomial)
+            continue;
+        const RationalPolynomial common = rpGcd(*polynomial, denominator);
+        if (common.degree() == 0)
+            continue;
+        auto reducedFactor = rpExactQuotient(*polynomial, common);
+        auto reducedDenominator = rpExactQuotient(denominator, common);
+        if (!reducedFactor || !reducedDenominator)
+            continue;
+        factor = polynomialToExpandedExpr(*reducedFactor, variable, builtins);
+        denominator = std::move(*reducedDenominator);
+    }
+
+    factors.push_back(polynomialToExpandedExpr(
+        certificate.numerator, variable, builtins));
+    Expr numerator = builtins::exact::multiply(
+        std::move(factors), builtins, mathematics, angles);
+    if (isUnitPolynomial(denominator))
+        return builtins::exact::simplify(
+            std::move(numerator), builtins, mathematics, angles);
+    return builtins::exact::simplify(
+        builtins::exact::divide(
+            std::move(numerator),
+            polynomialToExpandedExpr(denominator, variable, builtins),
+            builtins, mathematics, angles),
+        builtins, mathematics, angles);
+}
+
+[[nodiscard]] std::optional<Expr> gosperAntidifference(
+    const Expr& body,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    constexpr std::size_t maximumRatioDegree = 96;
+    Expr quotient = normalizedShiftQuotient(
+        body, variable, builtins, mathematics, angles);
+    auto ratio = extractRationalFunction(
+        quotient, variable, builtins, maximumRatioDegree);
+    if (!ratio || ratio->numerator.isZero())
+        return std::nullopt;
+    auto certificate = gosperRationalCertificate(*ratio);
+    if (!certificate)
+        return std::nullopt;
+    return multiplyHypergeometricCertificate(
+        body, *certificate, variable, builtins, mathematics, angles);
+}
+
+[[nodiscard]] Expr evaluateExactFactorialConstant(
+    Expr expression,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!builtins.isCallTo(expression, BuiltinId::Factorial)
+        || expression.asCall().arguments.size() != 1)
+        return expression;
+    const Expr& argument = expression.asCall().arguments.front();
+    if (!argument.isNumber() || !argument.asNumber().isReal()
+        || !argument.asNumber().asReal().isInteger())
+        return expression;
+    const BigInt& value = argument.asNumber().asReal().asInteger();
+    const auto count = value.isNegative()
+        ? std::optional<std::uint64_t>{}
+        : numeric::tryToUint64(value);
+    if (!count)
+        return expression;
+    return Expr{Number{numeric::factorial(*count)}};
+}
+
+[[nodiscard]] std::optional<Expr> gosperSum(
+    const Expr& body,
+    const expression::Symbol& variable,
+    const Bounds& bounds,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    auto antidifference = gosperAntidifference(
+        body, variable, builtins, mathematics, angles);
+    if (!antidifference)
+        return std::nullopt;
+    Expr upperPlusOne = builtins::exact::add(
+        {bounds.upper, integer(1)}, builtins, mathematics, angles);
+    Expr atUpper = evaluateExactFactorialConstant(
+        builtins::exact::simplify(
+            substituteSymbol(*antidifference, variable, upperPlusOne),
+            builtins, mathematics, angles),
+        builtins);
+    Expr atLower = evaluateExactFactorialConstant(
+        builtins::exact::simplify(
+            substituteSymbol(*antidifference, variable, bounds.lower),
+            builtins, mathematics, angles),
+        builtins);
+    return builtins::exact::simplify(
+        builtins::exact::subtract(
+            std::move(atUpper), std::move(atLower),
+            builtins, mathematics, angles),
+        builtins, mathematics, angles);
 }
 
 [[nodiscard]] std::optional<ExactRationalFunction> abramovProperAntidifference(
@@ -1166,16 +1786,23 @@ struct ExactRationalFunction final {
 [[nodiscard]] bool rationalFunctionInVariable(
     const Expr& expression,
     const expression::Symbol& variable,
-    const evaluation::BuiltinRegistry& builtins) {
-    if (toRationalPolynomial(expression, variable, builtins,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (toExpressionPolynomial(
+            expression, variable, builtins, mathematics, angles,
             PolynomialConversionOptions{128, 1024}))
         return true;
     if (!builtins.isCallTo(expression, BuiltinId::Divide)
         || expression.asCall().arguments.size() != 2)
         return false;
-    return toRationalPolynomial(expression.asCall().arguments[0], variable, builtins,
+    return toExpressionPolynomial(
+               expression.asCall().arguments[0], variable,
+               builtins, mathematics, angles,
                PolynomialConversionOptions{128, 1024}).has_value()
-        && toRationalPolynomial(expression.asCall().arguments[1], variable, builtins,
+        && toExpressionPolynomial(
+               expression.asCall().arguments[1], variable,
+               builtins, mathematics, angles,
                PolynomialConversionOptions{128, 1024}).has_value();
 }
 
@@ -1207,6 +1834,10 @@ std::optional<Expr> finiteSymbolicSum(
             body, iterator.variable, *bounds, builtins, mathematics, angles))
         return guardedForNonemptyRange(
             std::move(*result), *bounds, integer(0), builtins);
+    if (auto result = alternatingBinomialReciprocalSum(
+            body, iterator.variable, *bounds, builtins, mathematics, angles))
+        return guardedForNonemptyRange(
+            std::move(*result), *bounds, integer(0), builtins);
     Expr telescopingBody = body;
     if (auto normalized = normalizeRationalTelescopingBody(
             body, iterator.variable, builtins, mathematics, angles))
@@ -1216,6 +1847,10 @@ std::optional<Expr> finiteSymbolicSum(
         return guardedForNonemptyRange(
             std::move(*result), *bounds, integer(0), builtins);
     if (auto result = abramovRationalSum(
+            body, iterator.variable, *bounds, builtins, mathematics, angles))
+        return guardedForNonemptyRange(
+            std::move(*result), *bounds, integer(0), builtins);
+    if (auto result = gosperSum(
             body, iterator.variable, *bounds, builtins, mathematics, angles))
         return guardedForNonemptyRange(
             std::move(*result), *bounds, integer(0), builtins);
@@ -1244,18 +1879,7 @@ std::optional<Expr> finiteSymbolicProduct(
             body, iterator, builtins, mathematics, angles))
         return distributed;
 
-    if (!containsSymbol(body, iterator.variable)) {
-        Expr value = power(
-            body, countExpression(*bounds, builtins, mathematics, angles),
-            builtins, mathematics, angles);
-        return guardedForNonemptyRange(
-            std::move(value), *bounds, integer(1), builtins);
-    }
-    if (auto result = telescopingProduct(
-            body, iterator.variable, *bounds, builtins, mathematics, angles))
-        return guardedForNonemptyRange(
-            std::move(*result), *bounds, integer(1), builtins);
-    if (auto result = affineProduct(
+    if (auto result = finiteProductCore(
             body, iterator.variable, *bounds, builtins, mathematics, angles))
         return guardedForNonemptyRange(
             std::move(*result), *bounds, integer(1), builtins);
@@ -1268,13 +1892,10 @@ std::optional<HypergeometricTermRecognition> recognizeHypergeometricTerm(
     const evaluation::BuiltinRegistry& builtins,
     const mathematics::MathRegistry& mathematics,
     const mathematics::AngleSemantics& angles) {
-    Expr variablePlusOne = builtins::exact::add(
-        {Expr{variable}, integer(1)}, builtins, mathematics, angles);
-    Expr shifted = substituteSymbol(body, variable, variablePlusOne);
-    Expr ratio = builtins::exact::divide(
-        std::move(shifted), body, builtins, mathematics, angles);
-    ratio = builtins::exact::simplify(std::move(ratio), builtins, mathematics, angles);
-    if (!rationalFunctionInVariable(ratio, variable, builtins))
+    Expr ratio = normalizedShiftQuotient(
+        body, variable, builtins, mathematics, angles);
+    if (!rationalFunctionInVariable(
+            ratio, variable, builtins, mathematics, angles))
         return std::nullopt;
     return HypergeometricTermRecognition{std::move(ratio)};
 }

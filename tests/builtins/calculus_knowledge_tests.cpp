@@ -559,8 +559,8 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[atan[x]==Pi/4,x,Real]"), std::string{"{x == 1}"},
         "principal atan inversion accepts an interior exact angle");
     tests.expectEqual(eval(session, "solve[acosh[x]==y,x,Real]"),
-        std::string{"{x == cosh[y] if y in Real && y >= 0}"},
-        "principal acosh inversion retains its nonnegative real range condition");
+        std::string{"{x == cosh[y] if y in Real && y >= 0, x == cosh[y] if y in Complex && re[y] == 0 && im[y] > 0 && im[y] < Pi, x == cosh[y] if y in Complex && im[y] == Pi && re[y] >= 0}"},
+        "principal acosh inversion retains the complete real-input principal image");
     tests.expectEqual(eval(session, "solve[2^x==-1,x,Real]"), std::string{"{}"},
         "positive real exponentials reject non-positive real right-hand sides");
     tests.expectEqual(eval(session, "solve[(1/2)^x==4,x,Real]"), std::string{"{x == -2}"},
@@ -590,6 +590,105 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[lambertw[x]==1,x]"),
         std::string{"{x == E}"},
         "principal Lambert W inversion uses w Exp[w] on its proved real range");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==1,x]"),
+        std::string{"{x == lambertw[k, 1] where k in Integer}"},
+        "Complex Solve retains every Lambert W branch of u Exp[u]==a");
+    tests.expectEqual(eval(session, "solve[exp[-x]==x,x]"),
+        std::string{"{x == lambertw[k, 1] where k in Integer}"},
+        "Complex negative exponential fixed points normalize to all Lambert W branches");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==0,x]"),
+        std::string{"{x == 0}"},
+        "Complex Lambert normal form treats zero separately because nonprincipal W branches diverge there");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==a,x]"),
+        std::string{"{x == 0 if a in Complex && a == 0, x == lambertw[k, a] where k in Integer if a in Complex && a != 0}"},
+        "symbolic Complex Lambert normal form separates its zero target from the branch family");
+    tests.expectEqual(eval(session, "solve[x*exp[x]==k,x]").find("lambertw[k1, k] where k1 in Integer") != std::string::npos, true,
+        "Complex Lambert families choose a fresh branch parameter when k already occurs in the equation");
+    tests.expectEqual(eval(session, "solve[lambertw[-1,x]==-2,x]"),
+        std::string{"{x == -2*exp[-2]}"},
+        "explicit real W_-1 inversion recognizes its exact real image");
+    tests.expectEqual(eval(session, "solve[lambertw[-1,x]==-1/2,x]"), std::string{"{}"},
+        "explicit W_-1 inversion rejects real targets outside the branch image");
+    tests.expectEqual(eval(session, "solve[lambertw[2,x]==1,x]"), std::string{"{}"},
+        "nonreal Lambert W branches reject finite real outputs");
+    tests.expectEqual(eval(session, "solve[lambertw[x]==-2,x]"), std::string{"{}"},
+        "principal Lambert W rejects real targets below -1 in Complex Solve");
+    tests.expectEqual(eval(session, "solve[cosh[x]==2,x]"),
+        std::string{"{x == 2I Pi k+acosh[2] where k in Integer, x == 2I Pi k-acosh[2] where k in Integer}"},
+        "Complex cosh inversion retains both acosh sheets and the imaginary period");
+    tests.expectEqual(eval(session, "solve[cosh[x]==1,x]"),
+        std::string{"{x == 2I Pi k where k in Integer}"},
+        "Complex cosh coalesces its two inverse sheets at one");
+    tests.expectEqual(eval(session, "solve[sinh[x]==0,x]"),
+        std::string{"{x == I Pi k where k in Integer}"},
+        "Complex sinh zero set uses the minimal Pi-I period family");
+    tests.expectEqual(eval(session, "solve[tanh[x]==0,x]"),
+        std::string{"{x == I Pi k where k in Integer}"},
+        "Complex tanh inversion retains its imaginary Pi period");
+    tests.expectEqual(eval(session, "solve[tanh[x]==1,x]"), std::string{"{}"},
+        "Complex tanh correctly rejects its omitted value one");
+    tests.expectEqual(eval(session, "solve[log[x]==I Pi,x]"), std::string{"{x == -1}"},
+        "Complex principal Log includes its +Pi branch-cut endpoint");
+    tests.expectEqual(eval(session, "solve[log[x]==2I Pi,x]"), std::string{"{}"},
+        "Complex principal Log rejects targets outside its (-Pi,Pi] image");
+    tests.expectEqual(eval(session, "solve[log[x]==-I Pi,x]"), std::string{"{}"},
+        "Complex principal Log excludes its -Pi image endpoint");
+    tests.expectEqual(eval(session, "solve[asin[x]==Pi/2-I,x]"),
+        std::string{"{x == sin[Pi/2-I]}"},
+        "Complex principal asin includes the downward upper strip boundary");
+    tests.expectEqual(eval(session, "solve[asin[x]==Pi/2+I,x]"), std::string{"{}"},
+        "Complex principal asin rejects the opposite side of its upper boundary");
+    tests.expectEqual(eval(session, "solve[asin[x]==y,x]"),
+        std::string{"{x == sin[y] if y in Complex && re[y] > -Pi/2 && re[y] < Pi/2, x == sin[y] if y in Complex && re[y] == -Pi/2 && im[y] >= 0, x == sin[y] if y in Complex && re[y] == Pi/2 && im[y] <= 0}"},
+        "Complex principal asin inversion retains its complete half-open image as DNF conditions");
+    tests.expectEqual(eval(session, "solve[acos[x]==I,x]"), std::string{"{x == cos[I]}"},
+        "Complex principal acos accepts the positive-imaginary zero-real boundary");
+    tests.expectEqual(eval(session, "solve[atan[x]==Pi/2+I,x]"),
+        std::string{"{x == tan[I+Pi/2]}"},
+        "Complex principal atan accepts its positive-imaginary right boundary");
+    tests.expectEqual(eval(session, "solve[atan[x]==Pi/2-I,x]"), std::string{"{}"},
+        "Complex principal atan rejects the opposite right-boundary orientation");
+    tests.expectEqual(eval(session, "solve[asinh[x]==1+I*Pi/2,x]"),
+        std::string{"{x == sinh[1+I Pi/2]}"},
+        "Complex principal asinh accepts the positive-real upper boundary");
+    tests.expectEqual(eval(session, "solve[asinh[x]==-1+I*Pi/2,x]"), std::string{"{}"},
+        "Complex principal asinh rejects the wrong upper-boundary half-line");
+    tests.expectEqual(eval(session, "solve[acosh[x]==I*Pi/2,x]"), std::string{"{x == 0}"},
+        "Complex principal acosh accepts its imaginary-axis boundary");
+    tests.expectEqual(eval(session, "solve[acosh[x]==-I,x]"), std::string{"{}"},
+        "Complex principal acosh rejects the negative imaginary boundary at zero real part");
+    tests.expectEqual(eval(session, "solve[atanh[x]==1-I*Pi/2,x]"),
+        std::string{"{x == tanh[1-I Pi/2]}"},
+        "Complex principal atanh accepts the positive-real lower boundary");
+    tests.expectEqual(eval(session, "solve[atanh[x]==-1-I*Pi/2,x]"), std::string{"{}"},
+        "Complex principal atanh rejects the wrong lower-boundary half-line");
+    tests.expectEqual(eval(session, "solve[log1p[x]==I*Pi,x]"), std::string{"{x == -2}"},
+        "Complex principal log1p shares the principal Log image and includes +Pi");
+    tests.expectEqual(eval(session, "solve[log1p[x]==-I*Pi,x]"), std::string{"{}"},
+        "Complex principal log1p excludes the -Pi endpoint");
+    tests.expectEqual(eval(session, "solve[log[x]==I*Pi,x,Real]"), std::string{"{x == -1}"},
+        "Real solve uses the real-input principal Log image on the negative-axis branch cut");
+    tests.expectEqual(eval(session, "solve[log[x]==-I*Pi,x,Real]"), std::string{"{}"},
+        "Real solve respects the half-open principal Log cut orientation");
+    tests.expectEqual(eval(session, "solve[log1p[x]==I*Pi,x,Real]"), std::string{"{x == -2}"},
+        "Real solve applies the real-input principal Log image to log1p");
+    tests.expectEqual(eval(session, "solve[asin[x]==Pi/2-I,x,Real]"),
+        std::string{"{x == sin[Pi/2-I]}"},
+        "Real solve retains the complex principal asin boundary reached by real inputs above one");
+    tests.expectEqual(eval(session, "solve[asin[x]==Pi/2+I,x,Real]"), std::string{"{}"},
+        "Real solve rejects the unreachable opposite asin boundary");
+    tests.expectEqual(eval(session, "solve[acosh[x]==I*Pi/2,x,Real]"), std::string{"{x == 0}"},
+        "Real solve retains the imaginary acosh segment generated by real inputs in [-1,1]");
+    tests.expectEqual(eval(session, "solve[acosh[x]==-I,x,Real]"), std::string{"{}"},
+        "Real solve rejects the negative imaginary side outside the real-input acosh image");
+    tests.expectEqual(eval(session, "solve[atanh[x]==1-I*Pi/2,x,Real]"),
+        std::string{"{x == tanh[1-I Pi/2]}"},
+        "Real solve retains the lower atanh boundary generated by real inputs above one");
+    tests.expectEqual(eval(session, "solve[atanh[x]==-1-I*Pi/2,x,Real]"), std::string{"{}"},
+        "Real solve rejects the wrong atanh boundary orientation");
+    tests.expectEqual(eval(session, "solve[log[x]==y,x,Real]"),
+        std::string{"{x == exp[y] if y in Real, x == exp[y] if y in Complex && im[y] == Pi}"},
+        "Real principal Log inversion keeps both positive- and negative-real input images");
     tests.expectEqual(eval(session, "solve[cosh[x]==2,x,Real]"),
         std::string{"{x == acosh[2], x == -acosh[2]}"},
         "real cosh inversion returns both even branches");
@@ -620,6 +719,31 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "solve[{exp[x]==1,x>=0},x,Real]"),
         std::string{"{x == 0}"},
         "relation-array Solve reuses scalar transcendental dispatch before filtering constraints");
+    {
+        kernel::KernelSession degreePrincipalSession;
+        degreePrincipalSession.setDefaultAngleUnit(mathematics::AngleUnit::Degree);
+        tests.expectEqual(eval(degreePrincipalSession, "solve[asin[x]==90,x]"),
+            std::string{"{x == 1}"},
+            "principal inverse-image bounds respect Degree session semantics");
+        tests.expectEqual(eval(degreePrincipalSession, "solve[asin[x]==90+I,x]"),
+            std::string{"{}"},
+            "Degree principal asin keeps the complex boundary orientation");
+        tests.expectEqual(eval(degreePrincipalSession, "solve[asin[x]==90-I,x,Real]"),
+            std::string{"{x == sin[90-I]}"},
+            "Real-input principal image uses the active Degree quarter-turn boundary");
+        tests.expectEqual(eval(degreePrincipalSession, "solve[atan[x]==90+I,x]"),
+            std::string{"{x == tan[90+I]}"},
+            "Degree principal atan uses the degree quarter-turn boundary");
+
+        kernel::KernelSession gradianPrincipalSession;
+        gradianPrincipalSession.setDefaultAngleUnit(mathematics::AngleUnit::Gradian);
+        tests.expectEqual(eval(gradianPrincipalSession, "solve[asin[x]==100,x]"),
+            std::string{"{x == 1}"},
+            "principal inverse-image bounds respect Gradian session semantics");
+        tests.expectEqual(eval(gradianPrincipalSession, "solve[acos[x]==200,x]"),
+            std::string{"{x == -1}"},
+            "principal acos uses the Gradian half-turn endpoint");
+    }
     {
         const expression::Expr xExpression = session.evaluate("x");
         const auto* infinity = session.symbolRegistry().find("Infinity");
@@ -1087,6 +1211,24 @@ void runCalculusKnowledgeTests(TestRunner& tests) {
     tests.expectEqual(eval(session, "N[root[{-2,0,0,0,0,0,0,0,0,0,1},1,Complex],30]"),
         std::string{"-0.331196214043795628507030588621-1.01931713553736126627822937193I"},
         "complex Root isolation remains stable for sparse symmetric degree-ten polynomials");
+    tests.expectEqual(eval(session, "minimalPolynomial[sqrt[2]+sqrt[3],x]"),
+        std::string{"x^4-10x^2+1"},
+        "minimalPolynomial exposes the certified number-field minimal polynomial");
+    tests.expectEqual(eval(session, "minimalPolynomial[I,x]"),
+        std::string{"x^2+1"},
+        "minimalPolynomial handles exact complex-rational algebraic values");
+    tests.expectEqual(eval(session, "minimalPolynomial[3/2,x]"),
+        std::string{"x-3/2"},
+        "minimalPolynomial returns the monic linear polynomial for exact rationals");
+    tests.expectEqual(eval(session, "minimalPolynomial[Pi,x]"),
+        std::string{"minimalPolynomial[Pi, x]"},
+        "minimalPolynomial does not guess a polynomial for unsupported transcendental constants");
+    kernel::KernelSession minimalPolynomialHoldSession;
+    (void)eval(minimalPolynomialHoldSession, "x:=5");
+    tests.expectEqual(eval(minimalPolynomialHoldSession, "minimalPolynomial[sqrt[2]+sqrt[3],x]"),
+        std::string{"x^4-10x^2+1"},
+        "minimalPolynomial holds its output variable independently of session assignments");
+
     tests.expectEqual(eval(session, "root[{-2,0,1},2]*root[{-2,0,1},2]"),
         std::string{"2"},
         "bounded AlgebraicNumber arithmetic re-identifies an exact rational product");

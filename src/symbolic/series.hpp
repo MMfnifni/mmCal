@@ -52,6 +52,30 @@ struct SeriesData final {
     const mathematics::AngleSemantics& angles,
     const mathematics::AssumptionSet& assumptions = {});
 
+// seriesCoefficient[expr,{x,a,n}]相当。既存SeriesData backendを使い，
+// finite centerにおける(x-a)^nのlog^0係数だけを返す。
+// 現在の打切り・branch proofで係数を構成できない場合はnullopt。
+[[nodiscard]] std::optional<expression::Expr> seriesCoefficientExpression(
+    const expression::Expr& expression,
+    const expression::Symbol& variable,
+    const expression::Expr& center,
+    std::int64_t exponent,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions = {});
+
+// residue[expr,{x,a}]相当。pure Laurent seriesでisolated meromorphic local formを
+// 証明できる場合だけ(x-a)^-1係数を返す。Puiseux/logarithmic branch pointは拒否する。
+[[nodiscard]] std::optional<expression::Expr> residueExpression(
+    const expression::Expr& expression,
+    const expression::Symbol& variable,
+    const expression::Expr& center,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions = {});
+
 [[nodiscard]] expression::Expr normalSeriesExpression(
     const SeriesData& series,
     const evaluation::BuiltinRegistry& builtins,

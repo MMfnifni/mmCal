@@ -5,6 +5,7 @@
 #include "error/error_message.hpp"
 #include "expression/array_utils.hpp"
 #include "solver/solution_set.hpp"
+#include "symbolic/cases.hpp"
 
 #include <cstddef>
 #include <stdexcept>
@@ -67,12 +68,46 @@ Expr evaluateLength(std::span<const Expr> arguments) {
     detail::arrayTypeError("length expects a brace value");
 }
 
-Expr evaluateArrayGet(std::span<const Expr> arguments) {
+Expr evaluateArrayGet(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& builtins) {
     if (arguments.front().isSolutionSet()) {
         const solver::SolutionSet& solutions = arguments.front().asSolutionSet();
+        if (solutions.kind() == solver::SolutionSetKind::Conditional) {
+            if (arguments.size() != 2)
+                detail::arrayTypeError(
+                    "at expects one case index for a conditional SolutionSet; index the selected finite result again to access a binding");
+            const std::size_t index = detail::requireSize(arguments[1], "at");
+            if (index >= solutions.cases().size())
+                error::throwCalcError(error::CalcErrorType::Domain, "at index is out of range");
+
+            const solver::SolutionCase& solutionCase = solutions.cases()[index];
+            std::vector<solver::SolverVariable> variables(
+                solutions.variables().begin(), solutions.variables().end());
+            solver::SolutionSet selected = [&] {
+                switch (solutionCase.outcome) {
+                case solver::SolutionSetKind::Empty:
+                    return solver::SolutionSet::empty(std::move(variables));
+                case solver::SolutionSetKind::Finite:
+                    return solver::SolutionSet::finite(
+                        std::move(variables), solutionCase.branches);
+                case solver::SolutionSetKind::Universal:
+                    return solver::SolutionSet::universal(std::move(variables));
+                case solver::SolutionSetKind::Unresolved:
+                    return solver::SolutionSet::unresolved(std::move(variables));
+                case solver::SolutionSetKind::Conditional:
+                    break;
+                }
+                throw std::logic_error("Conditional SolutionCase cannot contain another conditional result");
+            }();
+            selected = selected.withAdditionalConditions(solutionCase.conditions);
+            selected = selected.withAdditionalConditions(solutions.conditions());
+            return Expr::solutionSet(std::move(selected));
+        }
+
         if (solutions.kind() != solver::SolutionSetKind::Finite)
             error::throwCalcError(error::CalcErrorType::Type,
-                "at can index only a finite solution set");
+                "at can index only a finite or conditional solution set");
         if (arguments.size() < 2 || arguments.size() > 3)
             detail::arrayTypeError(
                 "at expects a branch index and optional binding symbol for SolutionSet");
@@ -85,8 +120,10 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
         if (arguments.size() == 2) {
             std::vector<solver::SolverVariable> variables(
                 solutions.variables().begin(), solutions.variables().end());
-            return Expr::solutionSet(solver::SolutionSet::finite(
-                std::move(variables), {branch}));
+            solver::SolutionSet selected = solver::SolutionSet::finite(
+                std::move(variables), {branch});
+            selected = selected.withAdditionalConditions(solutions.conditions());
+            return Expr::solutionSet(std::move(selected));
         }
 
         if (!arguments[2].isSymbol())
@@ -97,6 +134,24 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
                 return binding.value;
         error::throwCalcError(error::CalcErrorType::Domain,
             "at binding selector is not a solver variable");
+    }
+
+    if (builtins.isCallTo(arguments.front(), evaluation::BuiltinId::Cases)) {
+        if (arguments.size() != 2)
+            detail::arrayTypeError("at expects one branch index for cases");
+        const auto& branches = arguments.front().asCall().arguments;
+        const std::size_t index = detail::requireSize(arguments[1], "at");
+        if (index >= branches.size())
+            error::throwCalcError(error::CalcErrorType::Domain, "at index is out of range");
+        const auto branch = symbolic::detail::caseBranchView(branches[index], builtins);
+        if (!branch)
+            detail::arrayTypeError("at encountered an invalid cases branch");
+        if (!branch->hasCondition())
+            return *branch->value;
+        return symbolic::detail::makeCases(
+            builtins,
+            {symbolic::detail::makeCaseBranch(
+                builtins, *branch->value, *branch->condition)});
     }
     if (arguments.front().isList()) {
         const auto& list = arguments.front().asList();
@@ -111,7 +166,7 @@ Expr evaluateArrayGet(std::span<const Expr> arguments) {
         nested.push_back(list.elements[index]);
         for (std::size_t i = 2; i < arguments.size(); ++i)
             nested.push_back(arguments[i]);
-        return evaluateArrayGet(nested);
+        return evaluateArrayGet(nested, builtins);
     }
 
     const ArrayExpr& array = detail::requireArray(arguments.front(), "at");

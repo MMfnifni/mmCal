@@ -591,6 +591,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (startup.showVersion) {
+        std::cout << "mmCal " MMCAL_VERSION_STRING << '\n';
+        return 0;
+    }
+
     kernel::KernelSession session;
     if (startup.angleUnit)
         session.setDefaultAngleUnit(*startup.angleUnit);

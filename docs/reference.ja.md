@@ -1026,11 +1026,11 @@ totient[n]
 isprime[97]    -> True
 nextprime[14]  -> 17
 prevprime[14]  -> 13
-factorint[360] -> {2, 2, 2, 3, 3, 5}
+factorint[360] -> {{2, 3}, {3, 2}, {5, 1}}
 totient[9]     -> 6
 ```
 
-`isprime`は`0 <= n <= 2^64-1`でdeterministicなstrong Miller-Rabin判定を行う。`factorint` / `totient`は同じ`uint64`範囲でdeterministic Pollard-Rho + exact prime verificationを使う。現在の証明計算基盤を超えるBigIntではprobable-primeを`True`として返さず，未評価を保持する。`factorint[-n]`は先頭に`-1`を付けたflat prime factor listを返し，`factorint[0]`はDomainErrorである。
+`isprime`は`0 <= n <= 2^64-1`でdeterministicなstrong Miller-Rabin判定を行う。`factorint` / `totient`はBigIntにも対応し，小素数除去，bounded Brent-Pollard-Rho，`uint64` deterministic primality，およびPocklington証明を組み合わせてexactに処理する。計算budget内で分割または素数証明を完了できない場合は誤答せず未評価を保持する。`factorint[n]`は`{{prime, exponent}, ...}`を返し，負数では`{-1,1}`を先頭に含める。`factorint[1] -> {}`，`factorint[0]`はDomainErrorである。 通常の引数評価を行うため，`factorint[50!]`と，一度`50!`をBigIntへmaterializeしてから`factorint[%]`へ渡す場合は同じ結果になる。構文上のfactorialだけを特別扱いするfast pathには依存しない。
 
 ---
 
@@ -1457,7 +1457,9 @@ cols[A]
 diag[A]
 ```
 
-indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。さらにfinite `SolutionSet`にも同じ0始まりindexを使える。`at[solutions,i]`は第`i` branchだけを含む`SolutionSet`を返し，branchの条件，自由変数，multiplicity，solver変数domainを保持する。`at[solutions,i,x]`は第`i` branchにおける`x`のbinding右辺だけを返す。後者は条件metadataを返さないため，条件付き解を後段へ渡す場合は2引数版を使う。`Conditional` / `Universal` / `Unresolved`集合はexplicit branch indexを一意に定義できないため対象外である。
+indexは0始まり。`at`はrank未満のprefix indexも受け取り，残り次元を保持したsubarrayを返す。全rank分を指定した場合だけscalarになる。`SolutionSet`にも同じ0始まりindexを使える。finite集合では`at[solutions,i]`が第`i` branchだけを含む`SolutionSet`を返し，branch条件，自由変数，multiplicity，solver変数domainに加えて集合全体のconditionも保持する。`at[solutions,i,x]`は第`i` branchにおける`x`のbinding右辺だけを返す。この3引数版はcondition metadataを意図的に返さないため，条件付き解を後段へ渡す場合はまず2引数版を使う。conditional集合では`at[solutions,i]`が第`i` set-level caseを選び，そのoutcome (`Finite` / `{}` / `All` / `Unresolved`) とcase condition・外側conditionを保持した独立した`SolutionSet`を返す。選択後のfinite outcomeからbindingを取り出す場合は`at[at[solutions,i],j,x]`と二段で指定する。`Universal` / `Unresolved`そのものにはexplicit branch列がないため直接indexしない。
+
+scalar数学式の`cases[...]`もbranch列として安全に選択できる。`at[casesExpr,i]`は第`i` conditional branchを**条件付きの`cases[...]`のまま**返し，条件を暗黙に捨てない。explicit default branchには条件metadataがないため，defaultを選んだ場合だけ値を直接返す。条件が既知なら`simplify[at[casesExpr,i], assumption]`で通常値へ畳める。この契約により，Sum/Product，微分，特殊函数などが返す`cases[...]`を後段のsymbolic処理へ再利用できる。
 
 ```text
 dimensions[{{1,2,3},{4,5,6}}] -> {2, 3}
@@ -1467,6 +1469,10 @@ at[{{1,2},{3,4}},1,0] -> 3
 at[solve[x^2==1,x],0] -> {x == 1}
 at[solve[x^2==1,x],1,x] -> -1
 at[solve[{x+y==3,x*y==2},{x,y}],1,y] -> 1
+at[solve[a*x==1,x],0] -> {x == 1/a} if a != 0
+at[at[solve[a*x==1,x],0],0,x] -> 1/a
+at[cases[x^2 if a>0;0],0] -> cases[x^2 if a > 0]
+at[cases[x^2 if a>0;0],1] -> 0
 reshape[{1,2,3,4},{2,2}] -> {{1, 2}, {3, 4}}
 ```
 
@@ -1534,14 +1540,18 @@ prod[expr,{i,a,b}]
 prod[expr,{i,a,b,step}]
 ```
 
-unit stepのsymbolic boundでは，有限多項式和を一般のexact差分kernelで閉じ，幾何級数，telescoping，binomial基本族，affine factor productをexactに扱う。有理函数`P(i)/Q(i)`には，shift分散からuniversal denominatorを構成し，exact線形系を解くbounded Abramov型前処理も適用する。得られた差分はcross multiplicationでexactに検証し，分散32，分母次数96，方程式256の安全境界内で証明できない場合は未評価に保つ。empty rangeの恒等元は`sum -> 0`，`prod -> 1`であり，symbolic boundsでnonemptyを証明できない場合は`cases[...]`に条件を保持する。stepがunitでない場合も，exact finite boundsなら既存の有限列kernelへ安全に展開する。
+unit stepのsymbolic boundでは，有限多項式和を一般のexact差分kernelで閉じ，幾何級数，telescoping，binomial基本族，affine factor productをexactに扱う。symbolic factorialはTypeErrorにせず未評価保持し，Factorial / Combination / rising/falling factorial，整数冪，定数底指数項についてstructural shift quotientを正規化する。正規化した比が`Q(i)`に入るhypergeometric termにはbounded Gosper solverを適用し，normal form，polynomial certificate，最終rational certificateをすべてexact polynomial恒等式で再検証してから採用する。`(-1)^i comb[n,i]/(i+1)`のようなparameter付きalternating-binomial reciprocal族は専用のexact ruleで閉じる。有理函数`P(i)/Q(i)`には従来のbounded Abramov型solverを適用し，両差分solverは共通のexact `Q[x]` kernelを使う。`prod`は乗法因子とbounded exact integer powerへ分配した後，compactなaffine / telescoping形へ落とす。未対応，budget超過，certificate未証明の入力は未評価に保つ。empty rangeの恒等元は`sum -> 0`，`prod -> 1`であり，symbolic boundsでnonemptyを証明できない場合は`cases[...]`に条件を保持する。stepがunitでない場合も，exact finite boundsなら既存の有限列kernelへ安全に展開する。
 
 ```text
 sum[i^2,{i,1,5}] -> 55
+sum[i 2^i,{i,0,n}] -> cases[2+(n-1)2^(n+1) if 0 <= n; 0]
+sum[i i!,{i,1,n}] -> cases[(n+1)!-1 if 1 <= n; 0]
+sum[(-1)^i comb[n,i]/(i+1),{i,0,n}] -> cases[1/(n+1) if 0 <= n; 0]
 sum[1/i-1/(i+1),{i,1,n}] -> cases[1-1/(n+1) if 1 <= n; 0]
 sum[(2i+1)/(i^2(i+1)^2),{i,1,n}] -> cases[1-1/(n+1)^2 if 1 <= n; 0]
 sum[comb[n,i] z^i,{i,0,n}] -> cases[(z+1)^n if 0 <= n; 0]
 prod[i,{i,1,n}] -> cases[n! if 1 <= n; 1]
+prod[i^2,{i,1,n}] -> cases[n!^2 if 1 <= n; 1]
 prod[2i+3,{i,1,n}] -> cases[2^n risingfact[5/2, n] if 1 <= n; 1]
 ```
 
@@ -1789,7 +1799,7 @@ length[toNormal[Plot[1/x,{x,-4,4}]]]
 -> 2
 ```
 
-`series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，finite/conditional `SolutionSet`のbinding右辺も再帰変換し，集合構造，branch条件，自由変数，multiplicity，domain metadataは保持する。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。
+`series`は点`x=a`まわりの局所展開を，内部`seriesData[...]`として保持する。`normal`はトップレベルが`SeriesData`の場合だけ剰余次数を捨て，現在保持している打切り式へ戻す。`toNormal`は式木を再帰走査し，式中に入れ子になった対応済み構造を通常式へ戻す。現在はlist / array / call内の`SeriesData`に加え，scalar `cases[...]`の**branch値だけ**，finite/conditional `SolutionSet`のbinding右辺も再帰変換する。`cases`のpredicate，SolutionSetのset-level/case/branch条件，自由変数，multiplicity，solver domain metadataは構造情報としてexactのまま保持する。特にcondition付きSolutionSetを変換後に再構築しても外側conditionを落とさない。通常の式・未対応構造はそのまま保持するため，既存`normal`のトップレベル限定挙動とは分離されている。
 
 トップレベルの`Plot` / `ParametricPlot`に対する`toNormal`は，描画要求を数学座標のsample列へmaterializeする。1本の連続曲線は`N×2` Array，不連続で複数segmentに分かれる1曲線はsegment Arrayのlist，複数曲線はcurveごとのlistとして返す。返すのはdata spaceの`{x,y}`であり，150×100 mm等のlayout座標やSVG/PDF座標ではない。通常描画ではexact primitiveとして保持されるLine / Bézier / Circle / Ellipse / EllipticArcも，`toNormal`を明示した場合だけPolylineへ離散化する。この明示的materializeには`PlotPoints`のsampling密度倍率を適用するが，通常のvector Exportのexact geometryには影響しない。 `toNormal[ListPlot[...]]`はsamplingを行わず，受理済み1D/N×1/N×2点列を明示的な`N×2` Arrayへ正規化する。TPSA基盤で定数，展開変数，和，差，積，除算，整数冪，`exp` / `log` / `sin` / `cos` / `sinh` / `cosh`，`tan/cot/sec/csc`，`tanh/coth/sech/csch`，`expm1/log1p`，`sinc/cosc/tanc`，`sinhc/tanhc/expc`，`log2/log10`，principal `sqrt` / exact有理冪を合成し，Taylor，有限principal partを持つLaurent，およびexact有理指数格子を持つPuiseux展開へ対応する。`log2/log10`は一般の`log[base,x] = log[x]/log[base]`として有限点および`+Infinity`のlog層へ接続する。analytic函数は高階`D`の反復ではなく係数漸化式で処理する。異なるPuiseux分母はLCM格子へexactに再配置する。記号的な先頭係数を逆数化する場合は非零性を証明できるときだけ展開し，principal `log`は展開中心が正の実数または非実数であることを証明できる場合に限る。direct trigは現在の角度modeと明示`Rad` / `Deg` / `Grad`を尊重する。分岐点上の非整数有理冪は，現在正の先頭係数を持つsimple zero/pole，または既にbranchを明示したPuiseux式に限定する。`sqrt[x^2]`のような高重複零点や負向きのprincipal branchを一意に証明できない形は推測せず未評価にする。
 
@@ -1903,7 +1913,7 @@ series[log2[x],{x,Infinity,3}]
 -> seriesData[x, Infinity, {0, 0, 0, 0}, 0, 4, 1, {{-1/log[2], 0, 0, 0}}]
 ```
 
-`toNormal`は再帰変換であり，変換後の式へ再度適用しても結果は変わらない。`SolutionSet`ではbinding右辺だけを変換し，条件・自由変数・multiplicity・domainは変更しない。将来，通常形へ落とす特殊構造が増えた場合も同じfrontendへ追加できる。
+`toNormal`は再帰変換であり，変換後の式へ再度適用しても結果は変わらない。scalar `cases`ではbranch値だけを変換してpredicateを保持し，`SolutionSet`ではbinding右辺だけを変換してset-level/case/branch条件，自由変数，multiplicity，domainを変更しない。`at`で選択したcondition付きbranch/outcomeへ適用しても同じmetadataを保持するため，`at[toNormal[...],i]`と`toNormal[at[...,i]]`を安全に後段へ渡せる。将来，通常形へ落とす特殊構造が増えた場合も同じfrontendへ追加できる。
 
 
 ```text
@@ -2673,11 +2683,14 @@ solve[atan[x]==Pi/2,x,Real]
 -> {}
 
 solve[acosh[x]==y,x,Real]
--> {x == cosh[y] if y in Real && y >= 0}
+-> {x == cosh[y] if y in Real && y >= 0,
+    x == cosh[y] if y in Complex && re[y] == 0 && im[y] > 0 && im[y] < Pi,
+    x == cosh[y] if y in Complex && im[y] == Pi && re[y] >= 0}
 ```
 
+principal-image判定は，Complex入力の像だけでなく**実入力に制限したprincipal image**も同じ基盤で表現する。したがって`solve[...,x,Real]`でも「函数値も実数」とは仮定しない。principal `Log`や逆三角・逆双曲線函数は実入力からbranch cut上の複素主値へ到達し得るため，例えば`solve[log[x]==I Pi,x,Real] -> {x == -1}`，`solve[asin[x]==Pi/2-I,x,Real] -> {x == sin[Pi/2-I]}`，`solve[acosh[x]==I Pi/2,x,Real] -> {x == 0}`を保持する。一方，反対側の半開境界である`log[x]==-I Pi`や`asin[x]==Pi/2+I`は`{}`になる。symbolic targetでは，実軸・縦半直線・branch-cut境界を互いに重複しないDNF条件として残す。
 
-principal `asin` / `acos` / `atan` / `acosh`を右辺から反転する場合も，主値の実値域をSolutionBranch条件として保持する。`asin` / `acos` / `atan`の端点は現在の`angleMode[]`に従い，`atan`だけは両端を含まない。定数同士の端点比較はcertified enclosureで判定し，範囲外を偽の条件付きbranchとして残さない。
+Complex定義域でも同じprincipal-image基盤を使う。現在`sqrt`，`log` / `log1p`，`asin`，`acos`，`atan`，`asinh`，`acosh`，`atanh`を接続しており，像を`re` / `im`の半開境界を含むDNF条件として保持する。定数targetが像内なら条件を消去し，像外なら`{}`，symbolic targetなら必要条件だけをSolutionBranchへ残す。三角逆函数の実部境界は`angleMode[]`のquarter/half turnに従うが，Logおよび逆双曲線函数の複素branch境界は函数定義どおりRadianの`Pi`で表す。例：`solve[asin[x]==Pi/2-I,x] -> {x == sin[Pi/2-I]}`，`solve[asin[x]==Pi/2+I,x] -> {}`，`solve[log1p[x]==I Pi,x] -> {x == -2}`。`Arg` / `atan2`は非単射で逆像が自由parameterを持つ幾何学集合，principal `Power`は指数により像が変わるため，この一価inverse反転表には含めない。Lambert Wはbranch indexを持つ既存専用solverを維持する。
 
 ### 25.4 Real-定義域 nonexistence / uniqueness proof
 
@@ -3046,6 +3059,7 @@ svd[A]
 conditionNumber[A]
 pseudoInverse[A]
 leastSquares[A,b]
+characteristicPolynomial[A,x]
 eigenvalues[A]
 eigenvectors[A]
 eigensystem[A]
@@ -3118,7 +3132,14 @@ leastSquares[{{1,0},{0,1},{1,1}},{1,2,4}] -> {4/3, 7/3}
 dimensions[pseudoInverse[zeros[0,3]]] -> {3, 0}
 ```
 
-`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` は正方行列の固有値・固有vector・組を扱う。`eigenvectors`の各**列**が対応する固有vectorであり，`eigensystem[A]`は `{values,vectors}` を返す。exact pathは上三角行列の対角固有値，対角行列の標準基底，およびdistinct eigenvalueを持つexact Number 2×2を明示処理する。重根を持つ非対角2×2では不足する固有vectorを複製せず未評価に留める。一般行列の `N[...]` はComplex BigFloat Hessenberg reduction + implicit shifted QRからSchur形 `A Q ≈ Q T` を求め，Schur三角行列からback substitutionで固有vectorを構成する。元入力のcertified intervalに対するSchur relationと `A v ≈ λ v` residual，およびSchur vectorのunitarityを要求表示桁より厳しく区間監査し，証明できなければguard digitsを増やして再試行する。一般非正規行列では固有値・固有vectorは摂動に敏感であり，返した各componentが唯一の真値を個別区間包含するとは主張しない。保証対象は計算されたSchur/eigenpair relationである。近接重根・defective caseで独立固有vectorを安定に構成できない場合，`eigenvectors` / `eigensystem`は推測せず未評価に留める。
+`characteristicPolynomial[A,x]` はexact Number正方行列について `det(x I-A)` を返す。実装はdivision-free Berkowitz recurrenceを使うため非零pivotを仮定せず，特異行列やexact complex-Rational係数でもdeterminant展開なしに処理する。第2引数はHoldされ，未保護のuser symbolでなければならない。symbolicな行列要素は現時点では未評価保持する。
+
+```text
+characteristicPolynomial[{{1,2},{3,4}},x] -> x^2-5x-2
+characteristicPolynomial[{{1,2,3},{0,4,5},{1,0,6}},x] -> x^3-11x^2+31x-22
+```
+
+`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` は正方行列の固有値・固有vector・組を扱う。`eigenvectors`の各**列**が対応する固有vectorであり，`eigensystem[A]`は `{values,vectors}` を返す。従来の上三角・exact 2×2 fast pathに加え，一般exact real Rational正方行列はBerkowitzで特性多項式を構成し，既存polynomial Root solverへ接続する。root isolation前にsquare-free decompositionを行い，代数的重複度を保持する。一般exact real Rational行列の`eigenvectors` / `eigensystem`は，各固有値に対応する代数体`Q(lambda)`上で`(A-lambda I)v=0`をexact RREFし，null-space basisを構成する。field elementは近似せず，同じexact固有値generatorのpower basis式へ戻す。重根は幾何学的重複度が代数的重複度と一致する場合だけ採用し，defective matrixは不足する固有vectorを複製せず未評価に留める。一般行列の `N[...]` はComplex BigFloat Hessenberg reduction + implicit shifted QRからSchur形 `A Q ≈ Q T` を求め，Schur三角行列からback substitutionで固有vectorを構成する。元入力のcertified intervalに対するSchur relationと `A v ≈ λ v` residual，およびSchur vectorのunitarityを要求表示桁より厳しく区間監査し，証明できなければguard digitsを増やして再試行する。一般非正規行列では固有値・固有vectorは摂動に敏感であり，返した各componentが唯一の真値を個別区間包含するとは主張しない。保証対象は計算されたSchur/eigenpair relationである。近接重根・defective caseで独立固有vectorを安定に構成できない場合，`eigenvectors` / `eigensystem`は推測せず未評価に留める。
 
 `conjugateTranspose[A]`はHermitian transposeであり，complex SVDの`V^H`や複素直交性の検証に使う。rank-1では成分の共役だけを行い，rank-2では転置と共役を同時に行う。
 
@@ -3402,6 +3423,10 @@ Show[Plot[...],Plot[...],...]
 Export[Plot[...],"file.svg"]
 Export[Plot[...],"file.eps"]
 Export[Plot[...],"file.pdf"]
+Export[Plot[...],"file.png"]
+Export[Plot[...],"file.png",DPI->300]
+Export[Plot[...],"file.png",ImageSize->{1500,1000},Antialiasing->4]
+Export[Plot[...],"file.png",Background->None]
 ```
 
 `Plot`は有限実区間上の2次元函数plot要求を保持するcanonical名で，旧`plot`は互換aliasである。bound variableはsession定義から保護され，parameter・user function・区間端はplot要求を作る時点のsession環境でmaterializeする。複素値の軌跡は`Plot`へ混在させず，将来の`ComplexPlot`等へ分離する。
@@ -3434,7 +3459,9 @@ PlotProgramへ現在接続済みの代表的な実函数には，基本初等函
 
 ### 29.6 `Show` / `Export` / Graphics backend
 
-最終描画はbackend非依存の`GraphicsScene`へlowerし，内部寸法はmm・y軸上向きで保持する。既定canvasは150×100 mmで，label marginはcanvas外へ足さず内部plot areaを縮める。現在のvector backendはSVG / EPS / PDF。PDFは初版でPDF 1.4，classic xref，非圧縮object/content/XMPを使う。`Export[obj,file,"PDF"]`のようにformatを明示し，fileの既存拡張子が異なる場合は置換せず`.pdf`を追加する（例: `file.svg.pdf`）。
+最終描画はbackend非依存の`GraphicsScene`へlowerし，内部寸法はmm・y軸上向きで保持する。既定canvasは150×100 mmで，label marginはcanvas外へ足さず内部plot areaを縮める。vector backendはSVG / EPS / PDF，raster backendはPNG / WebPを持つ。PDFは初版でPDF 1.4，classic xref，非圧縮object/content/XMPを使う。`Export[obj,file,"PDF"]`のようにformatを明示し，fileの既存拡張子が異なる場合は置換せず`.pdf`を追加する（例: `file.svg.pdf`）。
+
+PNGは外部libraryを使わずRGBA8として生成し，既定は254 dpiなので150×100 mm canvasが1500×1000 pxになる。`DPI->d`ではmm寸法からpixel数を算出し，`ImageSize->{w,h}`ではpixel寸法を直接指定する。両者の同時指定はDomain errorである。`Antialiasing->1|2|4`はsupersampling倍率で，既定は2。`Background`は`White`または`None`のみを受理し，既定は`White`である。`Background->None`ではcanvasを透明RGBAで初期化し，白埋めを行わない。rasterizerは高解像度のpremultiplied RGBAへ描画してbox downsampleするため，透過背景でもAA境界をalpha込みで保持する。PNG encoderは各scanlineについてNone / Sub / Up / Average / Paethを比較した後，32 KiB window・最大64候補のbounded LZ77とfixed Huffman DEFLATEでIDATを生成する。`pHYs`には実効pixels/meterを記録する。現段階のraster textはPlotの数値tick labelに必要な最小built-in glyphを使い，任意font rasterizationはまだ行わない。 WebP Losslessはsimple RIFF/VP8Lで出力する。pixel単位のbounded hash-chain LZ77 backward reference，literal，16-entry color cacheに加えてadaptive Predictor TransformとSubtract Green Transformを符号化する。G/length/cache，R，B，A，distanceの5 prefix treeは実際に生成されたtoken頻度から最大15 bitのcanonical Huffman codeを構築し，tree自身のcode-length列はVP8Lの16/17/18 repeat codeと最大7 bitのcode-length treeで圧縮する。Predictorは16×16 blockごとにVP8Lの14 modeをmodulo-256残差から評価し，必要なpredictor subimageとしてmode mapを符号化する。Subtract Greenは付随dataを持たず，各pixelについて`R=(R-G) mod 256`，`B=(B-G) mod 256`へ変換する。無変換 / Predictor / Subtract Green / Subtract Green→Predictorの4候補を実際に符号化し，最小のVP8L payloadだけを採用する。併用時はbitstreamにもSubtract Green→Predictorの順で記録し，decoder側ではPredictorの逆変換後にGをR/Bへ加算する。color cacheは仕様のARGB乗算hash `(0x1e35a7bd * color) >> (32 - 4)` を使い，literal / backward reference / cache codeの別を問わず復元された全pixelをscan-line順に挿入する。短いmatch（32 pixel以下）では1 pixel lazy matchingを行い，遅延側だけでなくgreedy側も次tokenまで先読みした到達長と実prefix bit costを比較する。distanceはVP8L仕様の1..120近傍2D mappingを優先し，該当しない距離だけscan-line距離+120の一般mappingへfallbackする。幅が小さく複数の2D codeが同じscan distanceへ写る場合は，現在のdistance prefix treeでbit costが最小のcodeを選ぶ。RGBA値はexactに保持し，PNGと同じraster optionを利用する。
 
 ---
 
@@ -3476,13 +3503,13 @@ mmCal 1.5.0では，Mathematica互換だけを目的とした大文字始まりa
 
 ## 31. 現在のsource-callable函数一覧
 
-現在のtreeでは **builtin/alias登録名284個 / sourceから呼出可能な名前264個**。内部headはsource-callable数に含めない。この一覧はregistryとの一致を回帰テストで検証し，ASCII辞書順で固定する。
+現在のtreeでは **builtin/alias登録名289個 / sourceから呼出可能な名前269個**。内部headはsource-callable数に含めない。この一覧はregistryとの一致を回帰テストで検証し，ASCII辞書順で固定する。
 
 ```text
 Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, Export, GtoD, GtoR, In, ListPlot, N, Out, ParametricPlot, Plot, RtoD, RtoG,
 Rule, Show, Si, UnDef, abs, accuracy, acos, acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2,
 atanh, ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor, bitshiftl, bitshiftr,
-bitxor, cases, cbrt, ceil, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
+bitxor, cases, cbrt, ceil, characteristicPolynomial, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
 conjugateTranspose, convolve, corr, corrspearman, cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn,
 curl, cv, det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
 eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp, expand,
@@ -3491,12 +3518,12 @@ fresnels, fullSimplify, gamma, gcd, geomean, grad, gramSchmidt, groebnerBasis, h
 hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity, if, ifft, im, imag, inner, integrate, inverse,
 iqr, isprime, jacobian, kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
 linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd, mag, manhattanDistance,
-map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode, mrank,
+map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minimalPolynomial, minverse, mmul, mod, mode, mrank,
 mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ,
 orthonormalQ, outer, percentile, percentrank, perm, plot, polar, polylog, polynomialReduce, pow, precision,
 prevprime, prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed,
 randint, randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection, rem,
-reshape, risingfact, rms, root, round, rows, rref, sec, sech, series, sign, simplify, sin, sinc,
+reshape, residue, risingfact, rms, root, round, rows, rref, sec, sech, series, seriesCoefficient, sign, simplify, sin, sinc,
 singularValueDecomposition, sinh, sinhc, skew, solve, solveLinear, sqrt, stddev, stddevs, stderr, sum, svd,
 table, tan, tanc, tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit, var,
 vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
@@ -3605,6 +3632,7 @@ mmCal --angle grad --fix 8
 mmCal --layout multi
 mmCal --eval "expand[(x+1)^3]"
 mmCal --batch < expressions.txt
+mmCal --version
 ```
 
 - `--fix n`: 起動時の小数表示桁数上限。内部値は変更せず，末尾の不要な0は省略する
@@ -3612,6 +3640,7 @@ mmCal --batch < expressions.txt
 - `--layout auto|single|multi`: 通常REPLだけの出力組版。非対話modeとは併用できない
 - `--eval expr`: 1式だけを非対話評価する
 - `--batch`: 標準入力を1行1式として同じsessionで非対話評価する。
+- `-v`, `--version`: `version.h`で定義した`MMCAL_VERSION_STRING`を`mmCal `に続けて表示し，終了code 0で終了する
 - `--help`, `-h`: 使用法を表示
 
 `--layout`は対話表示専用であり，`--eval` / `--batch`との同時指定は引数errorになる。既定`auto`はTTYでは端末幅と式構造からArray/List/`cases`/解集合の改行を選び，pipe/redirect時はcanonical 1行表示へ退避する。`single`は常に1行，`multi`は対象構造を複数行へ展開する。KernelのExpr，履歴，`formatExpr()`のcanonical表現は変更しない。

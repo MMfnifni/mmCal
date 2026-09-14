@@ -1002,11 +1002,11 @@ totient[n]
 isprime[97]    -> True
 nextprime[14]  -> 17
 prevprime[14]  -> 13
-factorint[360] -> {2, 2, 2, 3, 3, 5}
+factorint[360] -> {{2, 3}, {3, 2}, {5, 1}}
 totient[9]     -> 6
 ```
 
-`isprime` is deterministic on `0 <= n <= 2^64-1` using strong Miller-Rabin bases whose proven range covers all `uint64` values. `factorint` / `totient` use deterministic Pollard-Rho together with exact prime verification in the same `uint64` domain. Values beyond the current proof backend remain unevaluated rather than returning a probable-prime result as `True`. `factorint[-n]` prefixes `-1` to the flat prime-factor list; `factorint[0]` is a DomainError.
+`isprime` is deterministic on `0 <= n <= 2^64-1` using strong Miller-Rabin bases whose proven range covers all `uint64` values. `factorint` / `totient` also accept BigInt values, combining small-prime stripping, bounded Brent-Pollard-Rho, deterministic `uint64` primality, and Pocklington certificates. If splitting or exact prime certification cannot be completed within the bounded work budget, evaluation remains unevaluated rather than accepting a probable prime. `factorint[n]` returns `{{prime, exponent}, ...}`; negative inputs include `{-1,1}`, `factorint[1] -> {}`, and `factorint[0]` is a DomainError. Normal argument evaluation is preserved, so `factorint[50!]` and factoring the already-materialized `50!` BigInt produce the same result; correctness does not depend on a syntax-only factorial fast path.
 
 ---
 
@@ -1432,7 +1432,9 @@ cols[A]
 diag[A]
 ```
 
-Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar. Finite `SolutionSet` values use the same zero-based convention. `at[solutions,i]` returns a one-branch `SolutionSet`, preserving branch conditions, free variables, multiplicity, and solver-variable domains. `at[solutions,i,x]` returns only the right-hand side bound to `x` in that branch. Because that three-argument form does not carry condition metadata, use the two-argument branch form when conditional information must be preserved. `Conditional`, `Universal`, and `Unresolved` sets are not indexable because they do not define one unambiguous explicit branch sequence.
+Indices are zero-based. `at` also accepts a prefix shorter than the Array rank and returns the remaining subarray; only a full-rank index returns a scalar. `SolutionSet` values use the same zero-based convention. For a finite set, `at[solutions,i]` returns a one-branch `SolutionSet`, preserving branch conditions, free variables, multiplicity, solver-variable domains, and set-level conditions. `at[solutions,i,x]` returns only the right-hand side bound to `x`; this three-argument form intentionally does not carry condition metadata, so select the branch first when conditions must survive downstream use. For a conditional set, `at[solutions,i]` selects the i-th set-level case and returns an independent `SolutionSet` that preserves its outcome (`Finite`, `{}`, `All`, or `Unresolved`), the case condition, and any outer condition. A binding of a selected finite outcome can then be obtained explicitly as `at[at[solutions,i],j,x]`. `Universal` and `Unresolved` sets themselves have no explicit branch sequence and are not directly indexable.
+
+Scalar mathematical `cases[...]` values can also be selected safely. `at[casesExpr,i]` returns the i-th conditional branch as a conditioned `cases[...]`, so its predicate is not silently discarded. An explicit default branch has no condition metadata and is therefore returned as its value. When a predicate is known, `simplify[at[casesExpr,i], assumption]` can collapse the selected branch to its ordinary value. This makes `cases[...]` produced by Sum/Product, differentiation, special functions, and other symbolic frontends reusable by later operations.
 
 ```text
 dimensions[{{1,2,3},{4,5,6}}] -> {2, 3}
@@ -1442,6 +1444,10 @@ at[{{1,2},{3,4}},1,0] -> 3
 at[solve[x^2==1,x],0] -> {x == 1}
 at[solve[x^2==1,x],1,x] -> -1
 at[solve[{x+y==3,x*y==2},{x,y}],1,y] -> 1
+at[solve[a*x==1,x],0] -> {x == 1/a} if a != 0
+at[at[solve[a*x==1,x],0],0,x] -> 1/a
+at[cases[x^2 if a>0;0],0] -> cases[x^2 if a > 0]
+at[cases[x^2 if a>0;0],1] -> 0
 reshape[{1,2,3,4},{2,2}] -> {{1, 2}, {3, 4}}
 ```
 
@@ -1509,14 +1515,18 @@ prod[expr,{i,a,b}]
 prod[expr,{i,a,b,step}]
 ```
 
-For symbolic unit-step bounds, finite polynomial sums use a general exact antidifference kernel; geometric sums, telescoping forms, basic binomial families, and affine-factor products are recognized exactly. Rational functions `P(i)/Q(i)` also pass through a bounded Abramov-style preprocessor that derives a universal denominator from shift dispersion and solves an exact linear system. Every resulting antidifference is certified by exact cross multiplication; cases beyond dispersion 32, denominator degree 96, or 256 equations remain unevaluated. Empty ranges use the identities `sum -> 0` and `prod -> 1`. When non-emptiness of symbolic bounds is not provable, the condition is preserved in `cases[...]`. Non-unit exact finite steps can fall back to the existing finite-sequence kernel.
+For symbolic unit-step bounds, finite polynomial sums use a general exact antidifference kernel; geometric sums, telescoping forms, basic binomial families, and affine-factor products are recognized exactly. Symbolic factorials are held instead of being rejected, and a structural shift-quotient normalizer handles factorial, binomial, rising/falling-factorial, integer-power, and constant-base exponential factors. Hypergeometric terms whose normalized ratio lies in `Q(i)` pass through a bounded Gosper solver; its normal form, polynomial certificate, and final rational certificate are all revalidated by exact polynomial identities before acceptance. Parameterized alternating-binomial reciprocal sums such as `(-1)^i comb[n,i]/(i+1)` use a dedicated exact family rule. Rational functions `P(i)/Q(i)` continue to pass through the bounded Abramov-style solver. Both difference solvers share the exact `Q[x]` polynomial kernel. Products distribute over multiplicative factors and exact bounded integer powers before applying compact affine/telescoping forms. Unsupported, over-budget, or uncertified cases remain unevaluated. Empty ranges use the identities `sum -> 0` and `prod -> 1`; when non-emptiness of symbolic bounds is not provable, the condition is preserved in `cases[...]`. Non-unit exact finite steps can fall back to the existing finite-sequence kernel.
 
 ```text
 sum[i^2,{i,1,5}] -> 55
+sum[i 2^i,{i,0,n}] -> cases[2+(n-1)2^(n+1) if 0 <= n; 0]
+sum[i i!,{i,1,n}] -> cases[(n+1)!-1 if 1 <= n; 0]
+sum[(-1)^i comb[n,i]/(i+1),{i,0,n}] -> cases[1/(n+1) if 0 <= n; 0]
 sum[1/i-1/(i+1),{i,1,n}] -> cases[1-1/(n+1) if 1 <= n; 0]
 sum[(2i+1)/(i^2(i+1)^2),{i,1,n}] -> cases[1-1/(n+1)^2 if 1 <= n; 0]
 sum[comb[n,i] z^i,{i,0,n}] -> cases[(z+1)^n if 0 <= n; 0]
 prod[i,{i,1,n}] -> cases[n! if 1 <= n; 1]
+prod[i^2,{i,1,n}] -> cases[n!^2 if 1 <= n; 1]
 prod[2i+3,{i,1,n}] -> cases[2^n risingfact[5/2, n] if 1 <= n; 1]
 ```
 
@@ -1764,7 +1774,7 @@ length[toNormal[Plot[1/x,{x,-4,4}]]]
 -> 2
 ```
 
-`series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists, arrays, and calls, and now also recurses into binding right-hand sides of finite and conditional `SolutionSet` objects while preserving set structure, branch conditions, free variables, multiplicity, and domain metadata. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`.
+`series` constructs a local expansion about `x=a` and retains it as internal `seriesData[...]`. `normal` converts only a top-level `SeriesData` object, discarding the remainder order and returning the retained truncated expression. `toNormal` recursively walks the expression tree and converts supported structured objects nested inside it to ordinary expressions. It handles `SeriesData` inside lists and arrays, normalizes only the branch values of scalar `cases[...]`, and recurses into binding right-hand sides of finite and conditional `SolutionSet` objects. Case predicates and all SolutionSet set-level/case/branch conditions, free variables, multiplicity, and solver-domain metadata remain exact structural information. Reconstructing a normalized conditioned SolutionSet therefore no longer drops its outer condition. Ordinary expressions and unsupported structures are preserved, so the recursive behavior remains distinct from the compatibility-oriented top-level `normal`.
 
 For a top-level `Plot` or `ParametricPlot`, `toNormal` materializes the drawing request as sampled mathematical coordinates. One continuous curve becomes an `N x 2` Array; one discontinuous curve becomes a list of segment Arrays; multiple curves become a list that preserves curve identity. Returned points are data-space `{x,y}` coordinates, never layout-mm or SVG/PDF backend coordinates. Line / Bezier / Circle / Ellipse / EllipticArc geometry that remains exact during normal rendering is converted to a polyline only for explicit `toNormal` materialization. `PlotPoints` therefore controls this sampled representation without changing exact vector export. `toNormal[ListPlot[...]]` performs no resampling; it normalizes accepted 1D, N x 1, or N x 2 point data to an explicit N x 2 Array. The TPSA kernel composes exact constants, the expansion variable, sums, differences, products, division, integer powers, `exp` / `log` / `sin` / `cos` / `sinh` / `cosh`, `tan/cot/sec/csc`, `tanh/coth/sech/csch`, `expm1/log1p`, `sinc/cosc/tanc`, `sinhc/tanhc/expc`, `log2/log10`, and principal `sqrt` / exact rational powers, supporting Taylor series, Laurent series with a finite principal part, and Puiseux series on an exact rational exponent grid. `log2/log10` lower through the general `log[base,x] = log[x]/log[base]` form for both finite logarithmic Series and the `+Infinity` logarithmic layers. Different Puiseux denominators are re-embedded into an exact LCM grid. Analytic functions compose through coefficient recurrences rather than repeated higher differentiation. A symbolic leading coefficient is inverted only when nonzero status is proved, while principal `log` is expanded only at a proved positive-real or nonreal regular center. Direct trigonometric series honor the current angle mode and explicit `Rad` / `Deg` / `Grad`. At a branch point, non-integer rational powers are restricted to a positive leading coefficient with a simple zero/pole, or to an already branched Puiseux expression. Higher-multiplicity cases such as `sqrt[x^2]` and uncertified negative leading directions remain unevaluated rather than selecting a branch by guesswork.
 
@@ -1878,7 +1888,7 @@ series[log2[x],{x,Infinity,3}]
 -> seriesData[x, Infinity, {0, 0, 0, 0}, 0, 4, 1, {{-1/log[2], 0, 0, 0}}]
 ```
 
-`toNormal` is recursive and idempotent for converted objects. For `SolutionSet`, only binding right-hand sides are normalized; conditions, free variables, multiplicity, and domains are preserved. Additional structured representations can be added to the same frontend in the future.
+`toNormal` is recursive and idempotent for converted objects. For scalar `cases`, only branch values are normalized and predicates are preserved. For `SolutionSet`, only binding right-hand sides are normalized; set-level/case/branch conditions, free variables, multiplicity, and domains are preserved. A conditioned branch/outcome selected with `at` therefore remains safe to pass downstream, and `at[toNormal[...],i]` is compatible with `toNormal[at[...,i]]`. Additional structured representations can be added to the same frontend in the future.
 
 
 ```text
@@ -2630,11 +2640,14 @@ solve[atan[x]==Pi/2,x,Real]
 -> {}
 
 solve[acosh[x]==y,x,Real]
--> {x == cosh[y] if y in Real && y >= 0}
+-> {x == cosh[y] if y in Real && y >= 0,
+    x == cosh[y] if y in Complex && re[y] == 0 && im[y] > 0 && im[y] < Pi,
+    x == cosh[y] if y in Complex && im[y] == Pi && re[y] >= 0}
 ```
 
+The shared principal-image analyzer now represents not only the full Complex-input image but also the **principal image restricted to real inputs**. Therefore `solve[...,x,Real]` does not assume that the function value itself must be real. Principal `Log` and inverse trigonometric/hyperbolic functions can map real inputs onto complex branch-cut values: for example `solve[log[x]==I Pi,x,Real] -> {x == -1}`, `solve[asin[x]==Pi/2-I,x,Real] -> {x == sin[Pi/2-I]}`, and `solve[acosh[x]==I Pi/2,x,Real] -> {x == 0}`. The opposite half-open boundaries, such as `log[x]==-I Pi` or `asin[x]==Pi/2+I`, correctly return `{}`. Symbolic targets retain disjoint DNF conditions for the real segment, vertical rays, or branch-cut boundaries.
 
-When principal `asin` / `acos` / `atan` / `acosh` is inverted from the right-hand side, its principal real output range is retained as a solution-branch condition. The trigonometric endpoints follow the active `angleMode[]`; `atan` uses open endpoints. Constant endpoint comparisons use certified enclosures, so out-of-range constants are rejected instead of surviving as false conditional branches.
+The Complex-domain solver uses the same principal-image foundation for `sqrt`, `log` / `log1p`, `asin`, `acos`, `atan`, `asinh`, `acosh`, and `atanh`. Principal images are represented as DNF conditions over `re` / `im`, including the correct half-open boundary orientations. A constant target proven inside the image loses the condition; one proven outside returns `{}`; a symbolic target retains only the required image predicates in its `SolutionBranch`. Trigonometric inverse real-part boundaries follow the active `angleMode[]` quarter/half turn, while complex Log and inverse-hyperbolic branch boundaries remain the function-defined radian `Pi` boundaries. For example, `solve[asin[x]==Pi/2-I,x] -> {x == sin[Pi/2-I]}`, `solve[asin[x]==Pi/2+I,x] -> {}`, and `solve[log1p[x]==I Pi,x] -> {x == -2}`. `Arg` / `atan2` are non-injective and have parameterized geometric preimages, while principal `Power` has an exponent-dependent image, so they are intentionally outside this one-valued inverse table. Lambert W keeps its existing branch-index-aware solver.
 
 ### 25.4 Real-domain nonexistence / uniqueness proof
 
@@ -2978,6 +2991,7 @@ svd[A]
 conditionNumber[A]
 pseudoInverse[A]
 leastSquares[A,b]
+characteristicPolynomial[A,x]
 eigenvalues[A]
 eigenvectors[A]
 eigensystem[A]
@@ -3050,7 +3064,14 @@ leastSquares[{{1,0},{0,1},{1,1}},{1,2,4}] -> {4/3, 7/3}
 dimensions[pseudoInverse[zeros[0,3]]] -> {3, 0}
 ```
 
-`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` handle eigenvalues, eigenvectors, and the paired result for square matrices. Eigenvectors are returned as **columns**, and `eigensystem[A]` returns `{values,vectors}`. The exact path handles diagonal entries of upper-triangular matrices, the standard basis of diagonal matrices, and exact Number 2x2 matrices with distinct eigenvalues. A nondiagonal repeated-root 2x2 matrix is not given duplicated vectors merely to fill a basis. General `N[...]` uses Complex BigFloat Hessenberg reduction followed by implicit shifted QR to obtain a Schur relation `A Q ≈ Q T`; eigenvectors are then recovered from triangular back substitution. The original certified input intervals are used to audit the Schur relation, `A v ≈ λ v` residuals, and Schur-vector unitarity more strictly than the requested display digits, retrying with more guard digits when necessary. For a general non-normal matrix, individual eigenvalue/eigenvector components can be perturbation-sensitive, so mmCal does not claim that every displayed component is a unique componentwise enclosure of a mathematically distinguished exact value; the certificate concerns the computed Schur/eigenpair relations. Near-multiple or defective cases that do not yield a stable independent eigenvector basis remain unevaluated rather than being guessed.
+`characteristicPolynomial[A,x]` returns `det(x I-A)` for an exact Number square matrix. The implementation uses the division-free Berkowitz recurrence, so it does not require a nonzero pivot and works for singular matrices and exact complex-Rational coefficients without determinant expansion. The second argument is held and must be an unprotected user symbol. Symbolic matrix entries are currently left unevaluated.
+
+```text
+characteristicPolynomial[{{1,2},{3,4}},x] -> x^2-5x-2
+characteristicPolynomial[{{1,2,3},{0,4,5},{1,0,6}},x] -> x^3-11x^2+31x-22
+```
+
+`eigenvalues[A]` / `eigenvectors[A]` / `eigensystem[A]` handle eigenvalues, eigenvectors, and the paired result for square matrices. Eigenvectors are returned as **columns**, and `eigensystem[A]` returns `{values,vectors}`. In addition to the existing triangular and exact 2x2 fast paths, a general exact real Rational square matrix now obtains its characteristic polynomial through Berkowitz and reuses the polynomial Root solver. Square-free decomposition is used before root isolation so algebraic multiplicities are preserved. For a general exact real Rational matrix, `eigenvectors` / `eigensystem` now solve `(A-lambda I)v=0` by exact RREF over the algebraic number field `Q(lambda)` associated with each eigenvalue. Field elements are materialized back into the same exact eigenvalue generator rather than approximated. Repeated eigenvalues are accepted only when the eigenspace dimension equals the algebraic multiplicity; defective matrices remain unevaluated instead of duplicating vectors merely to fill a basis. General `N[...]` uses Complex BigFloat Hessenberg reduction followed by implicit shifted QR to obtain a Schur relation `A Q ≈ Q T`; eigenvectors are then recovered from triangular back substitution. The original certified input intervals are used to audit the Schur relation, `A v ≈ λ v` residuals, and Schur-vector unitarity more strictly than the requested display digits, retrying with more guard digits when necessary. For a general non-normal matrix, individual eigenvalue/eigenvector components can be perturbation-sensitive, so mmCal does not claim that every displayed component is a unique componentwise enclosure of a mathematically distinguished exact value; the certificate concerns the computed Schur/eigenpair relations. Near-multiple or defective cases that do not yield a stable independent eigenvector basis remain unevaluated rather than being guessed.
 
 `conjugateTranspose[A]` computes the Hermitian transpose used by complex SVD and complex orthogonality checks. Rank-1 input is conjugated componentwise; rank-2 input is transposed and conjugated.
 
@@ -3334,6 +3355,10 @@ Show[Plot[...],Plot[...],...]
 Export[Plot[...],"file.svg"]
 Export[Plot[...],"file.eps"]
 Export[Plot[...],"file.pdf"]
+Export[Plot[...],"file.png"]
+Export[Plot[...],"file.png",DPI->300]
+Export[Plot[...],"file.png",ImageSize->{1500,1000},Antialiasing->4]
+Export[Plot[...],"file.png",Background->None]
 ```
 
 `Plot` is the canonical held request for a two-dimensional function plot over a finite real interval; the old `plot` spelling is a compatibility alias. The bound variable is protected from session definitions, while parameters, user functions, and interval endpoints are materialized from the session environment when the request is formed. Complex-valued loci are intentionally not mixed into `Plot`; a future `ComplexPlot`-style facility is kept separate.
@@ -3366,7 +3391,9 @@ Representative real functions currently connected to PlotProgram include element
 
 ### 29.6 `Show` / `Export` / graphics backends
 
-Final geometry lowers to the backend-independent `GraphicsScene`, using millimeters and a y-up coordinate system internally. The default canvas is 150x100 mm; label margins shrink the internal plot area rather than expanding the canvas. Current vector backends are SVG, EPS, and PDF. Native PDF output initially targets PDF 1.4 with classic xref and readable uncompressed objects/content/XMP. With an explicit format such as `Export[obj,file,"PDF"]`, an incompatible existing suffix is preserved and `.pdf` is appended (for example `file.svg.pdf`).
+Final geometry lowers to the backend-independent `GraphicsScene`, using millimeters and a y-up coordinate system internally. The default canvas is 150x100 mm; label margins shrink the internal plot area rather than expanding the canvas. Vector backends are SVG, EPS, and PDF, while PNG and WebP are native raster backends. Native PDF output initially targets PDF 1.4 with classic xref and readable uncompressed objects/content/XMP. With an explicit format such as `Export[obj,file,"PDF"]`, an incompatible existing suffix is preserved and `.pdf` is appended (for example `file.svg.pdf`).
+
+PNG is generated as RGBA8 without external libraries. The default 254 dpi maps a 150x100 mm canvas to 1500x1000 pixels. `DPI->d` derives pixel dimensions from the physical canvas, while `ImageSize->{w,h}` specifies them directly; the two options are mutually exclusive. `Antialiasing->1|2|4` selects the supersampling factor and defaults to 2. `Background` accepts only `White` or `None` and defaults to `White`; `Background->None` initializes the canvas as transparent RGBA without white filling. The rasterizer draws into a high-resolution premultiplied-RGBA surface and box-downsamples it, so antialiased edges retain alpha correctly on transparent output. The PNG encoder evaluates None / Sub / Up / Average / Paeth per scanline, then writes IDAT with a bounded 32 KiB LZ77 search (at most 64 hash-chain candidates) and fixed-Huffman DEFLATE. Effective pixels-per-meter are written through `pHYs`. Raster text currently uses a small built-in glyph set sufficient for Plot numeric tick labels; general font rasterization is not yet implemented. WebP Lossless uses a simple RIFF/VP8L container. The current correctness-first encoder combines literals, a 16-entry color cache, bounded pixel-wise hash-chain LZ77 backward references, an adaptive Predictor Transform, and Subtract Green Transform. The five G/length/cache, R, B, A, and distance prefix trees are canonical Huffman codes derived from the emitted-token frequencies with a 15-bit limit; their code-length streams are themselves compressed with VP8L repeat codes 16/17/18 and a 7-bit-limited code-length tree. Predictor blocks are 16x16; all 14 VP8L predictor modes are scored from modulo-256 residuals and the predictor-mode map is encoded as the required transform subimage. Subtract Green has no transform payload of its own and maps each pixel to `R=(R-G) mod 256` and `B=(B-G) mod 256`. The encoder actually writes no-transform, Predictor, Subtract Green, and Subtract Green→Predictor candidates and keeps the smallest VP8L payload. In the combined candidate the bitstream records Subtract Green before Predictor, so decoding reverses Predictor first and then adds G back to R/B. The cache uses the specified ARGB multiplicative hash `(0x1e35a7bd * color) >> (32 - 4)` and inserts every reconstructed pixel in scan-line order regardless of whether it came from a literal, backward reference, or cache code. For short matches (up to 32 pixels), one-pixel lazy matching compares both the delayed path and the greedy path through their next token using reach and actual prefix-bit cost. Distances prefer the VP8L 1..120 two-dimensional neighborhood mapping and fall back to the general scan-line distance + 120 representation only when no neighborhood code applies. If a narrow image makes several 2D codes collapse to the same scan-line distance, the code with the lowest cost under the current distance prefix tree is chosen. RGBA bytes are preserved exactly and the PNG raster options are shared.
 
 ---
 
@@ -3408,13 +3435,13 @@ In mmCal 1.5.0, capitalized aliases added only for Mathematica compatibility (`S
 
 ## 31. Current source-callable function list
 
-The current tree contains **284 registered builtin/alias names / 264 source-callable names**. Internal heads are excluded from the source-callable count. This list is regression-checked against the registry and kept in ASCII lexical order.
+The current tree contains **289 registered builtin/alias names / 269 source-callable names**. Internal heads are excluded from the source-callable count. This list is regression-checked against the registry and kept in ASCII lexical order.
 
 ```text
 Ci, Clear, D, Defs, DtoG, DtoR, Ei, Exit, Export, GtoD, GtoR, In, ListPlot, N, Out, ParametricPlot, Plot, RtoD, RtoG,
 Rule, Show, Si, UnDef, abs, accuracy, acos, acosh, angleMode, arg, arrayRank, asin, asinh, at, atan, atan2,
 atanh, ave, beta, betaln, binom, bitand, bitcount, bitget, bitlength, bitnot, bitor, bitshiftl, bitshiftr,
-bitxor, cases, cbrt, ceil, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
+bitxor, cases, cbrt, ceil, characteristicPolynomial, choice, cis, clamp, collect, cols, comb, conditionNumber, conj,
 conjugateTranspose, convolve, corr, corrspearman, cos, cosc, cosh, cot, coth, cov, cross, csc, csch, csgn,
 curl, cv, det, dft, diag, diff, digamma, dimensions, directionalDerivative, distance, divergence, dot,
 eigensystem, eigenvalues, eigenvectors, element, ellipticE, ellipticF, ellipticPi, erf, erfc, exp, expand,
@@ -3423,12 +3450,12 @@ fresnels, fullSimplify, gamma, gcd, geomean, grad, gramSchmidt, groebnerBasis, h
 hypergeometric1F1, hypergeometric2F1, hypot, ibeta, identity, if, ifft, im, imag, inner, integrate, inverse,
 iqr, isprime, jacobian, kurtp, kurts, lambertw, laplacian, lcm, leastSquares, length, lgamma, li, limit,
 linearIndependentQ, ln, log, log10, log1p, log2, luDecomposition, mad, madR, madd, mag, manhattanDistance,
-map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minverse, mmul, mod, mode, mrank,
+map, matmul, matrixRank, max, mcols, mdet, mdiag, mean, median, mget, min, minimalPolynomial, minverse, mmul, mod, mode, mrank,
 mrows, mtrace, mtranspose, nextpow2, nextprime, nintegrate, norm, normal, normalize, nullSpace, orthogonalQ,
 orthonormalQ, outer, percentile, percentrank, perm, plot, polar, polylog, polynomialReduce, pow, precision,
 prevprime, prod, proj, projection, pseudoInverse, qrDecomposition, quantile, quotient, rand, randSeed,
 randint, randn, range, rank, rationalize, re, real, rect, reflectAxis, reflectNormal, rejection, rem,
-reshape, risingfact, rms, root, round, rows, rref, sec, sech, series, sign, simplify, sin, sinc,
+reshape, residue, risingfact, rms, root, round, rows, rref, sec, sech, series, seriesCoefficient, sign, simplify, sin, sinc,
 singularValueDecomposition, sinh, sinhc, skew, solve, solveLinear, sqrt, stddev, stddevs, stderr, sum, svd,
 table, tan, tanc, tanh, tanhc, toNormal, totient, trace, transpose, trigamma, trimmean, trunc, unit, var,
 vars, vectorAngle, winsor, winsorR, zeros, zeta, zscore
@@ -3537,6 +3564,7 @@ mmCal --angle grad --fix 8
 mmCal --layout multi
 mmCal --eval "expand[(x+1)^3]"
 mmCal --batch < expressions.txt
+mmCal --version
 ```
 
 - `--fix n`: Set the startup limit on decimal display digits. Internal values are unchanged and unnecessary trailing zeros are omitted
@@ -3544,6 +3572,7 @@ mmCal --batch < expressions.txt
 - `--layout auto|single|multi`: Set interactive REPL composition only; it cannot be combined with non-interactive modes
 - `--eval expr`: Evaluate one expression non-interactively
 - `--batch`: Evaluate standard input one expression per line in one session.
+- `-v`, `--version`: Print `mmCal ` followed by the `MMCAL_VERSION_STRING` defined in `version.h`, then exit with status 0
 - `--help`, `-h`: Show usage
 
 `--layout` is presentation-only and cannot be combined with `--eval` or `--batch`. The default `auto` uses terminal width and expression structure on a TTY, but falls back to canonical one-line output through pipes or redirects. `single` always uses one line; `multi` structurally expands supported compound results. Kernel Expr values, history, and canonical `formatExpr()` output are unchanged.

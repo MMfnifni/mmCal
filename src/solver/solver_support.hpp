@@ -21,6 +21,20 @@ class MathRegistry;
 
 namespace mmcal::solver {
 
+enum class CertifiedOrder {
+    Less,
+    Equal,
+    Greater,
+    Unknown
+};
+
+[[nodiscard]] CertifiedOrder certifiedConstantOrder(
+    const expression::Expr& lhs,
+    const expression::Expr& rhs,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles);
+
 [[nodiscard]] expression::Expr integerExpr(std::int64_t value);
 
 [[nodiscard]] expression::Expr builtinCall(

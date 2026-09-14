@@ -320,7 +320,7 @@ solve[asin[x]==2,x,Real] ==> {}
 solve[acos[x]==Pi,x,Real] ==> {x == -1}
 solve[atan[x]==Pi/2,x,Real] ==> {}
 solve[atan[x]==Pi/4,x,Real] ==> {x == 1}
-solve[acosh[x]==y,x,Real] ==> {x == cosh[y] if y in Real && y >= 0}
+solve[acosh[x]==y,x,Real] ==> {x == cosh[y] if y in Real && y >= 0, x == cosh[y] if y in Complex && re[y] == 0 && im[y] > 0 && im[y] < Pi, x == cosh[y] if y in Complex && im[y] == Pi && re[y] >= 0}
 solve[cbrt[x]==2,x] ==> {x == 8}
 solve[cbrt[x+1]==x-1,x] ==> {x == root[{-2, 2, -3, 1}, 1]}
 N[lambertw[1],20] ==> 0.5671432904097838730
@@ -346,6 +346,10 @@ series[(x-1)^-2,{x,1,2}] ==> seriesData[x, 1, {1, 0, 0, 0, 0}, -2, 3, 1]
 series[exp[x],{x,0,5}] ==> seriesData[x, 0, {1, 1, 1/2, 1/6, 1/24, 1/120}, 0, 6, 1]
 series[log[1+x],{x,0,5}] ==> seriesData[x, 0, {1, -1/2, 1/3, -1/4, 1/5}, 1, 6, 1]
 series[sin[x],{x,0,7}] ==> seriesData[x, 0, {1, 0, -1/6, 0, 1/120, 0, -1/5040}, 1, 8, 1]
+seriesCoefficient[sin[x],{x,0,5}] ==> 1/120
+seriesCoefficient[1/x,{x,0,-1}] ==> 1
+residue[1/(x^2+1),{x,I}] ==> -I/2
+minimalPolynomial[sqrt[2]+sqrt[3],x] ==> x^4-10x^2+1
 series[cos[x],{x,Pi/2,4}] ==> seriesData[x, Pi/2, {-1, 0, 1/6, 0}, 1, 5, 1]
 series[sinh[x],{x,0,7}] ==> seriesData[x, 0, {1, 0, 1/6, 0, 1/120, 0, 1/5040}, 1, 8, 1]
 series[cosh[x],{x,0,6}] ==> seriesData[x, 0, {1, 0, 1/2, 0, 1/24, 0, 1/720}, 0, 7, 1]

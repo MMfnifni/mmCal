@@ -12,7 +12,14 @@
 
 namespace mmcal::linear_algebra {
 
-// 固有値。exactでは三角行列と2x2を扱い，一般行列はprecision-aware Schur backendへ委ねる。
+// det(xI-A)をdivision-free Berkowitz法で構成する。exact number matrixのみ。
+[[nodiscard]] std::optional<expression::Expr> characteristicPolynomial(
+    const MatrixView& matrix,
+    const expression::Symbol& variable,
+    const ExactMatrixContext& context);
+
+// 固有値。exact Rational行列はBerkowitz特性多項式からRootへ接続し，
+// exact complexは三角行列/2x2を扱う。その他はprecision-aware Schur backendへ委ねる。
 [[nodiscard]] std::optional<expression::Expr> eigenvalues(
     const MatrixView& matrix,
     const ExactMatrixContext& context);

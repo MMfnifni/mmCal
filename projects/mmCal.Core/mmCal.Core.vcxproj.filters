@@ -393,6 +393,9 @@
     <ClInclude Include="..\..\src\solver\polynomial_solver.hpp">
       <Filter>src\solver</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\solver\principal_image.hpp">
+      <Filter>src\solver</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\solver\radical_solver.hpp">
       <Filter>src\solver</Filter>
     </ClInclude>
@@ -465,10 +468,19 @@
     <ClInclude Include="..\..\src\graphics\pdf_backend.hpp">
       <Filter>src\graphics</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\graphics\png_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\raster_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\graphics\text_metrics.hpp">
       <Filter>src\graphics</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\graphics\svg_backend.hpp">
+      <Filter>src\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\graphics\webp_backend.hpp">
       <Filter>src\graphics</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\solver\solve_constraints.hpp">
@@ -847,6 +859,9 @@
     <ClCompile Include="..\..\src\solver\polynomial_solver.cpp">
       <Filter>src\solver</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\solver\principal_image.cpp">
+      <Filter>src\solver</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\solver\radical_solver.cpp">
       <Filter>src\solver</Filter>
     </ClCompile>
@@ -913,7 +928,16 @@
     <ClCompile Include="..\..\src\graphics\pdf_backend.cpp">
       <Filter>src\graphics</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\graphics\png_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\raster_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\graphics\svg_backend.cpp">
+      <Filter>src\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\graphics\webp_backend.cpp">
       <Filter>src\graphics</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\solver\transcendental_solver.cpp">

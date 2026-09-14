@@ -256,7 +256,7 @@ simplify[2(a+b)-2(a-b)-4b]==>0
 simplify[2(log[x]-log[x])]==>2(log[x]-log[x])
 simplify[2(log[x]-log[x]),x>0]==>0
 
-# Finite SolutionSet branch and binding access are zero-based.
+# SolutionSet / cases branch access is zero-based and preserves conditions in two-argument at.
 at[solve[x^2==1,x],0]==>{x == 1}
 at[solve[x^2==1,x],1,x]==>-1
 at[solve[{x+y==3,x*y==2},{x,y}],1,x]==>2
@@ -264,8 +264,17 @@ at[solve[{x+y==3,x*y==2},{x,y}],1,y]==>1
 at[solve[{x*y==1},{x,y},Real],0]==>{y == 1/x where x in Real if x != 0}
 at[solve[{x*y==1},{x,y},Real],0,y]==>1/x
 at[solve[sin[x]==0,x,Real],0]==>{x == Pi k where k in Integer}
+at[cases[x^2 if a>0;0],0]==>cases[x^2 if a > 0]
+at[cases[x^2 if a>0;0],1]==>0
+simplify[at[cases[x^2 if a>0;0],0],a>0]==>x^2
+at[sum[k*2^k,{k,0,n}],0]==>cases[2+(n-1)2^(n+1) if 0 <= n]
+at[solve[a*x==1,x],0]==>{x == 1/a} if a != 0
+at[solve[a*x==1,x],1]==>{} if a == 0
+at[at[solve[a*x==1,x],0],0,x]==>1/a
+toNormal[at[cases[seriesData[x,0,{1,2,1},0,3,1] if a>0;0],0]]==>cases[x^2+2x+1 if a > 0]
+at[toNormal[cases[seriesData[x,0,{1,2,1},0,3,1] if a>0;0]],0]==>cases[x^2+2x+1 if a > 0]
 at[solve[x^2==1,x],2]==>DomainError: at index is out of range
-at[solve[x==x,x],0]==>TypeError: at can index only a finite solution set
+at[solve[x==x,x],0]==>TypeError: at can index only a finite or conditional solution set
 at[solve[x^2==1,x],0,y]==>DomainError: at binding selector is not a solver variable
 at[solve[x^2==1,x],0,1]==>TypeError: at solution binding selector must be a symbol
 toNormal[solve[x^2==1,x]]==>{x == 1, x == -1}

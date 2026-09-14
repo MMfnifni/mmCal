@@ -735,6 +735,19 @@ RationalPolynomial integrateRationalPolynomialExact(
     return integratePolynomial(value);
 }
 
+RationalPolynomial shiftRationalPolynomialExact(
+    const RationalPolynomial& value,
+    std::int64_t shift) {
+    const RationalPolynomial linear{{Rational{BigInt{shift}}, one()}};
+    RationalPolynomial result;
+    for (std::size_t index = value.degree() + 1; index-- > 0;) {
+        result = addPolynomials(
+            multiplyPolynomials(result, linear),
+            constantPolynomial(value.coefficient(index)));
+    }
+    return result;
+}
+
 RationalPolynomial monicRationalPolynomialExact(
     const RationalPolynomial& value) {
     return monicPolynomial(value);

@@ -668,11 +668,15 @@ Expr evaluateNegate(
     return scalarNegate(arguments.front(), registry);
 }
 
-Expr evaluateFactorial(std::span<const Expr> arguments) {
+Expr evaluateFactorial(
+    std::span<const Expr> arguments,
+    const evaluation::BuiltinRegistry& registry) {
     requireArity(arguments, 1, names::factorial);
 
     const Expr& argument = arguments.front();
-    if (!argument.isNumber() || !argument.asNumber().isReal()
+    if (!argument.isNumber())
+        return Expr::call(registry.symbol(evaluation::BuiltinId::Factorial), {argument});
+    if (!argument.asNumber().isReal()
         || !argument.asNumber().asReal().isInteger())
         error::throwCalcError(
             error::CalcErrorType::Type,

@@ -4,6 +4,7 @@
 #include "mathematics/knowledge_context.hpp"
 #include "numeric/number.hpp"
 #include "polynomial_solver.hpp"
+#include "principal_image.hpp"
 #include "solve_constraints.hpp"
 #include "solver_support.hpp"
 #include "symbolic/polynomial.hpp"
@@ -32,13 +33,6 @@ struct RadicalSide final {
     RadicalKind kind = RadicalKind::Sqrt;
     Expr argument;
     Expr rhs;
-};
-
-enum class RangeDecision {
-    Accept,
-    Reject,
-    RequireNonNegativeReal,
-    Unknown
 };
 
 [[nodiscard]] std::optional<Number> exactClosedNumber(
@@ -159,51 +153,6 @@ void appendAssumptions(
     for (const auto& predicate : source.predicates())
         target.add(predicate);
 }
-
-[[nodiscard]] RangeDecision principalSqrtRange(
-    const Expr& value,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AssumptionSet& assumptions) {
-    // 主値sqrt自身の値は定義上，主値sqrtの像に入る。
-    if (builtins.isCallTo(value, BuiltinId::Sqrt))
-        return RangeDecision::Accept;
-
-    if (value.isNumber()) {
-        const Number& number = value.asNumber();
-        if (number.isReal())
-            return number.asReal().isNegative()
-                ? RangeDecision::Reject
-                : RangeDecision::Accept;
-
-        // 主値sqrtの像は Re(w)>0 または Re(w)==0 && Im(w)>=0。
-        const auto real = number.realPart();
-        const auto imaginary = number.imaginaryPart();
-        if (!real.isNegative() && !real.isZero())
-            return RangeDecision::Accept;
-        if (real.isNegative())
-            return RangeDecision::Reject;
-        return imaginary.isNegative()
-            ? RangeDecision::Reject
-            : RangeDecision::Accept;
-    }
-
-    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
-    const auto realPredicate = mathematics::elementOf(value, mathematics::NumericDomain::Real);
-    const TruthValue real = knowledge.prove(realPredicate);
-    if (real != TruthValue::True)
-        return RangeDecision::Unknown;
-
-    const auto nonnegative = mathematics::relation(
-        RelationKind::GreaterEqual, value, integerExpr(0));
-    const TruthValue sign = knowledge.prove(nonnegative);
-    if (sign == TruthValue::True)
-        return RangeDecision::Accept;
-    if (sign == TruthValue::False)
-        return RangeDecision::Reject;
-    return RangeDecision::RequireNonNegativeReal;
-}
-
 
 [[nodiscard]] bool containsRootCall(
     const Expr& expression,
@@ -333,38 +282,18 @@ void appendAssumptions(
         branch.multiplicity.reset();
 
         if (matched.kind == RadicalKind::Sqrt) {
-            switch (principalSqrtRange(rhs, builtins, mathematics, localAssumptions)) {
-            case RangeDecision::Reject:
+            const auto image = analyzePrincipalImage(
+                mathematics::FunctionBranchRule::PrincipalSquareRoot, rhs,
+                builtins, mathematics, angles, localAssumptions);
+            if (!image || image->rejected())
                 continue;
-            case RangeDecision::Unknown: {
-                Expr realPart = Expr::call(
-                    builtins.symbol(BuiltinId::Re), {rhs});
-                Expr imaginaryPart = Expr::call(
-                    builtins.symbol(BuiltinId::Im), {rhs});
-                realPart = simplifyForSolve(
-                    std::move(realPart), builtins, mathematics, angles, localAssumptions);
-                imaginaryPart = simplifyForSolve(
-                    std::move(imaginaryPart), builtins, mathematics, angles, localAssumptions);
 
-                SolutionBranch interior = branch;
-                interior.conditions.add(mathematics::relation(
-                    RelationKind::Greater, realPart, integerExpr(0)));
-                accepted.push_back(std::move(interior));
-
-                branch.conditions.add(mathematics::relation(
-                    RelationKind::Equal, realPart, integerExpr(0)));
-                branch.conditions.add(mathematics::relation(
-                    RelationKind::GreaterEqual, imaginaryPart, integerExpr(0)));
-                accepted.push_back(std::move(branch));
-                continue;
+            for (const auto& imageConditions : image->alternatives) {
+                SolutionBranch acceptedBranch = branch;
+                appendAssumptions(acceptedBranch.conditions, imageConditions);
+                accepted.push_back(std::move(acceptedBranch));
             }
-            case RangeDecision::RequireNonNegativeReal:
-                branch.conditions.add(mathematics::relation(
-                    RelationKind::GreaterEqual, rhs, integerExpr(0)));
-                break;
-            case RangeDecision::Accept:
-                break;
-            }
+            continue;
         }
         else {
             const mathematics::KnowledgeContext knowledge{

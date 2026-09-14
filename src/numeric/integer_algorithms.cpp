@@ -1,9 +1,11 @@
 // 整数平方根・階乗などの整数算法
 #include "integer_algorithms.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <charconv>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <vector>
@@ -79,6 +81,288 @@ namespace {
             return divisor;
     }
     return std::nullopt;
+}
+
+
+using FactorMap = std::map<BigInt, std::uint64_t>;
+
+struct BigFactorContext final {
+    std::size_t rhoStepsRemaining = 4'000'000;
+    unsigned proofDepthLimit = 24;
+};
+
+[[nodiscard]] const std::vector<std::uint32_t>& smallTrialPrimes() {
+    static const std::vector<std::uint32_t> primes = [] {
+        constexpr std::uint32_t limit = 10'000;
+        std::vector<bool> composite(static_cast<std::size_t>(limit) + 1, false);
+        std::vector<std::uint32_t> result;
+        for (std::uint32_t candidate = 2; candidate <= limit; ++candidate) {
+            if (composite[candidate])
+                continue;
+            result.push_back(candidate);
+            if (candidate > limit / candidate)
+                continue;
+            for (std::uint32_t multiple = candidate * candidate; multiple <= limit; multiple += candidate)
+                composite[multiple] = true;
+        }
+        return result;
+    }();
+    return primes;
+}
+
+[[nodiscard]] BigInt absDifference(const BigInt& lhs, const BigInt& rhs) {
+    return lhs >= rhs ? lhs - rhs : rhs - lhs;
+}
+
+[[nodiscard]] BigInt powerModBigInt(BigInt base, BigInt exponent, const BigInt& modulus) {
+    BigInt result{1};
+    base %= modulus;
+    while (!exponent.isZero()) {
+        if (exponent.modulo(2) != 0)
+            result = (result * base) % modulus;
+        exponent >>= 1;
+        if (!exponent.isZero())
+            base = (base * base) % modulus;
+    }
+    return result;
+}
+
+[[nodiscard]] bool isProbablePrimeBigInt(const BigInt& value) {
+    if (value < BigInt{2})
+        return false;
+    if (const auto small = tryToUint64(value))
+        return isPrimeUint64(*small);
+
+    constexpr std::uint32_t trialPrimes[] = {
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37
+    };
+    for (const std::uint32_t prime : trialPrimes) {
+        if (value.modulo(prime) == 0)
+            return false;
+    }
+
+    BigInt d = value - BigInt{1};
+    const std::size_t s = d.trailingZeroBits();
+    d >>= s;
+
+    // ここでは素数証明ではなくcomposite witness探索にだけ使う。
+    // 全baseを通過しても後段のPocklington証明なしにはprimeとして確定しない。
+    constexpr std::uint32_t bases[] = {
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37
+    };
+    const BigInt minusOne = value - BigInt{1};
+    for (const std::uint32_t baseValue : bases) {
+        BigInt x = powerModBigInt(BigInt::fromUnsigned(baseValue), d, value);
+        if (x == BigInt{1} || x == minusOne)
+            continue;
+
+        bool strongProbablePrime = false;
+        for (std::size_t r = 1; r < s; ++r) {
+            x = (x * x) % value;
+            if (x == minusOne) {
+                strongProbablePrime = true;
+                break;
+            }
+            if (x == BigInt{1})
+                return false;
+        }
+        if (!strongProbablePrime)
+            return false;
+    }
+    return true;
+}
+
+[[nodiscard]] BigInt rhoStep(const BigInt& value, const BigInt& c, const BigInt& modulus) {
+    return (value * value + c) % modulus;
+}
+
+[[nodiscard]] std::optional<BigInt> pollardRhoBigInt(
+    const BigInt& value,
+    BigFactorContext& context) {
+    if (value.modulo(2) == 0)
+        return BigInt{2};
+    if (value.modulo(3) == 0)
+        return BigInt{3};
+
+    // Brent法でGCD回数を抑える。全探索量はcontextで上限を共有し、
+    // 巨大な難しい入力が無制限に走り続けないようにする。
+    constexpr std::size_t batchSize = 64;
+    for (std::uint64_t attempt = 1; attempt <= 32 && context.rhoStepsRemaining != 0; ++attempt) {
+        const BigInt c = BigInt::fromUnsigned(2 * attempt + 1);
+        BigInt y = BigInt::fromUnsigned(2 + attempt);
+        BigInt g{1};
+        BigInt x;
+        BigInt ys;
+        std::size_t r = 1;
+
+        while (g == BigInt{1} && context.rhoStepsRemaining != 0) {
+            x = y;
+            for (std::size_t i = 0; i < r && context.rhoStepsRemaining != 0; ++i) {
+                y = rhoStep(y, c, value);
+                --context.rhoStepsRemaining;
+            }
+            if (context.rhoStepsRemaining == 0)
+                break;
+
+            std::size_t k = 0;
+            BigInt q{1};
+            while (k < r && g == BigInt{1} && context.rhoStepsRemaining != 0) {
+                ys = y;
+                const std::size_t count = std::min(batchSize, r - k);
+                for (std::size_t i = 0; i < count && context.rhoStepsRemaining != 0; ++i) {
+                    y = rhoStep(y, c, value);
+                    --context.rhoStepsRemaining;
+                    const BigInt difference = absDifference(x, y);
+                    q = (q * difference) % value;
+                }
+                g = gcd(q, value);
+                k += count;
+            }
+
+            if (g == value) {
+                do {
+                    if (context.rhoStepsRemaining == 0)
+                        break;
+                    ys = rhoStep(ys, c, value);
+                    --context.rhoStepsRemaining;
+                    g = gcd(absDifference(x, ys), value);
+                } while (g == BigInt{1});
+            }
+
+            if (g > BigInt{1} && g < value)
+                return g;
+            if (g == value)
+                break;
+            if (r > (std::numeric_limits<std::size_t>::max() >> 1))
+                break;
+            r <<= 1;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool addFactor(
+    FactorMap& factors,
+    const BigInt& prime,
+    std::uint64_t exponent = 1) {
+    auto& current = factors[prime];
+    if (current > std::numeric_limits<std::uint64_t>::max() - exponent)
+        return false;
+    current += exponent;
+    return true;
+}
+
+[[nodiscard]] bool factorBigIntInternal(
+    BigInt value,
+    FactorMap& factors,
+    BigFactorContext& context,
+    unsigned proofDepth);
+
+[[nodiscard]] bool provePrimeBigInt(
+    const BigInt& value,
+    BigFactorContext& context,
+    unsigned proofDepth) {
+    if (const auto small = tryToUint64(value))
+        return isPrimeUint64(*small);
+    if (proofDepth > context.proofDepthLimit || value.bitLength() > 512)
+        return false;
+    if (!isProbablePrimeBigInt(value))
+        return false;
+
+    // Pocklingtonを完全因数分解したn-1に適用する。probable-prime判定は
+    // compositeを早く落とすためだけで、prime確定には必ずこの証明を通す。
+    FactorMap predecessorFactors;
+    if (!factorBigIntInternal(value - BigInt{1}, predecessorFactors, context, proofDepth + 1))
+        return false;
+
+    const BigInt exponent = value - BigInt{1};
+    for (const auto& [prime, ignoredExponent] : predecessorFactors) {
+        static_cast<void>(ignoredExponent);
+        const BigInt reducedExponent = exponent / prime;
+        bool foundWitness = false;
+        for (std::uint64_t witnessValue = 2; witnessValue <= 64; ++witnessValue) {
+            const BigInt witness = BigInt::fromUnsigned(witnessValue);
+            if (powerModBigInt(witness, exponent, value) != BigInt{1})
+                continue;
+            const BigInt residue = powerModBigInt(witness, reducedExponent, value);
+            if (gcd(residue - BigInt{1}, value) == BigInt{1}) {
+                foundWitness = true;
+                break;
+            }
+        }
+        if (!foundWitness)
+            return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool stripSmallPrimeFactors(BigInt& value, FactorMap& factors) {
+    for (const std::uint32_t prime : smallTrialPrimes()) {
+        if (value == BigInt{1})
+            return true;
+        std::uint64_t exponent = 0;
+        while (value.modulo(prime) == 0) {
+            value /= BigInt::fromUnsigned(prime);
+            ++exponent;
+        }
+        if (exponent != 0 && !addFactor(factors, BigInt::fromUnsigned(prime), exponent))
+            return false;
+        if (const auto small = tryToUint64(value)) {
+            if (*small < static_cast<std::uint64_t>(prime) * prime)
+                break;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool factorBigIntInternal(
+    BigInt value,
+    FactorMap& factors,
+    BigFactorContext& context,
+    unsigned proofDepth) {
+    if (value == BigInt{1})
+        return true;
+    if (!stripSmallPrimeFactors(value, factors))
+        return false;
+    if (value == BigInt{1})
+        return true;
+
+    if (const auto small = tryToUint64(value)) {
+        std::vector<std::uint64_t> smallFactors;
+        if (!factorUint64(*small, smallFactors))
+            return false;
+        for (const std::uint64_t factor : smallFactors) {
+            if (!addFactor(factors, BigInt::fromUnsigned(factor)))
+                return false;
+        }
+        return true;
+    }
+
+    // 大きな完全平方はrhoより先に割る。巨大なprime powerにも効く。
+    const auto square = integerSqrt(value);
+    if (square.remainder.isZero()) {
+        FactorMap rootFactors;
+        if (!factorBigIntInternal(square.root, rootFactors, context, proofDepth))
+            return false;
+        for (const auto& [prime, exponent] : rootFactors) {
+            if (exponent > std::numeric_limits<std::uint64_t>::max() / 2
+                || !addFactor(factors, prime, exponent * 2))
+                return false;
+        }
+        return true;
+    }
+
+    if (isProbablePrimeBigInt(value)) {
+        if (!provePrimeBigInt(value, context, proofDepth + 1))
+            return false;
+        return addFactor(factors, value);
+    }
+
+    const auto divisor = pollardRhoBigInt(value, context);
+    if (!divisor)
+        return false;
+    return factorBigIntInternal(*divisor, factors, context, proofDepth)
+        && factorBigIntInternal(value / *divisor, factors, context, proofDepth);
 }
 
 [[nodiscard]] BigInt productRange(std::uint64_t first, std::uint64_t last) {
@@ -235,6 +519,25 @@ bool factorUint64(std::uint64_t value, std::vector<std::uint64_t>& factors) {
         return false;
     return factorUint64(*divisor, factors)
         && factorUint64(value / *divisor, factors);
+}
+
+
+bool factorBigInt(const BigInt& value, std::vector<PrimePowerFactor>& factors) {
+    factors.clear();
+    if (value.isZero() || value.isNegative())
+        return false;
+    if (value == BigInt{1})
+        return true;
+
+    FactorMap grouped;
+    BigFactorContext context;
+    if (!factorBigIntInternal(value, grouped, context, 0))
+        return false;
+
+    factors.reserve(grouped.size());
+    for (auto& [prime, exponent] : grouped)
+        factors.push_back(PrimePowerFactor{std::move(prime), exponent});
+    return true;
 }
 
 BigInt gcd(BigInt lhs, BigInt rhs) {

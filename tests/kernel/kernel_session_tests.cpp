@@ -60,6 +60,14 @@ void runKernelSessionTests(TestRunner& tests) {
             "CLI: --batch selects line-oriented automation mode");
     }
     {
+        const std::array<std::string_view, 1> canonical{"--version"};
+        const std::array<std::string_view, 1> shortForm{"-v"};
+        tests.expect(
+            cli::parseStartupOptions(canonical).showVersion
+                && cli::parseStartupOptions(shortForm).showVersion,
+            "CLI: -v and --version select version output");
+    }
+    {
         const std::array<std::string_view, 2> arguments{"--layout", "multi"};
         const cli::StartupOptions options = cli::parseStartupOptions(arguments);
         tests.expect(
@@ -168,6 +176,112 @@ void runKernelSessionTests(TestRunner& tests) {
                 && svg.find(">0</text>") == std::string::npos,
             "Plot/Export: canonical Plot syntax writes a fixed 150x100 mm SVG without origin labels");
         std::filesystem::remove(path, ignored);
+    }
+
+    {
+        kernel::KernelSession plotSession;
+        const std::filesystem::path path{"mmcal_plot_export_test.png"};
+        const std::filesystem::path explicitPath{"mmcal_plot_explicit_png_test.dat.png"};
+        const std::filesystem::path transparentPath{"mmcal_plot_transparent_png_test.png"};
+        const std::filesystem::path whitePath{"mmcal_plot_white_png_test.png"};
+        const std::filesystem::path webpPath{"mmcal_plot_export_test.webp"};
+        const std::filesystem::path explicitWebpPath{"mmcal_plot_explicit_webp_test.dat.webp"};
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        std::filesystem::remove(explicitPath, ignored);
+        std::filesystem::remove(transparentPath, ignored);
+        std::filesystem::remove(whitePath, ignored);
+        std::filesystem::remove(webpPath, ignored);
+        std::filesystem::remove(explicitWebpPath, ignored);
+        const std::string exported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi}],\"mmcal_plot_export_test.png\",ImageSize->{750,500},Antialiasing->4]");
+        const std::string explicitExported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[x^2,{x,-2,2}],\"mmcal_plot_explicit_png_test.dat\",\"PNG\",DPI->254]");
+        const std::string transparentExported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[x,{x,-1,1}],\"mmcal_plot_transparent_png_test.png\",Background->None]");
+        const std::string whiteExported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[x,{x,-1,1}],\"mmcal_plot_white_png_test.png\",Background->White]");
+        const std::string webpExported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[sin[x],{x,-Pi,Pi}],\"mmcal_plot_export_test.webp\",ImageSize->{300,200},Antialiasing->2,Background->None]");
+        const std::string explicitWebpExported = evaluateAndFormat(
+            plotSession,
+            "Export[Plot[x^2,{x,-2,2}],\"mmcal_plot_explicit_webp_test.dat\",\"WEBP\",ImageSize->{150,100}]");
+        std::ifstream input(path, std::ios::binary);
+        const std::string png{
+            std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        const auto byte = [&](std::size_t offset) {
+            return static_cast<unsigned char>(png[offset]);
+        };
+        const std::uint32_t width = png.size() >= 24
+            ? (static_cast<std::uint32_t>(byte(16)) << 24u)
+                | (static_cast<std::uint32_t>(byte(17)) << 16u)
+                | (static_cast<std::uint32_t>(byte(18)) << 8u)
+                | static_cast<std::uint32_t>(byte(19))
+            : 0u;
+        const std::uint32_t height = png.size() >= 24
+            ? (static_cast<std::uint32_t>(byte(20)) << 24u)
+                | (static_cast<std::uint32_t>(byte(21)) << 16u)
+                | (static_cast<std::uint32_t>(byte(22)) << 8u)
+                | static_cast<std::uint32_t>(byte(23))
+            : 0u;
+        std::ifstream webpInput(webpPath, std::ios::binary);
+        const std::string webp{
+            std::istreambuf_iterator<char>{webpInput}, std::istreambuf_iterator<char>{}};
+        std::uint32_t webpWidth = 0;
+        std::uint32_t webpHeight = 0;
+        if (webp.size() >= 25 && webp.compare(0, 4, "RIFF", 4) == 0
+            && webp.compare(8, 8, "WEBPVP8L", 8) == 0
+            && static_cast<unsigned char>(webp[20]) == 0x2f) {
+            const std::uint32_t header = static_cast<std::uint32_t>(static_cast<unsigned char>(webp[21]))
+                | (static_cast<std::uint32_t>(static_cast<unsigned char>(webp[22])) << 8u)
+                | (static_cast<std::uint32_t>(static_cast<unsigned char>(webp[23])) << 16u)
+                | (static_cast<std::uint32_t>(static_cast<unsigned char>(webp[24])) << 24u);
+            webpWidth = (header & 0x3fffu) + 1u;
+            webpHeight = ((header >> 14u) & 0x3fffu) + 1u;
+        }
+        tests.expect(
+            exported == "\"mmcal_plot_export_test.png\""
+                && explicitExported == "\"mmcal_plot_explicit_png_test.dat.png\""
+                && transparentExported == "\"mmcal_plot_transparent_png_test.png\""
+                && whiteExported == "\"mmcal_plot_white_png_test.png\""
+                && png.size() > 64
+                && png.compare(0, 8, "\x89PNG\r\n\x1a\n", 8) == 0
+                && width == 750 && height == 500
+                && png.find("pHYs") != std::string::npos
+                && png.find("IDAT") != std::string::npos,
+            "Plot/Export PNG: extension inference, explicit format, raster options, pHYs, and IDAT are wired through Export");
+        tests.expect(
+            webpExported == "\"mmcal_plot_export_test.webp\""
+                && explicitWebpExported == "\"mmcal_plot_explicit_webp_test.dat.webp\""
+                && webpWidth == 300 && webpHeight == 200,
+            "Plot/Export WEBP: extension inference, explicit format, raster options, and LZ77 VP8L are wired through Export");
+        tests.expect(
+            evaluateError(plotSession,
+                "Export[Plot[x,{x,-1,1}],\"bad.png\",DPI->254,ImageSize->{1500,1000}]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Export[Plot[x,{x,-1,1}],\"bad.png\",Antialiasing->3]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Export[Plot[x,{x,-1,1}],\"bad.png\",Background->Black]").type()
+                    == error::CalcErrorType::Domain
+                && evaluateError(plotSession,
+                    "Export[Plot[x,{x,-1,1}],\"bad.svg\",Background->None]").type()
+                    == error::CalcErrorType::Domain,
+            "Plot/Export PNG: conflicting raster options, invalid option values, and raster options on vector formats are rejected");
+        std::filesystem::remove(path, ignored);
+        std::filesystem::remove(explicitPath, ignored);
+        std::filesystem::remove(transparentPath, ignored);
+        std::filesystem::remove(whitePath, ignored);
+        std::filesystem::remove(webpPath, ignored);
+        std::filesystem::remove(explicitWebpPath, ignored);
+        std::filesystem::remove("bad.png", ignored);
+        std::filesystem::remove("bad.svg", ignored);
     }
 
     {
@@ -2318,6 +2432,51 @@ void runKernelSessionTests(TestRunner& tests) {
             "simplify[cases[1/x if x!=0; 0 if x==0],x!=0]"),
         std::string{"1/x"},
         "KernelSession: cases consumes exact simplification assumptions");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[cases[x^2 if a>0;0],0]"),
+        std::string{"cases[x^2 if a > 0]"},
+        "KernelSession: at selects a scalar cases branch without dropping its condition");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[cases[x^2 if a>0;0],1]"),
+        std::string{"0"},
+        "KernelSession: at returns an explicit default cases branch value directly");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "simplify[at[cases[x^2 if a>0;0],0],a>0]"),
+        std::string{"x^2"},
+        "KernelSession: selected cases branches remain reusable with assumption-aware simplify");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "toNormal[at[cases[seriesData[x,0,{1,2,1},0,3,1] if a>0;0],0]]"),
+        std::string{"cases[x^2+2x+1 if a > 0]"},
+        "KernelSession: toNormal materializes selected cases values while preserving predicates");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[toNormal[cases[seriesData[x,0,{1,2,1},0,3,1] if a>0;0]],0]"),
+        std::string{"cases[x^2+2x+1 if a > 0]"},
+        "KernelSession: at and toNormal commute for scalar cases branch selection");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[sum[k*2^k,{k,0,n}],0]"),
+        std::string{"cases[2+(n-1)2^(n+1) if 0 <= n]"},
+        "KernelSession: at reuses conditional Sum results without discarding bound conditions");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[solve[a*x==1,x],0]"),
+        std::string{"{x == 1/a} if a != 0"},
+        "KernelSession: at selects a conditional SolutionSet outcome with its case condition");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[solve[a*x==1,x],1]"),
+        std::string{"{} if a == 0"},
+        "KernelSession: at preserves conditions on non-finite conditional SolutionSet outcomes");
+    tests.expectEqual(
+        evaluateAndFormat(symbolicCoreSession,
+            "at[at[solve[a*x==1,x],0],0,x]"),
+        std::string{"1/a"},
+        "KernelSession: a selected conditional SolutionSet can be indexed again for a binding");
     tests.expectEqual(
         evaluateAndFormat(symbolicCoreSession,
             "N[cases[Pi if x!=0; E if x==0],20]"),

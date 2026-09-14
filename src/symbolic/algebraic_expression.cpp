@@ -9,6 +9,8 @@
 #include "numeric/integer_algorithms.hpp"
 #include "numeric/number.hpp"
 #include "numeric/rational.hpp"
+#include "symbolic/number_field.hpp"
+#include "symbolic/polynomial.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -363,6 +365,50 @@ std::optional<AlgebraicNumber> exactAlgebraicValue(
     std::size_t remainingNodes = maximumBridgeNodes;
     return exactAlgebraicValueImpl(
         expression, builtins, mathematics, remainingNodes);
+}
+
+std::optional<Expr> minimalPolynomialExpression(
+    const Expr& expression,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics) {
+    auto algebraic = exactAlgebraicValue(expression, builtins, mathematics);
+    if (!algebraic)
+        return std::nullopt;
+
+    std::vector<Rational> polynomial;
+    if (const auto exact = algebraic->exactRationalParts()) {
+        const Rational& real = exact->first;
+        const Rational& imaginary = exact->second;
+        if (imaginary.isZero()) {
+            polynomial = {-real, Rational{BigInt{1}}};
+        }
+        else {
+            // (x-(a+bi))(x-(a-bi)) = x^2-2a x+a^2+b^2。
+            polynomial = {
+                real * real + imaginary * imaginary,
+                -Rational{BigInt{2}} * real,
+                Rational{BigInt{1}}};
+        }
+    }
+    else {
+        // defining polynomialをminimal polynomialと誤認しない。
+        // generator fieldをQ上既約と証明できた場合だけ，power-basis elementから
+        // 最初のexact線形従属を取得する。
+        AlgebraicNumber fieldValue = algebraic->withGeneratorField();
+        const AlgebraicElement* element = fieldValue.arithmeticElement();
+        if (!element)
+            return std::nullopt;
+        auto minimal = element->minimalPolynomial();
+        if (!minimal || minimal->size() <= 1)
+            return std::nullopt;
+        polynomial = std::move(*minimal);
+    }
+
+    if (polynomial.size() <= 1)
+        return std::nullopt;
+    return polynomialToExpandedExpr(
+        RationalPolynomial{std::move(polynomial)}, variable, builtins);
 }
 
 } // namespace mmcal::symbolic

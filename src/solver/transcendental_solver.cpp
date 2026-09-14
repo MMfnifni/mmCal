@@ -2,12 +2,11 @@
 #include "transcendental_solver.hpp"
 
 #include "mathematics/knowledge_context.hpp"
-#include "approximation/certification_error.hpp"
-#include "approximation/certified_evaluator.hpp"
 #include "error/error_message.hpp"
 #include "numeric/big_int.hpp"
 #include "numeric/number.hpp"
 #include "polynomial_solver.hpp"
+#include "principal_image.hpp"
 #include "solve_constraints.hpp"
 #include "solver_support.hpp"
 #include "symbolic/polynomial.hpp"
@@ -235,55 +234,6 @@ void collectSymbolNames(const Expr& expression, std::unordered_set<std::string>&
 }
 
 
-enum class CertifiedOrder {
-    Less,
-    Equal,
-    Greater,
-    Unknown
-};
-
-[[nodiscard]] CertifiedOrder certifiedConstantOrder(
-    const Expr& lhs,
-    const Expr& rhs,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    if (lhs == rhs)
-        return CertifiedOrder::Equal;
-
-    const mathematics::AssumptionSet noAssumptions;
-    const mathematics::KnowledgeContext knowledge{builtins, mathematics, noAssumptions};
-    if (knowledge.prove(mathematics::relation(RelationKind::Less, lhs, rhs)) == TruthValue::True)
-        return CertifiedOrder::Less;
-    if (knowledge.prove(mathematics::relation(RelationKind::Greater, lhs, rhs)) == TruthValue::True)
-        return CertifiedOrder::Greater;
-    if (knowledge.prove(mathematics::relation(RelationKind::Equal, lhs, rhs)) == TruthValue::True)
-        return CertifiedOrder::Equal;
-
-    // 定数だけからなる超越式の大小は、guessではなくcertified enclosureが分離した場合だけ採用する。
-    const approximation::CertifiedEvaluator certified{builtins, mathematics, angles};
-    for (const std::size_t bits : {96U, 192U, 384U}) {
-        try {
-            const auto left = certified.enclose(lhs, bits);
-            const auto right = certified.enclose(rhs, bits);
-            if (!left || !right || !left->isReal() || !right->isReal())
-                return CertifiedOrder::Unknown;
-            const auto& l = left->asReal();
-            const auto& r = right->asReal();
-            if (l.upper() < r.lower())
-                return CertifiedOrder::Less;
-            if (l.lower() > r.upper())
-                return CertifiedOrder::Greater;
-            if (l.isPoint() && r.isPoint() && l.lower() == r.lower())
-                return CertifiedOrder::Equal;
-        }
-        catch (const approximation::CertifiedBackendUnsupported&) {
-            return CertifiedOrder::Unknown;
-        }
-    }
-    return CertifiedOrder::Unknown;
-}
-
 [[nodiscard]] bool isVariableSquare(
     const Expr& expression,
     const expression::Symbol& variable,
@@ -447,6 +397,38 @@ struct LambertNormalSide final {
     if (!exactZero(sum))
         return std::nullopt;
     return LambertNormalSide{rhs, integerExpr(1)};
+}
+
+struct LambertFunctionSide final {
+    BigInt branch{0};
+    Expr argument;
+    Expr rhs;
+};
+
+[[nodiscard]] std::optional<LambertFunctionSide> matchLambertFunctionSide(
+    const Expr& lhs,
+    const Expr& rhs,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!isHead(lhs, builtins, BuiltinId::LambertW)
+        || containsVariable(rhs, variable))
+        return std::nullopt;
+    const auto& arguments = lhs.asCall().arguments;
+    if (arguments.empty() || arguments.size() > 2)
+        return std::nullopt;
+
+    BigInt branch{0};
+    const Expr* argument = &arguments[0];
+    if (arguments.size() == 2) {
+        if (!arguments[0].isNumber() || !arguments[0].asNumber().isReal()
+            || !arguments[0].asNumber().asReal().isInteger())
+            return std::nullopt;
+        branch = arguments[0].asNumber().asReal().asInteger();
+        argument = &arguments[1];
+    }
+    if (!containsVariable(*argument, variable))
+        return std::nullopt;
+    return LambertFunctionSide{branch, *argument, rhs};
 }
 
 [[nodiscard]] std::optional<FunctionSide> matchNamedFunctionSide(
@@ -858,6 +840,30 @@ struct BaseLogSide final {
     return result.withAdditionalConditions(globalConditions);
 }
 
+[[nodiscard]] std::optional<SolutionSet> solveRealTargetWithConditionAlternatives(
+    const Expr& argument,
+    const Expr& target,
+    const expression::Symbol& variable,
+    const PrincipalImageAnalysis& image,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (image.rejected())
+        return SolutionSet::empty(
+            {SolverVariable{variable, mathematics::NumericDomain::Real}});
+
+    std::vector<SolutionSet> alternatives;
+    alternatives.reserve(image.alternatives.size());
+    for (const mathematics::AssumptionSet& conditions : image.alternatives) {
+        auto solved = solveRealTargetEquation(
+            argument, target, variable, conditions, builtins, mathematics, angles);
+        if (!solved)
+            return std::nullopt;
+        alternatives.push_back(std::move(*solved));
+    }
+    return mergeFiniteTargets(std::move(alternatives), variable);
+}
+
 [[nodiscard]] std::optional<SolutionSet> solveLambertNormalForm(
     const LambertNormalSide& matched,
     const expression::Symbol& variable,
@@ -940,6 +946,175 @@ struct BaseLogSide final {
     }
 
     return mergeFiniteTargets(std::move(targets), variable);
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveComplexTargetFamily(
+    const Expr& argument,
+    Expr target,
+    const expression::Symbol& variable,
+    const std::optional<expression::Symbol>& integerParameter,
+    const mathematics::AssumptionSet& branchConditions,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    // Lambert Wのbranch indexのようなformal parameterを係数に含む場合でも，
+    // affine引数ならPolynomial solverへ回す必要はない。Complex上で直接反転し，
+    // symbolic targetをexactなまま解族へ保持する。
+    if (argument.isSymbol() && argument.asSymbol().sameIdentity(variable)) {
+        SolutionBranch branch;
+        branch.bindings.push_back(SolutionBinding{variable, std::move(target)});
+        branch.conditions = branchConditions;
+        if (integerParameter)
+            branch.freeVariables.push_back(
+                SolverVariable{*integerParameter, mathematics::NumericDomain::Integer});
+        branch.bindingsCertifiedDomain = mathematics::NumericDomain::Complex;
+        return SolutionSet::finite(
+            {SolverVariable{variable, mathematics::NumericDomain::Complex}},
+            {std::move(branch)});
+    }
+
+    if (const auto affine = symbolic::toExpressionPolynomial(
+            argument, variable, builtins, mathematics, angles);
+        affine && affine->degree() == 1) {
+        const Expr& slope = affine->coefficient(1);
+        if (slope.isNumber() && !slope.asNumber().isZero()) {
+            Expr numerator = simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                    std::move(target), affine->coefficient(0)}),
+                builtins, mathematics, angles, {});
+            Expr value = simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Divide), {
+                    std::move(numerator), slope}),
+                builtins, mathematics, angles, {});
+            SolutionBranch branch;
+            branch.bindings.push_back(SolutionBinding{variable, std::move(value)});
+            branch.conditions = branchConditions;
+            if (integerParameter)
+                branch.freeVariables.push_back(
+                    SolverVariable{*integerParameter, mathematics::NumericDomain::Integer});
+            branch.bindingsCertifiedDomain = mathematics::NumericDomain::Complex;
+            return SolutionSet::finite(
+                {SolverVariable{variable, mathematics::NumericDomain::Complex}},
+                {std::move(branch)});
+        }
+    }
+
+    Expr targetRelation = Expr::call(
+        builtins.symbol(BuiltinId::Equal), {argument, std::move(target)});
+    SolutionSet solved = solveUnivariatePolynomialRelation(
+        targetRelation, variable, builtins, mathematics, angles);
+    if (solved.kind() != SolutionSetKind::Finite)
+        return std::nullopt;
+
+    std::vector<SolutionBranch> branches(solved.branches().begin(), solved.branches().end());
+    for (SolutionBranch& branch : branches) {
+        for (const auto& predicate : branchConditions.predicates())
+            branch.conditions.add(predicate);
+        if (integerParameter)
+            branch.freeVariables.push_back(
+                SolverVariable{*integerParameter, mathematics::NumericDomain::Integer});
+        branch.bindingsCertifiedDomain = mathematics::NumericDomain::Complex;
+    }
+    return SolutionSet::finite(
+        {SolverVariable{variable, mathematics::NumericDomain::Complex}},
+        std::move(branches)).withAdditionalConditions(solved.conditions());
+}
+
+[[nodiscard]] std::optional<SolutionSet> mergeComplexFamilies(
+    std::vector<SolutionSet> sets,
+    const expression::Symbol& variable) {
+    std::vector<SolutionBranch> branches;
+    mathematics::AssumptionSet globalConditions;
+    for (const SolutionSet& set : sets) {
+        if (set.kind() != SolutionSetKind::Finite)
+            return std::nullopt;
+        branches.insert(branches.end(), set.branches().begin(), set.branches().end());
+        for (const auto& predicate : set.conditions().predicates())
+            globalConditions.add(predicate);
+    }
+    return SolutionSet::finite(
+        {SolverVariable{variable, mathematics::NumericDomain::Complex}},
+        std::move(branches)).withAdditionalConditions(globalConditions);
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveComplexLambertNormalForm(
+    const Expr& relation,
+    const LambertNormalSide& matched,
+    const expression::Symbol& variable,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
+    const auto complexPredicate = mathematics::elementOf(
+        matched.rhs, mathematics::NumericDomain::Complex);
+    const TruthValue rhsComplex = knowledge.prove(complexPredicate);
+    if (rhsComplex == TruthValue::False)
+        return SolutionSet::empty(
+            {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+
+    const auto zeroPredicate = mathematics::relation(
+        RelationKind::Equal, matched.rhs, integerExpr(0));
+    const auto nonzeroPredicate = mathematics::relation(
+        RelationKind::NotEqual, matched.rhs, integerExpr(0));
+    const TruthValue rhsZero = knowledge.prove(zeroPredicate);
+    const TruthValue rhsNonzero = knowledge.prove(nonzeroPredicate);
+
+    std::vector<SolutionSet> families;
+    if (rhsZero != TruthValue::False && rhsNonzero != TruthValue::True) {
+        mathematics::AssumptionSet zeroConditions;
+        if (rhsComplex == TruthValue::Unknown)
+            zeroConditions.add(complexPredicate);
+        if (rhsZero == TruthValue::Unknown)
+            zeroConditions.add(zeroPredicate);
+        auto zero = solveComplexTargetFamily(
+            matched.argument, integerExpr(0), variable, std::nullopt, zeroConditions,
+            builtins, mathematics, angles);
+        if (!zero)
+            return std::nullopt;
+        families.push_back(std::move(*zero));
+    }
+
+    if (rhsNonzero != TruthValue::False && rhsZero != TruthValue::True) {
+        mathematics::AssumptionSet branchConditions;
+        if (rhsComplex == TruthValue::Unknown)
+            branchConditions.add(complexPredicate);
+        if (rhsNonzero == TruthValue::Unknown)
+            branchConditions.add(nonzeroPredicate);
+
+        const expression::Symbol parameter = freshIntegerParameter(relation, variable);
+        Expr target = Expr::call(
+            builtins.symbol(BuiltinId::LambertW),
+            {Expr{parameter}, matched.rhs});
+        auto family = solveComplexTargetFamily(
+            matched.argument, std::move(target), variable, parameter, branchConditions,
+            builtins, mathematics, angles);
+        if (!family)
+            return std::nullopt;
+        families.push_back(std::move(*family));
+    }
+
+    if (families.empty())
+        return SolutionSet::empty(
+            {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+    return mergeComplexFamilies(std::move(families), variable);
+}
+
+[[nodiscard]] Expr imaginaryPiMultiple(
+    std::int64_t coefficient,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles,
+    const mathematics::AssumptionSet& assumptions) {
+    const auto* pi = mathematics.findConstant(mathematics::ConstantId::Pi);
+    if (!pi)
+        error::throwCalcError(error::CalcErrorType::Internal, "Pi is not registered");
+    Expr imaginaryUnit{Number::complex(
+        numeric::RealNumber{BigInt{0}}, numeric::RealNumber{BigInt{1}})};
+    return simplifyForSolve(
+        Expr::call(builtins.symbol(BuiltinId::Multiply), {
+            integerExpr(coefficient), std::move(imaginaryUnit), Expr{pi->symbol}}),
+        builtins, mathematics, angles, assumptions);
 }
 
 [[nodiscard]] std::optional<SolutionSet> solvePeriodicTarget(
@@ -1068,129 +1243,6 @@ struct BaseLogSide final {
         {SolverVariable{variable, domain}}, std::move(cases));
 }
 
-[[nodiscard]] std::optional<SolutionSet> solveTargetWithConditions(
-    const Expr& argument,
-    const Expr& target,
-    const expression::Symbol& variable,
-    const mathematics::AssumptionSet& remainingConditions,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles) {
-    Expr relation = Expr::call(
-        builtins.symbol(BuiltinId::Equal), {argument, target});
-    SolutionSet result = solveUnivariatePolynomialRelation(
-        relation, variable, builtins, mathematics, angles);
-    if (result.kind() != SolutionSetKind::Finite)
-        return std::nullopt;
-
-    std::vector<SolutionBranch> branches(result.branches().begin(), result.branches().end());
-    for (SolutionBranch& branch : branches)
-        for (const auto& predicate : remainingConditions.predicates())
-            branch.conditions.add(predicate);
-    return SolutionSet::finite(
-        std::vector<SolverVariable>{result.variables().begin(), result.variables().end()},
-        std::move(branches)).withAdditionalConditions(result.conditions());
-}
-
-struct ExactCartesianParts final {
-    Expr real;
-    Expr imaginary;
-};
-
-[[nodiscard]] std::optional<ExactCartesianParts> exactCartesianParts(
-    const Expr& expression,
-    const evaluation::BuiltinRegistry& builtins,
-    const mathematics::MathRegistry& mathematics,
-    const mathematics::AngleSemantics& angles,
-    const mathematics::AssumptionSet& assumptions,
-    std::size_t depth = 0) {
-    if (depth > 64)
-        return std::nullopt;
-    if (expression.isNumber()) {
-        return ExactCartesianParts{
-            Expr{Number{expression.asNumber().realPart()}},
-            Expr{Number{expression.asNumber().imaginaryPart()}}};
-    }
-
-    const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
-    if (knowledge.prove(mathematics::elementOf(
-            expression, mathematics::NumericDomain::Real)) == TruthValue::True)
-        return ExactCartesianParts{expression, integerExpr(0)};
-    if (!expression.isCall())
-        return std::nullopt;
-    const auto& arguments = expression.asCall().arguments;
-    const auto simplify = [&](Expr value) {
-        return simplifyForSolve(
-            std::move(value), builtins, mathematics, angles, assumptions);
-    };
-    const auto addParts = [&](ExactCartesianParts lhs, ExactCartesianParts rhs) {
-        return ExactCartesianParts{
-            simplify(Expr::call(builtins.symbol(BuiltinId::Add), {
-                std::move(lhs.real), std::move(rhs.real)})),
-            simplify(Expr::call(builtins.symbol(BuiltinId::Add), {
-                std::move(lhs.imaginary), std::move(rhs.imaginary)}))};
-    };
-
-    if (isHead(expression, builtins, BuiltinId::Negate) && arguments.size() == 1) {
-        auto value = exactCartesianParts(
-            arguments[0], builtins, mathematics, angles, assumptions, depth + 1);
-        if (!value)
-            return std::nullopt;
-        return ExactCartesianParts{
-            simplify(Expr::call(
-                builtins.symbol(BuiltinId::Negate), {std::move(value->real)})),
-            simplify(Expr::call(
-                builtins.symbol(BuiltinId::Negate), {std::move(value->imaginary)}))};
-    }
-    if (isHead(expression, builtins, BuiltinId::Add)) {
-        ExactCartesianParts result{integerExpr(0), integerExpr(0)};
-        for (const Expr& argument : arguments) {
-            auto value = exactCartesianParts(
-                argument, builtins, mathematics, angles, assumptions, depth + 1);
-            if (!value)
-                return std::nullopt;
-            result = addParts(std::move(result), std::move(*value));
-        }
-        return result;
-    }
-    if (isHead(expression, builtins, BuiltinId::Subtract) && arguments.size() == 2) {
-        auto lhs = exactCartesianParts(
-            arguments[0], builtins, mathematics, angles, assumptions, depth + 1);
-        auto rhs = exactCartesianParts(
-            arguments[1], builtins, mathematics, angles, assumptions, depth + 1);
-        if (!lhs || !rhs)
-            return std::nullopt;
-        rhs->real = simplify(Expr::call(
-            builtins.symbol(BuiltinId::Negate), {std::move(rhs->real)}));
-        rhs->imaginary = simplify(Expr::call(
-            builtins.symbol(BuiltinId::Negate), {std::move(rhs->imaginary)}));
-        return addParts(std::move(*lhs), std::move(*rhs));
-    }
-    if (isHead(expression, builtins, BuiltinId::Multiply)) {
-        ExactCartesianParts result{integerExpr(1), integerExpr(0)};
-        for (const Expr& argument : arguments) {
-            auto rhs = exactCartesianParts(
-                argument, builtins, mathematics, angles, assumptions, depth + 1);
-            if (!rhs)
-                return std::nullopt;
-            Expr ac = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
-                result.real, rhs->real}));
-            Expr bd = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
-                result.imaginary, rhs->imaginary}));
-            Expr ad = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
-                result.real, rhs->imaginary}));
-            Expr bc = simplify(Expr::call(builtins.symbol(BuiltinId::Multiply), {
-                result.imaginary, rhs->real}));
-            result.real = simplify(Expr::call(
-                builtins.symbol(BuiltinId::Subtract), {std::move(ac), std::move(bd)}));
-            result.imaginary = simplify(Expr::call(
-                builtins.symbol(BuiltinId::Add), {std::move(ad), std::move(bc)}));
-        }
-        return result;
-    }
-    return std::nullopt;
-}
-
 [[nodiscard]] mathematics::Predicate simplifyPredicate(
     const mathematics::Predicate& predicate,
     const evaluation::BuiltinRegistry& builtins,
@@ -1207,9 +1259,84 @@ struct ExactCartesianParts final {
         simplifyForSolve(domain.expression, builtins, mathematics, angles, assumptions), domain.domain);
 }
 
+[[nodiscard]] bool imageGuaranteesTargetDefinedness(
+    const mathematics::Predicate& predicate,
+    const Expr& target,
+    const evaluation::BuiltinRegistry& builtins) {
+    if (!target.isCall() || target.asCall().arguments.size() != 1)
+        return false;
+    BuiltinId denominator = BuiltinId::Cos;
+    if (builtins.isCallTo(target, BuiltinId::Tan))
+        denominator = BuiltinId::Cos;
+    else if (builtins.isCallTo(target, BuiltinId::Tanh))
+        denominator = BuiltinId::Cosh;
+    else
+        return false;
+
+    const auto* relation = std::get_if<mathematics::RelationPredicate>(&predicate);
+    if (!relation || relation->relation != RelationKind::NotEqual)
+        return false;
+    const auto isZero = [](const Expr& value) {
+        return value.isNumber() && value.asNumber().isReal() && value.asNumber().isZero();
+    };
+    const Expr* denominatorExpr = nullptr;
+    if (isZero(relation->rhs))
+        denominatorExpr = &relation->lhs;
+    else if (isZero(relation->lhs))
+        denominatorExpr = &relation->rhs;
+    if (!denominatorExpr || !builtins.isCallTo(*denominatorExpr, denominator)
+        || denominatorExpr->asCall().arguments.size() != 1)
+        return false;
+    return denominatorExpr->asCall().arguments[0] == target.asCall().arguments[0];
+}
+
+[[nodiscard]] std::optional<SolutionSet> solveTargetWithConditionAlternatives(
+    const Expr& argument,
+    const Expr& target,
+    const expression::Symbol& variable,
+    const PrincipalImageAnalysis& image,
+    const evaluation::BuiltinRegistry& builtins,
+    const mathematics::MathRegistry& mathematics,
+    const mathematics::AngleSemantics& angles) {
+    if (image.rejected())
+        return SolutionSet::empty(
+            {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+
+    Expr relation = Expr::call(
+        builtins.symbol(BuiltinId::Equal), {argument, target});
+    SolutionSet result = solveUnivariatePolynomialRelation(
+        relation, variable, builtins, mathematics, angles);
+    if (result.kind() != SolutionSetKind::Finite)
+        return std::nullopt;
+
+    std::vector<SolutionBranch> branches;
+    branches.reserve(result.branches().size() * image.alternatives.size());
+    for (const SolutionBranch& base : result.branches()) {
+        for (const mathematics::AssumptionSet& conditions : image.alternatives) {
+            SolutionBranch branch = base;
+            mathematics::AssumptionSet filteredBase;
+            for (const auto& predicate : branch.conditions.predicates())
+                if (!imageGuaranteesTargetDefinedness(predicate, target, builtins))
+                    filteredBase.add(predicate);
+            branch.conditions = std::move(filteredBase);
+            for (const auto& predicate : conditions.predicates())
+                branch.conditions.add(predicate);
+            branches.push_back(std::move(branch));
+        }
+    }
+
+    mathematics::AssumptionSet globalConditions;
+    for (const auto& predicate : result.conditions().predicates())
+        if (!imageGuaranteesTargetDefinedness(predicate, target, builtins))
+            globalConditions.add(predicate);
+    return SolutionSet::finite(
+        std::vector<SolverVariable>{result.variables().begin(), result.variables().end()},
+        std::move(branches)).withAdditionalConditions(globalConditions);
+}
+
 } // namespace
 
-std::optional<SolutionSet> solvePrincipalLambertRelation(
+std::optional<SolutionSet> solveLambertBranchRelation(
     const Expr& relation,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
@@ -1220,21 +1347,49 @@ std::optional<SolutionSet> solvePrincipalLambertRelation(
         return std::nullopt;
 
     const auto& sides = relation.asCall().arguments;
-    auto matched = matchNamedFunctionSide(
-        sides[0], sides[1], variable, mathematics, mathematics::FunctionId::LambertW);
+    auto matched = matchLambertFunctionSide(sides[0], sides[1], variable, builtins);
     if (!matched)
-        matched = matchNamedFunctionSide(
-            sides[1], sides[0], variable, mathematics, mathematics::FunctionId::LambertW);
+        matched = matchLambertFunctionSide(sides[1], sides[0], variable, builtins);
     if (!matched
         || !matched->argument.isSymbol()
         || !matched->argument.asSymbol().sameIdentity(variable))
         return std::nullopt;
 
     const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
-    if (knowledge.prove(mathematics::elementOf(
-            matched->rhs, mathematics::NumericDomain::Real)) != TruthValue::True
-        || knowledge.prove(mathematics::relation(
-            RelationKind::GreaterEqual, matched->rhs, integerExpr(-1))) != TruthValue::True)
+    const TruthValue rhsReal = knowledge.prove(mathematics::elementOf(
+        matched->rhs, mathematics::NumericDomain::Real));
+    if (rhsReal != TruthValue::True)
+        return std::nullopt;
+
+    const auto rhsToMinusOne = knowledge.prove(mathematics::relation(
+        RelationKind::GreaterEqual, matched->rhs, integerExpr(-1)));
+    const auto rhsAtMostMinusOne = knowledge.prove(mathematics::relation(
+        RelationKind::LessEqual, matched->rhs, integerExpr(-1)));
+
+    // Real-valued images of explicit Lambert W branches are exact and simple:
+    // W_0 maps to [-1,inf), W_-1 maps to (-inf,-1], and all other integer
+    // branches have no finite real output.  Complex targets outside these proven
+    // image slices remain unresolved because a full branch-image classifier is larger.
+    bool invertible = false;
+    if (matched->branch == BigInt{0}) {
+        if (rhsToMinusOne == TruthValue::False)
+            return SolutionSet::empty(
+                {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+        if (rhsToMinusOne == TruthValue::True)
+            invertible = true;
+    }
+    else if (matched->branch == BigInt{-1}) {
+        if (rhsAtMostMinusOne == TruthValue::False)
+            return SolutionSet::empty(
+                {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+        if (rhsAtMostMinusOne == TruthValue::True)
+            invertible = true;
+    }
+    else {
+        return SolutionSet::empty(
+            {SolverVariable{variable, mathematics::NumericDomain::Complex}});
+    }
+    if (!invertible)
         return std::nullopt;
 
     Expr target = simplifyForSolve(
@@ -1662,7 +1817,7 @@ std::optional<SolutionSet> solveRealPeriodicFunctionRelation(
         builtins, mathematics, angles, assumptions);
 }
 
-std::optional<SolutionSet> solveComplexExponentialLogRelation(
+std::optional<SolutionSet> solveComplexTranscendentalRelation(
     const Expr& relation,
     const expression::Symbol& variable,
     const evaluation::BuiltinRegistry& builtins,
@@ -1689,6 +1844,54 @@ std::optional<SolutionSet> solveComplexExponentialLogRelation(
     const mathematics::KnowledgeContext knowledge{builtins, mathematics, assumptions};
     const std::vector<SolverVariable> variables{
         SolverVariable{variable, mathematics::NumericDomain::Complex}};
+
+    // Complex上では u Exp[u] == a の全解は a!=0 なら W_k(a), k in Integer。
+    // a==0だけは非主分岐W_k(0)が有限値を持たないため u==0 へ分離する。
+    auto lambertNormal = matchLambertNormalSide(
+        sides[0], sides[1], variable, builtins, mathematics, angles, assumptions);
+    if (!lambertNormal)
+        lambertNormal = matchLambertNormalSide(
+            sides[1], sides[0], variable, builtins, mathematics, angles, assumptions);
+    if (lambertNormal)
+        return solveComplexLambertNormalForm(
+            relation, *lambertNormal, variable, builtins, mathematics, angles, assumptions);
+
+    // Exp[u]+u==0 は v=-u とすれば v Exp[v]==1。
+    // 実軸専用のbranch選択をせず，Complexでは全Lambert W分岐を返す。
+    auto expNegativeSelf = matchFunctionNegativeSelfSide(
+        sides[0], sides[1], variable, builtins, mathematics, angles, assumptions,
+        mathematics::FunctionId::Exp);
+    if (!expNegativeSelf)
+        expNegativeSelf = matchFunctionNegativeSelfSide(
+            sides[1], sides[0], variable, builtins, mathematics, angles, assumptions,
+            mathematics::FunctionId::Exp);
+    if (!expNegativeSelf)
+        expNegativeSelf = matchFunctionPlusArgumentZeroSide(
+            sides[0], sides[1], variable, builtins, mathematics, angles, assumptions,
+            mathematics::FunctionId::Exp);
+    if (!expNegativeSelf)
+        expNegativeSelf = matchFunctionPlusArgumentZeroSide(
+            sides[1], sides[0], variable, builtins, mathematics, angles, assumptions,
+            mathematics::FunctionId::Exp);
+    if (expNegativeSelf) {
+        Expr negated = simplifyForSolve(
+            Expr::call(builtins.symbol(BuiltinId::Negate), {*expNegativeSelf}),
+            builtins, mathematics, angles, assumptions);
+        return solveComplexLambertNormalForm(
+            relation, LambertNormalSide{std::move(negated), integerExpr(1)},
+            variable, builtins, mathematics, angles, assumptions);
+    }
+
+    // Exp[-u]==u <=> u Exp[u]==1。Exp[u]は零にならないためComplex上でも同値変形。
+    auto fixedPoint = matchNegativeExponentialFixedPoint(
+        sides[0], sides[1], variable, builtins, mathematics, angles, assumptions);
+    if (!fixedPoint)
+        fixedPoint = matchNegativeExponentialFixedPoint(
+            sides[1], sides[0], variable, builtins, mathematics, angles, assumptions);
+    if (fixedPoint)
+        return solveComplexLambertNormalForm(
+            relation, *fixedPoint,
+            variable, builtins, mathematics, angles, assumptions);
 
     if (auto exponential = matchBothSides(mathematics::FunctionId::Exp)) {
         exponential->rhs = simplifyForSolve(
@@ -1848,48 +2051,165 @@ std::optional<SolutionSet> solveComplexExponentialLogRelation(
             builtins, mathematics, angles, assumptions);
     }
 
-    if (auto logarithm = matchBothSides(mathematics::FunctionId::Log)) {
-        logarithm->rhs = simplifyForSolve(
-            logarithm->rhs, builtins, mathematics, angles, assumptions);
+    // Hyperbolic functions are periodic in the imaginary direction.  Real Solve uses
+    // monotonicity/range knowledge separately; Complex Solve must retain every period branch.
+    std::optional<FunctionSide> hyperbolic = matchBothSides(mathematics::FunctionId::Sinh);
+    if (!hyperbolic)
+        hyperbolic = matchBothSides(mathematics::FunctionId::Cosh);
+    if (!hyperbolic)
+        hyperbolic = matchBothSides(mathematics::FunctionId::Tanh);
+    if (hyperbolic) {
+        hyperbolic->rhs = simplifyForSolve(
+            hyperbolic->rhs, builtins, mathematics, angles, assumptions);
         mathematics::AssumptionSet remaining;
         const auto complexPredicate = mathematics::elementOf(
-            logarithm->rhs, mathematics::NumericDomain::Complex);
+            hyperbolic->rhs, mathematics::NumericDomain::Complex);
         const TruthValue complexTruth = knowledge.prove(complexPredicate);
         if (complexTruth == TruthValue::False)
             return SolutionSet::empty(variables);
         if (complexTruth == TruthValue::Unknown)
             remaining.add(complexPredicate);
 
-        const auto cartesian = exactCartesianParts(
-            logarithm->rhs, builtins, mathematics, angles, assumptions);
-        const Expr imaginaryPart = cartesian
-            ? cartesian->imaginary
-            : simplifyForSolve(
-                Expr::call(builtins.symbol(BuiltinId::Im), {logarithm->rhs}),
-                builtins, mathematics, angles, assumptions);
-        const Expr negativePi = simplifyForSolve(
-            Expr::call(builtins.symbol(BuiltinId::Negate), {Expr{pi->symbol}}),
-            builtins, mathematics, angles, assumptions);
-        const std::array<mathematics::Predicate, 2> imagePredicates{
-            mathematics::relation(
-                RelationKind::Greater, imaginaryPart, negativePi),
-            mathematics::relation(
-                RelationKind::LessEqual, imaginaryPart, Expr{pi->symbol})};
-        for (const auto& predicate : imagePredicates) {
-            const TruthValue truth = knowledge.prove(predicate);
-            if (truth == TruthValue::False)
+        const auto exactSignedOne = [&]() -> std::optional<int> {
+            if (!hyperbolic->rhs.isNumber() || !hyperbolic->rhs.asNumber().isReal())
+                return std::nullopt;
+            const auto value = hyperbolic->rhs.asNumber().asReal().toRational();
+            if (value == numeric::Rational{BigInt{1}})
+                return 1;
+            if (value == numeric::Rational{BigInt{-1}})
+                return -1;
+            return std::nullopt;
+        }();
+
+        if (hyperbolic->definition->id == mathematics::FunctionId::Tanh) {
+            if (exactSignedOne)
                 return SolutionSet::empty(variables);
-            if (truth == TruthValue::Unknown)
-                remaining.add(predicate);
+            for (const int omitted : {-1, 1}) {
+                const auto predicate = mathematics::relation(
+                    RelationKind::NotEqual, hyperbolic->rhs, integerExpr(omitted));
+                const TruthValue truth = knowledge.prove(predicate);
+                if (truth == TruthValue::False)
+                    return SolutionSet::empty(variables);
+                if (truth == TruthValue::Unknown)
+                    remaining.add(predicate);
+            }
         }
 
-        Expr target = simplifyForSolve(
-            Expr::call(builtins.symbol(BuiltinId::Exp), {logarithm->rhs}),
+        BuiltinId inverseId = BuiltinId::Asinh;
+        switch (hyperbolic->definition->id) {
+        case mathematics::FunctionId::Sinh: inverseId = BuiltinId::Asinh; break;
+        case mathematics::FunctionId::Cosh: inverseId = BuiltinId::Acosh; break;
+        case mathematics::FunctionId::Tanh: inverseId = BuiltinId::Atanh; break;
+        default: return std::nullopt;
+        }
+        const Expr inverseValue = simplifyForSolve(
+            Expr::call(builtins.symbol(inverseId), {hyperbolic->rhs}),
             builtins, mathematics, angles, assumptions);
-        return solveTargetWithConditions(
-            logarithm->argument, target, variable, remaining,
+        const expression::Symbol parameter = freshIntegerParameter(relation, variable);
+        Expr period = imaginaryPiMultiple(
+            hyperbolic->definition->id == mathematics::FunctionId::Tanh ? 1 : 2,
+            builtins, mathematics, angles, assumptions);
+        std::vector<Expr> bases;
+
+        switch (hyperbolic->definition->id) {
+        case mathematics::FunctionId::Sinh:
+            if (exactZero(hyperbolic->rhs)) {
+                bases.push_back(integerExpr(0));
+                period = imaginaryPiMultiple(1, builtins, mathematics, angles, assumptions);
+            }
+            else {
+                bases.push_back(inverseValue);
+                Expr iPi = imaginaryPiMultiple(1, builtins, mathematics, angles, assumptions);
+                bases.push_back(simplifyForSolve(
+                    Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                        std::move(iPi), inverseValue}),
+                    builtins, mathematics, angles, assumptions));
+            }
+            break;
+        case mathematics::FunctionId::Cosh:
+            if (exactSignedOne && *exactSignedOne == 1)
+                bases.push_back(integerExpr(0));
+            else if (exactSignedOne && *exactSignedOne == -1)
+                bases.push_back(imaginaryPiMultiple(
+                    1, builtins, mathematics, angles, assumptions));
+            else {
+                bases.push_back(inverseValue);
+                bases.push_back(simplifyForSolve(
+                    Expr::call(builtins.symbol(BuiltinId::Negate), {inverseValue}),
+                    builtins, mathematics, angles, assumptions));
+            }
+            break;
+        case mathematics::FunctionId::Tanh:
+            bases.push_back(inverseValue);
+            break;
+        default:
+            return std::nullopt;
+        }
+
+        std::vector<Expr> targets;
+        targets.reserve(bases.size());
+        for (Expr& base : bases)
+            targets.push_back(periodicTarget(
+                std::move(base), period, parameter,
+                builtins, mathematics, angles, assumptions));
+        const auto affine = symbolic::toExpressionPolynomial(
+            hyperbolic->argument, variable, builtins, mathematics, angles);
+        if (!affine || affine->degree() != 1)
+            return std::nullopt;
+        Expr constantFunctionValue = Expr::call(
+            hyperbolic->definition->symbol, {affine->coefficient(0)});
+        return solveAffinePeriodicTargets(
+            hyperbolic->argument, std::move(targets), constantFunctionValue,
+            hyperbolic->rhs, variable, parameter, remaining,
+            mathematics::NumericDomain::Complex,
+            builtins, mathematics, angles, assumptions);
+    }
+
+    // principal inverse函数の反転は，各函数ごとの場当たり的なrange判定ではなく
+    // FunctionBranchRuleに対応する共通principal-image解析へ集約する。
+    struct PrincipalInverseSolveSpec final {
+        mathematics::FunctionId function;
+        BuiltinId forward;
+    };
+    const std::array principalInverseSpecs{
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Log, BuiltinId::Exp},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Log1p, BuiltinId::Expm1},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Asin, BuiltinId::Sin},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Acos, BuiltinId::Cos},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Atan, BuiltinId::Tan},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Asinh, BuiltinId::Sinh},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Acosh, BuiltinId::Cosh},
+        PrincipalInverseSolveSpec{mathematics::FunctionId::Atanh, BuiltinId::Tanh}};
+
+    for (const PrincipalInverseSolveSpec& spec : principalInverseSpecs) {
+        auto inverseSide = matchBothSides(spec.function);
+        if (!inverseSide)
+            continue;
+
+        inverseSide->rhs = simplifyForSolve(
+            inverseSide->rhs, builtins, mathematics, angles, assumptions);
+        const auto image = analyzePrincipalImage(
+            inverseSide->definition->branchRule, inverseSide->rhs,
+            builtins, mathematics, angles, assumptions);
+        if (!image)
+            return std::nullopt;
+        if (image->rejected())
+            return SolutionSet::empty(variables);
+
+        Expr target = spec.function == mathematics::FunctionId::Log1p
+            ? simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                    Expr::call(builtins.symbol(BuiltinId::Exp), {inverseSide->rhs}),
+                    integerExpr(1)}),
+                builtins, mathematics, angles, assumptions)
+            : simplifyForSolve(
+                Expr::call(builtins.symbol(spec.forward), {inverseSide->rhs}),
+                builtins, mathematics, angles, assumptions);
+        return solveTargetWithConditionAlternatives(
+            inverseSide->argument, target, variable, *image,
             builtins, mathematics, angles);
     }
+
     return std::nullopt;
 }
 
@@ -1956,31 +2276,24 @@ std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
             builtins, mathematics, angles);
     }
 
-    // principal inverse functions are injective on the real axis, but their output
-    // ranges are part of the inversion contract.  Trigonometric ranges follow the
-    // active angle semantics instead of assuming radians.
-    struct PrincipalInverseSpec final {
+    // Real solveでもprincipal函数を「実入力に制限した像」で反転する。
+    // これにより通常の実値rangeだけでなく，branch cut上の正当な複素主値も落とさない。
+    // 例: log[-1]=I Pi, asin[x>1]=Pi/2-I a, acosh[0]=I Pi/2。
+    struct PrincipalInverseRealSolveSpec final {
         mathematics::FunctionId function;
-        BuiltinId inverse;
-        bool lowerInclusive;
-        bool upperInclusive;
-        std::optional<numeric::Rational> lowerTurns;
-        std::optional<numeric::Rational> upperTurns;
-        bool nonNegative = false;
+        BuiltinId forward;
     };
-    const std::array principalInverseSpecs{
-        PrincipalInverseSpec{mathematics::FunctionId::Asin, BuiltinId::Sin, true, true,
-            numeric::Rational{BigInt{-1}, BigInt{4}},
-            numeric::Rational{BigInt{1}, BigInt{4}}},
-        PrincipalInverseSpec{mathematics::FunctionId::Acos, BuiltinId::Cos, true, true,
-            numeric::Rational{BigInt{0}}, numeric::Rational{BigInt{1}, BigInt{2}}},
-        PrincipalInverseSpec{mathematics::FunctionId::Atan, BuiltinId::Tan, false, false,
-            numeric::Rational{BigInt{-1}, BigInt{4}},
-            numeric::Rational{BigInt{1}, BigInt{4}}},
-        PrincipalInverseSpec{mathematics::FunctionId::Acosh, BuiltinId::Cosh, true, true,
-            std::nullopt, std::nullopt, true}};
+    const std::array principalInverseRealSpecs{
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Log, BuiltinId::Exp},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Log1p, BuiltinId::Expm1},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Asin, BuiltinId::Sin},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Acos, BuiltinId::Cos},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Atan, BuiltinId::Tan},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Asinh, BuiltinId::Sinh},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Acosh, BuiltinId::Cosh},
+        PrincipalInverseRealSolveSpec{mathematics::FunctionId::Atanh, BuiltinId::Tanh}};
 
-    for (const PrincipalInverseSpec& spec : principalInverseSpecs) {
+    for (const PrincipalInverseRealSolveSpec& spec : principalInverseRealSpecs) {
         auto inverseSide = matchNamedFunctionSide(
             sides[0], sides[1], variable, mathematics, spec.function);
         if (!inverseSide)
@@ -1989,95 +2302,35 @@ std::optional<SolutionSet> solveRealInjectiveFunctionRelation(
         if (!inverseSide)
             continue;
 
+        // Real-input imageを使えるのは函数引数自体がReal variable上で実数と証明できる場合だけ。
+        // 複素shift等をここで推測反転すると，Real solveの完全性を壊す。
+        if (!provablyRealForRealVariable(
+                inverseSide->argument, variable, builtins, mathematics, assumptions))
+            return std::nullopt;
+
         inverseSide->rhs = simplifyForSolve(
             inverseSide->rhs, builtins, mathematics, angles, assumptions);
-        mathematics::AssumptionSet conditions;
-        const auto realPredicate = mathematics::elementOf(
-            inverseSide->rhs, mathematics::NumericDomain::Real);
-        const TruthValue rhsReal = knowledge.prove(realPredicate);
-        if (rhsReal == TruthValue::False)
+        const auto image = analyzePrincipalImage(
+            inverseSide->definition->branchRule, inverseSide->rhs,
+            builtins, mathematics, angles, assumptions,
+            PrincipalImageInputDomain::Real);
+        if (!image)
+            return std::nullopt;
+        if (image->rejected())
             return SolutionSet::empty(
                 {SolverVariable{variable, mathematics::NumericDomain::Real}});
-        if (rhsReal == TruthValue::Unknown)
-            conditions.add(realPredicate);
 
-        const auto requireRelation = [&](
-            RelationKind relation, const Expr& lhs, const Expr& rhs) -> bool {
-            const Expr difference = simplifyForSolve(
-                Expr::call(builtins.symbol(BuiltinId::Subtract), {lhs, rhs}),
+        Expr target = spec.function == mathematics::FunctionId::Log1p
+            ? simplifyForSolve(
+                Expr::call(builtins.symbol(BuiltinId::Subtract), {
+                    Expr::call(builtins.symbol(BuiltinId::Exp), {inverseSide->rhs}),
+                    integerExpr(1)}),
+                builtins, mathematics, angles, proofAssumptions)
+            : simplifyForSolve(
+                Expr::call(builtins.symbol(spec.forward), {inverseSide->rhs}),
                 builtins, mathematics, angles, proofAssumptions);
-            if (exactZero(difference)) {
-                switch (relation) {
-                case RelationKind::Less:
-                case RelationKind::Greater:
-                case RelationKind::NotEqual:
-                    return false;
-                case RelationKind::LessEqual:
-                case RelationKind::GreaterEqual:
-                case RelationKind::Equal:
-                    return true;
-                }
-            }
-            const auto predicate = mathematics::relation(relation, lhs, rhs);
-            const TruthValue truth = knowledge.prove(predicate);
-            if (truth == TruthValue::True)
-                return true;
-            if (truth == TruthValue::False)
-                return false;
-
-            const CertifiedOrder order = certifiedConstantOrder(
-                lhs, rhs, builtins, mathematics, angles);
-            if (order != CertifiedOrder::Unknown) {
-                switch (relation) {
-                case RelationKind::Less: return order == CertifiedOrder::Less;
-                case RelationKind::LessEqual:
-                    return order == CertifiedOrder::Less || order == CertifiedOrder::Equal;
-                case RelationKind::Greater: return order == CertifiedOrder::Greater;
-                case RelationKind::GreaterEqual:
-                    return order == CertifiedOrder::Greater || order == CertifiedOrder::Equal;
-                case RelationKind::Equal: return order == CertifiedOrder::Equal;
-                case RelationKind::NotEqual: return order != CertifiedOrder::Equal;
-                }
-            }
-
-            conditions.add(predicate);
-            return true;
-        };
-
-        if (spec.nonNegative) {
-            if (!requireRelation(
-                    RelationKind::GreaterEqual, inverseSide->rhs, integerExpr(0)))
-                return SolutionSet::empty(
-                    {SolverVariable{variable, mathematics::NumericDomain::Real}});
-        }
-        else {
-            if (spec.lowerTurns) {
-                const Expr lower = simplifyForSolve(
-                    angleValueFromTurns(*spec.lowerTurns, builtins, mathematics, angles),
-                    builtins, mathematics, angles, proofAssumptions);
-                if (!requireRelation(
-                        spec.lowerInclusive ? RelationKind::GreaterEqual : RelationKind::Greater,
-                        inverseSide->rhs, lower))
-                    return SolutionSet::empty(
-                        {SolverVariable{variable, mathematics::NumericDomain::Real}});
-            }
-            if (spec.upperTurns) {
-                const Expr upper = simplifyForSolve(
-                    angleValueFromTurns(*spec.upperTurns, builtins, mathematics, angles),
-                    builtins, mathematics, angles, proofAssumptions);
-                if (!requireRelation(
-                        spec.upperInclusive ? RelationKind::LessEqual : RelationKind::Less,
-                        inverseSide->rhs, upper))
-                    return SolutionSet::empty(
-                        {SolverVariable{variable, mathematics::NumericDomain::Real}});
-            }
-        }
-
-        Expr target = simplifyForSolve(
-            Expr::call(builtins.symbol(spec.inverse), {inverseSide->rhs}),
-            builtins, mathematics, angles, proofAssumptions);
-        return solveRealTargetEquation(
-            inverseSide->argument, std::move(target), variable, conditions,
+        return solveRealTargetWithConditionAlternatives(
+            inverseSide->argument, target, variable, *image,
             builtins, mathematics, angles);
     }
 

@@ -143,6 +143,7 @@ void add(std::vector<Expr>& properties, std::string_view name, Expr value) {
     case ArgumentEvaluation::All: return "All";
     case ArgumentEvaluation::HoldFirst: return "HoldFirst";
     case ArgumentEvaluation::HoldFirstTwo: return "HoldFirstTwo";
+    case ArgumentEvaluation::HoldSecond: return "HoldSecond";
     case ArgumentEvaluation::HoldFirstAndIteratorSpec: return "HoldFirstAndIteratorSpec";
     case ArgumentEvaluation::HoldFirstAndTableIteratorSpec: return "HoldFirstAndTableIteratorSpec";
     case ArgumentEvaluation::HoldAll: return "HoldAll";

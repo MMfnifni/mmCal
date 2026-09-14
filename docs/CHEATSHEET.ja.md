@@ -241,7 +241,7 @@ perm[10,3]      -> 720
 comb[10,3]      -> 120
 fib[100]
 isprime[97]     -> True
-factorint[360]
+factorint[360] -> {{2, 3}, {3, 2}, {5, 1}}
 totient[9]      -> 6
 ```
 
@@ -356,13 +356,17 @@ solve[{2x+3y==5,x-2y==9},{x,y}]
 
 等式系の既定ambient domainは `Complex`。ordered inequalityは `Real` 系。
 
-有限解のbranch選択は**0-based**。
+解・条件分岐のbranch選択も**0-based**。`at`の2引数版は条件metadataを保持する。
 
 ```text
 s:=solve[x^2==1,x]
 at[s,0]     -> {x == 1}
 at[s,1]     -> {x == -1}
 at[s,1,x]   -> -1
+
+at[solve[a*x==1,x],0] -> {x == 1/a} if a != 0
+at[at[solve[a*x==1,x],0],0,x] -> 1/a
+at[cases[x^2 if a>0;0],0] -> cases[x^2 if a > 0]
 ```
 
 exact root:
@@ -441,6 +445,7 @@ nullSpace[A]             solveLinear[A,b]
 luDecomposition[A]       qrDecomposition[A]
 svd[A]                   conditionNumber[A]
 pseudoInverse[A]         leastSquares[A,b]
+characteristicPolynomial[A,x]
 eigenvalues[A]           eigenvectors[A]
 eigensystem[A]           trace[A]
 ```

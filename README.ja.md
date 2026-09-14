@@ -78,7 +78,7 @@ v1.6.0は，**描画・Export基盤を正式機能として追加し，exact sym
 
 主な変更点:
 
-- **Plot・Graphics**: `Plot` / `ParametricPlot` / `ListPlot` / `Show`，`PlotRange` / `AspectRatio` / `Ticks` / `PlotPoints`，SVG / EPS / PDF Exportを追加。3次以下のparametric polynomialはexact Bézier，同一affine phaseの`C+A cos+B sin`は円・楕円・楕円弧としてsampling前に認識する
+- **Plot・Graphics**: `Plot` / `ParametricPlot` / `ListPlot` / `Show`，`PlotRange` / `AspectRatio` / `Ticks` / `PlotPoints`，SVG / EPS / PDF / PNG / WebP Exportを追加。3次以下のparametric polynomialはexact Bézier，同一affine phaseの`C+A cos+B sin`は円・楕円・楕円弧としてsampling前に認識する
 - **Ruleと言語接続**: 第一級式`Rule[lhs,rhs]`と右結合`lhs -> rhs`を追加し，Plot option等を通常Symbolのままconsumer側で解釈する
 - **一般因数分解**: `Q[x]`のsquare-free分解，Berlekamp / Cantor–Zassenhaus，複数good primeのfactor-degree絞込み，quadratic Hensel，Zassenhaus再結合，CLD + exact LLLをbounded pipelineとして接続した
 - **記号積分**: Hermite reduction / LRT compact residue，`Q(x)`上のRisch differential equation，単一primitive / exponential differential tower，primitive rational caseをexact certificate付きで拡張した
@@ -100,6 +100,7 @@ mmCal --angle grad --fix 8
 mmCal --layout multi
 mmCal --eval "factor[x^2-1]"
 mmCal --batch < expressions.txt
+mmCal --version
 ```
 
 - `--fix 16`: 結果を小数点以下**最大16桁(0..1000)**で表示する。末尾の不要な0は省略
@@ -109,6 +110,7 @@ mmCal --batch < expressions.txt
 - `--layout auto|single|multi`: 通常REPLの表示組版。既定`auto`はTTY上でArray/List/`cases`/解集合を構造的に改行し，pipe/redirect時は1行へ退避する
 - `--eval expr`: 1式だけ評価し，値だけを標準出力へ出す
 - `--batch`: 標準入力を1行1式として同一sessionで順に評価する。
+- `-v`, `--version`: `version.h`の`MMCAL_VERSION_STRING`を`mmCal `に続けて表示し，正常終了する
 - `--help`, `-h`: 短い起動usageを表示する。函数の詳細は起動後に`:help sin`等で確認する
 
 `--eval` / `--batch`は自動処理用であり，banner・prompt・`Out[...]`・終了挨拶を出さない。値は標準出力，Warning / Errorは標準エラーへ分離する。終了codeは成功`0`，引数`2`，Syntax / ResourceLimit`3`，評価`4`，内部error`5`である。batch modeはerror後も次行を処理し，発生した最大の終了codeを返す。
@@ -273,7 +275,7 @@ In[-1]
 
 `conditionNumber`, `leastSquares`, `pseudoInverse`
 
-`eigenvalues`, `eigenvectors`, `eigensystem`
+`characteristicPolynomial`, `eigenvalues`, `eigenvectors`, `eigensystem`
 
 `trace`, `rows`, `cols`, `diag`
 
@@ -321,7 +323,7 @@ ListPlot[{{0,0},{1,1},{2,4}},Joined -> True]
 Export[Plot[sin[x],{x,-Pi,Pi}],"sin.svg"]
 ```
 
-主なoptionは`PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`で，`lhs -> rhs`のRuleとして渡す。SVG / EPS / PDFへ出力できる。exact geometry，sampling，不連続点，canvas寸法，`toNormal`等の詳細はReferenceを参照。
+主なoptionは`PlotRange`, `AspectRatio`, `Ticks`, `PlotPoints`で，`lhs -> rhs`のRuleとして渡す。SVG / EPS / PDF / PNG / WebPへ出力できる。PNG / WebPは既定254 dpi・2× supersampling・白背景で，`DPI` / `ImageSize` / `Antialiasing` / `Background`をExport optionとして指定できる。`Background->None`で透明背景になる。PNGはscanline filter，bounded 32 KiB LZ77，3-byte hashを基準にしたbounded探索と条件付き8-byte hash候補比較，2-token局所lazy parsing，dynamic Huffman DEFLATEを用いる。WebPはcorrectness-firstのlossless VP8Lで，pixel単位のbounded LZ77 backward reference，短いmatch向けの1 pixel lazy matching，16-entry color cacheに加えてPredictor TransformとSubtract Green Transformを利用する。G/length/cache・R・B・A・distanceの5 prefix treeは実token頻度からcanonical Huffman codeを構築し，code-length列もrepeat codeで圧縮する。Predictorは16×16 blockごとにVP8Lの14 modeを評価し，Subtract Greenは各pixelのR/BからGをmodulo-256で減算する。無変換 / Predictor / Subtract Green / Subtract Green+Predictorを実際に符号化し，最小payloadだけを採用する。exact geometry，sampling，不連続点，canvas寸法，`toNormal`等の詳細はReferenceを参照。
 
 ## 11. Warningについて
 

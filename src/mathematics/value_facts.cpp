@@ -1301,6 +1301,7 @@ struct RationalBound final {
     case BuiltinId::ConditionNumber:
     case BuiltinId::LeastSquares:
     case BuiltinId::PseudoInverse:
+    case BuiltinId::CharacteristicPolynomial:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
@@ -1422,6 +1423,9 @@ struct RationalBound final {
     case BuiltinId::Definitions:
     case BuiltinId::Undefine:
     case BuiltinId::Series:
+    case BuiltinId::SeriesCoefficient:
+    case BuiltinId::Residue:
+    case BuiltinId::MinimalPolynomial:
     case BuiltinId::SeriesData:
     case BuiltinId::Normal:
     case BuiltinId::ToNormal:

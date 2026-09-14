@@ -102,6 +102,7 @@ namespace mmcal::evaluation {
     case BuiltinId::ConditionNumber:
     case BuiltinId::LeastSquares:
     case BuiltinId::PseudoInverse:
+    case BuiltinId::CharacteristicPolynomial:
     case BuiltinId::Eigenvalues:
     case BuiltinId::Eigenvectors:
     case BuiltinId::Eigensystem:
